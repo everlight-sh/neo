@@ -1,0 +1,45 @@
+import "std:json"
+import "std:io"
+fn writer_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn writer_op(move state:JsonWriter,op:Json) -> JsonWriter
+  = let args=json_array_values(op) in if len(args)==0 then json_writer_value(state,json_none().value) else check len(args)>0 in let name=json_text(args[0]).value in
+    let value=if len(args)>1 then check len(args)>1 in args[1] else json_value_null() in
+    if str_equal(name,"array") then json_writer_begin_array(state) else if str_equal(name,"object") then json_writer_begin_object(state) else
+    if str_equal(name,"end_array") then json_writer_end_array(state) else if str_equal(name,"end_object") then json_writer_end_object(state) else
+    if str_equal(name,"key") then json_writer_key(state,json_text(value).value) else if str_equal(name,"string") then json_writer_string(state,json_text(value).value) else
+    if str_equal(name,"int") then json_writer_int(state,json_int(value).value) else if str_equal(name,"bool") then json_writer_bool(state,json_bool(value).value) else
+    if str_equal(name,"null") then json_writer_null(state) else if str_equal(name,"json") then json_writer_value(state,value) else
+    if str_equal(name,"key_bytes") then json_writer_key(state,writer_decode(json_text(value).value)) else
+    if str_equal(name,"string_bytes") then json_writer_string(state,writer_decode(json_text(value).value)) else json_writer_value(state,json_none().value)
+fn writer_case(input:Json) -> Arr u8 _
+  = let depth=json_get(input,"depth") in
+    let state=if depth.present then let count=json_int(depth.value).value in
+      let opened=loop(i=0,state=json_writer()) while i<count next(i+1,json_writer_begin_array(state)) yield state in
+      let filled=if json_bool(json_get(input,"leaf").value).value then json_writer_int(opened,7) else opened in
+      loop(i=0,state=filled) while i<count next(i+1,json_writer_end_array(state)) yield state else
+      let ops=json_array_values(json_get(input,"ops").value) in
+      loop(i=0,state=json_writer()) while i<len(ops) next(i+1,check i>=0 && i<len(ops) in writer_op(state,ops[i])) yield state in
+    let fragment=json_writer_fragment_finish(state) in let result=json_writer_finish(state) in
+    check fragment.ok==result.ok in
+    let decoded=json_fragment_json(fragment.value) in
+    let copied=json_writer_finish(json_writer_fragment(json_writer(),fragment.value)) in
+    check !result.ok || (copied.ok && str_equal(decoded.raw,result.value.raw) && str_equal(copied.value.raw,result.value.raw) && decoded.count==result.value.count && copied.value.count==result.value.count) in
+    let wrapped=json_writer_finish(json_writer_end_array(json_writer_fragment(json_writer_begin_array(json_writer()),fragment.value))) in
+    let oracle=json_parse(concat("[",fragment.value.raw,"]")) in
+    check !fragment.ok || wrapped.ok==oracle.ok in
+    if !result.ok then "{\"ok\":false}" else
+    let parsed=json_parse(result.value.raw) in check parsed.ok && parsed.value.count==result.value.count && parsed.value.kind==result.value.kind in
+    let alias=result.value.raw in let changed=if len(alias)==0 then alias else set(alias,0,u8(0)) in check len(changed)==len(alias) && json_parse(result.value.raw).ok in
+    concat("{\"ok\":true,\"value\":",result.value.raw,",\"count\":",int_text(result.value.count),"}")
+fn writer_aliases() -> bool
+  = let first=json_writer_int(json_writer_begin_array(json_writer()),1) in
+    let alias=first in let second=json_writer_string(first,"new") in
+    let before=json_writer_finish(json_writer_end_array(alias)) in let after=json_writer_finish(json_writer_end_array(second)) in
+    before.ok && after.ok && str_equal(before.value.raw,"[1]") && str_equal(after.value.raw,"[1,\"new\"]")
+effect(fs) fn main() -> unit
+  = check writer_aliases() in let input=file_read(0,4194304) in let text=input.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let result=writer_case(json_parse(writer_decode(str_slice(text,at,end))).value) in
+      let shown=print_out(concat(result,"\n")) in end+1) yield at in noop()

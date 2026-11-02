@@ -1,0 +1,19 @@
+import "std:collections"
+import "std:json"
+
+fn main () -> Arr u8 _
+  = let parsed = json_parse(" {\"name\":\"caf\\u00e9 \\ud83d\\ude80\", \"values\":[3 , 1, 2], \"minimum\":-9223372036854775808} ") in
+    let name = json_get(parsed.value, "name") in let decoded = json_text(name.value) in
+    let values = json_get(parsed.value, "values") in let second = json_array_get(values.value, 1) in
+    let number = json_int(second.value) in let minimum = json_get(parsed.value, "minimum") in
+    let min_value = json_int(minimum.value) in
+    let map = map_put(map_put(map_empty(), "key", "first"), "key", "second") in
+    let found = map_get(map, "key") in
+    let sorted = vector_sort(vector_push(vector_push(vector_push(vector_empty(), 3), 1), 2)) in
+    let first = vector_get(sorted, 0) in
+    check parsed.ok && name.present && decoded.ok && str_equal(decoded.value, "café 🚀") in
+    check json_array_len(values.value) == 3 && number.ok && number.value == 1 in
+    check min_value.ok && min_value.value == -9223372036854775808 in
+    check !int_parse("9223372036854775808").ok && !json_parse("[1,]").ok && !json_parse("\"\\ud800\"").ok in
+    check found.present && str_equal(found.value, "second") && first.present && first.value == 1 in
+    concat(json_quote(decoded.value), " ", int_text(min_value.value), "\n")

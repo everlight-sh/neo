@@ -1,0 +1,95 @@
+import "std:hash"
+import "std:option"
+import "std:result"
+import "std:random"
+
+sealed type HashSlot<K,V> = { state: u8, key: Option<K>, value: Option<V> }
+sealed type HashMap<K,V> = { table: Arr HashSlot<K,V> _, count: i64, occupied: i64, seed0: i64, seed1: i64 }
+type HashMapTake<K,V> = { map:HashMap<K,V>,value:Option<V> }
+
+; SipHash keys are explicit configuration. Use independent random seed words
+; for maps exposed to untrusted input; fixed seeds make benchmarks reproducible.
+fn hashmap_empty<K,V>(seed0: i64, seed1: i64) -> HashMap<K,V>
+  = HashMap::<K,V> { table = arr(i in 0..8) HashSlot::<K,V> { state = u8(0), key = None::<K>(), value = None::<V>() },
+      count = 0, occupied = 0, seed0 = seed0, seed1 = seed1 }
+
+fn hashmap_len<K,V>(map: HashMap<K,V>) -> i64 = map.count
+effect(process) fn hashmap_random<K,V>() -> Result<HashMap<K,V>,Error>
+  = let first=random_i64() in if !first.ok then Err::<HashMap<K,V>,Error>(first.error) else
+    let second=random_i64() in if !second.ok then Err::<HashMap<K,V>,Error>(second.error) else
+    Ok::<HashMap<K,V>,Error>(hashmap_empty::<K,V>(first.value,second.value))
+fn hashmap_capacity<K,V>(map: HashMap<K,V>) -> i64 = len(map.table)
+
+fn hashmap_slot<K,V>(map: HashMap<K,V>, key: K) -> i64
+  = let seed0 = map.seed0 in let seed1 = map.seed1 in let table = map.table in let capacity = len(table) in
+    check capacity > 0 in let first = bit_and(hash_key(key,seed0,seed1),9223372036854775807) % capacity in
+    loop(step = 0, at = first, tombstone = -1, found = -1) while found < 0 && step < capacity
+      next(step + 1,if at + 1 == capacity then 0 else at + 1,
+           check at >= 0 && at < capacity in if table[at].state == u8(2) && tombstone < 0 then at else tombstone,
+           check at >= 0 && at < capacity in
+           if table[at].state == u8(0) then if tombstone >= 0 then tombstone else at else
+           if table[at].state != u8(1) then -1 else
+           match table[at].key { None => -1, Some(stored) => if key_equal(stored,key) then at else -1 })
+      yield if found >= 0 then found else tombstone
+
+fn hashmap_get<K,V>(map: HashMap<K,V>, key: K) -> Option<V>
+  = let at = hashmap_slot::<K,V>(map,key) in let table = map.table in
+    if at < 0 then None::<V>() else check at < len(table) in
+    if table[at].state != u8(1) then None::<V>() else table[at].value
+
+fn hashmap_insert_slot<K,V>(move map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>
+  = let at = hashmap_slot::<K,V>(map,key) in
+    let count = map.count in let occupied = map.occupied in let seed0 = map.seed0 in let seed1 = map.seed1 in
+    let table = map.table in check at >= 0 && at < len(table) in let previous = table[at].state in
+    HashMap::<K,V> { table = set(table,at,HashSlot::<K,V> { state = u8(1), key = Some::<K>(key), value = Some::<V>(value) }),
+      count = count + (if previous == u8(1) then 0 else 1), occupied = occupied + (if previous == u8(0) then 1 else 0), seed0 = seed0, seed1 = seed1 }
+
+fn hashmap_rehash<K,V>(move map: HashMap<K,V>, capacity: i64) -> HashMap<K,V>
+  = let seed0 = map.seed0 in let seed1 = map.seed1 in let table = map.table in
+    check capacity >= 8 in
+    let empty = HashMap::<K,V> { table = arr(i in 0..capacity) HashSlot::<K,V> { state = u8(0), key = None::<K>(), value = None::<V>() },
+      count = 0, occupied = 0, seed0 = seed0, seed1 = seed1 } in
+    loop(i = 0, result = empty) while i < len(table)
+      next(i + 1,check i >= 0 && i < len(table) in
+           if table[i].state != u8(1) then result else
+           match table[i].key { None => result, Some(key) =>
+             match table[i].value { None => result, Some(value) => hashmap_insert_slot::<K,V>(result,key,value) } }) yield result
+
+fn hashmap_put<K,V>(move map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>
+  = let capacity = len(map.table) in
+    let prepared = if map.occupied * 10 < capacity * 7 then map else
+      check capacity <= 4611686018427387903 in
+      hashmap_rehash::<K,V>(map,if map.count * 10 < capacity * 4 then capacity else capacity * 2) in
+    hashmap_insert_slot::<K,V>(prepared,key,value)
+
+fn hashmap_delete<K,V>(move map: HashMap<K,V>, key: K) -> HashMap<K,V>
+  = let at = hashmap_slot::<K,V>(map,key) in
+    let count = map.count in let occupied = map.occupied in let seed0 = map.seed0 in let seed1 = map.seed1 in let table = map.table in
+    let present = at >= 0 && at < len(table) in
+    let present = if present then check at >= 0 && at < len(table) in table[at].state == u8(1) else false in
+    HashMap::<K,V> { table = if !present then table else check at >= 0 && at < len(table) in
+      set(table,at,HashSlot::<K,V> { state = u8(2), key = None::<K>(), value = None::<V>() }),
+      count = count - (if present then 1 else 0), occupied = occupied, seed0 = seed0, seed1 = seed1 }
+
+; Remove-and-return convenience. Managed values retain immutable value semantics;
+; the current implementation copies an escaping value before deleting its slot.
+fn hashmap_take<K,V>(move map:HashMap<K,V>,key:K) -> HashMapTake<K,V>
+  = let value=hashmap_get(map,key) in
+    HashMapTake::<K,V> { map=hashmap_delete(map,key),value=value }
+
+; Return the existing value or insert a supplied default with one lookup in the
+; common case. Rehashing only occurs for a missing key that needs more room.
+; Scope the table observer in a helper so its alias is released before mutation.
+type HashMapEntry<K,V> = {map:HashMap<K,V>,value:V,inserted:bool}
+private fn hashmap_value_at<K,V>(borrow map:HashMap<K,V>,at:i64) -> Option<V>
+  = let table=map.table in if at<0 || at>=len(table) then None::<V>() else check at>=0 && at<len(table) in
+    if table[at].state!=u8(1) then None::<V>() else table[at].value
+fn hashmap_get_or_insert<K,V>(move map:HashMap<K,V>,key:K,default:V) -> HashMapEntry<K,V>
+  = let at=hashmap_slot::<K,V>(map,key) in let prior=hashmap_value_at::<K,V>(map,at) in
+    match prior {Some(value)=>HashMapEntry::<K,V> {map=map,value=value,inserted=false},None=>
+      let capacity=len(map.table) in let room=map.occupied*10<capacity*7 in
+      let prepared=if room then map else check capacity<=4611686018427387903 in hashmap_rehash::<K,V>(map,if map.count*10<capacity*4 then capacity else capacity*2) in
+      let target=if room then at else hashmap_slot::<K,V>(prepared,key) in let storage=prepared.table in check target>=0 && target<len(storage) in
+      let previous=storage[target].state in
+      HashMapEntry::<K,V> {map=HashMap::<K,V> {table=set(storage,target,HashSlot::<K,V> {state=u8(1),key=Some::<K>(key),value=Some::<V>(default)}),
+        count=prepared.count+1,occupied=prepared.occupied+(if previous==u8(0) then 1 else 0),seed0=prepared.seed0,seed1=prepared.seed1},value=default,inserted=true}}

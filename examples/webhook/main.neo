@@ -1,0 +1,51 @@
+import "model.neo"
+import "std:net"
+
+effect(env) fn queue_path () -> Arr u8 _ = let path = env_get("NEO_WEBHOOK_FILE") in if path.present then path.value else "webhooks.axlog"
+effect(env) fn queue_config_int (name: Arr u8 n, fallback: i64, maximum: i64) -> i64
+  = let value = env_get(name) in let parsed = if value.present then int_parse(value.value) else int_ok(fallback) in
+    if parsed.ok && parsed.value >= 1 && parsed.value <= maximum then parsed.value else fallback
+effect(fs,env) fn queue_handler (request: Arr u8 n) -> Arr u8 _
+  = let path = http_path(request) in let method = http_method(request) in
+    if !str_equal(path, "/events") && !str_equal(path, "/jobs") then http_json(404, "{\"error\":\"not found\"}") else
+    if !((str_equal(path, "/events") && str_equal(method, "POST")) || (str_equal(path, "/jobs") && str_equal(method, "GET"))) then http_json(405, "{\"error\":\"method not allowed\"}") else
+    let transaction = journal_begin(queue_path()) in if !transaction.ok then http_json(503, "{\"error\":\"storage unavailable\"}") else
+      let queue = queue_replay(transaction.bytes) in if !queue.ok then let closed = journal_close(transaction) in http_json(503, "{\"error\":\"corrupt journal\"}") else
+      if str_equal(path, "/jobs") then let closed = journal_close(transaction) in http_json(200, queue_json(queue)) else
+        let body = json_parse(http_body(request)) in let field = json_get(body.value, "id") in let id = json_text(field.value) in let payload = json_get(body.value, "payload") in
+        if !body.ok || !id.ok || !queue_id_valid(id.value) || !payload.present then let closed = journal_close(transaction) in http_json(400, "{\"error\":\"expected visible ASCII id (1..128 bytes) and payload\"}") else
+        if queue_find(queue, id.value) >= 0 then let closed = journal_close(transaction) in http_json(202, concat("{\"duplicate\":true,\"id\":", json_quote(id.value), "}")) else
+          let event = concat("{\"op\":\"enqueue\",\"id\":", json_quote(id.value), ",\"payload\":", payload.value.raw, "}") in
+          let committed = journal_commit(transaction, event) in if !committed.ok then http_json(503, "{\"error\":\"storage unavailable\"}") else http_json(202, concat("{\"duplicate\":false,\"id\":", json_quote(id.value), "}"))
+effect(fs,env,net,time) fn queue_deliver (job: Job, attempt: i64, timeout: i64) -> unit
+  = let host_arg = env_get("NEO_WEBHOOK_HOST") in let host = if host_arg.present then host_arg.value else "127.0.0.1" in
+    let port = queue_config_int("NEO_WEBHOOK_PORT", 8099, 65535) in let path_arg = env_get("NEO_WEBHOOK_PATH") in let path = if path_arg.present then path_arg.value else "/receive" in
+    let response = http_post_ipv4(host, port, path, job.payload, job.id, timeout) in
+    let delivered = response.ok && response.status >= 200 && response.status < 300 in
+    let maximum = queue_config_int("NEO_WEBHOOK_MAX_ATTEMPTS", 5, 100) in
+    let base = queue_config_int("NEO_WEBHOOK_RETRY_MS", 100, 60000) in
+    let delay = loop (i = 1, value = base) while i < attempt && value < 30000 next (i + 1, value * 2) yield value in
+    let clock = time_unix_ms() in
+    let transaction = journal_begin(queue_path()) in if !transaction.ok then noop() else
+      let current = queue_replay(transaction.bytes) in let found = queue_find(current, job.id) in let jobs = current.jobs in
+      if !current.ok then let closed = journal_close(transaction) in noop() else
+      if found < 0 || found >= len(jobs) then let closed = journal_close(transaction) in noop() else
+      if jobs[found].done then let closed = journal_close(transaction) in noop() else
+        let committed = journal_commit(transaction, queue_event(if delivered then "done" else if attempt >= maximum then "failed" else "retry", job, attempt, clock.value + delay)) in noop()
+effect(fs,env,net,time) fn queue_tick () -> bool
+  = let clock = time_unix_ms() in if !clock.ok then false else
+    let transaction = journal_begin(queue_path()) in if !transaction.ok then false else
+      let queue = queue_replay(transaction.bytes) in let found = queue_pick(queue, clock.value) in let jobs = queue.jobs in
+      if !queue.ok then let closed = journal_close(transaction) in false else
+      if found < 0 || found >= len(jobs) then let closed = journal_close(transaction) in false else
+        let job = jobs[found] in let attempt = job.attempts + 1 in
+        let timeout = queue_config_int("NEO_WEBHOOK_TIMEOUT_MS", 1000, 60000) in
+        let claimed = journal_commit(transaction, queue_event("attempt", job, attempt, clock.value + timeout + 1000)) in
+        if !claimed.ok then false else let delivered = queue_deliver(job, attempt, timeout) in true
+effect(fs,env,net,time,process) fn queue_worker (parent: i64) -> unit
+  = let stopped = loop (alive = true) while alive
+      next (let processed = queue_tick() in let paused = if processed then int_ok(0) else sleep_ms(25) in process_parent_id() == parent) yield alive in noop()
+effect(fs,env,net,time,process) fn main (port: i64{port > 0, port < 65536}) -> i64
+  = let parent = process_id() in let child = process_fork() in
+    if !child.ok then let stopped = process_exit(1) in 1 else
+    if child.value == 0 then let ran = queue_worker(parent) in let stopped = process_exit(0) in 0 else serve_effect(port, queue_handler)

@@ -1,0 +1,19 @@
+# Verifies the complete toolchain on native ARM64 or x86-64 Linux.
+FROM oven/bun:1.3.13 AS bun-tools
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends clang lld binutils python3 curl procps wrk ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=bun-tools /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /neo
+COPY neoc neoc
+COPY runtime runtime
+COPY stdlib stdlib
+COPY examples examples
+RUN cd examples/jsx-ssr && bun install --frozen-lockfile
+COPY docs docs
+COPY bench/http/protocol_test.py bench/http/protocol_test.py
+COPY bench/http/pipeline.lua bench/http/pipeline.lua
+COPY neoc.sh neoc.sh
+COPY neo neo
+COPY neo.toml neo.toml
+COPY tests tests
+CMD ["sh", "tests/verify_linux.sh"]

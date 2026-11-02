@@ -1,0 +1,4 @@
+import "std:io"
+effect(fs) fn main() -> unit
+  = let input=file_read(0,65536) in check input.ok in let result=int_parse(input.value) in
+    let printed=print_out(if result.ok then concat("ok ",int_text(result.value)) else concat("error ",int_text(result.error.position))) in noop()

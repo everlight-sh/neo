@@ -1,0 +1,95 @@
+; The syntax tree as tables. Neo has no recursive value types, so a node
+; refers to its children by index: into nodes for a node, into lists for a
+; list (its length, then its items), into strs for a name or string literal.
+; Unused fields hold -1. neoc/syntax.py defines the same tree as classes.
+; Nodes are stored flat, eleven numbers each in Node's field order: push grows
+; an array of numbers in place, but copies a whole array of records.
+import "text.neo"
+
+type Node = { kind:i64, a:i64, b:i64, c:i64, d:i64, e:i64, f:i64, g:i64, h:i64, line:i64, col:i64 }
+type Ast = { nodes:Arr i64 _, lists:Arr i64 _, strs:Arr Arr u8 _ _ }
+
+; Expressions. Fields in order of the syntax.py class.
+fn n_num() -> i64 = 1       ; a value, b 1 when it does not fit i64 (c: its decimal text)
+fn n_flt() -> i64 = 2       ; a the f64 bits
+fn n_bool() -> i64 = 3      ; a 0 or 1
+fn n_str() -> i64 = 4       ; a bytes
+fn n_byte() -> i64 = 5      ; a value
+fn n_var() -> i64 = 6       ; a name
+fn n_bin() -> i64 = 7       ; a symbol code, b left, c right
+fn n_un() -> i64 = 8        ; a symbol code, b operand
+fn n_index() -> i64 = 9     ; a array, b index
+fn n_call() -> i64 = 10     ; a name, b arguments, c type arguments
+fn n_let() -> i64 = 11      ; a name, b value, c body
+fn n_using() -> i64 = 12    ; a name, b value, c body
+fn n_if() -> i64 = 13       ; a condition, b then, c else
+fn n_sum() -> i64 = 14      ; a variable, b low, c high, d body
+fn n_arrc() -> i64 = 15     ; a variable, b low, c high, d body
+fn n_loop() -> i64 = 16     ; a states, b condition, c nexts, d yield
+fn n_check() -> i64 = 17    ; a predicate, b body
+fn n_len() -> i64 = 18      ; a operand
+fn n_cast() -> i64 = 19     ; a type, b operand
+fn n_reclit() -> i64 = 20   ; a type name, b field inits, c type arguments
+fn n_field() -> i64 = 21    ; a record, b field name
+fn n_with() -> i64 = 22     ; a record, b field inits
+fn n_match() -> i64 = 23    ; a scrutinee, b arms
+fn n_try() -> i64 = 24      ; a operand
+
+; Types. Scalars have no fields.
+fn n_t_i64() -> i64 = 40
+fn n_t_f64() -> i64 = 41
+fn n_t_bool() -> i64 = 42
+fn n_t_u8() -> i64 = 43
+fn n_t_u16() -> i64 = 44
+fn n_t_i32() -> i64 = 45
+fn n_t_ptr() -> i64 = 46
+fn n_t_unit() -> i64 = 47
+fn n_t_rec() -> i64 = 48     ; a name, b type arguments
+fn n_t_ref() -> i64 = 49     ; a resource type
+fn n_t_fn() -> i64 = 50      ; a parameter types, b result type, c capabilities or -1
+fn n_t_arr() -> i64 = 51     ; a element type, b size, c 0 when b names a size variable, 1 when it is an expression
+
+; Parts of nodes and declarations.
+fn n_state() -> i64 = 60     ; loop state: a name, b annotation or -1, c initial value
+fn n_annot() -> i64 = 61     ; a type, b predicates
+fn n_arm() -> i64 = 62       ; a alternative, b binder names, c body
+fn n_finit() -> i64 = 63     ; a field name, b value
+fn n_param() -> i64 = 64     ; a name, b type, c predicates, f flags (1 move, 2 borrow)
+fn n_fn() -> i64 = 65        ; a name, b parameters, c result type, d body, e result predicates, f flags,
+                             ; g capabilities or -1, h type parameters
+fn n_type() -> i64 = 66      ; a name, b fields, c type parameters, d alternatives or -1, e destructor or -1, f flags
+fn n_tfield() -> i64 = 67    ; a name, b type
+fn n_variant() -> i64 = 68   ; a name, b payload types
+fn n_import() -> i64 = 69    ; a path, b alias or -1
+
+; n_fn flags.
+fn fl_effect() -> i64 = 1
+fn fl_external() -> i64 = 2
+fn fl_exported() -> i64 = 4
+fn fl_variadic() -> i64 = 8
+fn fl_cold() -> i64 = 16
+fn fl_inline() -> i64 = 32
+fn fl_visible() -> i64 = 64
+; n_type flags.
+fn fl_sealed() -> i64 = 1
+fn fl_type_visible() -> i64 = 2
+
+fn ast_none() -> Node = Node { kind=0, a=-1, b=-1, c=-1, d=-1, e=-1, f=-1, g=-1, h=-1, line=0, col=0 }
+fn ast_node_at(borrow nodes:Arr i64 _, id:i64) -> Node
+  = if id<0 || id>=len(nodes)/11 then ast_none() else let at=id*11 in
+    Node { kind=tx_at(nodes,at), a=tx_at(nodes,at+1), b=tx_at(nodes,at+2), c=tx_at(nodes,at+3), d=tx_at(nodes,at+4),
+           e=tx_at(nodes,at+5), f=tx_at(nodes,at+6), g=tx_at(nodes,at+7), h=tx_at(nodes,at+8),
+           line=tx_at(nodes,at+9), col=tx_at(nodes,at+10) }
+fn ast_push_node(move nodes:Arr i64 _, n:Node) -> Arr i64 _
+  = push(push(push(push(push(push(push(push(push(push(push(nodes,n.kind),n.a),n.b),n.c),n.d),n.e),n.f),n.g),n.h),n.line),n.col)
+fn ast_node(borrow ast:Ast, id:i64) -> Node = ast_node_at(ast.nodes,id)
+fn ast_empty() -> Ast = Ast { nodes=tx_ints(), lists=tx_ints(), strs=arr(i in 0..0) tx_empty() }
+; Field k of node id (0 kind, 1..8 a..h, 9 line, 10 col) set to value.
+fn ast_set(move ast:Ast, id:i64, k:i64, value:i64) -> Ast
+  = let at=id*11+k in if id<0 || k<0 || k>10 || at>=len(ast.nodes) then ast else ast with { nodes=set(ast.nodes,at,value) }
+fn ast_add_str(move ast:Ast, borrow text:Arr u8 _) -> Ast = ast with { strs=push(ast.strs,text) }
+fn ast_list_len(borrow ast:Ast, list:i64) -> i64 = if list>=0 && list<len(ast.lists) then ast.lists[list] else 0
+fn ast_list_at(borrow ast:Ast, list:i64, k:i64) -> i64
+  = let at=list+1+k in if list>=0 && k>=0 && at<len(ast.lists) then ast.lists[at] else -1
+fn ast_str(borrow ast:Ast, id:i64) -> Arr u8 _ = if id>=0 && id<len(ast.strs) then ast.strs[id] else tx_empty()
+fn ast_flag(node:Node, flag:i64) -> bool = bit_and(node.f,flag)!=0

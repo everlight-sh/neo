@@ -1,0 +1,39 @@
+import "std:io"
+; Ref<T> holds (arena generation,slot generation). Free slots are reused;
+; generation checks ensure an old Ref cannot access or close a new occupant.
+resource type Arena = { token:i64 } drop arena_release
+effect(process) fn new_arena(capacity:i64) -> Arena
+  = if capacity<1 || capacity>65536 then Arena { token= -22 } else
+    let size=48+capacity*32 in let address=rt_private_map(size) in
+    if address<0 then Arena { token=address } else
+      let p=ptr_from_i64(address) in let length=store_i64(p,0,size) in let serial=store_i64(p,8,0) in
+      let limit=store_i64(p,16,capacity) in let closing=store_i64(p,24,0) in let free=store_i64(p,32,0) in
+      let clear=memset(ptr_add(p,48),i32(0),capacity*32) in
+      let init=loop(i=0) while i<capacity next(let link=store_i64(p,72+i*32,if i+1<capacity then i+1 else -1) in i+1) yield i in
+      Arena { token=rt_handle_new(address,9) }
+effect(process) fn arena_status(arena:Arena) -> IntResult
+  = let address=rt_handle_fd(arena.token,9) in if address<0 then int_error(9,"arena is not live",0) else int_ok(0)
+effect fn rt_arena_register(token:i64,value:ptr,finalizer:ptr) -> i64
+  = let address=rt_handle_fd(token,9) in if address<0 then -1 else
+    let p=ptr_from_i64(address) in let slot=load_i64(p,32) in let capacity=load_i64(p,16) in let serial=load_i64(p,8)+1 in
+    if slot<0 || slot>=capacity || load_i64(p,24)!=0 || serial>140737488355327 then -1 else
+      let advanced=store_i64(p,32,load_i64(p,72+slot*32)) in
+      let saved=store_ptr(p,48+slot*32,value) in let saved=store_ptr(p,56+slot*32,finalizer) in
+      let generation=store_i64(p,64+slot*32,serial) in let counter=store_i64(p,8,serial) in serial*capacity+slot+1
+effect fn rt_arena_lookup(token:i64,key:i64) -> ptr
+  = let address=rt_handle_fd(token,9) in if address<0 || key<=0 then null() else
+    let p=ptr_from_i64(address) in let capacity=load_i64(p,16) in check capacity>0 in
+    let slot=(key-1)%capacity in let serial=(key-1)/capacity in
+    if serial!=load_i64(p,64+slot*32) then null() else load_ptr(p,48+slot*32)
+effect fn rt_arena_release(token:i64,key:i64) -> unit
+  = let value=rt_arena_lookup(token,key) in if value==null() then noop() else
+    let p=ptr_from_i64(rt_handle_fd(token,9)) in let capacity=load_i64(p,16) in check capacity>0 in let slot=(key-1)%capacity in
+    let finalizer=load_ptr(p,56+slot*32) in let clear=store_ptr(p,48+slot*32,null()) in
+    let linked=store_i64(p,72+slot*32,load_i64(p,32)) in let free=store_i64(p,32,slot) in
+    let dropped=invoke_finalizer(finalizer,value) in ax_release(value)
+private effect(fs,net,process) fn arena_release(arena:Arena) -> unit
+  = let address=rt_handle_fd(arena.token,9) in if address<0 then noop() else
+    let p=ptr_from_i64(address) in if load_i64(p,24)!=0 then noop() else
+    let closing=store_i64(p,24,1) in let capacity=load_i64(p,16) in
+    let done=loop(i=capacity) while i>0 next(let serial=load_i64(p,64+(i-1)*32) in
+      let released=rt_arena_release(arena.token,serial*capacity+i) in i-1) yield i in rt_handle_drop(arena.token,9)

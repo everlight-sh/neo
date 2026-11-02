@@ -1,0 +1,28 @@
+import "std:io"
+type ObserverBox = {value:Arr u8 _}
+fn observer_keep(a:Arr u8 _) -> Arr u8 _ = a
+fn observer_copy(a:Arr u8 n) -> Arr u8 _
+  = let saved=observer_keep(a) in let slice=byte_slice(a,0,n) in
+    let copied=arr(i in 0..n) a[i] in
+    let changed=if n==0 then saved else check len(saved)>0 in set(saved,0,u8(88)) in
+    check str_equal(a,slice) && len(changed)==n in copied
+fn observer_box(a:Arr u8 _) -> ObserverBox = ObserverBox {value=a}
+fn observer_nested(a:Arr u8 _) -> Arr ObserverBox _
+  = set(arr(i in 0..1) ObserverBox {value=""},0,ObserverBox {value=a})
+fn observer_loop(a:Arr u8 _,b:Arr u8 _) -> Arr u8 _
+  = loop(i=0,out=a) while i<3 next(i+1,b) yield out
+fn observer_indirect(f:Fn(Arr u8 _)->Arr u8 _,a:Arr u8 _) -> Arr u8 _ = f(a)
+fn observer_case(n:i64) -> bool
+  = let boxed=observer_box(int_text(n)) in let nested=observer_nested(int_text(n+1)) in
+    let looped=observer_loop(int_text(n+2),int_text(n+3)) in
+    let indirect=observer_indirect(function(observer_keep),int_text(n+4)) in
+    let source=int_text(n+5) in let saved=observer_keep(source) in let copied=observer_copy(source) in
+    let fresh=observer_copy(int_text(n+6)) in
+    let churn=loop(i=0,total=0) while i<32 next(i+1,let temporary=int_text(n*37+i) in total+len(temporary)) yield total in
+    check churn>0 && len(nested)==1 in
+    str_equal(boxed.value,int_text(n)) && str_equal(nested[0].value,int_text(n+1)) &&
+    str_equal(looped,int_text(n+3)) && str_equal(indirect,int_text(n+4)) &&
+    str_equal(saved,int_text(n+5)) && str_equal(copied,saved) && str_equal(fresh,int_text(n+6))
+effect(fs) fn main() -> unit
+  = let good=loop(i=0,ok=true) while ok && i<10000 next(i+1,observer_case(i)) yield ok in
+    check good in let printed=print_out("observer lifetimes OK\n") in noop()

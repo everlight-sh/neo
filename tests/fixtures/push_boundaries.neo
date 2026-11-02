@@ -1,0 +1,33 @@
+import "std:io"
+fn append_i64(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row=arr(j in 0..0) 0) while i<n next(i+1,push(row,i%251)) yield row in
+    sum(i in 0..len(row)) row[i]
+fn append_i32(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row=arr(j in 0..0) i32(0)) while i<n next(i+1,push(row,i32(i%251))) yield row in
+    sum(i in 0..len(row)) i64(row[i])
+fn append_byte(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row="") while i<n next(i+1,push(row,u8(i%251))) yield row in
+    sum(i in 0..len(row)) i64(row[i])
+fn append_bool(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row=arr(j in 0..0) false) while i<n next(i+1,push(row,i%2==0)) yield row in
+    sum(i in 0..len(row)) if row[i] then 1 else 0
+fn nested_empty() -> Arr Arr u8 _ _ = arr(j in 0..0) ""
+fn append_nested(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row=nested_empty()) while i<n next(i+1,push(row,"payload")) yield row in
+    sum(i in 0..len(row)) check str_equal(row[i],"payload") in len(row[i])
+type PushPair = { first:i64,second:i64 }
+fn append_records(n:i64{n>=0}) -> i64
+  = let row=loop(i=0,row=arr(j in 0..0) PushPair { first=0,second=0 }) while i<n
+      next(i+1,push(row,PushPair { first=i%251,second=(i%251)*7 })) yield row in
+    sum(i in 0..len(row)) row[i].first+row[i].second
+fn alias_check(n:i64{n>=0 && n<=1000000}) -> bool
+  = let original=arr(i in 0..n) i in let changed=push(original,-1) in
+    check len(changed)==n+1 in
+    len(original)==n && changed[n]== -1 &&
+      (sum(i in 0..n) original[i])==n*(n-1)/2 && (sum(i in 0..n) changed[i])==n*(n-1)/2
+effect(fs,unsafe) fn main(mode:i64,n:i64{n>=0 && n<=1000000}) -> unit
+  = check alias_check(n) in
+    let r0=load_i64(runtime_state(),64) in let b0=load_i64(runtime_state(),80) in
+    let answer=if mode==0 then append_i64(n) else if mode==1 then append_i32(n) else if mode==2 then append_byte(n) else if mode==3 then append_bool(n) else if mode==4 then append_nested(n) else append_records(n) in
+    let r1=load_i64(runtime_state(),64) in let b1=load_i64(runtime_state(),80) in
+    let printed=print_out(concat(int_text(answer)," ",int_text(r1-r0)," ",int_text(b1-b0),"\n")) in noop()

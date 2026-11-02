@@ -1,0 +1,47 @@
+import "std:x509"
+import "std:base64"
+import "std:io"
+; mode 0: [u8 host length][host][u64 time][u8 chain count][u8 root count] then
+;         chain and root certificates as [u24 length][DER]; prints verified/rejected.
+; mode 1: like mode 0 without the root count; roots are the PEM bundle after the chain.
+; mode 2: [u16 scheme][u24 length][leaf DER][u16 length][signature][message]: TLS 1.3
+;         CertificateVerify check, prints yes/no.
+; mode 3: mode 0 input, verified `repeat` times; prints the number of successes.
+type CertList = { at:i64,certs:Arr Certificate _,ok:bool }
+type PemList = { at:i64,certs:Arr Certificate _ }
+fn cert_list(input:Arr u8 n,at:i64,count:i64) -> CertList
+  = loop(state=CertList { at=at,certs=arr(i in 0..0) x509_parse(""),ok=true },i=0) while state.ok && i<count next(
+      let size=str_byte(input,state.at)*65536+str_byte(input,state.at+1)*256+str_byte(input,state.at+2) in
+      if size<0 || state.at+3+size>n then CertList { at=state.at,certs=state.certs,ok=false } else
+      CertList { at=state.at+3+size,certs=push(state.certs,x509_parse(str_slice(input,state.at+3,state.at+3+size))),ok=true },i+1) yield state
+fn pem_strip(text:Arr u8 n) -> Arr u8 _
+  = loop(i=0,out="") while i<n next(i+1,let c=str_byte(text,i) in if c==10 || c==13 || c==32 || c==9 then out else push(out,u8(c))) yield out
+fn pem_step(move state:PemList,text:Arr u8 n) -> PemList
+  = let begin=str_find(str_slice(text,state.at,n),"-----BEGIN CERTIFICATE-----") in
+    if !begin.present then PemList { at=n,certs=state.certs } else
+    let body=state.at+begin.value+27 in let finish=str_find(str_slice(text,body,n),"-----END CERTIFICATE-----") in
+    if !finish.present then PemList { at=n,certs=state.certs } else
+    let der=base64_decode(pem_strip(str_slice(text,body,body+finish.value))) in
+    let cert=x509_parse(if der.ok then der.value else "") in
+    PemList { at=body+finish.value+25,certs=if cert.valid then push(state.certs,cert) else state.certs }
+fn pem_roots(text:Arr u8 n) -> Arr Certificate _
+  = loop(state=PemList { at=0,certs=arr(i in 0..0) x509_parse("") }) while state.at<n next(pem_step(state,text)) yield state.certs
+fn number(input:Arr u8 n,at:i64,count:i64) -> i64 = loop(i=0,value=0) while i<count next(i+1,value*256+str_byte(input,at+i)) yield value
+effect(fs,process) fn main(mode:i64,repeat:i64) -> unit
+  = let raw=file_read(0,8388608) in check raw.ok in let input=raw.value in let size=len(input) in
+    let output=if mode==2 then
+      let scheme=number(input,0,2) in let length=number(input,2,3) in let leaf=x509_parse(str_slice(input,5,5+length)) in
+      let sig_size=number(input,5+length,2) in let signature=str_slice(input,7+length,7+length+sig_size) in
+      if length<0 || sig_size<0 || 7+length+sig_size>size then "bad input\n" else
+      if x509_tls13_signature_valid(leaf,scheme,str_slice(input,7+length+sig_size,size),signature) then "yes\n" else "no\n" else
+      let host_size=str_byte(input,0) in let host=str_slice(input,1,1+host_size) in let now=number(input,1+host_size,8) in
+      let chain_count=str_byte(input,9+host_size) in let root_count=if mode==1 then 0 else str_byte(input,10+host_size) in
+      let chain=cert_list(input,if mode==1 then 10+host_size else 11+host_size,chain_count) in
+      let explicit=cert_list(input,chain.at,root_count) in
+      let roots=if mode==1 then pem_roots(str_slice(input,chain.at,size)) else explicit.certs in
+      if host_size<1 || chain_count<1 || !chain.ok || !explicit.ok || mode!=1 && explicit.at!=size then "bad input\n" else
+      if mode==3 then
+        let count=loop(i=0,count=0) while i<repeat next(i+1,count+(if x509_verify(chain.certs,roots,host,now+i%2) then 1 else 0)) yield count in
+        concat("verified ",int_text(count),"\n") else
+      concat(if x509_verify(chain.certs,roots,host,now) then "verified" else "rejected",if mode==1 then concat(" roots=",int_text(len(roots))) else "","\n") in
+    let printed=print_out(output) in if str_starts(output,"bad") then process_exit(2) else noop()

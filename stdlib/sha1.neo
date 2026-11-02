@@ -1,0 +1,26 @@
+; Legacy SHA-1 for WebSocket handshakes and STUN HMAC interoperability only.
+; Do not use SHA-1 for new signatures or content integrity designs.
+import "std:strings"
+private fn sha1_u32(v:i64) -> i64 = bit_and(v,4294967295)
+private fn sha1_rol(v:i64,n:i64) -> i64 = sha1_u32(bit_or(shift_left(v,n),shift_right(v,32-n)))
+type Sha1State = { a:i64,b:i64,c:i64,d:i64,e:i64 }
+private fn sha1_block(s:Sha1State,text:Arr u8 n,block:i64,padded:i64) -> Sha1State
+  = check n<=1048576 && block>=0 && block<=16385 && padded>=8 in
+    let initial=arr(j in 0..80) if j>=16 then 0 else loop(k=0,value=0) while k<4 next(k+1,
+      let at=block*64+j*4+k in let byte=if at<n then check at>=0 && at<n in i64(text[at]) else if at==n then 128 else if at>=padded-8 then bit_and(shift_right(n*8,(padded-1-at)*8),255) else 0 in value*256+byte) yield value in
+    let words=loop(i=16,w=initial) while i<80 next(i+1,check i>=16 && i<80 && len(w)==80 in set(w,i,sha1_rol(bit_xor(bit_xor(w[i-3],w[i-8]),bit_xor(w[i-14],w[i-16])),1))) yield w in
+    let r=loop(i=0,r=s) while i<80 next(i+1,check i>=0 && i<len(words) in
+      let f=if i<20 then bit_or(bit_and(r.b,r.c),bit_and(bit_xor(r.b,4294967295),r.d)) else if i<40 || i>=60 then bit_xor(bit_xor(r.b,r.c),r.d) else bit_or(bit_or(bit_and(r.b,r.c),bit_and(r.b,r.d)),bit_and(r.c,r.d)) in
+      let k=if i<20 then 1518500249 else if i<40 then 1859775393 else if i<60 then 2400959708 else 3395469782 in
+      Sha1State { a=sha1_u32(sha1_rol(r.a,5)+f+r.e+k+words[i]),b=r.a,c=sha1_rol(r.b,30),d=r.c,e=r.d }) yield r in
+    Sha1State { a=sha1_u32(s.a+r.a),b=sha1_u32(s.b+r.b),c=sha1_u32(s.c+r.c),d=sha1_u32(s.d+r.d),e=sha1_u32(s.e+r.e) }
+fn sha1(text:Arr u8 n) -> Arr u8 _
+  = check n<=1048576 in let padded=(n+72)/64*64 in
+    let result=loop(i=0,s=Sha1State { a=1732584193,b=4023233417,c=2562383102,d=271733878,e=3285377520 }) while i<padded/64 next(i+1,sha1_block(s,text,i,padded)) yield s in
+    arr(i in 0..20) u8(shift_right(if i/4==0 then result.a else if i/4==1 then result.b else if i/4==2 then result.c else if i/4==3 then result.d else result.e,(3-i%4)*8))
+
+fn hmac_sha1(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _
+  = let bounded=if n>64 then sha1(key) else key in
+    let inner=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,54)) in
+    let outer=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,92)) in
+    sha1(concat(outer,sha1(concat(inner,message))))

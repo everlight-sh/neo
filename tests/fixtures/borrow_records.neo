@@ -1,0 +1,28 @@
+import "std:strings"
+type BorrowPayload = { text: Arr u8 _, empty: Arr u8 _, values: Arr i64 _ }
+fn borrow_make (n: i64{n >= 1}) -> BorrowPayload
+  = BorrowPayload { text = int_text(n), empty = "", values = arr(i in 0..n) i }
+fn borrow_text (p: BorrowPayload) -> Arr u8 _ = p.text
+fn borrow_empty (p: BorrowPayload) -> Arr u8 _ = p.empty
+fn borrow_values (p: BorrowPayload) -> Arr i64 _ = p.values
+fn borrow_identity (p: BorrowPayload) -> BorrowPayload = p
+fn borrow_change (p: BorrowPayload) -> BorrowPayload = p with { text = "changed" }
+fn borrow_observe (p: BorrowPayload, q: BorrowPayload) -> i64 = len(p.text) + len(q.text)
+fn main (n: i64{n >= 1, n < 100}) -> Arr u8 _
+  = let original = borrow_make(n) in
+    let returned = borrow_text(borrow_make(n)) in
+    let escaped = borrow_values(borrow_make(n)) in
+    let copied = borrow_identity(original) in let changed = borrow_change(original) in
+    let empty = borrow_empty(borrow_make(n)) in
+    let grown = concat(empty, "grown") in
+    let literals = arr(i in 0..3) BorrowPayload { text = "static", empty = "", values = arr(j in 0..0) j } in
+    let static_text = borrow_text(literals[1]) in check len(static_text) > 0 in let edited = set(static_text, 0, u8(88)) in
+    let empty_nested = arr(i in 0..3) (arr(j in 0..0) u8(j)) in let append = concat(empty_nested[1], "appended") in
+    let pressure = loop (i = 0, total = 0) while i < 2000
+      next (i + 1, total + len(borrow_text(borrow_make(n)))) yield total in
+    check str_equal(returned, int_text(n)) && len(escaped) == n && escaped[n - 1] == n - 1 in
+    check str_equal(original.text, copied.text) && str_equal(changed.text, "changed") in
+    check str_equal(grown, "grown") && str_equal(append, "appended") in
+    check str_equal(literals[1].text, "static") && str_equal(edited, "Xtatic") in
+    check borrow_observe(original, borrow_change(original)) == len(int_text(n)) + 7 && pressure > 0 in
+    "ownership OK\n"

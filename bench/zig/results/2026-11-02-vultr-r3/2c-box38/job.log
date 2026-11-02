@@ -1,0 +1,150 @@
+Mon Nov  2 09:33:13 AM UTC 2026
+Mon Nov  2 09:59:45 AM UTC 2026
+== vif          median     81447 req/s (range 80640-85914)  p50   394 p99    773 us  srv 10.29 us/req 0.84 CPU  wrk 0.99 CPU  busy 0:0.86 1:1.00
+== before       median     81236 req/s (range 78284-92482)  p50   394 p99    779 us  srv 10.04 us/req 0.82 CPU  wrk 0.99 CPU  busy 0:0.84 1:1.00
+== pollfirst    median     81770 req/s (range 79141-89748)  p50   394 p99    776 us  srv 10.06 us/req 0.81 CPU  wrk 0.99 CPU  busy 0:0.84 1:1.00
+== accept1      median     81906 req/s (range 79087-89771)  p50   392 p99    786 us  srv 10.19 us/req 0.83 CPU  wrk 0.99 CPU  busy 0:0.86 1:1.00
+== nocore       median     81573 req/s (range 80697-87424)  p50   395 p99    773 us  srv 10.25 us/req 0.83 CPU  wrk 0.99 CPU  busy 0:0.86 1:1.00
+== noalign      median     81312 req/s (range 78572-91783)  p50   394 p99    780 us  srv 10.39 us/req 0.84 CPU  wrk 0.99 CPU  busy 0:0.86 1:1.00
+== nollvm       median     81198 req/s (range 77087-86600)  p50   395 p99    785 us  srv 10.28 us/req 0.83 CPU  wrk 0.99 CPU  busy 0:0.86 1:1.00
+== epoll        median     82392 req/s (range 81047-90015)  p50   388 p99    815 us  srv 10.65 us/req 0.87 CPU  wrk 0.99 CPU  busy 0:0.90 1:1.00
+== httpz        median     85422 req/s (range 84286-96624)  p50   606 p99   1450 us  srv 11.64 us/req 0.99 CPU  wrk 0.99 CPU  busy 0:1.00 1:0.99
+== httpz-1+1    median     71826 req/s (range 70224-77584)  p50   812 p99   2730 us  srv 13.83 us/req 0.99 CPU  wrk 0.94 CPU  busy 0:1.00 1:0.95
+== faults
+Mon Nov  2 09:59:45 AM UTC 2026
+== compute
+Mon Nov  2 10:00:06 AM UTC 2026
+mandel-1200-1200-300   w=1  Vif    145.5 ms  Zig    203.4 ms  Zig native    210.2 ms  Vif before    145.2 ms  ok
+stencil-1000000-20     w=1  Vif     30.7 ms  Zig     37.6 ms  Zig native     38.8 ms  Vif before     36.1 ms  ok
+stencil-50000000-20    w=1  Vif   1420.7 ms  Zig   1776.6 ms  Zig native   1861.4 ms  Vif before   6167.5 ms  ok
+nbody-1024-3           w=1  Vif     11.8 ms  Zig     17.8 ms  Zig native     17.9 ms  Vif before     11.7 ms  ok
+nbody-4096-10          w=1  Vif    377.1 ms  Zig    686.7 ms  Zig native    684.7 ms  Vif before    377.9 ms  ok
+sieve-100000000        w=1  Vif    439.0 ms  Zig    511.9 ms  Zig native    502.3 ms  Vif before    549.6 ms  ok
+mandel-1200-1200-300   w=2  Vif     73.8 ms  Zig    102.6 ms  Zig native    106.9 ms  Vif before     74.1 ms  ok
+stencil-1000000-20     w=2  Vif     28.4 ms  Zig     38.3 ms  Zig native     36.5 ms  Vif before     32.7 ms  ok
+stencil-50000000-20    w=2  Vif    802.4 ms  Zig   1105.5 ms  Zig native    972.9 ms  Vif before   5805.4 ms  ok
+nbody-1024-3           w=2  Vif      7.1 ms  Zig     11.5 ms  Zig native     11.4 ms  Vif before      7.2 ms  ok
+nbody-4096-10          w=2  Vif    194.3 ms  Zig    353.3 ms  Zig native    351.2 ms  Vif before    195.4 ms  ok
+sieve-100000000        w=2  Vif    428.5 ms  Zig    494.4 ms  Zig native    493.9 ms  Vif before    541.6 ms  ok
+== json
+Mon Nov  2 10:03:55 AM UTC 2026
+doc x1M            Vif    188.1  Zig Value    676.6  Zig typed    355.9  Zig Value arena    636.0  Zig typed arena    333.7  Zig Value native    695.4  Zig typed native    342.1  Vif before    188.1  ok
+orders 1000 x1000  Vif    186.6  Zig Value   1060.6  Zig typed    252.8  Zig Value arena    448.5  Zig typed arena    218.3  Zig Value native   1091.3  Zig typed native    249.9  Vif before    189.9  ok
+== loop alignment A/B (align32 = final, align16 = final without -falign-loops=32)
+Mon Nov  2 10:05:13 AM UTC 2026
+## JSON doc x1M, CPU 0
+align32        wall    187.5  (min    185.3 max    204.4)  user   186.1 sys    1.0  out ['513500000']
+align16        wall    182.8  (min    179.2 max    197.0)  user   181.3 sys    1.0  out ['513500000']
+before         wall    183.6  (min    181.6 max    206.6)  user   182.1 sys    1.0  out ['513500000']
+## orders 1000 x1000, CPU 0
+align32        wall    186.5  (min    183.8 max    217.1)  user   184.6 sys    1.0  out ['34327000']
+align16        wall    184.9  (min    183.4 max    199.8)  user   183.5 sys    1.0  out ['34327000']
+before         wall    189.4  (min    187.5 max    202.6)  user   188.3 sys    1.0  out ['34327000']
+## sieve 1e8, 1 worker
+align32        wall    457.2  (min    449.9 max    469.0)  user   447.5 sys    7.0  out ['5761455']
+align16        wall    450.5  (min    447.1 max    462.2)  user   442.4 sys    8.0  out ['5761455']
+## sieve 1e8, 2 workers
+align32        wall    438.7  (min    420.3 max    448.6)  user   449.6 sys   14.0  out ['5761455']
+align16        wall    437.2  (min    420.0 max    448.8)  user   450.7 sys   13.0  out ['5761455']
+## stencil 50M x20, 1 worker
+align32        wall   1426.1  (min   1417.7 max   1470.6)  user  1378.5 sys   46.0  out ['25000046624222']
+align16        wall   1430.7  (min   1418.6 max   1466.8)  user  1384.9 sys   47.0  out ['25000046624222']
+== bench/run.py workloads
+Mon Nov  2 10:06:16 AM UTC 2026
+go version go1.25.1 linux/amd64
+## mandel 3000 3000 2000
+Traceback (most recent call last):
+  File "/root/ab.py", line 14, in <module>
+    assert p.returncode == 0, (cmd, p.stderr)
+           ^^^^^^^^^^^^^^^^^
+AssertionError: ('go-mandel 3000 3000 2000', 'taskset: failed to execute go-mandel: No such file or directory\n')
+## stencil 50000000 20
+Traceback (most recent call last):
+  File "/root/ab.py", line 14, in <module>
+    assert p.returncode == 0, (cmd, p.stderr)
+           ^^^^^^^^^^^^^^^^^
+AssertionError: ('go-stencil 50000000 20', 'taskset: failed to execute go-stencil: No such file or directory\n')
+## stencil_small 1000000 2000
+Traceback (most recent call last):
+  File "/root/ab.py", line 14, in <module>
+    assert p.returncode == 0, (cmd, p.stderr)
+           ^^^^^^^^^^^^^^^^^
+AssertionError: ('go-stencil 1000000 2000', 'taskset: failed to execute go-stencil: No such file or directory\n')
+## nbody 16384 10
+Traceback (most recent call last):
+  File "/root/ab.py", line 14, in <module>
+    assert p.returncode == 0, (cmd, p.stderr)
+           ^^^^^^^^^^^^^^^^^
+AssertionError: ('go-nbody 16384 10', 'taskset: failed to execute go-nbody: No such file or directory\n')
+== placement
+Mon Nov  2 10:06:43 AM UTC 2026
+n48 a16: mark loop at 402f70:
+n48 a32: mark loop at 403300:
+n56 a16: mark loop at 402f70:
+n56 a32: mark loop at 403300:
+== 1 worker
+s-n16-a32      wall    439.6  (min    433.9 max    458.9)  user   432.3 sys    9.0  out ['5761455']
+s-n24-a16      wall    440.1  (min    434.9 max    458.8)  user   429.3 sys    9.0  out ['5761455']
+s-n24-a32      wall    440.5  (min    425.3 max    463.1)  user   435.9 sys    6.0  out ['5761455']
+s-n32-a16      wall    440.9  (min    423.4 max    454.9)  user   429.0 sys   10.0  out ['5761455']
+s-n0-a16       wall    441.3  (min    437.0 max    453.1)  user   434.1 sys    7.0  out ['5761455']
+s-n32-a32      wall    441.8  (min    427.1 max    454.2)  user   431.2 sys   10.0  out ['5761455']
+s-n0-a32       wall    442.8  (min    435.7 max    452.7)  user   430.5 sys   10.0  out ['5761455']
+s-n8-a16       wall    443.1  (min    430.9 max    455.4)  user   439.6 sys    5.0  out ['5761455']
+s-n8-a32       wall    443.4  (min    429.0 max    453.8)  user   432.1 sys    7.0  out ['5761455']
+s-n56-a32      wall    444.4  (min    431.5 max    457.3)  user   440.9 sys    3.0  out ['5761455']
+s-n16-a16      wall    445.0  (min    434.7 max    465.2)  user   436.5 sys    8.0  out ['5761455']
+s-n40-a16      wall    445.3  (min    440.4 max    458.2)  user   437.8 sys    7.0  out ['5761455']
+s-n48-a32      wall    445.5  (min    426.8 max    467.7)  user   439.8 sys    6.0  out ['5761455']
+s-n40-a32      wall    448.5  (min    439.5 max    469.1)  user   440.9 sys    7.0  out ['5761455']
+s-n56-a16      wall    473.4  (min    467.9 max    491.2)  user   467.0 sys    9.0  out ['5761455']
+s-n48-a16      wall    484.8  (min    466.1 max    497.3)  user   476.1 sys    8.0  out ['5761455']
+zig            wall    507.4  (min    491.3 max    522.4)  user   453.2 sys   52.0  out ['5761455']
+== 2 workers
+s-n40-a32      wall    421.6  (min    399.2 max    443.0)  user   436.7 sys   12.0  out ['5761455']
+s-n56-a32      wall    424.2  (min    414.0 max    445.2)  user   435.6 sys   13.0  out ['5761455']
+s-n8-a32       wall    426.7  (min    413.7 max    457.0)  user   441.5 sys   10.0  out ['5761455']
+s-n32-a16      wall    428.2  (min    420.7 max    457.0)  user   440.9 sys   13.0  out ['5761455']
+s-n0-a16       wall    429.5  (min    412.9 max    445.8)  user   443.4 sys   12.1  out ['5761455']
+s-n48-a32      wall    429.5  (min    420.2 max    445.3)  user   444.4 sys    9.0  out ['5761455']
+s-n40-a16      wall    430.3  (min    418.9 max    443.2)  user   443.4 sys   10.0  out ['5761455']
+s-n8-a16       wall    430.9  (min    421.4 max    452.7)  user   445.4 sys   12.0  out ['5761455']
+s-n24-a16      wall    431.9  (min    420.7 max    459.7)  user   448.7 sys   13.0  out ['5761455']
+s-n24-a32      wall    432.0  (min    424.1 max    451.7)  user   445.1 sys   12.0  out ['5761455']
+s-n32-a32      wall    432.3  (min    421.4 max    444.0)  user   443.9 sys   13.0  out ['5761455']
+s-n0-a32       wall    435.8  (min    430.0 max    441.0)  user   450.0 sys   11.0  out ['5761455']
+s-n16-a16      wall    438.7  (min    426.6 max    451.2)  user   445.9 sys   13.0  out ['5761455']
+s-n16-a32      wall    440.3  (min    415.9 max    450.3)  user   456.0 sys   13.0  out ['5761455']
+s-n56-a16      wall    460.5  (min    454.0 max    471.2)  user   471.2 sys   12.9  out ['5761455']
+s-n48-a16      wall    468.1  (min    432.0 max    521.4)  user   480.4 sys   14.0  out ['5761455']
+zig            wall    489.5  (min    477.3 max    528.2)  user   480.5 sys   60.1  out ['5761455']
+== rss
+Mon Nov  2 10:08:49 AM UTC 2026
+ap-before threads=1 args=20000 40 0: 122619017652317 maxrss_kib 119336 minflt 148957 wall 0.43 
+ap-after threads=1 args=20000 40 0: 122619017652317 maxrss_kib 119368 minflt 28338 wall 0.14 
+ap-before threads=2 args=20000 40 0: 122619017652317 maxrss_kib 119376 minflt 148960 wall 0.56 
+ap-after threads=2 args=20000 40 0: 122619017652317 maxrss_kib 119396 minflt 30930 wall 0.21 
+ap-before threads=1 args=20000 40 10000000: 
+ap-after threads=1 args=20000 40 10000000: 
+ap-before threads=2 args=20000 40 10000000: 
+ap-after threads=2 args=20000 40 10000000: 
+ap-before threads=1 args=2000 400 0: 1149385349341898 maxrss_kib 128460 minflt 1365239 wall 3.74 
+ap-after threads=1 args=2000 400 0: 1149385349341898 maxrss_kib 128476 minflt 194817 wall 1.10 
+ap-before threads=2 args=2000 400 0: 1149385349341898 maxrss_kib 128284 minflt 1365266 wall 5.16 
+ap-after threads=2 args=2000 400 0: 1149385349341898 maxrss_kib 128436 minflt 148104 wall 1.82 
+ap-before threads=1 args=50000 24 20000000: 
+ap-after threads=1 args=50000 24 20000000: 
+ap-before threads=2 args=50000 24 20000000: Command terminated by signal 15 maxrss_kib 161064 minflt 79388 wall 93.97 
+ap-after threads=2 args=50000 24 20000000: Command terminated by signal 15 maxrss_kib 161116 minflt 2234 wall 1.00 
+== suite
+Mon Nov  2 10:22:41 AM UTC 2026
+== axon test (unit + native cases + integration)
+Mon Nov  2 10:22:41 AM UTC 2026
+axon test exit 0
+Ran 173 tests in 6.558s
+OK
+Ran 31 tests across 1 file. [374.00ms]
+axon test: 37 native cases, 0 failed
+Mon Nov  2 10:40:10 AM UTC 2026
+Mon Nov  2 10:40:10 AM UTC 2026
+ALL-DONE

@@ -1,0 +1,205 @@
+; Linux io_uring backend, entirely Neo + direct kernel syscalls. The default
+; on x86-64 (rt_uring_default); NEO_HTTP_URING=0 selects epoll, =1 opts in on
+; ARM64. A worker whose ring cannot be created (kernels before 6.1, Docker's
+; default seccomp profile) serves with epoll instead, silently unless =1.
+; One ring per worker process, SINGLE_ISSUER | DEFER_TASKRUN: completions are
+; posted only inside this worker's io_uring_enter. Each loop makes one
+; io_uring_enter that submits every queued operation and waits for a
+; completion. A connection has at most one operation in flight (a receive or
+; a send), so a state is only dropped or reused when nothing references it.
+; Accepts keep the epoll backend's round-robin turn: the listener (through a
+; one-entry epoll instance) and the notification socket are polled through the
+; ring, then accepted directly.
+; user_data: listener poll=0, notification poll=1, receive=2+2i, send=3+2i.
+;
+; Ring descriptor (128 bytes): fd@0, mapping@8, sqes@16, sq mask@24,
+; sq entries@32, sq tail@40, queued@48, cq mask@56, the kernel's offsets of
+; sq tail@64, cq head@72, cq tail@80 and cqes@88, then cq head@96.
+; Ring indices are unsigned 32-bit counters kept as i64 in [0, 2^32).
+
+effect fn rt_uring_setup (d : ptr) -> bool
+  = let params = stack_alloc(120) in let cleared = memset(params, i32(0), 120) in
+    ; CQSIZE | SUBMIT_ALL | SINGLE_ISSUER | DEFER_TASKRUN with 4096 completions:
+    ; at most 1026 operations are ever in flight, so neither queue overflows.
+    let sized = store_i32(params, 4, i32(4096)) in
+    let flags = store_i32(params, 8, i32(12424)) in
+    let fd = rt_result(syscall6(425, 2048, ptr_to_i64(params), 0, 0, 0, 0)) in
+    if fd < 0 then false else
+      let features = i64(load_i32(params, 20)) in
+      let sq_entries = i64(load_i32(params, 0)) in
+      let cq_entries = i64(load_i32(params, 4)) in
+      let array = i64(load_i32(params, 64)) in
+      let sq_bytes = array + sq_entries * 4 in
+      let cq_bytes = i64(load_i32(params, 100)) + cq_entries * 16 in
+      ; One mapping for both rings (FEAT_SINGLE_MMAP) and timed waits (FEAT_EXT_ARG).
+      let ring = if features % 2 == 1 && features / 256 % 2 == 1
+        then rt_map_ring(fd, if sq_bytes > cq_bytes then sq_bytes else cq_bytes, 0) else -1 in
+      let sqes = if ring < 0 then -1 else rt_map_ring(fd, sq_entries * 64, 268435456) in
+      if sqes < 0 then let closed = rt_close(fd) in false else
+        let mapping = ptr_from_i64(ring) in
+        let identity = loop (i = 0) while i < sq_entries
+          next (let slot = store_i32(mapping, array + i * 4, i32(i)) in i + 1) yield i in
+        let a0 = store_i64(d, 0, fd) in
+        let a1 = store_ptr(d, 8, mapping) in
+        let a2 = store_ptr(d, 16, ptr_from_i64(sqes)) in
+        let a3 = store_i64(d, 24, sq_entries - 1) in
+        let a4 = store_i64(d, 32, sq_entries) in
+        let a5 = store_i64(d, 40, bit_and(i64(atomic_load_i32(mapping, i64(load_i32(params, 44)))), 4294967295)) in
+        let a6 = store_i64(d, 48, 0) in
+        let a7 = store_i64(d, 56, cq_entries - 1) in
+        let a8 = store_i64(d, 64, i64(load_i32(params, 44))) in
+        let a9 = store_i64(d, 72, i64(load_i32(params, 80))) in
+        let a10 = store_i64(d, 80, i64(load_i32(params, 84))) in
+        let a11 = store_i64(d, 88, i64(load_i32(params, 100))) in
+        let a12 = store_i64(d, 96, bit_and(i64(atomic_load_i32(mapping, i64(load_i32(params, 80)))), 4294967295)) in true
+
+; Publishes the queued submissions and enters the ring once. With a wait
+; argument (a 24-byte io_uring_getevents_arg) it also waits for a completion,
+; up to the argument's timeout. Returns the submitted count or -1 (errno set).
+effect fn rt_uring_submit (d : ptr, waiting : ptr) -> i64
+  = let published = atomic_store_i32(load_ptr(d, 8), load_i64(d, 64), i32(load_i64(d, 40))) in
+    let queued = load_i64(d, 48) in
+    let wait = waiting != null() in
+    ; IORING_ENTER_GETEVENTS | IORING_ENTER_EXT_ARG when waiting.
+    let result = rt_result(syscall6(426, load_i64(d, 0), queued, if wait then 1 else 0,
+      if wait then 9 else 0, ptr_to_i64(waiting), if wait then 24 else 0)) in
+    let consumed = if result > 0 && queued > 0 then store_i64(d, 48, queued - result) else noop() in result
+
+; Queues one submission: opcode@0, fd@4, addr@16, len@24, op flags@28, user_data@32.
+effect fn rt_uring_push (d : ptr, opcode : i64, fd : i64, address : i64, length : i64, flags : i64, user : i64) -> unit
+  = let room = if load_i64(d, 48) < load_i64(d, 32) then noop() else
+      let submitted = rt_uring_submit(d, null()) in
+      if load_i64(d, 48) < load_i64(d, 32) then noop() else ax_trap(data("io_uring submission queue full\0")) in
+    let tail = load_i64(d, 40) in
+    let sqe = ptr_add(load_ptr(d, 16), bit_and(tail, load_i64(d, 24)) * 64) in
+    let w0 = store_i64(sqe, 0, bit_or(opcode, shift_left(fd, 32))) in
+    let w1 = store_i64(sqe, 8, 0) in
+    let w2 = store_i64(sqe, 16, address) in
+    let w3 = store_i64(sqe, 24, bit_or(length, shift_left(flags, 32))) in
+    let w4 = store_i64(sqe, 32, user) in
+    let w5 = store_i64(sqe, 40, 0) in let w6 = store_i64(sqe, 48, 0) in let w7 = store_i64(sqe, 56, 0) in
+    let advanced = store_i64(d, 40, bit_and(tail + 1, 4294967295)) in
+    store_i64(d, 48, load_i64(d, 48) + 1)
+
+; IORING_OP_RECV into the free input tail, attempted when it is submitted. A
+; receive is queued after its connection's response went out, and under load
+; the client's next request has usually arrived by the next submission, so the
+; receive completes inline instead of arming a poll first (POLL_FIRST); when
+; nothing has arrived the kernel arms the same poll after the attempt. With the
+; server as the bottleneck (hello, server on its own core, wrk -t2 on another)
+; this measured 3% more requests per second and 3% less CPU per request on one
+; EPYC-Milan box and no difference beyond run-to-run noise on a second one
+; (RESULTS-zig-x86-linux-2026-11-02.md). (With POLL_FIRST an earlier
+; measurement on a client-bound setup saw 0.25 us less CPU per request.)
+effect fn rt_uring_recv (d : ptr, state : ptr, index : i64) -> unit
+  = let have = load_i64(state, 16) in
+    rt_uring_push(d, 27, load_i64(state, 0),
+      ptr_to_i64(ptr_add(load_ptr(state, 8), have)), 65536 - have, 0, 2 + index * 2)
+
+; IORING_OP_SEND of the unsent output, MSG_NOSIGNAL.
+effect fn rt_uring_send (d : ptr, state : ptr, index : i64) -> unit
+  = let sent = load_i64(state, 40) in
+    rt_uring_push(d, 26, load_i64(state, 0), ptr_to_i64(ptr_add(load_ptr(state, 24), sent)),
+      load_i64(state, 32) - sent, 16384, 3 + index * 2)
+
+; Renders every complete buffered request, then sends the responses or reads more.
+effect fn rt_uring_continue (d : ptr, state : ptr, handler : ptr, index : i64) -> unit
+  = let prepared = if load_i64(state, 16) > 0 then rt_prepare(state, handler) else noop() in
+    if load_i64(state, 0) < 0 then noop()
+    else if load_i64(state, 32) > 0 then rt_uring_send(d, state, index)
+    else rt_uring_recv(d, state, index)
+
+effect fn rt_uring_complete (d : ptr, state : ptr, handler : ptr, index : i64, sending : bool, result : i64) -> unit
+  = if result < 0 then
+      if result == 0 - 4 || result == 0 - 11 then
+        if sending then rt_uring_send(d, state, index) else rt_uring_recv(d, state, index)
+      else rt_drop(state)
+    else if result == 0 then rt_drop(state)
+    else if sending then
+      let sent = load_i64(state, 40) + result in
+      if sent < load_i64(state, 32) then let saved = store_i64(state, 40, sent) in rt_uring_send(d, state, index)
+      else let reset = store_i64(state, 32, 0) in let rewound = store_i64(state, 40, 0) in
+        if load_i64(state, 48) == 1 then rt_drop(state) else rt_uring_continue(d, state, handler, index)
+    else let received = store_i64(state, 16, load_i64(state, 16) + result) in
+      rt_uring_continue(d, state, handler, index)
+
+; First dropped state below the count, else the count (rt_accept_at refuses 1024).
+effect fn rt_uring_slot (states : ptr, n : i64) -> i64
+  = loop (i = 0, found = -1) while found < 0 && i < n
+      next (i + 1, if load_i64(states, i * 64) < 0 then i else -1)
+      yield if found < 0 then n else found
+
+effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, listener : i64, control : ptr,
+                          worker : i64, workers : i64{workers >= 1}, scratch : ptr, user : i64, result : i64) -> unit
+  = if user == 0 then
+      ; Accept every pending connection while this worker holds the accept
+      ; turn (with one worker, until the listener is drained). One accept per
+      ; readiness event made the k-th of a burst of new connections wait out k
+      ; loop iterations, each serving the requests of those already accepted.
+      let rearm = store_i64(local, 8, 0) in
+      let drained = loop (more = true) while more
+        next (let slot = rt_accept_at(listener, states, rt_uring_slot(states, load_i64(local, 0)), true,
+                local, control, worker, workers) in
+              if slot < 0 then false else let queued = rt_uring_recv(d, ptr_add(states, slot * 64), slot) in true)
+        yield more in noop()
+    else if user == 1 then
+      let notify = load_i64(control, 256 + worker * 16) in
+      let drained = rt_read(notify, scratch, 64) in
+      rt_uring_push(d, 6, notify, 0, 0, 1, 1)
+    else let index = (user - 2) / 2 in
+      if index < 0 || index >= load_i64(local, 0) then ax_trap(data("invalid io_uring completion\0")) else
+        let state = ptr_add(states, index * 64) in
+        if load_i64(state, 0) < 0 then ax_trap(data("io_uring completion for a closed connection\0"))
+        else rt_uring_complete(d, state, handler, index, user % 2 == 1, result)
+
+; Handles every posted completion, then releases their slots to the kernel.
+effect fn rt_uring_reap (d : ptr, states : ptr, local : ptr, handler : ptr, listener : i64, control : ptr,
+                         worker : i64, workers : i64{workers >= 1}, scratch : ptr) -> unit
+  = let mapping = load_ptr(d, 8) in
+    let tail = bit_and(i64(atomic_load_i32(mapping, load_i64(d, 80))), 4294967295) in
+    let head = loop (h = load_i64(d, 96)) while h != tail
+      next (let cqe = ptr_add(mapping, load_i64(d, 88) + bit_and(h, load_i64(d, 56)) * 16) in
+            let handled = rt_uring_event(d, states, local, handler, listener, control, worker, workers, scratch,
+              load_i64(cqe, 0), i64(load_i32(cqe, 8))) in bit_and(h + 1, 4294967295))
+      yield h in
+    let saved = store_i64(d, 96, head) in
+    atomic_store_i32(mapping, load_i64(d, 72), i32(head))
+
+effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control : ptr, worker : i64,
+                              workers : i64{workers >= 1}, parent : i64) -> i64
+  = let states = ax_alloc(1024 * 64) in
+    ; local: connection count@0, listener polled@8.
+    let local = stack_alloc(16) in let cleared = memset(local, i32(0), 16) in
+    let scratch = stack_alloc(64) in
+    let notify = load_i64(control, 256 + worker * 16) in
+    let watched = rt_uring_push(d, 6, notify, 0, 0, 1, 1) in
+    ; The ring polls the listener through this epoll instance, not directly: a
+    ; pending ring request keeps its file open until the ring's teardown, which
+    ; runs asynchronously after exit, so a server restarted on the port failed to
+    ; bind for a few milliseconds. Epoll holds no reference, and the port is free
+    ; as soon as the process exits. Without epoll the listener is polled directly.
+    let gate = rt_epoll_create() in
+    let target = if gate < 0 then listener else if rt_epoll_ctl(gate, 1, listener, 1, 0) >= 0 then gate
+      else let closed = rt_close(gate) in listener in
+    ; Waits time out after a second so orphaned workers still notice and exit.
+    let timeout = stack_alloc(16) in let seconds = store_i64(timeout, 0, 1) in let nanos = store_i64(timeout, 8, 0) in
+    let waiting = stack_alloc(24) in let zeroed = memset(waiting, i32(0), 24) in
+    let limit = store_i64(waiting, 16, ptr_to_i64(timeout)) in
+    loop (running = true) while running
+      next (let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+            let listening = if load_i64(control, 0) == worker && load_i64(local, 8) == 0 then
+              let polled = rt_uring_push(d, 6, target, 0, 0, 1, 0) in store_i64(local, 8, 1) else noop() in
+            let entered = rt_uring_submit(d, waiting) in
+            let error = if entered < 0 then i64(load_i32(rt_errno(), 0)) else 0 in
+            ; ETIME, EINTR, EAGAIN and EBUSY leave the ring usable.
+            if error != 0 && error != 62 && error != 4 && error != 11 && error != 16 then
+              let failed = ax_trap(data("io_uring_enter syscall failed\0")) in false
+            else let reaped = rt_uring_reap(d, states, local, handler, listener, control, worker, workers, scratch) in true)
+      yield 0
+
+effect fn rt_serve_uring (listener : i64, handler : ptr, control : ptr, worker : i64,
+                        workers : i64{workers >= 1}, parent : i64, requested : bool) -> i64
+  = let d = stack_alloc(128) in
+    if rt_uring_setup(d) then rt_http_uring_worker(d, listener, handler, control, worker, workers, parent)
+    else let noted = if requested && worker == 0 then rt_write_all(2, data("neo: io_uring unavailable, serving with epoll\n"), 46) else noop() in
+      rt_http_epoll_worker(listener, handler, control, worker, workers, parent)

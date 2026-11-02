@@ -1,0 +1,33 @@
+import "std:bytesmap"
+import "std:time"
+; Same owned decimal-string keys/values and operations as Go/Rust. Checkpoints
+; are outside phase timers, and keep the complete map live for RSS sampling.
+fn create_map(n:i64,reserve:bool) -> BytesMap
+  = let initial=if reserve then bytesmap_with_capacity(n,0,0) else bytesmap_empty(0,0) in
+    loop(i=0,map=initial) while i<n next(i+1,bytesmap_put(map,int_text(i),int_text(i*7))) yield map
+fn lookup_map(map:BytesMap,n:i64,multiplier:i64,remaining:bool) -> i64
+  = loop(i=0,total=0) while i<n next(i+1,
+      let value=bytesmap_get(map,int_text(i)) in
+      if remaining && i%2==0 then check !value.present in total else
+        check value.present in let decoded=int_parse(value.value) in check decoded.ok && decoded.value==i*multiplier in total+decoded.value) yield total
+fn update_map(move map:BytesMap,n:i64) -> BytesMap
+  = loop(i=0,out=map) while i<n next(i+1,bytesmap_put(out,int_text(i),int_text(i*11))) yield out
+fn delete_map(move map:BytesMap,n:i64) -> BytesMap
+  = loop(i=0,out=map) while i<n next(i+2,bytesmap_delete(out,int_text(i))) yield out
+effect(fs) fn checkpoint(phase:Arr u8 n,elapsed:i64,checksum:i64,count:i64) -> unit
+  = let printed=print_out(concat(phase," ",int_text(elapsed)," ",int_text(checksum)," ",int_text(count),"\n")) in
+    let ack=file_read_chunk(0,1) in check ack.ok && len(ack.value)==1 in noop()
+effect(fs,time) fn main(n:i64{n>=0 && n<=1000000},reserved:i64) -> unit
+  = let start=monotonic_ns() in let original=create_map(n,reserved!=0) in let inserted=monotonic_ns() in
+    check bytesmap_len(original)==n in let paused=checkpoint("insert",inserted.value-start.value,0,bytesmap_len(original)) in
+    let start=monotonic_ns() in let checksum=lookup_map(original,n,7,false) in let stopped=monotonic_ns() in
+    let paused=checkpoint("lookup",stopped.value-start.value,checksum,bytesmap_len(original)) in
+    let paused=checkpoint("steady",0,checksum,bytesmap_len(original)) in
+    let start=monotonic_ns() in let updated=update_map(original,n) in let stopped=monotonic_ns() in
+    let paused=checkpoint("update",stopped.value-start.value,0,bytesmap_len(updated)) in
+    let start=monotonic_ns() in let checksum=lookup_map(updated,n,11,false) in let stopped=monotonic_ns() in
+    let paused=checkpoint("lookup_updated",stopped.value-start.value,checksum,bytesmap_len(updated)) in
+    let start=monotonic_ns() in let remaining=delete_map(updated,n) in let stopped=monotonic_ns() in
+    let paused=checkpoint("delete",stopped.value-start.value,0,bytesmap_len(remaining)) in
+    let start=monotonic_ns() in let checksum=lookup_map(remaining,n,11,true) in let stopped=monotonic_ns() in
+    let paused=checkpoint("lookup_remaining",stopped.value-start.value,checksum,bytesmap_len(remaining)) in noop()

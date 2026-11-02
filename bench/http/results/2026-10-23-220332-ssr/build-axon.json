@@ -1,0 +1,2359 @@
+{
+  "ok": true,
+  "program": "c30b996d0f013d6b21ad82944578f60b3e7c8f1f6ca7c6f25addfc0794502147",
+  "functions": {
+    "ax_runtime_init": "74a6c9bb4137d629f7ea463de838a2e963942b540bccf4bbd8e3f37e08f73ed6",
+    "rt_errno": "6f690fc95636d7d52b5969f2c2fdab70f99df516d0a45a2bb744eeffa5e267ef",
+    "rt_result": "a5836c12e556588e62b7866aaeb9f6283a52d379fa37e5ea5f78c86cf9e6ff8a",
+    "rt_cstrlen": "f3410de3ed0aadd16d5dce794cb8fc5e08d921616bb5e02698b36af5c7939c55",
+    "rt_write": "2020b53626e610a2e2618c29c17e05721d9956f32de894ec1fc37346a1f2a321",
+    "rt_write_all": "608737e022036f393a2d291ac7db0601c5fb2e4da2e81d4c3483467a310579f8",
+    "rt_puts": "4e4bd8b0f907896072fd56a3817bdcf62ee7238cd5d3997023f91ea42cca7a09",
+    "ax_exit": "0f8d1dc9f99b1c37a1843e82a970d2115e8e7e0d0a621d46d6eff1ed90829459",
+    "ax_trap": "b63d129051b624c11d63c792c647303d6c6f90651a60cf1867e192a7c8f70bbc",
+    "memcpy": "1ec7eae04fc67cd2fea82bfd156de745b464472b1eb9065e1431a884804e6586",
+    "memmove": "46116cc90891da8aa2ca6114c339b5d7ebceeae1afe22c5d1ee10d93ec6b19a5",
+    "memset": "2e043a144089c8fd421adfd8e22428b12fc37300ec5663b851b91b8cb1c080ed",
+    "bzero": "f5755c999e0d420eb4c1f548931b3f3b8280e2f3937ceca53337eb3cd1e9cbc0",
+    "ax_cap": "ab50ca90f9015acfb0a51b290efb101916480035ba7ade3d4fd698a8369fbd50",
+    "rt_class": "afeb6cae65c07e82f78008d5e930303a495d33c1211cbd7bade33605aebb9a9a",
+    "rt_mmap": "276964d478752982cc854eb5e9b6151cb0a06f4df734e021f5285ba66fad9992",
+    "rt_map": "3708829efc41c1e447f844563c9980a3e3b1b7a1991aed197e1e69eeb62afc37",
+    "ax_alloc": "36898759522984870c0eae7f61bb4d031bc4b5cd63643770d67897f32e686012",
+    "rt_munmap": "1ce582ddb730633ff167d6bc04d7df85d055bd13d620d48c24ac98ba29e86026",
+    "ax_release": "ccfd3b496c42c9b59eeb142e57c4c7f98b4f10e68f32b46be8e60d948a83a511",
+    "ax_free": "42857894e7b8af527c771edf07765c8b819f6e74ce363c36b15caa3d836dfc17",
+    "calloc": "af947b86e59a3c1aa61a83b6d59daa687346b6892635db67ba6597057b0b3439",
+    "rt_fork": "c02f043438a3bb3836fe925bc48c3afbb7f666a0ac79648119ed8bc91b42cc9a",
+    "rt_env_match": "d62c7306a3490c42e490f73c33eb1baf8bcfcf5a77ce010a0dc9b8554e2928e5",
+    "rt_getenv": "03c84845afa383a68631e0d381311d710bfc9e61ab213d61990f0a20e3ceeff7",
+    "rt_digit_ok": "01ef19facbab700b8676b728e0e90292498b4089edfe35806cf5a61c7229037a",
+    "ax_parse_i64": "316d1c80cab835aa420aa4483443cc9511b4937bc8ca077f47f3f7e12d0558f8",
+    "rt_ncpu": "b1c2ebe5dc243724445f669a17b27c2b27ad2942c932a4277d86570b4cd78841",
+    "rt_threads": "7503b35c4756ab4442aa54b24f0e21775beca3dd19141a4be2aebdae903caf1e",
+    "ax_chunks": "dcaf807779e435991e5aa8f227183f57f3dc58c8f6acc2819493b2e5ce6ad7df",
+    "rt_wait": "f985050dadfe30f610649186ae1d3e45eaf05b1d2f4d09dbe0853ccbcf209f6c",
+    "ax_par_for": "e864c3269f1a705e480aa6aafd1fe47a9b7ffb6d755207999426786a709b02f6",
+    "ax_usage": "f512d2fbfeecfa2bb04c648f17bda5bb5f5812195556c522b5c191d5fba9d9d6",
+    "ax_precondition_failed": "02639b0375690b5bc89b520978e06eff5c67fa3abe454ea248c20c79621080c3",
+    "rt_format_integer": "050e9777048a5cdc7da3f2ff84ad07dd0ede51b7534cc76f2231008dc678d7ef",
+    "ax_print_i64": "c6b7005e6d084c6658f1726dfd7f65296d42d1b8d3c3bda2cc35dd47c4637095",
+    "rt_normalize_float": "cf97271b9caac4323bec0d342086adc0c2c833f62006a03ace25b5da4ac38ba7",
+    "ax_print_f64": "df3589cbc333ce2f02c1d4235ba52614eeee3d736121155d161fa15ab0c1176c",
+    "ax_print_bytes": "61f88bdff75ebfd6dbbad46286a13712732bb1f5cc486c9ba4f437d0f43b0c77",
+    "rt_again": "a0c093163b7fda881670c9843ee4858a948c6da1a05ae1f54442f436830d7b63",
+    "rt_retry": "a229b7deabd1bac66b4122bc273fc4f7a78e6fc05c7f58ee99cd3cbd7847ad22",
+    "rt_fcntl": "3dba6ea564b9ae2970fb7ec494b166c9e72f5b8f1f7227a4ecd9abda751cd0cd",
+    "rt_nonblock_flag": "711da03e30e0cd522bf2d4140151e1cda2aa18af89edc290fda10d14a883ed83",
+    "rt_nonblock": "5c75d55575712b43cb9b63c411353ca8f0dbc8e5c60dd14fa07f042719541b0d",
+    "rt_address": "d961c4379da29661bd6a663bef25aeb7e8f656ab19dafc3c2654d07f5f17ff28",
+    "rt_bind": "9c8baee078286f11a7ba30b7ad154322415cb8f94efabcb094d5e437b31e9566",
+    "rt_close": "25118df06ef06bfdb23eb3f2ce91feb8119de03c477098b78ff1c4857270947b",
+    "rt_listen": "0ff0783dfccf87ae68007c9260780848ef8e199ecb03b2cdbc691f30674d80cc",
+    "rt_reuseaddr": "e29129d1ca97a221a1d5663fa920c6a4c09d96fdc22eaefe75df122728c9f341",
+    "rt_setsockopt": "11ac0effe609567aadd0a2f7e9d5c4866bf5088fb768580106af66ab697a6ab0",
+    "rt_socket": "6b6e5728b5684a2eec9fb4ea5a8ea4cfea0f1363c2cc3db1f76a96e8f471f29a",
+    "rt_socket_level": "a824f13ea80abe344caee034aa9185200cbbe572a3ee5e5696cd68403b196109",
+    "rt_listener": "faef19589597c6bb0f9a0a2f0c784c9b3ef44f4fab201156a4dcf8d40df7f869",
+    "rt_read": "52057fd1650b8ed37b8790989f1834013046ca9437d33092619234e21f818da2",
+    "rt_getpid": "bc30959cf1157bb552608541e2f830b7de8bd2479f598e1ec824e77c592dffe1",
+    "rt_getppid": "ec1843eb0afa332b461349f7ebe9e600025ca8a6daf95c88f910c920639be431",
+    "rt_accept_fd": "2d17e58f68be076e582f3fd49868ca51b0f9b650a4c6b50d906e52734b0f23f1",
+    "rt_send": "210d5a03235513abb59615b0f200639f1dd71f1b80d4800a019100e5bbf10e6b",
+    "rt_poll": "d073bbf4343c34a09e1417678bd3703614ed495386d463392f427f7c30d88f10",
+    "rt_socketpair": "3f3d06ce51cfa2148d630151edd5cc18325fe6edc2ed7d2e2a6c58b9515c7bf3",
+    "rt_lower": "221a167c60faa7b329c0e88bd22669484a1d51ab28172a721f99a11c3e2d7c0f",
+    "rt_match": "ebd11855a7e207067fb7b29ac30ee9ee2a2a1eeae1c6944b4e05f82ce85f9b2e",
+    "rt_match_ci": "9e1e707f1e085e6d0d9e60dfad43ad413b5cae297e7fe96aec899587a271b590",
+    "rt_find": "eb5f2734a877d4733ac3f87a6cb361183c2e7049b5d857678f8c281e60907668",
+    "rt_header": "6e58388c674591677d13ca2e67b753d77398971c26e66f8d333cdbf7af115f21",
+    "rt_skip_space": "d3219cdc3a527cf202d6b5cb7ec710f76810265160eef5b869510ea5827e67ee",
+    "rt_body_length": "b5a8bfdc1897e5785f50d3baf22dcc4527f271aafd6b459516c85a330b7ef58b",
+    "rt_connection_token": "cc007414139e27c6a0c704bf688725c92dcada856bbb59cac87c447d71005ee0",
+    "rt_drop": "5f9d536ed5778b6ad62575e774dfdd00b16b905178f60937b13cc426c54cf199",
+    "rt_request": "f1bbb901bf9873d306eacc9346be8b77e29cb2e420f751eb17536aa050cd68fd",
+    "rt_batch_next": "a53a7532b15475868bc37e55fb5af6fb3138433c9a6b14ec70c8a98af1095b87",
+    "rt_prepare": "76aca33231a188b2d50d8c2383eb17967bee2d9a070ae3e8166301e640c922be",
+    "rt_flush": "9bf4e423cc83944026d1aed805d19962b52f8f2143e8a9456b228208093a03c1",
+    "rt_step": "78bb81ce79d1f4632b7274e352a4f761c1b633d0e8beb30a4c18d86e4bfd17b3",
+    "rt_accept": "4dcfcf430ccb0e193d311958ae9367d864ba8fbfd82ac82e1c8b16749648c0f5",
+    "rt_compact": "751e00848e8b970339a536e76475c199c7bdba6a6a469311612b1d847a3e1a5d",
+    "rt_events": "10cbacbecd86a4deac0a64f9259abdc10dc1af137021ea831a73a88748dec84b",
+    "rt_http_worker": "eba3dfccb004a9cd2a65269a8e7891a86e2b5be7489379204dc4c841a49b2278",
+    "ax_serve": "177ce057ff5aa9164b14287ba0dacbddf182b6833d287d30a5a152178c66d327",
+    "starts_with": "16dd944fe6613e9f0969f6c1371202e99e15cbcc52f666e6437d19f0c6ab60a5",
+    "page_count": "da29705bd51a9c4eb6cf3caf789c58fafed20bd06479b4ae1acc796a34f995eb",
+    "shift10": "fd5f174a17cb3e0ca536b36edc2515568614463d8baa8cef6e83d4a2d3c57760",
+    "utoa": "dfda31c6ca797fbeea163dd4d8627b887c37c6825c9837fcca36a62be46c79ac",
+    "esc_width": "9a6995571fbb8b2773bf178b793b70cdb232f0df2537c12daf34b87cfefc6839",
+    "put": "b186a668275c49a178568f16f97b8417500f9f41e9120a6579e34f8b7287987e",
+    "esc_char": "caf0d2881d498df61a8d71de657510ea88c794fedf2078d28516aa187c1ed2c1",
+    "escape": "e282f479d27dfb28cc851565a40a8b06dd4add9e25957ea3eea98f0c0507da5e",
+    "word": "a6f764c016549fdf057c582dea008ad301a9de1b1992c74568e6a991506ebd8c",
+    "adj": "9307ba23ca399b61cac3c8a1e677b2de22127b1310425c878c2bd566c73bd446",
+    "row": "a31921c031c092ba1a197572eea652e6e6f5dea4e5c09f983a0702bcc48d1d84",
+    "pad2": "d07dd40f8a5091a39f3908ca43696284a4879ae3506121fdae64470918041eed",
+    "page": "76c06ef1323ce71cdea5a8a8faac11c7a2225182a8d322761f835258e3b15da9",
+    "page_response": "e98940cef83df781cd498f870b402f1407868945381ffa57e018effdccb03829",
+    "handle": "6171033af6fc1b4dff3e2892ca28db83844a7fe61b80a86259e669d91b88e8d9",
+    "main": "945e951a6724cf5396328267c0dea998ae0ee0b35a1002de02d2a48fc710562a"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "memset",
+      "node": "b87bb98e71c9",
+      "pos": [
+        45,
+        24
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "(257 <= 0 || -255 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "memset",
+      "node": "5b23a84ac5d0",
+      "pos": [
+        45,
+        37
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "(257 <= 0 || -255 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "calloc",
+      "node": "03e46f23d988",
+      "pos": [
+        101,
+        66
+      ],
+      "kind": "division",
+      "goal": "size != 0",
+      "normalised": "(size + 1 <= 0 || -size + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "rt_threads",
+      "node": "58945588a82b",
+      "pos": [
+        144,
+        40
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨if#62⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "rt_threads",
+      "node": "522a751178e7",
+      "pos": [
+        144,
+        53
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= 256)",
+      "normalised": "⟨if#62⟩ - 256 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "ax_par_for",
+      "node": "9500ed5c5550",
+      "pos": [
+        161,
+        52
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#68⟩ + 1 <= 0 || -⟨if#68⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "ax_par_for",
+      "node": "c394eab878a8",
+      "pos": [
+        161,
+        95
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#68⟩ + 1 <= 0 || -⟨if#68⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "ax_par_for",
+      "node": "1cebc2ee517d",
+      "pos": [
+        166,
+        54
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#68⟩ + 1 <= 0 || -⟨if#68⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "ax_par_for",
+      "node": "4e580e499368",
+      "pos": [
+        166,
+        97
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#68⟩ + 1 <= 0 || -⟨if#68⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "ax_par_for",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        170,
+        49
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#68⟩ + 1 <= 0 || -⟨if#68⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "rt_format_integer",
+      "node": "b16c1af29647",
+      "pos": [
+        190,
+        15
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "rt_format_integer",
+      "node": "951a0d54584f",
+      "pos": [
+        190,
+        69
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        214,
+        68
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "ax_print_f64",
+      "node": "73b2435b2fd1",
+      "pos": [
+        219,
+        66
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) initially (divisor := 10000000000000000)",
+      "normalised": "-9999999999999999 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "ax_print_f64",
+      "node": "e15713ba9a40",
+      "pos": [
+        220,
+        99
+      ],
+      "kind": "division",
+      "goal": "divisor != 0",
+      "normalised": "(divisor + 1 <= 0 || -divisor + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "ax_print_f64",
+      "node": "24b343a9eea7",
+      "pos": [
+        220,
+        109
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        221,
+        47
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "ax_print_f64",
+      "node": "1c3d3e93c877",
+      "pos": [
+        221,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) preserved (divisor := if (divisor >= 10) then … else …)",
+      "normalised": "-⟨if#129⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "rt_nonblock",
+      "node": "d01b4e2348fb",
+      "pos": [
+        235,
+        35
+      ],
+      "kind": "division",
+      "goal": "rt_nonblock_flag() != 0",
+      "normalised": "(⟨call#135⟩ + 1 <= 0 || -⟨call#135⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "rt_nonblock",
+      "node": "8a7a16ae5bb3",
+      "pos": [
+        235,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "rt_listener",
+      "node": "fa66432d526b",
+      "pos": [
+        243,
+        45
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "(257 <= 0 || -255 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "rt_listener",
+      "node": "29891c0eca04",
+      "pos": [
+        244,
+        44
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "(257 <= 0 || -255 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "rt_nonblock_flag",
+      "node": "af3e2245ebfe",
+      "pos": [
+        38,
+        39
+      ],
+      "kind": "postcondition",
+      "goal": "(result > 0)",
+      "normalised": "-3 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "rt_match",
+      "node": "f772792f6442",
+      "pos": [
+        10,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "rt_match",
+      "node": "5d7d099a06e4",
+      "pos": [
+        11,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "rt_match",
+      "node": "7949e64dc59b",
+      "pos": [
+        11,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - i <= 0 && at + i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "rt_match",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        11,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-i <= 0 && i - m + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "rt_match_ci",
+      "node": "f772792f6442",
+      "pos": [
+        14,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "rt_match_ci",
+      "node": "5d7d099a06e4",
+      "pos": [
+        15,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "rt_match_ci",
+      "node": "7949e64dc59b",
+      "pos": [
+        15,
+        48
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - i <= 0 && at + i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "rt_match_ci",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        15,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-i <= 0 && i - m + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "rt_find",
+      "node": "1af212fd43bb",
+      "pos": [
+        18,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "rt_find",
+      "node": "849fcf625186",
+      "pos": [
+        18,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "rt_find",
+      "node": "5d7d099a06e4",
+      "pos": [
+        20,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "rt_find",
+      "node": "f51863d53b48",
+      "pos": [
+        20,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "rt_find",
+      "node": "b2325436c811",
+      "pos": [
+        20,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if rt_match(a, i, b) then … else …)",
+      "normalised": "-⟨if#212⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "rt_find",
+      "node": "61b3a6475209",
+      "pos": [
+        17,
+        81
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#213⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "rt_header",
+      "node": "1af212fd43bb",
+      "pos": [
+        23,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "rt_header",
+      "node": "849fcf625186",
+      "pos": [
+        23,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "rt_header",
+      "node": "5d7d099a06e4",
+      "pos": [
+        25,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "rt_header",
+      "node": "cf559b9108e5",
+      "pos": [
+        25,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(a)",
+      "normalised": "(-i + 1 <= 0 && i - n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 42,
+      "fn": "rt_header",
+      "node": "f51863d53b48",
+      "pos": [
+        25,
+        70
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 43,
+      "fn": "rt_header",
+      "node": "6c00bd01ea41",
+      "pos": [
+        25,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if (((i == 0) || (a[(i - 1)] == '\\n')) && rt_match_ci(a, i, key)) then … else …)",
+      "normalised": "-⟨if#215⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 44,
+      "fn": "rt_header",
+      "node": "61b3a6475209",
+      "pos": [
+        22,
+        85
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#216⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 45,
+      "fn": "rt_skip_space",
+      "node": "f51863d53b48",
+      "pos": [
+        29,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 46,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        53
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 47,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        68
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 48,
+      "fn": "rt_skip_space",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        30,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 49,
+      "fn": "rt_skip_space",
+      "node": "4c51f7d67584",
+      "pos": [
+        28,
+        73
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨loop#217⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 50,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        33,
+        55
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 51,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        34,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 52,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        36,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#218⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 53,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        37,
+        45
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#218⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 54,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        38,
+        43
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-⟨call#221⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 55,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        31
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 56,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 57,
+      "fn": "rt_body_length",
+      "node": "f6296da08327",
+      "pos": [
+        40,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 58,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        40,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 59,
+      "fn": "rt_body_length",
+      "node": "1af212fd43bb",
+      "pos": [
+        42,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := i",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 60,
+      "fn": "rt_body_length",
+      "node": "94f8d85a88ce",
+      "pos": [
+        43,
+        38
+      ],
+      "kind": "bounds",
+      "goal": "0 <= end && end < len(headers)",
+      "normalised": "(-⟨call#224⟩ <= 0 && -n + ⟨call#224⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 61,
+      "fn": "rt_body_length",
+      "node": "a3eada33dae0",
+      "pos": [
+        43,
+        62
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (end + 1) && (end + 1) < len(headers)",
+      "normalised": "(-⟨call#224⟩ - 1 <= 0 && -n + ⟨call#224⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 62,
+      "fn": "rt_connection_token",
+      "node": "f772792f6442",
+      "pos": [
+        46,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 63,
+      "fn": "rt_connection_token",
+      "node": "3e6586a70b8d",
+      "pos": [
+        48,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := field)",
+      "normalised": "-⟨call#231⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 64,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 65,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        63
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 66,
+      "fn": "rt_connection_token",
+      "node": "5d7d099a06e4",
+      "pos": [
+        50,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 67,
+      "fn": "rt_connection_token",
+      "node": "f51863d53b48",
+      "pos": [
+        50,
+        43
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 68,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-i + 1 <= 0 && i - n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 69,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        69
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-i + 1 <= 0 && i - n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 70,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-i + 1 <= 0 && i - n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 71,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        32
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-i - m <= 0 && i + m - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 72,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        58
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-i - m <= 0 && i + m - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 73,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        83
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-i - m <= 0 && i + m - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 74,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        108
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-i - m <= 0 && i + m - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 75,
+      "fn": "rt_request",
+      "node": "0587e8299b1f",
+      "pos": [
+        67,
+        5
+      ],
+      "kind": "check",
+      "goal": "((offset >= 0) && (offset <= n))",
+      "status": "checked"
+    },
+    {
+      "id": 76,
+      "fn": "rt_request",
+      "node": "742fa090ffa6",
+      "pos": [
+        68,
+        17
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-n + offset <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 77,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        69,
+        42
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 78,
+      "fn": "rt_request",
+      "node": "c9f59df799cb",
+      "pos": [
+        73,
+        7
+      ],
+      "kind": "check",
+      "goal": "((header_bytes >= 0) && (header_bytes <= (n - offset)))",
+      "status": "checked"
+    },
+    {
+      "id": 79,
+      "fn": "rt_request",
+      "node": "a43c757175f3",
+      "pos": [
+        74,
+        21
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#234⟩ - 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 80,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        93,
+        47
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 81,
+      "fn": "rt_prepare",
+      "node": "17b5ebf61f15",
+      "pos": [
+        104,
+        5
+      ],
+      "kind": "check",
+      "goal": "((n >= 0) && (n <= 65536))",
+      "status": "checked"
+    },
+    {
+      "id": 82,
+      "fn": "rt_step",
+      "node": "8f30d0fd39f4",
+      "pos": [
+        128,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "(9 <= 0 || -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 83,
+      "fn": "rt_step",
+      "node": "34e7487a6e9f",
+      "pos": [
+        128,
+        19
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 84,
+      "fn": "rt_step",
+      "node": "92b5b3bf7cd3",
+      "pos": [
+        128,
+        38
+      ],
+      "kind": "division",
+      "goal": "32 != 0",
+      "normalised": "(33 <= 0 || -31 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 85,
+      "fn": "rt_step",
+      "node": "fec7f2b87569",
+      "pos": [
+        128,
+        43
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 86,
+      "fn": "rt_step",
+      "node": "f2fa58b5a3b9",
+      "pos": [
+        129,
+        56
+      ],
+      "kind": "division",
+      "goal": "4 != 0",
+      "normalised": "(5 <= 0 || -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 87,
+      "fn": "rt_step",
+      "node": "3ee6b2a6d451",
+      "pos": [
+        129,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 88,
+      "fn": "rt_step",
+      "node": "8ce2e4777990",
+      "pos": [
+        133,
+        63
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 89,
+      "fn": "rt_step",
+      "node": "92aded101155",
+      "pos": [
+        133,
+        82
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "(17 <= 0 || -15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 90,
+      "fn": "rt_step",
+      "node": "c78e4a7c9741",
+      "pos": [
+        133,
+        87
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 91,
+      "fn": "rt_accept",
+      "node": "26d5a3b4dc64",
+      "pos": [
+        158,
+        36
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(workers + 1 <= 0 || -workers + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 92,
+      "fn": "rt_http_worker",
+      "node": "17c345ade511",
+      "pos": [
+        198,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 93,
+      "fn": "rt_http_worker",
+      "node": "303fca13fad3",
+      "pos": [
+        201,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 94,
+      "fn": "rt_http_worker",
+      "node": "fd12beb8cd8b",
+      "pos": [
+        201,
+        122
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 95,
+      "fn": "ax_serve",
+      "node": "2f3157c831f4",
+      "pos": [
+        231,
+        56
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-⟨call#346⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 96,
+      "fn": "starts_with",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        39
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 97,
+      "fn": "starts_with",
+      "node": "5d7d099a06e4",
+      "pos": [
+        8,
+        25
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 98,
+      "fn": "starts_with",
+      "node": "10bc4e1f6401",
+      "pos": [
+        8,
+        31
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 99,
+      "fn": "starts_with",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        8,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-i <= 0 && i - m + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 100,
+      "fn": "page_count",
+      "node": "9826c93da585",
+      "pos": [
+        12,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 10)",
+      "normalised": "-10 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 101,
+      "fn": "page_count",
+      "node": "a2dbf447a161",
+      "pos": [
+        13,
+        25
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(req)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 102,
+      "fn": "page_count",
+      "node": "a2dbf447a161",
+      "pos": [
+        13,
+        42
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(req)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 103,
+      "fn": "page_count",
+      "node": "f6296da08327",
+      "pos": [
+        14,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 104,
+      "fn": "page_count",
+      "node": "a2dbf447a161",
+      "pos": [
+        14,
+        40
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(req)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 105,
+      "fn": "page_count",
+      "node": "a2dbf447a161",
+      "pos": [
+        15,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(req)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 106,
+      "fn": "page_count",
+      "node": "a2dbf447a161",
+      "pos": [
+        15,
+        60
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(req)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 107,
+      "fn": "shift10",
+      "node": "4d1300cfd04d",
+      "pos": [
+        19,
+        45
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 108,
+      "fn": "utoa",
+      "node": "325f376ca292",
+      "pos": [
+        22,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(d >= 1) initially (d := 1)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 109,
+      "fn": "utoa",
+      "node": "4d1300cfd04d",
+      "pos": [
+        22,
+        69
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 110,
+      "fn": "utoa",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        22,
+        77
+      ],
+      "kind": "invariant",
+      "goal": "(d >= 1) preserved (d := (d + 1))",
+      "normalised": "-d <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 111,
+      "fn": "utoa",
+      "node": "bb7c920c25b7",
+      "pos": [
+        23,
+        50
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "(11 <= 0 || -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 112,
+      "fn": "utoa",
+      "node": "639e716a9d87",
+      "pos": [
+        23,
+        5
+      ],
+      "kind": "range",
+      "goal": "0 <= d",
+      "normalised": "-⟨loop#377⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 113,
+      "fn": "esc_width",
+      "node": "58945588a82b",
+      "pos": [
+        27,
+        38
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨if#382⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 114,
+      "fn": "esc_width",
+      "node": "b225b25f0208",
+      "pos": [
+        27,
+        51
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= 6)",
+      "normalised": "⟨if#382⟩ - 6 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 115,
+      "fn": "put",
+      "node": "f772792f6442",
+      "pos": [
+        31,
+        38
+      ],
+      "kind": "invariant",
+      "goal": "(t >= 0) initially (t := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 116,
+      "fn": "put",
+      "node": "7144270d3198",
+      "pos": [
+        31,
+        74
+      ],
+      "kind": "bounds",
+      "goal": "0 <= t && t < len(s)",
+      "normalised": "(-t <= 0 && -k + t + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 117,
+      "fn": "put",
+      "node": "93aedc4778cf",
+      "pos": [
+        31,
+        59
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (j + t) && (j + t) < len(o)",
+      "normalised": "(-j - t <= 0 && j - m + t + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 118,
+      "fn": "put",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        31,
+        82
+      ],
+      "kind": "invariant",
+      "goal": "(t >= 0) preserved (t := (t + 1))",
+      "normalised": "-t - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 119,
+      "fn": "esc_char",
+      "node": "1af212fd43bb",
+      "pos": [
+        34,
+        31
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 120,
+      "fn": "esc_char",
+      "node": "6b8257b1e992",
+      "pos": [
+        34,
+        34
+      ],
+      "kind": "precondition",
+      "goal": "((j + k) <= m) with s := '&amp;'",
+      "normalised": "j - m + 5 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 121,
+      "fn": "esc_char",
+      "node": "1af212fd43bb",
+      "pos": [
+        35,
+        36
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 122,
+      "fn": "esc_char",
+      "node": "927b1e80dff0",
+      "pos": [
+        35,
+        39
+      ],
+      "kind": "precondition",
+      "goal": "((j + k) <= m) with s := '&lt;'",
+      "normalised": "j - m + 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 123,
+      "fn": "esc_char",
+      "node": "1af212fd43bb",
+      "pos": [
+        36,
+        36
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 124,
+      "fn": "esc_char",
+      "node": "40dd10b3cc45",
+      "pos": [
+        36,
+        39
+      ],
+      "kind": "precondition",
+      "goal": "((j + k) <= m) with s := '&gt;'",
+      "normalised": "j - m + 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 125,
+      "fn": "esc_char",
+      "node": "1af212fd43bb",
+      "pos": [
+        37,
+        36
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 126,
+      "fn": "esc_char",
+      "node": "5fb9b63723f1",
+      "pos": [
+        37,
+        39
+      ],
+      "kind": "precondition",
+      "goal": "((j + k) <= m) with s := '&quot;'",
+      "normalised": "j - m + 6 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 127,
+      "fn": "esc_char",
+      "node": "1af212fd43bb",
+      "pos": [
+        38,
+        37
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 128,
+      "fn": "esc_char",
+      "node": "f79025be5769",
+      "pos": [
+        38,
+        40
+      ],
+      "kind": "precondition",
+      "goal": "((j + k) <= m) with s := '&#x27;'",
+      "normalised": "j - m + 6 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 129,
+      "fn": "esc_char",
+      "node": "ca66986fa489",
+      "pos": [
+        39,
+        10
+      ],
+      "kind": "bounds",
+      "goal": "0 <= j && j < len(out)",
+      "normalised": "(-j <= 0 && j - m + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 130,
+      "fn": "escape",
+      "node": "237c474541a9",
+      "pos": [
+        42,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(s)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 131,
+      "fn": "escape",
+      "node": "44b92c46fdcf",
+      "pos": [
+        43,
+        25
+      ],
+      "kind": "range",
+      "goal": "0 <= (6 * n)",
+      "normalised": "-6*n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 132,
+      "fn": "escape",
+      "node": "f772792f6442",
+      "pos": [
+        43,
+        78
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) && (i <= n) initially (i := 0)",
+      "normalised": "(0 <= 0 && -n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 133,
+      "fn": "escape",
+      "node": "f772792f6442",
+      "pos": [
+        43,
+        111
+      ],
+      "kind": "invariant",
+      "goal": "(j >= 0) && (j <= (6 * i)) initially (j := 0)",
+      "normalised": "(0 <= 0 && 0 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 134,
+      "fn": "escape",
+      "node": "10bc4e1f6401",
+      "pos": [
+        45,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(s)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 135,
+      "fn": "escape",
+      "node": "3e6586a70b8d",
+      "pos": [
+        45,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "(j >= 0) with j := j",
+      "normalised": "-j <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 136,
+      "fn": "escape",
+      "node": "3e6586a70b8d",
+      "pos": [
+        45,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "((j + 6) <= m) with j := j",
+      "normalised": "j - 6*n + 6 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 137,
+      "fn": "escape",
+      "node": "5d7d099a06e4",
+      "pos": [
+        45,
+        47
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) && (i <= n) preserved (i := (i + 1))",
+      "normalised": "(-i - 1 <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 138,
+      "fn": "escape",
+      "node": "10bc4e1f6401",
+      "pos": [
+        45,
+        67
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(s)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 139,
+      "fn": "escape",
+      "node": "ae92f483bafc",
+      "pos": [
+        45,
+        54
+      ],
+      "kind": "invariant",
+      "goal": "(j >= 0) && (j <= (6 * i)) preserved (j := (j + esc_width(s[i])))",
+      "normalised": "(-j - ⟨call#386⟩ <= 0 && -6*i + j + ⟨call#386⟩ - 6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 140,
+      "fn": "escape",
+      "node": "7a9ff1502a8f",
+      "pos": [
+        47,
+        27
+      ],
+      "kind": "bounds",
+      "goal": "0 <= k && k < len(buf)",
+      "normalised": "(-k <= 0 && k - 6*n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 141,
+      "fn": "escape",
+      "node": "6af9539751c4",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "range",
+      "goal": "0 <= total",
+      "normalised": "-⟨sum#384⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 142,
+      "fn": "word",
+      "node": "6dddbefc0620",
+      "pos": [
+        51,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "(9 <= 0 || -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 143,
+      "fn": "adj",
+      "node": "6dddbefc0620",
+      "pos": [
+        56,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "(9 <= 0 || -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 144,
+      "fn": "row",
+      "node": "4642c572e203",
+      "pos": [
+        61,
+        28
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "(1001 <= 0 || -999 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 145,
+      "fn": "row",
+      "node": "96907490387a",
+      "pos": [
+        62,
+        26
+      ],
+      "kind": "division",
+      "goal": "50 != 0",
+      "normalised": "(51 <= 0 || -49 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 146,
+      "fn": "row",
+      "node": "accce47f2bd5",
+      "pos": [
+        63,
+        17
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 147,
+      "fn": "row",
+      "node": "1af212fd43bb",
+      "pos": [
+        64,
+        17
+      ],
+      "kind": "precondition",
+      "goal": "(i >= 0)",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 148,
+      "fn": "row",
+      "node": "f51863d53b48",
+      "pos": [
+        64,
+        79
+      ],
+      "kind": "precondition",
+      "goal": "(dollars >= 0)",
+      "normalised": "-⟨div#401⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 149,
+      "fn": "row",
+      "node": "3e6586a70b8d",
+      "pos": [
+        64,
+        110
+      ],
+      "kind": "precondition",
+      "goal": "(stock >= 0)",
+      "normalised": "-⟨div#402⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 150,
+      "fn": "row",
+      "node": "c65dc4db99ee",
+      "pos": [
+        65,
+        17
+      ],
+      "kind": "division",
+      "goal": "5 != 0",
+      "normalised": "(6 <= 0 || -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 151,
+      "fn": "pad2",
+      "node": "3e6586a70b8d",
+      "pos": [
+        68,
+        82
+      ],
+      "kind": "precondition",
+      "goal": "(v >= 0)",
+      "normalised": "-v <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 152,
+      "fn": "pad2",
+      "node": "3e6586a70b8d",
+      "pos": [
+        68,
+        96
+      ],
+      "kind": "precondition",
+      "goal": "(v >= 0)",
+      "normalised": "-v <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 153,
+      "fn": "page",
+      "node": "f772792f6442",
+      "pos": [
+        71,
+        50
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 154,
+      "fn": "page",
+      "node": "3e6586a70b8d",
+      "pos": [
+        71,
+        87
+      ],
+      "kind": "precondition",
+      "goal": "(i >= 0)",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 155,
+      "fn": "page",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        71,
+        94
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 156,
+      "fn": "page",
+      "node": "4642c572e203",
+      "pos": [
+        72,
+        42
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "(1001 <= 0 || -999 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 157,
+      "fn": "page",
+      "node": "1af212fd43bb",
+      "pos": [
+        74,
+        17
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 0)",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 158,
+      "fn": "page",
+      "node": "3f7477fe479c",
+      "pos": [
+        75,
+        72
+      ],
+      "kind": "division",
+      "goal": "100 != 0",
+      "normalised": "(101 <= 0 || -99 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 159,
+      "fn": "page",
+      "node": "3f7477fe479c",
+      "pos": [
+        75,
+        72
+      ],
+      "kind": "precondition",
+      "goal": "((cents / 100) >= 0)",
+      "normalised": "-⟨div#423⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 160,
+      "fn": "page",
+      "node": "94e89bc6a56a",
+      "pos": [
+        75,
+        96
+      ],
+      "kind": "division",
+      "goal": "100 != 0",
+      "normalised": "(101 <= 0 || -99 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 161,
+      "fn": "page",
+      "node": "94e89bc6a56a",
+      "pos": [
+        75,
+        96
+      ],
+      "kind": "precondition",
+      "goal": "((cents % 100) >= 0)",
+      "normalised": "-⟨div#425⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 162,
+      "fn": "page",
+      "node": "94e89bc6a56a",
+      "pos": [
+        75,
+        96
+      ],
+      "kind": "precondition",
+      "goal": "((cents % 100) < 100)",
+      "normalised": "⟨div#425⟩ - 99 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 163,
+      "fn": "page_response",
+      "node": "3e6586a70b8d",
+      "pos": [
+        78,
+        21
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 0)",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 164,
+      "fn": "page_response",
+      "node": "8ec5665bcdf3",
+      "pos": [
+        79,
+        21
+      ],
+      "kind": "precondition",
+      "goal": "(len(body) >= 0)",
+      "normalised": "-⟨page#427⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 165,
+      "fn": "handle",
+      "node": "3e6586a70b8d",
+      "pos": [
+        88,
+        26
+      ],
+      "kind": "precondition",
+      "goal": "(count >= 0)",
+      "normalised": "-⟨if#430⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 166,
+      "fn": "main",
+      "node": "af3e2245ebfe",
+      "pos": [
+        93,
+        33
+      ],
+      "kind": "precondition",
+      "goal": "(port > 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 167,
+      "fn": "main",
+      "node": "d5a843598ef3",
+      "pos": [
+        93,
+        43
+      ],
+      "kind": "precondition",
+      "goal": "(port < 65536)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    }
+  ],
+  "summary": {
+    "obligations": 167,
+    "proven": 162,
+    "runtime_checks": 5,
+    "unproven": 0
+  },
+  "folded_calls": 1,
+  "inlined_calls": 1,
+  "parallel_regions": [
+    {
+      "fn": "utoa",
+      "node": "639e716a9d87",
+      "pos": [
+        23,
+        5
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "escape",
+      "node": "4d1ee0a70f9b",
+      "pos": [
+        42,
+        17
+      ],
+      "kind": "sum"
+    },
+    {
+      "fn": "escape",
+      "node": "44b92c46fdcf",
+      "pos": [
+        43,
+        25
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "escape",
+      "node": "6af9539751c4",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "page",
+      "node": "9f600b5c95e7",
+      "pos": [
+        72,
+        17
+      ],
+      "kind": "sum"
+    }
+  ],
+  "vector_sums": [
+    {
+      "fn": "page",
+      "node": "9f600b5c95e7",
+      "pos": [
+        72,
+        17
+      ],
+      "lanes": 16
+    },
+    {
+      "fn": "page",
+      "node": "9f600b5c95e7",
+      "pos": [
+        72,
+        17
+      ],
+      "lanes": 16
+    }
+  ],
+  "bounded_remainders": [],
+  "backend": "llvm-ir",
+  "ir": "examples/.axon-build/c30b996d0f013d6b.ll",
+  "build": {
+    "cache": "miss",
+    "graph": "c30b996d0f013d6b",
+    "llvm_seconds": 0.46,
+    "warnings": "warning: overriding the module target triple with arm64-apple-macosx27.0.0 [-Woverride-module]\n1 warning generated."
+  },
+  "binary": "/private/tmp/axon-ssr",
+  "runtime": "Axon kernel syscalls; no libc function imports",
+  "loader_dependency": "libSystem (required by macOS ARM64)",
+  "undefined_symbols": []
+}

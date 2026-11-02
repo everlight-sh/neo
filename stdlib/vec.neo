@@ -1,0 +1,42 @@
+import "std:option"
+
+; Capacity is distinct from logical length. Inactive slots are None; owned
+; children are initialized, copied and destroyed by the ordinary compiler.
+sealed type Vec<T> = { slots: Arr Option<T> _, count: i64 }
+
+fn vec_empty<T>() -> Vec<T>
+  = Vec::<T> { slots = arr(i in 0..0) None::<T>(), count = 0 }
+
+fn vec_with_capacity<T>(capacity:i64) -> Vec<T>
+  = check capacity>=0 in Vec::<T> {slots=arr(i in 0..capacity) None::<T>(),count=0}
+
+fn vec_len<T>(vector: Vec<T>) -> i64 = vector.count
+fn vec_capacity<T>(vector: Vec<T>) -> i64 = len(vector.slots)
+
+fn vec_get<T>(vector: Vec<T>, index: i64) -> Option<T>
+  = if index < 0 || index >= vector.count then None::<T>() else
+    let slots = vector.slots in check index >= 0 && index < len(slots) in slots[index]
+
+fn vec_push<T>(move vector: Vec<T>, move value: T) -> Vec<T>
+  = let count = vector.count in let slots = vector.slots in let capacity = len(slots) in
+    check count >= 0 && count <= capacity in
+    let storage = if count < capacity then slots else
+      check capacity <= 4611686018427387903 in
+      let grown = if capacity < 8 then 8 else capacity * 2 in
+      arr(i in 0..grown) if i < capacity then slots[i] else None::<T>() in
+    check count >= 0 && count < len(storage) in
+    Vec::<T> { slots = set(storage,count,Some::<T>(value)), count = count + 1 }
+
+fn vec_set<T>(move vector: Vec<T>, index: i64, move value: T) -> Vec<T>
+  = let count = vector.count in let slots = vector.slots in
+    check index >= 0 && index < count && index < len(slots) in
+    Vec::<T> { slots = set(slots,index,Some::<T>(value)), count = count }
+
+fn vec_pop<T>(move vector: Vec<T>) -> Vec<T>
+  = let count = vector.count in let slots = vector.slots in
+    if count == 0 then Vec::<T> { slots = slots, count = 0 } else
+    check count > 0 && count <= len(slots) in
+    Vec::<T> { slots = set(slots,count - 1,None::<T>()), count = count - 1 }
+
+fn vec_clear<T>(move vector: Vec<T>) -> Vec<T>
+  = vec_empty::<T>()

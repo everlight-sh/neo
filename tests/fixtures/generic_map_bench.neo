@@ -1,0 +1,11 @@
+import "std:hashmap"
+import "std:io"
+fn generic_map_work(n:i64{n>=0 && n<=1000000}) -> i64
+  = let map=loop(i=0,map=hashmap_empty::<Arr u8 _,Arr u8 _>(0,0)) while i<n
+      next(i+1,hashmap_put(map,int_text(i),int_text(i*7))) yield map in
+    loop(i=0,checksum=0) while i<n next(i+1,match hashmap_get(map,int_text(i)) {
+      None => -1,Some(value) => let number=int_parse(value) in check number.ok in checksum+number.value }) yield checksum
+effect fn main(n:i64{n>=0 && n<=1000000}) -> unit
+  = let before=rt_clock_ns() in let checksum=generic_map_work(n) in let after=rt_clock_ns() in
+    let requests=load_i64(runtime_state(),64) in let requested=load_i64(runtime_state(),80) in
+    let output=print_out(concat(int_text(checksum)," ",int_text(after-before)," ",int_text(requests)," ",int_text(requested),"\n")) in noop()

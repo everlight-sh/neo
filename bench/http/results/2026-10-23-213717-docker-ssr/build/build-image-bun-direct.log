@@ -1,0 +1,41 @@
+#0 building with "colima-axon-bench" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.bun
+#1 transferring dockerfile: 580B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.13-alpine
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 2.60kB done
+#4 DONE 0.0s
+
+#5 [base 1/3] FROM docker.io/oven/bun:1.3.13-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349
+#5 resolve docker.io/oven/bun:1.3.13-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349 done
+#5 DONE 0.0s
+
+#6 [base 2/3] WORKDIR /app
+#6 CACHED
+
+#7 [base 3/3] COPY server.ts /app/server.ts
+#7 CACHED
+
+#8 [direct 1/1] COPY direct.ts /app/direct.ts
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:28366b0f832a3514115411d8a3a172e6b78415972272a56a5529ac1d88d4c15d done
+#9 exporting config sha256:f05e99d324ad3ea1c3382def0af9e5bf06a758fbf74c47595f42f8690734d6da done
+#9 exporting attestation manifest sha256:dc9f20b5fdb7ce82f656ccba0380a6a08dffbfc9a910b487df7ea347e16750f2 done
+#9 exporting manifest list sha256:da7e9523c7e1da945bf5cd2efd25eb9d8dec5de2ff4e70ac3124f555878341f7 done
+#9 naming to docker.io/library/axon-compare-bun-direct:20261023 done
+#9 unpacking to docker.io/library/axon-compare-bun-direct:20261023 done
+#9 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/colima-axon-bench/colima-axon-bench/9rszqvhl2r9f5cqj2ji8myvxs

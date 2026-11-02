@@ -1,0 +1,54 @@
+import "std:socket"
+import "std:datagram"
+import "std:process"
+import "std:vec"
+
+; Non-owning generational interests. Owners must stay live through each wait.
+; Every wait resolves the generation again, so a reused fd cannot satisfy a
+; stale interest. A kernel poll call waits for all descriptors together.
+sealed type Interest = { owner:i64,kind:i64,stream:i64,events:i64,key:i64 }
+type Ready = { key:i64,events:i64,readable:bool,writable:bool,closed:bool }
+type Readiness = { ok:bool,events:Vec<Ready>,timed_out:bool,cancelled:bool,error:Error }
+fn socket_interest(socket:Socket,events:i64,key:i64) -> Interest
+  = Interest { owner=socket_identity(socket),kind=2,stream=0,events=events,key=key }
+fn process_interest(process:Process,stream:i64,events:i64,key:i64) -> Interest
+  = Interest { owner=process_identity(process),kind=10,stream=stream,events=events,key=key }
+private fn reactor_error(code:i64,message:Arr u8 _,cancelled:bool) -> Readiness
+  = Readiness { ok=false,events=vec_empty::<Ready>(),timed_out=false,cancelled=cancelled,error=Error { code=code,message=message,position=0 } }
+private effect(net,process) fn interest_fd(interest:Interest) -> i64
+  = let address=rt_handle_fd(interest.owner,interest.kind) in
+    if address<0 || (interest.events!=1 && interest.events!=4 && interest.events!=5) then -1 else
+    if interest.kind==2 || interest.kind==3 then address else
+    if interest.kind==10 && (interest.stream==1 || interest.stream==2) && !(interest.stream==2 && interest.events!=1) then
+      load_i64(ptr_from_i64(address),if interest.stream==1 then 16 else 24) else -1
+private effect(net,process) fn reactor_prepare(interests:Arr Interest n,p:ptr) -> bool
+  = loop(i=0,valid=true) while valid && i<n next(i+1,
+      check i>=0 && i<n in let fd=interest_fd(interests[i]) in
+      let descriptor=store_i32(p,i*8,i32(fd)) in let mask=store_i32(p,i*8+4,i32(interests[i].events)) in fd>=0) yield valid
+private effect(net,process) fn reactor_collect(interests:Arr Interest n,p:ptr) -> Vec<Ready>
+  = loop(i=0,out=vec_empty::<Ready>()) while i<n next(i+1,
+      check i>=0 && i<n in let flags=bit_and(shift_right(i64(load_i32(p,i*8+4)),16),65535) in
+      if flags==0 then out else vec_push(out,Ready { key=interests[i].key,events=flags,readable=bit_and(flags,1)!=0,writable=bit_and(flags,4)!=0,closed=bit_and(flags,56)!=0 })) yield out
+private effect(net,time,process) fn reactor_attempt(interests:Arr Interest n,p:ptr,deadline:i64,cancellation:Cancellation) -> Readiness
+  = if is_cancelled(cancellation) then reactor_error(125,"reactor cancelled",true) else
+    let clock=monotonic_ms() in if !clock.ok then reactor_error(clock.error.code,clock.error.message,false) else
+    let remaining=deadline-clock.value in
+    let delay=if remaining<=0 then 0 else if remaining<10 then remaining else 10 in
+    let prepared=reactor_prepare(interests,p) in if !prepared then reactor_error(9,"invalid or stale readiness interest",false) else
+    let count=rt_poll_timeout(p,n,delay) in
+    if is_cancelled(cancellation) then reactor_error(125,"reactor cancelled",true) else
+    if count<0 then let code=i64(load_i32(rt_errno(),0)) in
+      if code==4 then Readiness { ok=true,events=vec_empty::<Ready>(),timed_out=false,cancelled=false,error=no_error() } else reactor_error(code,"kernel readiness wait failed",false) else
+    let events=reactor_collect(interests,p) in
+    let now=monotonic_ms() in if !now.ok then reactor_error(now.error.code,now.error.message,false) else
+    Readiness { ok=true,events=events,timed_out=vec_len(events)==0 && now.value>=deadline,cancelled=false,error=no_error() }
+effect(net,time,process) fn reactor_wait(interests:Arr Interest n,deadline:i64,cancellation:Cancellation) -> Readiness
+  = if n>4096 || deadline<0 then reactor_error(22,"invalid reactor bounds",false) else
+    let buffer=ax_alloc(if n==0 then 8 else n*8) in
+    let first=reactor_attempt(interests,buffer,deadline,cancellation) in
+    let result=loop(result=first) while result.ok && !result.timed_out && vec_len(result.events)==0 next(reactor_attempt(interests,buffer,deadline,cancellation)) yield result in
+    let freed=ax_release(buffer) in result
+
+fn listener_interest(listener:Listener,key:i64) -> Interest = Interest { owner=listener_identity(listener),kind=3,stream=0,events=1,key=key }
+
+fn datagram_interest(socket:Datagram,events:i64,key:i64) -> Interest = Interest { owner=datagram_identity(socket),kind=2,stream=0,events=events,key=key }

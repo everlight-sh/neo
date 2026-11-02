@@ -1,0 +1,15 @@
+import "std:json"
+import "std:io"
+fn writer_growth_row(move writer:JsonWriter,value:i64) -> JsonWriter
+  = json_writer_end_object(json_writer_string(json_writer_key(json_writer_int(json_writer_key(json_writer_begin_object(writer),"i"),value),"name"),"item"))
+effect(fs,unsafe) fn main(mode:i64,n:i64{n>=0 && n<=100000}) -> unit
+  = let before=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let fragment=json_writer_fragment_finish(writer_growth_row(json_writer(),7)) in check fragment.ok in
+    let encoder=json_object_encoder(arr(i in 0..2) if i==0 then "i" else "name").value in
+    let writer=loop(i=0,writer=json_writer_begin_array(json_writer())) while i<n next(i+1,
+      if mode==0 then json_writer_int(writer,i) else if mode==1 then writer_growth_row(writer,i) else if mode==2 then json_writer_fragment(writer,fragment.value) else
+        let row=json_encode_object(encoder,arr(j in 0..2) if j==0 then json_encode_int(i) else json_encode_string("item")) in json_writer_fragment(writer,row.value)) yield writer in
+    let result=json_writer_finish(json_writer_end_array(writer)) in
+    let requests=load_i64(runtime_state(),64)-before in let requested=load_i64(runtime_state(),80)-bytes in
+    check result.ok && result.value.count==n && json_parse(result.value.raw).value.count==n in
+    let shown=print_out(concat(int_text(requests)," ",int_text(requested),"\n",result.value.raw,"\n")) in noop()

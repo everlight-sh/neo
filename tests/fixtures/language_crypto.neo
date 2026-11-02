@@ -1,0 +1,24 @@
+import "std:sha1"
+import "std:x25519"
+import "std:chacha20"
+import "std:rsa"
+import "std:io"
+effect(fs,process) fn main(mode:i64) -> unit
+  = let input=file_read(0,1048576) in check input.ok in let bytes=input.value in let size=len(bytes) in
+    let result=if mode==10 then bytes_ok(sha1(bytes)) else
+      if mode==11 then check size>=32 in bytes_ok(hmac_sha1(str_slice(bytes,0,32),str_slice(bytes,32,size))) else
+      if mode==0 then bytes_ok(sha256(bytes)) else
+      if mode==1 then check size>=32 in bytes_ok(hmac_sha256(str_slice(bytes,0,32),str_slice(bytes,32,size))) else
+      if mode==2 then check size==48 in bytes_ok(chacha20_block(str_slice(bytes,0,32),str_slice(bytes,32,44),
+        loop(i=0,word=0) while i<4 next(i+1,bit_or(word,shift_left(str_byte(bytes,44+i),i*8))) yield word)) else
+      if mode==3 then check size>=56 in bytes_ok(chacha20_poly1305_seal(str_slice(bytes,0,32),str_slice(bytes,32,44),str_slice(bytes,44,56),str_slice(bytes,56,size))) else
+      if mode==4 then check size>=56 in chacha20_poly1305_open(str_slice(bytes,0,32),str_slice(bytes,32,44),str_slice(bytes,44,56),str_slice(bytes,56,size)) else
+      if mode==5 then check size>=32 in bytes_ok(poly1305(str_slice(bytes,0,32),str_slice(bytes,32,size))) else
+      if mode==6 then check size==64 in x25519(str_slice(bytes,0,32),str_slice(bytes,32,64)) else
+      if mode==7 then check size>=32 in bytes_ok(hkdf_expand(str_slice(bytes,0,32),str_slice(bytes,32,size),42)) else
+      if mode==8 || mode==9 then
+        let length=str_byte(bytes,0)*256+str_byte(bytes,1) in check length>=256 && length<=512 && size>=2+length*2 in
+        let key=rsa_public(str_slice(bytes,2,2+length),65537) in let signature=str_slice(bytes,2+length,2+length*2) in let message=str_slice(bytes,2+length*2,size) in
+        let valid=if mode==8 then rsa_verify_sha256(key,message,signature) else rsa_verify_pss_sha256(key,message,signature) in
+        if valid then bytes_ok("verified") else bytes_error(74,"bad RSA signature",0) else bytes_error(22,"unknown crypto test",0) in
+    if !result.ok then process_exit(2) else let output=file_write(1,result.value) in check output.ok in noop()

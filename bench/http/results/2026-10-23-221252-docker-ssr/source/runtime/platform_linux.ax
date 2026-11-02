@@ -1,0 +1,52 @@
+; Linux ARM64 kernel ABI. This executable links statically with no CRT/libc.
+effect fn rt_read (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(63, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_write (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(64, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_close (fd : i64) -> i64 = rt_result(syscall6(57, fd, 0, 0, 0, 0, 0))
+export effect fn ax_exit (status : i64) -> unit = let result = syscall6(94, status, 0, 0, 0, 0, 0) in noop()
+effect fn rt_mmap (n : i64) -> i64 = syscall6(222, 0, n, 3, 33, -1, 0)
+effect fn rt_munmap (p : ptr, n : i64) -> i64 = syscall6(215, ptr_to_i64(p), n, 0, 0, 0, 0)
+effect fn rt_getpid () -> i64 = syscall6(172, 0, 0, 0, 0, 0, 0)
+effect fn rt_getppid () -> i64 = syscall6(173, 0, 0, 0, 0, 0, 0)
+effect fn rt_socket (domain : i64, kind : i64, protocol : i64) -> i64 = rt_result(syscall6(198, domain, kind, protocol, 0, 0, 0))
+effect fn rt_setsockopt (fd : i64, level : i64, option : i64, value : ptr, n : i64) -> i64
+  = rt_result(syscall6(208, fd, level, option, ptr_to_i64(value), n, 0))
+effect fn rt_bind (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(200, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_listen (fd : i64, backlog : i64) -> i64 = rt_result(syscall6(201, fd, backlog, 0, 0, 0, 0))
+effect fn rt_accept_fd (fd : i64) -> i64 = rt_result(syscall6(202, fd, 0, 0, 0, 0, 0))
+effect fn rt_fcntl (fd : i64, command : i64, arg : i64) -> i64 = rt_result(syscall6(25, fd, command, arg, 0, 0, 0))
+effect fn rt_send (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(206, fd, ptr_to_i64(p), n, 16384, 0, 0))
+effect fn rt_poll (fds : ptr, count : i64) -> i64
+  = let timeout = stack_alloc(16) in let seconds = store_i64(timeout, 0, 1) in let nanos = store_i64(timeout, 8, 0) in
+    rt_result(syscall6(73, ptr_to_i64(fds), count, ptr_to_i64(timeout), 0, 0, 0))
+; ARM64 epoll_event is 16 bytes: events@0, padding@4, data@8.
+; Linux only packs this structure to 12 bytes on x86-64, not ARM64.
+effect fn rt_epoll_create () -> i64 = rt_result(syscall6(20, 524288, 0, 0, 0, 0, 0))
+effect fn rt_epoll_ctl (epfd : i64, op : i64, fd : i64, mask : i64, token : i64) -> i64
+  = let event = stack_alloc(16) in
+    let flags = store_i64(event, 0, mask) in let key = store_i64(event, 8, token) in
+    rt_result(syscall6(21, epfd, op, fd, ptr_to_i64(event), 0, 0))
+effect fn rt_epoll_wait (epfd : i64, events : ptr) -> i64
+  = rt_result(syscall6(22, epfd, ptr_to_i64(events), 1026, 1000, 0, 8))
+effect fn rt_socketpair (p : ptr) -> i64 = rt_result(syscall6(199, 1, 1, 0, ptr_to_i64(p), 0, 0))
+effect fn rt_wait (pid : i64) -> i64
+  = let status = stack_alloc(24) in let cleared = store_i64(status, 0, 0) in
+    let result = loop (r = -1, again = true) while again
+      next (let waited = rt_result(syscall6(260, pid, ptr_to_i64(status), 0, 0, 0, 0)) in let saved = store_i64(status, 16, waited) in waited,
+            load_i32(rt_errno(), 0) == i32(4) && load_i64(status, 16) < 0) yield r in
+    if result < 0 then 1 else i64(load_i32(status, 0))
+effect fn rt_ncpu () -> i64
+  = let cache = load_i64(runtime_state(), 16) in if cache > 0 then cache else
+    let mask = stack_alloc(128) in
+    let cleared = memset(mask, i32(0), 128) in
+    let result = syscall6(123, 0, 128, ptr_to_i64(mask), 0, 0, 0) in
+    let count = loop (i = 0, total = 0) while i < 128
+      next (i + 1, total + loop (bits = i64(load_u8(mask, i)), n = 0) while bits > 0 next (bits / 2, n + bits % 2) yield n)
+      yield total in
+    let n = if result < 0 || count < 1 then 1 else count in
+    let saved = store_i64(runtime_state(), 16, n) in n
+fn rt_again () -> i64 = 11
+fn rt_nonblock_flag () -> i64 {result > 0} = 2048
+fn rt_socket_level () -> i64 = 1
+fn rt_reuseaddr () -> i64 = 2
+effect fn rt_address (p : ptr) -> unit
+  = let low = store_u8(p, 0, u8(2)) in store_u8(p, 1, u8(0))

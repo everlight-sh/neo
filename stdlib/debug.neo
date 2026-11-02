@@ -1,0 +1,6 @@
+; Compile with NEO_ALLOC_STATS=1 to count allocation requests. Disabled in
+; ordinary builds. Requested bytes count cumulative traffic, not resident RAM.
+type AllocationStats = { enabled: bool, requests: i64, requested_bytes: i64 }
+effect fn allocation_stats() -> AllocationStats
+  = AllocationStats { enabled = allocation_stats_enabled(), requests = load_i64(runtime_state(),64), requested_bytes = load_i64(runtime_state(),80) }
+effect(process) fn live_resources() -> i64 = rt_handle_live()

@@ -1,0 +1,47 @@
+import "std:socket"
+
+resource type Datagram = { token:i64 } drop datagram_release
+type DatagramRead = { ok:bool,bytes:Arr u8 _,host:Arr u8 _,port:i64,error:Error }
+private effect(net) fn datagram_address(host:Arr u8 _,port:i64,p:ptr) -> bool
+  = let ip=net_ipv4(host) in if len(ip)!=4 || port<0 || port>65535 then false else
+    let clear=memset(p,i32(0),32) in let family=rt_address(p) in let high=store_u8(p,2,u8(port/256)) in let low=store_u8(p,3,u8(port%256)) in
+    let copied=loop(i=0) while i<4 next(check i>=0 && i<len(ip) in let byte=store_u8(p,4+i,u8(ip[i])) in i+1) yield i in true
+private effect(net) fn datagram_host(p:ptr) -> Arr u8 _
+  = concat(int_text(i64(load_u8(p,4))),".",int_text(i64(load_u8(p,5))),".",int_text(i64(load_u8(p,6))),".",int_text(i64(load_u8(p,7))))
+effect(net) fn udp_bind_ipv4(host:Arr u8 _,port:i64) -> Datagram
+  = let address=stack_alloc(32) in if !datagram_address(host,port,address) then Datagram { token= -22 } else
+    let fd=rt_socket(2,2,0) in if fd<0 then Datagram { token=0-i64(load_i32(rt_errno(),0)) } else
+    let bound=rt_bind(fd,address,16) in let mode=if bound<0 then -1 else rt_nonblock(fd) in
+    if mode<0 then let error=i64(load_i32(rt_errno(),0)) in let closed=rt_close(fd) in Datagram { token=0-error } else Datagram { token=rt_handle_new(fd,2) }
+private effect(net) fn datagram_release(socket:Datagram) -> unit = rt_handle_drop(socket.token,2)
+fn datagram_identity(socket:Datagram) -> i64 = socket.token
+effect(net) fn datagram_status(socket:Datagram) -> IntResult
+  = if socket.token<0 then int_error(0-socket.token,"datagram setup failed",0) else
+    if rt_handle_fd(socket.token,2)<0 then int_error(9,"datagram owner closed",0) else int_ok(0)
+effect(net) fn datagram_local_port(socket:Datagram) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then int_error(9,"datagram owner closed",0) else
+    let address=stack_alloc(32) in let size=stack_alloc(8) in let initialized=store_i32(size,0,i32(32)) in
+    let result=rt_socket_name(fd,address,size) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"datagram local address failed",0) else
+      int_ok(i64(load_u8(address,2))*256+i64(load_u8(address,3)))
+effect(net) fn datagram_try_send(socket:Datagram,host:Arr u8 _,port:i64,bytes:Arr u8 n) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in let address=stack_alloc(32) in
+    if fd<0 then int_error(9,"datagram owner closed",0) else
+    if port<1 || !datagram_address(host,port,address) || n>65507 then int_error(22,"invalid datagram destination or size",0) else
+    let result=rt_sendto(fd,data(bytes),n,address,16) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"datagram send failed",0) else
+    if result!=n then int_error(5,"partial datagram send",result) else int_ok(result)
+private fn datagram_error(code:i64,message:Arr u8 _) -> DatagramRead
+  = DatagramRead { ok=false,bytes="",host="",port=0,error=Error { code=code,message=message,position=0 } }
+effect(net) fn datagram_try_receive(socket:Datagram,limit:i64) -> DatagramRead
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then datagram_error(9,"datagram owner closed") else
+    if limit<0 || limit>65507 then datagram_error(22,"invalid datagram receive limit") else
+    let buffer=ax_alloc(65536) in let address=stack_alloc(32) in let size=stack_alloc(8) in let initialized=store_i32(size,0,i32(32)) in
+    let count=rt_recvfrom(fd,buffer,65536,address,size) in
+    let result=if count<0 then datagram_error(i64(load_i32(rt_errno(),0)),"datagram receive failed") else
+      if count>limit then datagram_error(90,"datagram exceeds receive limit") else
+        check count>=0 && count<=65536 in DatagramRead { ok=true,bytes=bytes_ok(view(buffer,count)).value,host=datagram_host(address),port=i64(load_u8(address,2))*256+i64(load_u8(address,3)),error=no_error() } in
+    let freed=ax_release(buffer) in result
+effect(net,time) fn datagram_receive(socket:Datagram,limit:i64,deadline:i64,cancellation:Cancellation) -> DatagramRead
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then datagram_error(9,"datagram owner closed") else
+    loop(result=datagram_error(rt_again(),"pending")) while !result.ok && (result.error.code==rt_again() || result.error.code==4) next(
+      let ready=net_wait_cancel(fd,1,deadline,cancellation_identity(cancellation)) in
+      if !ready.ok then datagram_error(ready.error.code,ready.error.message) else datagram_try_receive(socket,limit)) yield result

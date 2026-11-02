@@ -1,0 +1,7 @@
+; Dot product of two derived arrays.
+; a[i] = i % 7, b[i] = (i * 3) % 11, result = sum_i a[i] * b[i].
+
+fn main (n : i64{n >= 1}) -> i64
+  = let a = arr(i in 0..n) i % 7 in
+    let b = arr(i in 0..n) (i * 3) % 11 in
+    sum(i in 0..n) a[i] * b[i]

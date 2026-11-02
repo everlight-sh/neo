@@ -1,0 +1,45 @@
+import "std:file"
+import "std:result"
+import "std:channel"
+
+effect(fs) fn short_circuit() -> Result<i64,i64>
+  = using file=open_file("/dev/null",0) in
+    let status=file_status(file) in check status.ok in
+    let value=Err::<i64,i64>(7)? in Ok::<i64,i64>(value)
+effect(fs) fn consume_file(move file:File) -> i64
+  = let status=file_status(file) in if status.ok then 1 else 0
+effect(process,time) fn bounded_channel_check() -> unit
+  = using cancellation=new_cancellation() in using channel=new_channel(2) in
+    let a=channel_try_send(channel,"first") in let b=channel_try_send(channel,"") in let full=channel_try_send(channel,"full") in
+    check a.ok && b.ok && !full.ok && full.error.code==11 in
+    let first=channel_try_receive(channel) in let second=channel_try_receive(channel) in let empty=channel_try_receive(channel) in
+    check first.ok && str_equal(first.value,"first") && second.ok && len(second.value)==0 && !empty.ok && empty.error.code==11 in
+    let deadline=deadline_after(5) in let timed=channel_receive(channel,deadline.value,cancellation) in
+    check !timed.ok && timed.error.code==110 in let cancelled=cancel(cancellation) in
+    let deadline=deadline_after(1000) in let stopped=channel_receive(channel,deadline.value,cancellation) in
+    check !stopped.ok && stopped.error.code==125 in noop()
+effect(process,time) fn producer(channel:Channel,cancellation:Cancellation,n:i64) -> unit
+  = let sent=loop(i=0) while i<n
+      next(let deadline=deadline_after(5000) in let result=channel_send(channel,int_text(i),deadline.value,cancellation) in
+        check result.ok in i+1) yield i in channel_close_sender(channel)
+effect(fs,process,time,unsafe) fn fork_channel(n:i64) -> unit
+  = using cancellation=new_cancellation() in using channel=new_channel(3) in
+    let status=channel_status(channel) in check status.ok in let forked=process_fork() in check forked.ok in
+    if forked.value==0 then producer(channel,cancellation,n) else
+      let received=loop(i=0) while i<n
+        next(let deadline=deadline_after(5000) in let result=channel_receive(channel,deadline.value,cancellation) in
+          check result.ok && str_equal(result.value,int_text(i)) in i+1) yield i in
+      let deadline=deadline_after(5000) in let eof=channel_receive(channel,deadline.value,cancellation) in
+      check !eof.ok && eof.error.code==32 in let waited=process_wait(forked.value) in check waited.ok && waited.value==0 in noop()
+effect(fs,process,time,unsafe) fn main(n:i64{n>=0 && n<=100000}) -> unit
+  = let parent=process_id() in let baseline=rt_handle_live() in
+    let result=loop(i=0,total=0) while i<n
+      next(i+1,total+(using file=open_file("/dev/null",0) in consume_file(file))) yield total in
+    let failed=short_circuit() in
+    let negative=using missing=open_file("/no-such-neo-file",0) in let status=file_status(missing) in !status.ok in
+    let channels=bounded_channel_check() in
+    let live=rt_handle_live() in check result==n && live==baseline && negative in
+    let exchange=fork_channel(n) in
+    let live=rt_handle_live() in check live==baseline in
+    let pid=process_id() in
+    if pid!=parent then noop() else let text=print_out("resources OK\n") in noop()

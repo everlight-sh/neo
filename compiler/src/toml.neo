@@ -1,0 +1,146 @@
+; Just enough TOML for a package manifest: whether it parses, and its
+; [package] name and version strings, as Python's tomllib reads them.
+; Repeated keys and redefined tables, which tomllib rejects, are accepted.
+import "std:strings"
+import "text.neo"
+
+; word is the last string or key read; keys the last dotted key; vstr whether
+; the last value was a string.
+type Toml = { src:Arr u8 _, i:i64, ok:bool, table:Arr Arr u8 _ _, keys:Arr Arr u8 _ _, word:Arr u8 _, vstr:bool,
+              name:Arr u8 _, has_name:bool, version:Arr u8 _, has_version:bool }
+
+fn tm_words() -> Arr Arr u8 _ _ = arr(i in 0..0) tx_empty()
+fn tm_at(borrow t:Toml) -> i64 = tx_byte(t.src,t.i)
+fn tm_peek(borrow t:Toml, k:i64) -> i64 = tx_byte(t.src,t.i+k)
+fn tm_fail(move t:Toml) -> Toml = if !t.ok then t else t with { ok=false }
+fn tm_skip(move t:Toml, k:i64) -> Toml = if !t.ok then t else t with { i=t.i+k }
+fn tm_expect(move t:Toml, byte:i64) -> Toml = if !t.ok then t else if tm_at(t)==byte then tm_skip(t,1) else tm_fail(t)
+
+fn tm_space_end(borrow src:Arr u8 _, i:i64) -> i64 = loop (j=i) while tx_byte(src,j)==32 || tx_byte(src,j)==9 next (j+1) yield j
+fn tm_after_ws(borrow t:Toml) -> i64 = tx_byte(t.src,tm_space_end(t.src,t.i))
+fn tm_ws(move t:Toml) -> Toml = if !t.ok then t else t with { i=tm_space_end(t.src,t.i) }
+fn tm_comment(move t:Toml) -> Toml
+  = if !t.ok || tm_at(t)!=35 then t else t with { i=loop (i=t.i) while i<len(t.src) && tx_byte(t.src,i)!=10 next (i+1) yield i }
+; Whitespace, comments and newlines.
+fn tm_blank(move t:Toml) -> Toml
+  = loop (s=tm_comment(tm_ws(t))) while s.ok && tm_at(s)==10 next (tm_comment(tm_ws(tm_skip(s,1)))) yield s
+
+fn tm_bare(c:i64) -> bool = (c>=65 && c<=90) || (c>=97 && c<=122) || (c>=48 && c<=57) || c==95 || c==45
+fn tm_hex(c:i64) -> i64 = if c>=48 && c<=57 then c-48 else if c>=97 && c<=102 then c-87 else if c>=65 && c<=70 then c-55 else -1
+fn tm_control(c:i64) -> bool = (c>=0 && c<32 && c!=9) || c==127
+
+; \uXXXX or \UXXXXXXXX at i: the code point, or -1.
+fn tm_unicode(borrow src:Arr u8 _, i:i64, digits:i64) -> i64
+  = let code=loop (k=0, v=0) while k<digits && v>=0 next (k+1, let d=tm_hex(tx_byte(src,i+k)) in if d<0 then -1 else v*16+d) yield v in
+    if code<0 || code>1114111 || (code>=55296 && code<=57343) then -1 else code
+; One escape after a backslash at i.
+fn tm_escape(move t:Toml) -> Toml
+  = if !t.ok then t else let e=tm_peek(t,1) in
+    let simple=if e==98 then 8 else if e==116 then 9 else if e==110 then 10 else if e==102 then 12 else if e==114 then 13
+      else if e==34 then 34 else if e==92 then 92 else -1 in
+    if simple>=0 then t with { word=push(t.word,u8(simple)), i=t.i+2 }
+    else let digits=if e==117 then 4 else if e==85 then 8 else 0 in
+    if digits==0 then tm_fail(t) else let code=tm_unicode(t.src,t.i+2,digits) in
+    if code<0 then tm_fail(t) else t with { word=concat(t.word,utf8_encode(code).value), i=t.i+2+digits }
+
+; A line-ending backslash in a multi-line basic string: the backslash, then
+; spaces, a newline, and every space or newline after it.
+fn tm_line_end(borrow src:Arr u8 _, i:i64) -> i64
+  = let j=loop (j=i+1) while tx_byte(src,j)==32 || tx_byte(src,j)==9 next (j+1) yield j in
+    if tx_byte(src,j)!=10 then -1 else
+    loop (k=j) while tx_byte(src,k)==32 || tx_byte(src,k)==9 || tx_byte(src,k)==10 next (k+1) yield k
+fn tm_quotes(borrow src:Arr u8 _, i:i64, q:i64) -> i64 = loop (k=0) while tx_byte(src,i+k)==q next (k+1) yield k
+
+; A string after its opening quotes. q is 34 or 39; basic strings have escapes.
+fn tm_string_step(move t:Toml, q:i64, multi:bool) -> Toml
+  = let c=tm_at(t) in
+    if c<0 then tm_fail(t)
+    else if c==q && (!multi || tm_quotes(t.src,t.i,q)>=3) then
+      let run=if multi then tm_quotes(t.src,t.i,q) else 1 in
+      if run>5 then tm_fail(t) else
+      let extra=if multi then run-3 else 0 in
+      t with { word=loop (w=t.word, k=0) while k<extra next (push(w,u8(q)), k+1) yield w, i=t.i+run, vstr=true }
+    else if c==92 && q==34 && multi && tm_line_end(t.src,t.i)>=0 then t with { i=tm_line_end(t.src,t.i) }
+    else if c==92 && q==34 then tm_escape(t)
+    else if c==10 && !multi then tm_fail(t)
+    else if c!=10 && tm_control(c) then tm_fail(t)
+    else t with { word=push(t.word,u8(c)), i=t.i+1 }
+fn tm_string(move t:Toml) -> Toml
+  = if !t.ok then t else let q=tm_at(t) in let multi=tm_quotes(t.src,t.i,q)>=3 in
+    let t=t with { word=tx_empty(), vstr=false, i=t.i+(if multi then 3 else 1) } in
+    let t=if multi && tm_at(t)==10 then tm_skip(t,1) else t in
+    loop (s=t) while s.ok && !s.vstr next (tm_string_step(s,q,multi)) yield s
+
+fn tm_simple_key(move t:Toml) -> Toml
+  = if !t.ok then t else let c=tm_at(t) in
+    if c==34 || c==39 then
+      if tm_quotes(t.src,t.i,c)>=3 then tm_fail(t) else tm_string(t)
+    else let end=loop (j=t.i) while tm_bare(tx_byte(t.src,j)) next (j+1) yield j in
+    if end==t.i then tm_fail(t) else t with { word=concat(tx_empty(),byte_slice(t.src,t.i,end)), i=end }
+fn tm_key_more(move t:Toml) -> Toml
+  = let t=tm_simple_key(tm_ws(tm_skip(tm_ws(t),1))) in if !t.ok then t else t with { keys=push(t.keys,t.word) }
+; A dotted key into keys.
+fn tm_key(move t:Toml) -> Toml
+  = let t=tm_simple_key(t) in if !t.ok then t else
+    let t=t with { keys=push(tm_words(),t.word) } in
+    loop (s=t) while s.ok && tm_after_ws(s)==46 next (tm_key_more(s)) yield s
+
+fn tm_join(borrow a:Arr Arr u8 _ _, borrow b:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = loop (out=loop (o=tm_words(), k:i64{k>=0}=0) while k<len(a) next (push(o,a[k]), k+1) yield o, k:i64{k>=0}=0)
+      while k<len(b) next (push(out,b[k]), k+1) yield out
+fn tm_is(borrow path:Arr Arr u8 _ _, borrow first:Arr u8 _, borrow second:Arr u8 _) -> bool
+  = len(path)==2 && tx_equal(path[0],first) && tx_equal(path[1],second)
+
+; Numbers, booleans and dates, loosely.
+fn tm_scalar_byte(c:i64) -> bool = tm_bare(c) || c==43 || c==46 || c==58
+fn tm_scalar(move t:Toml) -> Toml
+  = let end=loop (j=t.i) while tm_scalar_byte(tx_byte(t.src,j)) next (j+1) yield j in
+    let word=if end>t.i then byte_slice(t.src,t.i,end) else tx_empty() in
+    let c=tx_byte(word,0) in
+    if len(word)==0 then tm_fail(t)
+    else if (c>=48 && c<=57) || c==43 || c==45 || tx_equal(word,"true") || tx_equal(word,"false") || tx_equal(word,"inf") || tx_equal(word,"nan")
+    then t with { i=end, vstr=false } else tm_fail(t)
+
+fn tm_array_item(move t:Toml) -> Toml
+  = let t=tm_blank(tm_value(t,tm_words())) in
+    if tm_at(t)==44 then tm_blank(tm_skip(t,1)) else if tm_at(t)==93 then t else tm_fail(t)
+fn tm_array(move t:Toml) -> Toml
+  = let t=loop (s=tm_blank(tm_skip(t,1))) while s.ok && tm_at(s)!=93 next (tm_array_item(s)) yield s in
+    let t=tm_expect(t,93) in if !t.ok then t else t with { vstr=false }
+fn tm_inline_item(move t:Toml, borrow path:Arr Arr u8 _ _) -> Toml
+  = let t=tm_key(tm_ws(t)) in let full=tm_join(path,t.keys) in
+    let t=tm_ws(tm_value(tm_ws(tm_expect(tm_ws(t),61)),full)) in
+    if tm_at(t)==44 then let t=tm_ws(tm_skip(t,1)) in (if tm_at(t)==125 then tm_fail(t) else t)
+    else if tm_at(t)==125 then t else tm_fail(t)
+fn tm_inline(move t:Toml, borrow path:Arr Arr u8 _ _) -> Toml
+  = let t=tm_ws(tm_skip(t,1)) in
+    let t=if tm_at(t)==125 then t else loop (s=t) while s.ok && tm_at(s)!=125 next (tm_inline_item(s,path)) yield s in
+    let t=tm_expect(t,125) in if !t.ok then t else t with { vstr=false }
+
+; A value whose key path is path; the package name and version are kept.
+fn tm_value(move t:Toml, borrow path:Arr Arr u8 _ _) -> Toml
+  = if !t.ok then t else let c=tm_at(t) in
+    let t=if c==34 || c==39 then tm_string(t) else if c==91 then tm_array(t) else if c==123 then tm_inline(t,path) else tm_scalar(t) in
+    if !t.ok then t
+    else if tm_is(path,"package","name") then (if t.vstr then t with { name=t.word, has_name=true } else tm_fail(t))
+    else if tm_is(path,"package","version") then (if t.vstr then t with { version=t.word, has_version=true } else tm_fail(t))
+    else t
+
+fn tm_header(move t:Toml) -> Toml
+  = let many=tm_peek(t,1)==91 in
+    let t=tm_ws(tm_key(tm_ws(tm_skip(t,if many then 2 else 1)))) in
+    let t=if many then tm_expect(tm_expect(t,93),93) else tm_expect(t,93) in
+    if !t.ok then t
+    else if many && len(t.keys)==1 && tx_equal(t.keys[0],"package") then tm_fail(t)
+    else t with { table=t.keys }
+fn tm_keyval(move t:Toml) -> Toml
+  = let t=tm_key(t) in let full=tm_join(t.table,t.keys) in
+    tm_value(tm_ws(tm_expect(tm_ws(t),61)),full)
+fn tm_line(move t:Toml) -> Toml
+  = let t=tm_comment(tm_ws(if tm_at(t)==91 then tm_header(t) else tm_keyval(t))) in
+    if tm_at(t)==10 then tm_skip(t,1) else if t.i>=len(t.src) then t else tm_fail(t)
+
+fn tm_parse(move src:Arr u8 _) -> Toml
+  = let t=Toml { src=src, i=0, ok=true, table=tm_words(), keys=tm_words(), word=tx_empty(), vstr=false,
+                 name=tx_empty(), has_name=false, version=tx_empty(), has_version=false } in
+    loop (s=tm_blank(t)) while s.ok && s.i<len(s.src) next (tm_blank(tm_line(s))) yield s

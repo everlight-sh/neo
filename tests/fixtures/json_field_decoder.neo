@@ -1,0 +1,43 @@
+; Differential probe: prepared field decoding versus json_parse/json_get.
+; Each stdin line is the hex of {"mode":"object"|"array","names":[...],"text":"<hex>"}.
+import "std:json"
+import "std:io"
+fn hex_bytes(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn same_field(borrow fields:JsonFields,i:i64,borrow expected:JsonOption) -> bool
+  = let has=json_field_has(fields,i) in
+    if has!=expected.present then false else if !has then true else
+    let view=json_field_view(fields,i) in let value=expected.value in
+    let integer=json_field_int(fields,i) in let wanted=json_int(value) in
+    let text=json_field_text(fields,i) in let wanted_text=json_text(value) in
+    let whole=json_field_json(fields,i) in
+    str_equal(view.raw,value.raw) && view.kind==value.kind && integer.ok==wanted.ok && (!integer.ok || integer.value==wanted.value) &&
+      str_equal(whole.raw,value.raw) && whole.kind==value.kind && whole.count==value.count &&
+      text.ok==wanted_text.ok && (!text.ok || str_equal(text.value,wanted_text.value))
+fn same_object(borrow fields:JsonFields,borrow names:Arr Arr u8 _ n,borrow row:Json) -> bool
+  = loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in same_field(fields,i,json_get(row,names[i]))) yield ok
+; Count of decoded elements when the array ends cleanly, -1 on a mismatch, -2 on a decode error.
+fn walk_rows(move fields:JsonFields,borrow decoder:JsonFieldDecoder,borrow names:Arr Arr u8 _ _,borrow rows:Arr Json r,compare:bool,k:i64) -> i64
+  = let step=json_decode_next(fields,decoder) in
+    if !step.present then (if step.ok then k else -2) else
+    if compare && (k>=r || (check k>=0 && k<r in !same_object(step,names,rows[k]))) then -1 else walk_rows(step,decoder,names,rows,compare,k+1)
+fn check_case(borrow case:Json) -> bool
+  = let listed=json_array_values(json_get(case,"names").value) in
+    let names=arr(i in 0..len(listed)) check i>=0 && i<len(listed) in json_text(listed[i]).value in
+    let decoder=json_field_decoder(names) in
+    let text=hex_bytes(json_text(json_get(case,"text").value).value) in let parsed=json_parse(text) in
+    if str_equal(json_text(json_get(case,"mode").value).value,"object") then
+      let fields=json_decode_object(text,decoder) in let valid=parsed.ok && parsed.value.kind==6 in
+      fields.ok==valid && fields.present==valid && (!valid || same_object(fields,names,parsed.value))
+    else
+      let array=parsed.ok && parsed.value.kind==5 in
+      let rows=if array then json_array_values(parsed.value) else arr(i in 0..0) json_none().value in
+      let objects=array && loop(i=0,ok=true) while ok && i<len(rows) next(i+1,check i>=0 && i<len(rows) in rows[i].kind==6) yield ok in
+      let walked=walk_rows(json_decode_array(text,decoder),decoder,names,rows,objects,0) in
+      if objects then walked==len(rows) else walked== -2
+effect(fs) fn main() -> unit
+  = let input=file_read(0,16777216) in let text=input.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let parsed=json_parse(hex_bytes(str_slice(text,at,end))) in
+      let shown=print_out(if parsed.ok && check_case(parsed.value) then "1\n" else "0\n") in end+1) yield at in noop()

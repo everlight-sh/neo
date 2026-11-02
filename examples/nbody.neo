@@ -1,0 +1,44 @@
+; N-body simulation with records. `Arr Body n` is laid out struct-of-arrays by
+; the compiler (seven planes in one buffer), so the inner sum over j streams
+; contiguous x, y, z, m planes and vectorises; the program only sees records.
+; Softening (0.01) removes the j == i singularity without a branch.
+
+type Body = { x : f64, y : f64, z : f64, vx : f64, vy : f64, vz : f64, m : f64 }
+type Vec3 = { x : f64, y : f64, z : f64 }
+
+fn init (n : i64{n >= 1}) -> Arr Body n
+  = arr(i in 0..n) Body { x = f64((i * 2654435761) % 1009) / 1009.0,
+                          y = f64((i * 40503) % 1013) / 1013.0,
+                          z = f64((i * 69069) % 1019) / 1019.0,
+                          vx = 0.0, vy = 0.0, vz = 0.0, m = 1.0 / f64(n) }
+
+fn accel (bs : Arr Body n, i : i64{0 <= i, i < n}) -> Vec3
+  = let xi = bs[i].x in let yi = bs[i].y in let zi = bs[i].z in
+    sum(j in 0..n)
+      let dx = bs[j].x - xi in let dy = bs[j].y - yi in let dz = bs[j].z - zi in
+      let d2 = dx * dx + dy * dy + dz * dz + 0.01 in
+      let inv = bs[j].m / (d2 * sqrt(d2)) in
+      Vec3 { x = dx * inv, y = dy * inv, z = dz * inv }
+
+fn kick (bs : Arr Body n, dt : f64) -> Arr Body n
+  = arr(i in 0..n) let a = accel(bs, i) in let b = bs[i] in
+      b with { vx = b.vx + a.x * dt, vy = b.vy + a.y * dt, vz = b.vz + a.z * dt }
+
+fn drift (bs : Arr Body n, dt : f64) -> Arr Body n
+  = arr(i in 0..n) let b = bs[i] in
+      b with { x = b.x + b.vx * dt, y = b.y + b.vy * dt, z = b.z + b.vz * dt }
+
+fn step (bs : Arr Body n, dt : f64) -> Arr Body n = drift(kick(bs, dt), dt)
+
+fn energy (bs : Arr Body n) -> f64
+  = sum(i in 0..n)
+      let b = bs[i] in
+      0.5 * b.m * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
+      - 0.5 * sum(j in 0..n)
+          if j == i then 0.0
+          else let dx = bs[j].x - b.x in let dy = bs[j].y - b.y in let dz = bs[j].z - b.z in
+               b.m * bs[j].m / sqrt(dx * dx + dy * dy + dz * dz + 0.01)
+
+fn main (n : i64{n >= 1}, steps : i64{steps >= 0}) -> f64
+  = let bs = loop (b = init(n), k = 0) while k < steps next (step(b, 0.001), k + 1) yield b in
+    energy(bs)

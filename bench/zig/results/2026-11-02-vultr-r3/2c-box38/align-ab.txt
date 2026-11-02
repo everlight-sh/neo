@@ -1,0 +1,17 @@
+## JSON doc x1M, CPU 0
+align32        wall    187.5  (min    185.3 max    204.4)  user   186.1 sys    1.0  out ['513500000']
+align16        wall    182.8  (min    179.2 max    197.0)  user   181.3 sys    1.0  out ['513500000']
+before         wall    183.6  (min    181.6 max    206.6)  user   182.1 sys    1.0  out ['513500000']
+## orders 1000 x1000, CPU 0
+align32        wall    186.5  (min    183.8 max    217.1)  user   184.6 sys    1.0  out ['34327000']
+align16        wall    184.9  (min    183.4 max    199.8)  user   183.5 sys    1.0  out ['34327000']
+before         wall    189.4  (min    187.5 max    202.6)  user   188.3 sys    1.0  out ['34327000']
+## sieve 1e8, 1 worker
+align32        wall    457.2  (min    449.9 max    469.0)  user   447.5 sys    7.0  out ['5761455']
+align16        wall    450.5  (min    447.1 max    462.2)  user   442.4 sys    8.0  out ['5761455']
+## sieve 1e8, 2 workers
+align32        wall    438.7  (min    420.3 max    448.6)  user   449.6 sys   14.0  out ['5761455']
+align16        wall    437.2  (min    420.0 max    448.8)  user   450.7 sys   13.0  out ['5761455']
+## stencil 50M x20, 1 worker
+align32        wall   1426.1  (min   1417.7 max   1470.6)  user  1378.5 sys   46.0  out ['25000046624222']
+align16        wall   1430.7  (min   1418.6 max   1466.8)  user  1384.9 sys   47.0  out ['25000046624222']

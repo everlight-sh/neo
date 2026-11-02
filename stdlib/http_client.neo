@@ -1,0 +1,212 @@
+import "std:dns"
+import "std:vec"
+
+sealed type HttpReader = { ok:bool, status:i64, mode:i64, remaining:i64, chunk_left:i64, framing:i64,
+  total:i64, limit:i64, trailer_bytes:i64, reusable:bool, headers:Arr HttpHeader _, buffer:Arr u8 _, chunk:Arr u8 _, done:bool, error:Error }
+private fn http_reader_error(move reader:HttpReader,code:i64,message:Arr u8 n) -> HttpReader
+  = reader with { ok=false,done=true,buffer="",chunk="",error=Error { code=code,message=message,position=reader.total } }
+private fn http_reader_initial(limit:i64) -> HttpReader
+  = HttpReader { ok=true,status=0,mode=0,remaining=0,chunk_left=0,framing=0,total=0,limit=limit,trailer_bytes=0,reusable=false,headers=arr(i in 0..0) HttpHeader { name="",value="" },buffer="",chunk="",done=false,error=no_error() }
+private effect(net,time) fn http_headers_step(socket:Socket,move result:BytesResult,deadline:i64) -> BytesResult
+  = let chunk=socket_read(socket,deadline) in
+    if !chunk.ok then chunk else if len(chunk.value)==0 then bytes_error(5,"truncated HTTP headers",0) else
+      let wire=concat(result.value,chunk.value) in let boundary=str_find(wire,"\r\n\r\n") in
+      if boundary.present && boundary.value>16384 || !boundary.present && len(wire)>16384 then bytes_error(27,"HTTP headers exceed 16 KiB",0) else bytes_ok(wire)
+private effect(net,time) fn http_headers(socket:Socket,initial:Arr u8 n,deadline:i64) -> BytesResult
+  = loop(result=bytes_ok(initial)) while result.ok && !str_find(result.value,"\r\n\r\n").present
+      next(http_headers_step(socket,result,deadline)) yield result
+private fn http_connection_close(wire:Arr u8 n,end:i64) -> bool
+  = loop(at=http_line_end(wire,0)+2,closed=false) while !closed && at<end next(
+      let e=http_line_end(wire,at) in if e<at then end else e+2,
+      let e=http_line_end(wire,at) in let line=str_slice(wire,at,e) in let colon=str_find(line,":") in
+      str_equal(http_lower(str_slice(line,0,colon.value)),"connection") &&
+        let value=http_lower(str_trim(str_slice(line,colon.value+1,len(line)))) in
+        loop(i=0,found=false) while !found && i<=len(value) next(
+          let comma=str_find(str_slice(value,i,len(value)),",") in if comma.present then i+comma.value+1 else len(value)+1,
+          let comma=str_find(str_slice(value,i,len(value)),",") in str_equal(str_trim(str_slice(value,i,if comma.present then i+comma.value else len(value))),"close")) yield found) yield closed
+private fn http_response_fields(wire:Arr u8 n,end:i64) -> Arr HttpHeader _
+  = let fields=loop(at=http_line_end(wire,0)+2,fields=vec_empty::<HttpHeader>()) while at<end next(
+      let e=http_line_end(wire,at) in if e<at then end else e+2,
+      let e=http_line_end(wire,at) in let line=str_slice(wire,at,e) in let colon=str_find(line,":") in
+      vec_push(fields,HttpHeader { name=http_lower(str_slice(line,0,colon.value)),value=str_trim(str_slice(line,colon.value+1,len(line))) })) yield fields in
+    let count=vec_len(fields) in check count>=0 in arr(i in 0..count) match vec_get(fields,i) { None => HttpHeader { name="",value="" },Some(field) => field }
+private fn http_reader_headers(wire:Arr u8 n,head:bool,limit:i64) -> HttpReader
+  = let initial=http_reader_initial(limit) in let boundary=str_find(wire,"\r\n\r\n") in let first=http_line_end(wire,0) in
+    let status=net_status(wire) in
+    if !boundary.present || boundary.value>16384 || first<0 || !status.ok then http_reader_error(initial,1,"invalid HTTP response headers") else
+      let state=loop(position=first+2,headers=HttpHeaderState { valid=true,length=0,has_length=false,chunked=false,has_encoding=false }) while headers.valid && position<boundary.value
+        next(let end=http_line_end(wire,position) in if end<0 then n else end+2,
+          http_header_apply(headers,str_slice(wire,position,http_line_end(wire,position)))) yield headers in
+      if !state.valid then http_reader_error(initial,1,"invalid or ambiguous HTTP framing") else
+      let no_body=head || status.value<200 || status.value==204 || status.value==304 in
+      if !no_body && state.has_length && state.length>limit then http_reader_error(initial,27,"HTTP body exceeds configured limit") else
+        initial with { status=status.value,mode=if no_body then 0 else if state.has_length then 1 else if state.chunked then 2 else 3,
+          remaining=state.length,buffer=str_slice(wire,boundary.value+4,n),done=no_body,headers=http_response_fields(wire,boundary.value),
+          reusable=str_starts(wire,"HTTP/1.1 ") && !http_connection_close(wire,boundary.value) && (no_body || state.has_length || state.chunked) }
+fn http_method_valid(method:Arr u8 n) -> bool
+  = str_equal(method,"GET") || str_equal(method,"HEAD") || str_equal(method,"POST") || str_equal(method,"PUT") || str_equal(method,"PATCH") || str_equal(method,"DELETE") || str_equal(method,"OPTIONS")
+fn http_request_target(path:Arr u8 n) -> bool
+  = n>0 && n<=4096 && str_starts(path,"/") && loop(i=0,valid=true) while valid && i<n
+      next(i+1,let byte=str_byte(path,i) in byte>=33 && byte<=126 && byte!=35) yield valid
+effect(net,time) fn http_start(socket:Socket,method:Arr u8 n,path:Arr u8 m,host:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpReader
+  = let initial=http_reader_initial(limit) in
+    if !http_method_valid(method) || !http_request_target(path) || k<1 || k>512 || !http_field_value(host) || str_find(host,"\t").present || str_find(host," ").present || limit<0 || limit>1073741824 || q>1073741824 then
+      http_reader_error(initial,22,"invalid HTTP method, target, host or limit") else
+      let request=concat(method," ",path," HTTP/1.1\r\nHost: ",host,"\r\nContent-Length: ",int_text(q),"\r\nConnection: close\r\n\r\n") in
+      let written=socket_write(socket,request,deadline) in let payload=if written.ok then socket_write(socket,body,deadline) else written in
+      if !payload.ok then http_reader_error(initial,payload.error.code,payload.error.message) else
+        loop(wire=http_headers(socket,"",deadline),interim=0) while wire.ok && net_status(wire.value).ok && net_status(wire.value).value<200 && net_status(wire.value).value!=101 && interim<8
+          next(let boundary=str_find(wire.value,"\r\n\r\n") in http_headers(socket,str_slice(wire.value,boundary.value+4,len(wire.value)),deadline),interim+1)
+          yield if !wire.ok then http_reader_error(initial,wire.error.code,wire.error.message) else
+            let reader=http_reader_headers(wire.value,str_equal(method,"HEAD"),limit) in
+            if reader.ok && reader.status<200 then http_reader_error(reader,1,"unsupported HTTP upgrade or too many informational responses") else reader
+private effect(net,time) fn http_stream_fill(socket:Socket,move reader:HttpReader,deadline:i64) -> HttpReader
+  = let received=socket_read(socket,deadline) in if !received.ok then http_reader_error(reader,received.error.code,received.error.message) else
+    if len(received.value)==0 then if reader.mode==3 then reader with { done=true } else http_reader_error(reader,5,"truncated HTTP body") else
+      let bytes=if len(reader.buffer)==0 then received.value else concat(reader.buffer,received.value) in
+      if len(bytes)>32768 then http_reader_error(reader,27,"HTTP streaming buffer exceeds 32 KiB") else reader with { buffer=bytes }
+private fn http_stream_take(move reader:HttpReader,count:i64) -> HttpReader
+  = if count<0 || count>len(reader.buffer) || count>reader.limit-reader.total then http_reader_error(reader,27,"HTTP body exceeds configured limit") else
+    ; Taking the whole buffer hands it over without a copy.
+    let whole=count==len(reader.buffer) in
+    reader with { chunk=if whole then reader.buffer else str_slice(reader.buffer,0,count),buffer=if whole then "" else str_slice(reader.buffer,count,len(reader.buffer)),total=reader.total+count,
+      remaining=if reader.mode==1 then reader.remaining-count else reader.remaining,
+      chunk_left=if reader.mode==2 then reader.chunk_left-count else reader.chunk_left,
+      framing=if reader.mode==2 && count==reader.chunk_left then 1 else reader.framing,
+      done=reader.mode==1 && count==reader.remaining }
+private effect(net,time) fn http_stream_step(socket:Socket,move reader:HttpReader,deadline:i64) -> HttpReader
+  = if reader.mode==0 then reader with { done=true } else
+    if reader.mode==1 && reader.remaining==0 then if len(reader.buffer)>0 then http_reader_error(reader,1,"excess HTTP body") else reader with { done=true } else
+    if reader.mode==1 && len(reader.buffer)>reader.remaining then http_reader_error(reader,1,"excess HTTP body") else
+    if reader.mode==1 || reader.mode==3 then
+      if len(reader.buffer)==0 then http_stream_fill(socket,reader,deadline) else
+        http_stream_take(reader,if len(reader.buffer)>16384 then 16384 else len(reader.buffer)) else
+    if reader.framing==1 then
+      if len(reader.buffer)<2 then http_stream_fill(socket,reader,deadline) else
+      if !str_equal(str_slice(reader.buffer,0,2),"\r\n") then http_reader_error(reader,1,"invalid HTTP chunk terminator") else
+        reader with { buffer=str_slice(reader.buffer,2,len(reader.buffer)),framing=0 } else
+    if reader.chunk_left>0 then
+      if len(reader.buffer)==0 then http_stream_fill(socket,reader,deadline) else
+        let available=if len(reader.buffer)>16384 then 16384 else len(reader.buffer) in
+        http_stream_take(reader,if available<reader.chunk_left then available else reader.chunk_left) else
+    let end=http_line_end(reader.buffer,0) in
+    if end<0 then if len(reader.buffer)>1024 then http_reader_error(reader,27,"HTTP chunk or trailer line exceeds limit") else http_stream_fill(socket,reader,deadline) else
+      let line=str_slice(reader.buffer,0,end) in let rest=str_slice(reader.buffer,end+2,len(reader.buffer)) in
+      if reader.framing==2 then
+        if reader.trailer_bytes+end+2>16384 then http_reader_error(reader,27,"HTTP trailers exceed 16 KiB") else
+        if end==0 then if len(rest)>0 then http_reader_error(reader,1,"excess HTTP chunked body") else reader with { done=true,buffer="" } else
+          let state=http_header_apply(HttpHeaderState { valid=true,length=0,has_length=false,chunked=false,has_encoding=false },line) in
+          if !state.valid || state.has_length || state.has_encoding then http_reader_error(reader,1,"invalid HTTP trailer") else
+            reader with { buffer=rest,trailer_bytes=reader.trailer_bytes+end+2 } else
+      let size=http_chunk_length(line) in
+      if !size.ok || size.value>reader.limit-reader.total then http_reader_error(reader,1,"invalid HTTP chunk size or body limit") else
+        reader with { buffer=rest,chunk_left=size.value,framing=if size.value==0 then 2 else 0 }
+effect(net,time) fn http_read_next(socket:Socket,move reader:HttpReader,deadline:i64) -> HttpReader
+  = loop(state=reader with { chunk="" }) while state.ok && !state.done && len(state.chunk)==0
+      next(http_stream_step(socket,state,deadline)) yield state
+effect(fs,net,time,process) fn http_request(host:Arr u8 n,port:i64,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,timeout:i64,limit:i64) -> HttpResult
+  = let timer=deadline_after(timeout) in if !timer.ok then net_error(timer.error.code,timer.error.message) else
+    let address=dns_lookup(host,timer.value) in if !address.ok then net_error(address.error.code,address.error.message) else
+    using socket=tcp_connect_ipv4(dns_address(address.value),port,timer.value) in
+      let connected=socket_status(socket) in if !connected.ok then net_error(connected.error.code,connected.error.message) else
+      let reader=http_start(socket,method,path,concat(host,":",int_text(port)),body,timer.value,limit) in
+      loop(state=reader,out="") while state.ok && !state.done
+        next(http_read_next(socket,state,timer.value),concat(out,state.chunk)) yield
+          if !state.ok then net_error(state.error.code,state.error.message) else
+            HttpResult { ok=true,status=state.status,body=concat(out,state.chunk),error=no_error() }
+
+; Optional transport callbacks let the same framing/parser run over TLS or
+; cancellation-aware sockets. The capture record holds typed arena references.
+type HttpIO<C> = { context:C,read:Effect<net,time,process>(C,i64)->BytesResult,write:Effect<net,time,process>(C,Arr u8 _,i64)->IntResult }
+type HttpHeader = { name:Arr u8 _,value:Arr u8 _ }
+private effect(net,time,process) fn http_io_read<C>(io:HttpIO<C>,deadline:i64) -> BytesResult
+  = let invoke=io.read in invoke(io.context,deadline)
+private effect(net,time,process) fn http_io_write<C>(io:HttpIO<C>,bytes:Arr u8 n,deadline:i64) -> IntResult
+  = let invoke=io.write in invoke(io.context,bytes,deadline)
+fn http_headers_encode(headers:Arr HttpHeader n) -> BytesResult
+  = loop(i=0,out="",valid=n<=128) while valid && i<n next(i+1,
+      check i>=0 && i<n in concat(out,headers[i].name,": ",headers[i].value,"\r\n"),
+      check i>=0 && i<n in let name=http_lower(headers[i].name) in
+        http_token(headers[i].name) && http_field_value(headers[i].value) && len(out)+len(headers[i].name)+len(headers[i].value)+4<=16384 &&
+        !str_equal(name,"host") && !str_equal(name,"content-length") && !str_equal(name,"transfer-encoding") && !str_equal(name,"connection") && !str_equal(name,"upgrade"))
+      yield if valid then bytes_ok(out) else bytes_error(22,"invalid, reserved or excessive request headers",i)
+
+private effect(net,time,process) fn http_headers_step_io<C>(io:HttpIO<C>,move result:BytesResult,deadline:i64) -> BytesResult
+  = let chunk=http_io_read(io,deadline) in
+    if !chunk.ok then chunk else if len(chunk.value)==0 then bytes_error(5,"truncated HTTP headers",0) else
+      let wire=concat(result.value,chunk.value) in let boundary=str_find(wire,"\r\n\r\n") in
+      if boundary.present && boundary.value>16384 || !boundary.present && len(wire)>16384 then bytes_error(27,"HTTP headers exceed 16 KiB",0) else bytes_ok(wire)
+
+private effect(net,time,process) fn http_headers_io<C>(io:HttpIO<C>,initial:Arr u8 n,deadline:i64) -> BytesResult
+  = loop(result=bytes_ok(initial)) while result.ok && !str_find(result.value,"\r\n\r\n").present
+      next(http_headers_step_io(io,result,deadline)) yield result
+
+private effect(net,time,process) fn http_start_connection_io<C>(io:HttpIO<C>,method:Arr u8 n,path:Arr u8 m,host:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64,headers:Arr HttpHeader h,keep_alive:bool) -> HttpReader
+  = let extra=http_headers_encode(headers) in let initial=http_reader_initial(limit) in
+    if !extra.ok || !http_method_valid(method) || !http_request_target(path) || k<1 || k>512 || !http_field_value(host) || str_find(host,"\t").present || str_find(host," ").present || limit<0 || limit>1073741824 || q>1073741824 then
+      http_reader_error(initial,22,"invalid HTTP method, target, host or limit") else
+      let request=concat(method," ",path," HTTP/1.1\r\nHost: ",host,"\r\nContent-Length: ",int_text(q),"\r\nConnection: ",if keep_alive then "keep-alive" else "close","\r\n",extra.value,"\r\n") in
+      let written=http_io_write(io,request,deadline) in let payload=if written.ok then http_io_write(io,body,deadline) else written in
+      if !payload.ok || written.value!=len(request) || payload.value!=q then http_reader_error(initial,if payload.ok then 5 else payload.error.code,"incomplete HTTP request write") else
+        loop(wire=http_headers_io(io,"",deadline),interim=0) while wire.ok && net_status(wire.value).ok && net_status(wire.value).value<200 && net_status(wire.value).value!=101 && interim<8
+          next(let boundary=str_find(wire.value,"\r\n\r\n") in http_headers_io(io,str_slice(wire.value,boundary.value+4,len(wire.value)),deadline),interim+1)
+          yield if !wire.ok then http_reader_error(initial,wire.error.code,wire.error.message) else
+            let reader=http_reader_headers(wire.value,str_equal(method,"HEAD"),limit) in
+            if reader.ok && reader.status<200 then http_reader_error(reader,1,"unsupported HTTP upgrade or too many informational responses") else reader with { reusable=keep_alive && reader.reusable }
+
+private effect(net,time,process) fn http_stream_fill_io<C>(io:HttpIO<C>,move reader:HttpReader,deadline:i64) -> HttpReader
+  = let received=http_io_read(io,deadline) in if !received.ok then http_reader_error(reader,received.error.code,received.error.message) else
+    if len(received.value)==0 then if reader.mode==3 then reader with { done=true } else http_reader_error(reader,5,"truncated HTTP body") else
+      let bytes=if len(reader.buffer)==0 then received.value else concat(reader.buffer,received.value) in
+      if len(bytes)>32768 then http_reader_error(reader,27,"HTTP streaming buffer exceeds 32 KiB") else reader with { buffer=bytes }
+
+private effect(net,time,process) fn http_stream_step_io<C>(io:HttpIO<C>,move reader:HttpReader,deadline:i64) -> HttpReader
+  = if reader.mode==0 then reader with { done=true } else
+    if reader.mode==1 && reader.remaining==0 then if len(reader.buffer)>0 then http_reader_error(reader,1,"excess HTTP body") else reader with { done=true } else
+    if reader.mode==1 && len(reader.buffer)>reader.remaining then http_reader_error(reader,1,"excess HTTP body") else
+    if reader.mode==1 || reader.mode==3 then
+      if len(reader.buffer)==0 then http_stream_fill_io(io,reader,deadline) else
+        http_stream_take(reader,if len(reader.buffer)>16384 then 16384 else len(reader.buffer)) else
+    if reader.framing==1 then
+      if len(reader.buffer)<2 then http_stream_fill_io(io,reader,deadline) else
+      if !str_equal(str_slice(reader.buffer,0,2),"\r\n") then http_reader_error(reader,1,"invalid HTTP chunk terminator") else
+        reader with { buffer=str_slice(reader.buffer,2,len(reader.buffer)),framing=0 } else
+    if reader.chunk_left>0 then
+      if len(reader.buffer)==0 then http_stream_fill_io(io,reader,deadline) else
+        let available=if len(reader.buffer)>16384 then 16384 else len(reader.buffer) in
+        http_stream_take(reader,if available<reader.chunk_left then available else reader.chunk_left) else
+    let end=http_line_end(reader.buffer,0) in
+    if end<0 then if len(reader.buffer)>1024 then http_reader_error(reader,27,"HTTP chunk or trailer line exceeds limit") else http_stream_fill_io(io,reader,deadline) else
+      let line=str_slice(reader.buffer,0,end) in let rest=str_slice(reader.buffer,end+2,len(reader.buffer)) in
+      if reader.framing==2 then
+        if reader.trailer_bytes+end+2>16384 then http_reader_error(reader,27,"HTTP trailers exceed 16 KiB") else
+        if end==0 then if len(rest)>0 then http_reader_error(reader,1,"excess HTTP chunked body") else reader with { done=true,buffer="" } else
+          let state=http_header_apply(HttpHeaderState { valid=true,length=0,has_length=false,chunked=false,has_encoding=false },line) in
+          if !state.valid || state.has_length || state.has_encoding then http_reader_error(reader,1,"invalid HTTP trailer") else
+            reader with { buffer=rest,trailer_bytes=reader.trailer_bytes+end+2 } else
+      let size=http_chunk_length(line) in
+      if !size.ok || size.value>reader.limit-reader.total then http_reader_error(reader,1,"invalid HTTP chunk size or body limit") else
+        reader with { buffer=rest,chunk_left=size.value,framing=if size.value==0 then 2 else 0 }
+
+effect(net,time,process) fn http_read_next_io<C>(io:HttpIO<C>,move reader:HttpReader,deadline:i64) -> HttpReader
+  = loop(state=reader with { chunk="" }) while state.ok && !state.done && len(state.chunk)==0
+      next(http_stream_step_io(io,state,deadline)) yield state
+
+effect(net,time,process) fn http_start_io<C>(io:HttpIO<C>,method:Arr u8 n,path:Arr u8 m,host:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64,headers:Arr HttpHeader h) -> HttpReader
+  = http_start_connection_io(io,method,path,host,body,deadline,limit,headers,false)
+effect(net,time,process) fn http_start_keepalive_io<C>(io:HttpIO<C>,method:Arr u8 n,path:Arr u8 m,host:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64,headers:Arr HttpHeader h) -> HttpReader
+  = http_start_connection_io(io,method,path,host,body,deadline,limit,headers,true)
+fn http_reader_reusable(reader:HttpReader) -> bool = reader.ok && reader.done && reader.reusable && len(reader.buffer)==0
+
+; Every value of a response header that may repeat, such as Set-Cookie, in order.
+private fn http_no_values() -> Arr Arr u8 _ _ = arr(i in 0..0) ""
+fn http_response_values(reader:HttpReader,name:Arr u8 _) -> Arr Arr u8 _ _
+  = let wanted=http_lower(name) in
+    loop(i=0,out=http_no_values()) while i<len(reader.headers) next(i+1,
+      check i>=0 && i<len(reader.headers) in if str_equal(reader.headers[i].name,wanted) then push(out,reader.headers[i].value) else out) yield out
+fn http_response_header(reader:HttpReader,name:Arr u8 _) -> BytesResult
+  = let wanted=http_lower(name) in
+    loop(i=0,result=bytes_error(2,"response header absent",0),seen=0) while i<len(reader.headers) next(i+1,
+      check i>=0 && i<len(reader.headers) in if !str_equal(reader.headers[i].name,wanted) then result else
+        if seen>0 then bytes_error(71,"duplicate response header",0) else bytes_ok(reader.headers[i].value),
+      check i>=0 && i<len(reader.headers) in seen+(if str_equal(reader.headers[i].name,wanted) then 1 else 0)) yield result

@@ -1,0 +1,34 @@
+import "std:io"
+
+; A bounded, zero-on-drop private byte buffer for optional protocol libraries.
+; All accesses validate the generational owner and bounds. The private mapping
+; never escapes as a raw pointer. Copyable Ref<Buffer> identities can live in a
+; library's sealed state while an Arena retains the affine owner.
+resource type Buffer = { token:i64 } drop buffer_release
+effect(process) fn buffer_new(size:i64) -> Buffer
+  = if size<0 || size>16777216 then Buffer { token= -22 } else
+    let address=rt_private_map(size+16) in if address<0 then Buffer { token= -12 } else
+      let p=ptr_from_i64(address) in let mapped=store_i64(p,0,size+16) in let length=store_i64(p,8,size) in
+      Buffer { token=rt_handle_new(address,14) }
+private effect(process) fn buffer_address(buffer:Buffer,offset:i64,length:i64) -> i64
+  = let address=rt_handle_fd(buffer.token,14) in if address<0 then -1 else
+    let size=load_i64(ptr_from_i64(address),8) in if offset<0 || offset>size || length<0 || length>size-offset then -1 else address+16+offset
+effect(process) fn buffer_status(buffer:Buffer) -> IntResult
+  = if buffer.token<0 then int_error(0-buffer.token,"buffer allocation failed",0) else
+    let address=rt_handle_fd(buffer.token,14) in if address<0 then int_error(9,"buffer owner closed",0) else int_ok(load_i64(ptr_from_i64(address),8))
+effect(process) fn buffer_read(buffer:Buffer,offset:i64,length:i64) -> BytesResult
+  = let address=buffer_address(buffer,offset,length) in if address<0 then bytes_error(22,"invalid buffer owner or read bounds",0) else
+    check length>=0 in bytes_ok(view(ptr_from_i64(address),length))
+effect(process) fn buffer_write(buffer:Buffer,offset:i64,bytes:Arr u8 n) -> IntResult
+  = let address=buffer_address(buffer,offset,n) in if address<0 then int_error(22,"invalid buffer owner or write bounds",0) else
+    let written=memcpy(ptr_from_i64(address),data(bytes),n) in int_ok(n)
+effect(process) fn buffer_load_i64(buffer:Buffer,offset:i64) -> IntResult
+  = let address=buffer_address(buffer,offset,8) in if address<0 then int_error(22,"invalid buffer owner or word bounds",0) else int_ok(load_i64(ptr_from_i64(address),0))
+effect(process) fn buffer_store_i64(buffer:Buffer,offset:i64,value:i64) -> IntResult
+  = let address=buffer_address(buffer,offset,8) in if address<0 then int_error(22,"invalid buffer owner or word bounds",0) else
+    let written=store_i64(ptr_from_i64(address),0,value) in int_ok(8)
+effect(process) fn buffer_clear(buffer:Buffer) -> IntResult
+  = let address=rt_handle_fd(buffer.token,14) in if address<0 then int_error(9,"buffer owner closed",0) else
+    let p=ptr_from_i64(address) in let size=load_i64(p,8) in let clear=memset(ptr_add(p,16),i32(0),size) in int_ok(size)
+private effect(process) fn buffer_release(buffer:Buffer) -> unit
+  = let clear=buffer_clear(buffer) in rt_handle_drop(buffer.token,14)

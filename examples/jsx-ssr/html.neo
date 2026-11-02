@@ -1,0 +1,45 @@
+; Example HTML escaping and HTTP helpers. Ordinary Neo; no core extensions.
+fn starts_with (a : Arr u8 n, b : Arr u8 m) -> bool
+  = m <= n && loop (i : i64{i >= 0} = 0, ok = true)
+                while ok && i < m
+                next (i + 1, a[i] == b[i])
+                yield ok
+
+fn page_count (req : Arr u8 n) -> i64
+  = loop (i : i64{i >= 0} = 10, value = 0, digits = 0)
+      while i < n && req[i] >= '0' && req[i] <= '9' && digits < 12
+      next (i + 1, value * 10 + i64(req[i]) - 48, digits + 1)
+      yield if digits > 0 && i < n && (req[i] == ' ' || req[i] == '?') then value else -1
+
+; v divided by 10, k times
+fn shift10 (v : i64, k : i64) -> i64
+  = loop (x = v, j = 0) while j < k next (x / 10, j + 1) yield x
+
+fn utoa (v : i64{v >= 0}) -> Arr u8 _
+  = let d = loop (x = v, d : i64{d >= 1} = 1) while x >= 10 next (x / 10, d + 1) yield d in
+    arr(i in 0..d) u8(48 + shift10(v, d - 1 - i) % 10)
+
+; ---- HTML escaping, React's rules (& < > " '), fully proven: the buffer is 6x the input,
+;      the write cursor stays under 6 * i by invariant, and the exact length is a bounded sum.
+fn esc_width (c : u8) -> i64 {result >= 1, result <= 6}
+  = if c == '&' then 5 else if c == '<' || c == '>' then 4 else if c == '"' || c == '\'' then 6 else 1
+
+fn put (out : Arr u8 m, j : i64{j >= 0}, s : Arr u8 k{j + k <= m}) -> Arr u8 m
+  = loop (o = out, t : i64{t >= 0} = 0) while t < k next (set(o, j + t, s[t]), t + 1) yield o
+
+fn esc_char (out : Arr u8 m, j : i64{j >= 0, j + 6 <= m}, c : u8) -> Arr u8 m
+  = if c == '&' then put(out, j, "&amp;")
+    else if c == '<' then put(out, j, "&lt;")
+    else if c == '>' then put(out, j, "&gt;")
+    else if c == '"' then put(out, j, "&quot;")
+    else if c == '\'' then put(out, j, "&#x27;")
+    else set(out, j, c)
+
+fn escape (s : Arr u8 n) -> Arr u8 _
+  = let total = sum(i in 0..n) esc_width(s[i]) in
+    let buf = loop (o = arr(k in 0..6 * n) u8(32), i : i64{i >= 0, i <= n} = 0, j : i64{j >= 0, j <= 6 * i} = 0)
+                while i < n
+                next (esc_char(o, j, s[i]), i + 1, j + esc_width(s[i]))
+                yield o in
+    arr(k in 0..total) buf[k]
+

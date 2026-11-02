@@ -1,0 +1,22 @@
+import "std:socket"
+import "std:cancel"
+; Short readiness waits cap cancellation latency without a worker thread.
+effect(net,time,process) fn socket_read_cancel(socket:Socket,cancellation:Cancellation,deadline:i64) -> BytesResult
+  = loop(result=bytes_error(rt_again(),"pending",0)) while !result.ok && (result.error.code==rt_again() || result.error.code==4) next(
+      if is_cancelled(cancellation) then bytes_error(125,"operation cancelled",0) else
+      if deadline_remaining(deadline)==0 then bytes_error(110,"read deadline elapsed",0) else
+        let attempt=socket_try_read(socket,16384) in if attempt.ok || attempt.error.code!=rt_again() && attempt.error.code!=4 then attempt else
+          let wait=socket_wait_ready(socket,1,if deadline_remaining(deadline)>10 then 10 else deadline_remaining(deadline)) in attempt) yield result
+private effect(net,time,process) fn socket_cancel_write_step(socket:Socket,bytes:Arr u8 n,offset:i64,cancellation:Cancellation,deadline:i64) -> NetProgress
+  = if is_cancelled(cancellation) then NetProgress { offset=offset,error=125 } else
+    if deadline_remaining(deadline)==0 then NetProgress { offset=offset,error=110 } else
+      let result=socket_try_write(socket,bytes,offset) in
+      if result.ok then NetProgress { offset=offset+result.value,error=if result.value==0 then 5 else 0 } else
+      if result.error.code==4 then NetProgress { offset=offset,error=0 } else
+      if result.error.code!=rt_again() then NetProgress { offset=offset,error=result.error.code } else
+        let wait=socket_wait_ready(socket,4,if deadline_remaining(deadline)>10 then 10 else deadline_remaining(deadline)) in
+        NetProgress { offset=offset,error=0 }
+effect(net,time,process) fn socket_write_cancel(socket:Socket,bytes:Arr u8 n,cancellation:Cancellation,deadline:i64) -> IntResult
+  = loop(step=NetProgress { offset=0,error=0 }) while step.offset<n && step.error==0
+      next(socket_cancel_write_step(socket,bytes,step.offset,cancellation,deadline))
+      yield if step.error!=0 then int_error(step.error,"socket write failed",step.offset) else int_ok(step.offset)

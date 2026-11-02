@@ -1,0 +1,11 @@
+import "std:numbers"
+import "std:base64"
+import "std:io"
+effect fn main() -> unit
+  = let argument=cli_arg(1) in let mode=int_parse(argument.value) in check mode.ok in
+    let input=file_read(0,65536) in check input.ok in
+    let output=if mode.value==0 then let number=float_parse(input.value) in if number.ok then int_text(float_bits(number.value)) else "error" else
+      if mode.value==1 then let bits=int_parse(input.value) in check bits.ok in let result=float_text(bits_float(bits.value)) in if result.ok then result.value else "error" else
+      if mode.value==2 then base64_encode(input.value) else if mode.value==3 then let decoded=base64_decode(input.value) in if decoded.ok then decoded.value else "error" else
+      if mode.value==4 then base64url_encode(input.value) else let decoded=base64url_decode(input.value) in if decoded.ok then decoded.value else "error" in
+    let printed=print_out(output) in noop()

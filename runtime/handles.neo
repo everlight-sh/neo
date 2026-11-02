@@ -1,0 +1,52 @@
+; Generational process-owned handles. A stale token cannot close a reused fd.
+; State: table@112, next generation@120, live entries@128. 4096 fixed slots.
+; Only runtime primitives access this table; application resources are affine.
+effect fn rt_handles() -> ptr
+  = let existing = load_ptr(runtime_state(),112) in
+    if existing != null() then existing else
+    let mapped = rt_private_map(131072) in
+    let failed = if mapped < 0 then ax_trap(data("handle table allocation failed\0")) else noop() in
+    let table = ptr_from_i64(mapped) in let clear = memset(table,i32(0),131072) in
+    let saved = store_ptr(runtime_state(),112,table) in table
+
+effect fn rt_handle_new(fd:i64,kind:i64) -> i64
+  = if fd < 0 then 0 - i64(load_i32(rt_errno(),0)) else
+    let prepared = if kind<4 then rt_cloexec(fd) else fd in
+    if prepared<0 then -5 else
+    let table = rt_handles() in
+    let slot = loop(i = 0) while i < 4096 && load_i64(table,i * 32) != 0 next(i + 1) yield i in
+    let generation = load_i64(runtime_state(),120) in
+    if slot == 4096 || generation >= 2251799813685246 then
+      let closed = if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in -24 else
+      let generation = generation + 1 in
+      let serial = store_i64(runtime_state(),120,generation) in
+      let entry = ptr_add(table,slot * 32) in let g = store_i64(entry,0,generation) in let f = store_i64(entry,8,fd) in
+      let k = store_i64(entry,16,kind) in let p = store_i64(entry,24,rt_getpid()) in
+      let live = store_i64(runtime_state(),128,load_i64(runtime_state(),128) + 1) in generation * 4096 + slot + 1
+
+effect fn rt_handle_fd(token:i64,kind:i64) -> i64
+  = if token <= 4096 then let saved = store_i32(rt_errno(),0,i32(9)) in -1 else
+    let slot = (token - 1) % 4096 in let generation = (token - 1) / 4096 in let table = rt_handles() in
+    let entry = ptr_add(table,slot * 32) in
+    if load_i64(entry,0) != generation || load_i64(entry,16) != kind || ((kind<4 || kind>=7) && load_i64(entry,24) != rt_getpid()) then
+      let saved = store_i32(rt_errno(),0,i32(9)) in -1 else load_i64(entry,8)
+
+effect fn rt_handle_drop(token:i64,kind:i64) -> unit
+  = let fd = rt_handle_fd(token,kind) in
+    if fd < 0 then noop() else
+      let table = rt_handles() in let entry = ptr_add(table,((token - 1) % 4096) * 32) in
+      let invalidate = store_i64(entry,0,0) in
+      let live = store_i64(runtime_state(),128,load_i64(runtime_state(),128) - 1) in
+      let closed = if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in noop()
+
+effect fn rt_handle_live() -> i64 = load_i64(runtime_state(),128)
+
+effect fn rt_handle_after_fork() -> unit
+  = let table = load_ptr(runtime_state(),112) in
+    if table == null() then noop() else
+      let done = loop(i=0) while i<4096
+        next(let entry=ptr_add(table,i*32) in
+          let close=if load_i64(entry,0)>0 && (load_i64(entry,16)<4 || load_i64(entry,16)>=7) then
+            let fd=if load_i64(entry,16)>=5 then rt_munmap(ptr_from_i64(load_i64(entry,8)),load_i64(ptr_from_i64(load_i64(entry,8)),0)) else rt_close(load_i64(entry,8)) in
+            let clear=store_i64(entry,0,0) in
+            store_i64(runtime_state(),128,load_i64(runtime_state(),128)-1) else noop() in i+1) yield i in noop()

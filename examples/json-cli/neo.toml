@@ -1,0 +1,8 @@
+[package]
+name = "neo-json"
+entry = "main.neo"
+
+[[test]]
+name = "standard-library"
+file = "../../tests/fixtures/stdlib.neo"
+stdout = "\"café 🚀\" -9223372036854775808\n"

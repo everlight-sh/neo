@@ -1,0 +1,12 @@
+import "std:p256"
+import "std:io"
+effect(fs,process) fn main(mode:i64) -> unit
+  = let raw=file_read(0,1048576) in check raw.ok in let input=raw.value in let size=len(input) in
+    let result=if mode==0 then p256_public(input) else if mode==1 then p256_ecdh(str_slice(input,0,32),str_slice(input,32,size)) else
+    if mode==2 then ecdsa_p256_sign_sha256(str_slice(input,0,32),str_slice(input,32,size)) else
+    if mode==3 then
+      let siglen=str_byte(input,65) in
+      if size<66 || siglen>size-66 || siglen<0 then bytes_error(22,"signature header",0) else
+      bytes_ok(if ecdsa_p256_verify_sha256(str_slice(input,0,65),str_slice(input,66+siglen,size),str_slice(input,66,66+siglen)) then "yes" else "no") else
+    bytes_ok(if p256_public_valid(input) then "yes" else "no") in
+    if !result.ok then process_exit(2) else let output=file_write(1,result.value) in check output.ok in noop()

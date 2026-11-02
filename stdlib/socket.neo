@@ -1,0 +1,80 @@
+import "std:net"
+import "std:cancel"
+
+resource type Socket = { token:i64 } drop socket_release
+
+effect(net,time) fn tcp_connect_ipv4_key(host:Arr u8 n,port:i64,deadline:i64,identity:i64) -> Socket
+  = if net_is_cancelled(identity) then Socket { token= -125 } else let ip=net_ipv4(host) in
+    if len(ip)!=4 || port<1 || port>65535 then Socket { token=-22 } else
+      let fd=rt_socket(2,1,0) in if fd<0 then Socket { token=0-i64(load_i32(rt_errno(),0)) } else
+      let nonblocking=rt_nonblock(fd) in
+      let address=stack_alloc(32) in let clear=memset(address,i32(0),32) in let family=rt_address(address) in
+      let high=store_u8(address,2,u8(port/256)) in let low=store_u8(address,3,u8(port%256)) in
+      let copied=loop(i=0) while i<4 next(check i>=0 && i<len(ip) in let stored=store_u8(address,4+i,u8(ip[i])) in i+1) yield i in
+      let connected=if nonblocking<0 then -1 else rt_connect(fd,address) in
+      let waited=if connected==0 then int_ok(1) else net_wait_cancel(fd,4,deadline,identity) in let ready=waited.ok in let error=if ready then rt_socket_error(fd) else waited.error.code in
+      if !ready || error!=0 then let closed=rt_close(fd) in Socket { token=0-(if error>0 then error else 5) } else
+        Socket { token=rt_handle_new(fd,2) }
+effect(net) fn socket_status(socket:Socket) -> IntResult
+  = if socket.token<0 then int_error(0-socket.token,"socket connection failed",0) else
+    let fd=rt_handle_fd(socket.token,2) in if fd<0 then int_error(9,"socket owner is no longer live",0) else int_ok(0)
+fn socket_identity(socket:Socket) -> i64 = socket.token
+private effect(net) fn socket_release(socket:Socket) -> unit = rt_handle_drop(socket.token,2)
+effect(net,time) fn socket_write(socket:Socket,bytes:Arr u8 n,deadline:i64) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then int_error(9,"socket owner is no longer live",0) else net_send(fd,bytes,deadline)
+effect(net,time) fn socket_read(socket:Socket,deadline:i64) -> BytesResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then bytes_error(9,"socket owner is no longer live",0) else net_receive_chunk(fd,deadline)
+
+; Nonblocking operations are suitable for cooperative task steps. EAGAIN is a
+; typed error (rt_again()); callers yield and retry rather than blocking a task.
+effect(net) fn socket_try_read(socket:Socket,limit:i64) -> BytesResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then bytes_error(9,"socket owner is no longer live",0) else
+    if limit<1 || limit>65536 then bytes_error(22,"invalid read bound",0) else
+      let buffer=ax_alloc(limit) in let count=rt_read(fd,buffer,limit) in
+      let result=if count<0 then bytes_error(i64(load_i32(rt_errno(),0)),"nonblocking socket read",0) else
+        check count>=0 && count<=limit in bytes_ok(view(buffer,count)) in let freed=ax_release(buffer) in result
+effect(net) fn socket_try_write(socket:Socket,bytes:Arr u8 n,offset:i64) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then int_error(9,"socket owner is no longer live",0) else
+    if offset<0 || offset>n then int_error(22,"invalid write offset",0) else
+      let count=rt_send(fd,ptr_add(data(bytes),offset),n-offset) in
+      if count<0 then int_error(i64(load_i32(rt_errno(),0)),"nonblocking socket write",offset) else int_ok(count)
+effect(net) fn socket_wait_ready(socket:Socket,events:i64,milliseconds:i64) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in
+    if fd<0 then int_error(9,"socket owner is no longer live",0) else
+    if events!=1 && events!=4 || milliseconds<0 || milliseconds>2147483647 then int_error(22,"invalid socket wait",0) else
+      let result=rt_wait_ready(fd,events,milliseconds) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"socket wait failed",0) else int_ok(result)
+
+effect(net,time) fn tcp_connect_ipv4(host:Arr u8 n,port:i64,deadline:i64) -> Socket = tcp_connect_ipv4_key(host,port,deadline,0)
+effect(net,time) fn tcp_connect_ipv4_cancel(host:Arr u8 n,port:i64,deadline:i64,cancellation:Cancellation) -> Socket
+  = tcp_connect_ipv4_key(host,port,deadline,cancellation_identity(cancellation))
+
+resource type Listener = { token:i64 } drop listener_release
+effect(net) fn tcp_listen_ipv4(host:Arr u8 n,port:i64,backlog:i64) -> Listener
+  = let ip=net_ipv4(host) in if len(ip)!=4 || port<0 || port>65535 || backlog<1 || backlog>4096 then Listener { token= -22 } else
+    let fd=rt_socket(2,1,0) in if fd<0 then Listener { token=0-i64(load_i32(rt_errno(),0)) } else
+    let address=stack_alloc(32) in let clear=memset(address,i32(0),32) in let family=rt_address(address) in
+    let high=store_u8(address,2,u8(port/256)) in let low=store_u8(address,3,u8(port%256)) in
+    let copied=loop(i=0) while i<4 next(check i>=0 && i<len(ip) in let saved=store_u8(address,4+i,u8(ip[i])) in i+1) yield i in
+    let option=stack_alloc(8) in let set=store_i32(option,0,i32(1)) in let reuse=rt_setsockopt(fd,rt_socket_level(),rt_reuseaddr(),option,4) in
+    let bound=rt_bind(fd,address,16) in let listen=if bound<0 then -1 else rt_listen(fd,backlog) in let nonblocking=if listen<0 then -1 else rt_nonblock(fd) in
+    if nonblocking<0 then let error=i64(load_i32(rt_errno(),0)) in let closed=rt_close(fd) in Listener { token=0-error } else Listener { token=rt_handle_new(fd,3) }
+private effect(net) fn listener_release(listener:Listener) -> unit = rt_handle_drop(listener.token,3)
+fn listener_identity(listener:Listener) -> i64 = listener.token
+effect(net) fn listener_status(listener:Listener) -> IntResult
+  = if listener.token<0 then int_error(0-listener.token,"listener failed",0) else
+    if rt_handle_fd(listener.token,3)<0 then int_error(9,"listener closed",0) else int_ok(0)
+effect(net) fn listener_try_accept(listener:Listener) -> Socket
+  = let fd=rt_handle_fd(listener.token,3) in if fd<0 then Socket { token= -9 } else
+    let client=rt_accept_fd(fd) in if client<0 then Socket { token=0-i64(load_i32(rt_errno(),0)) } else
+    let mode=rt_nonblock(client) in if mode<0 then let closed=rt_close(client) in Socket { token= -5 } else Socket { token=rt_handle_new(client,2) }
+effect(net,time) fn listener_accept(listener:Listener,deadline:i64,cancellation:Cancellation) -> Socket
+  = let fd=rt_handle_fd(listener.token,3) in if fd<0 then Socket { token= -9 } else
+    let client=loop(result=0-rt_again()) while result==0-rt_again() || result== -4 next(
+      let ready=net_wait_cancel(fd,1,deadline,cancellation_identity(cancellation)) in
+      if !ready.ok then 0-ready.error.code else
+        let accepted=rt_accept_fd(fd) in if accepted<0 then 0-i64(load_i32(rt_errno(),0)) else accepted) yield result in
+    if client<0 then Socket { token=client } else
+      let mode=rt_nonblock(client) in if mode<0 then let closed=rt_close(client) in Socket { token= -5 } else Socket { token=rt_handle_new(client,2) }
+effect(net) fn socket_close_write(socket:Socket) -> IntResult
+  = let fd=rt_handle_fd(socket.token,2) in if fd<0 then int_error(9,"socket closed",0) else
+    let result=rt_shutdown_write(fd) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"socket half-close failed",0) else int_ok(0)

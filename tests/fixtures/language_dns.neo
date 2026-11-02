@@ -1,0 +1,4 @@
+import "std:dns"
+effect(net,time,process,fs) fn main(port:i64{port>0 && port<65536}) -> unit
+  = let deadline=deadline_after(300) in let result=dns_lookup_at("test.neo","127.0.0.1",port,deadline.value) in
+    let output=print_out(if result.ok then concat(dns_address(result.value),"\n") else concat("error:",int_text(result.error.code),"\n")) in noop()

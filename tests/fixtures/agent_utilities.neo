@@ -1,0 +1,16 @@
+import "std:datetime"
+import "std:unicode"
+import "std:fs"
+import "std:math"
+effect(fs,env,time,process) fn main() -> unit
+  = let mode=int_parse(cli_arg(1).value) in let input=file_read(0,65536) in check mode.ok && input.ok in
+    let text=input.value in
+    let result=if mode.value==0 then let parsed=rfc3339_parse(text) in if parsed.ok then int_text(parsed.value) else "error" else
+      if mode.value==1 then let parsed=int_parse(text) in if !parsed.ok then "error" else let date=rfc3339_format(parsed.value) in if date.ok then date.value else "error" else
+      if mode.value==2 then let folded=unicode_casefold(text) in if folded.ok then folded.value else "error" else
+      if mode.value==3 then let words=unicode_fields(text) in loop(i=0,out="") while i<vec_len(words) next(i+1,match vec_get(words,i) { None => out,Some(word) => concat(out,word,"\n") }) yield out else
+      if mode.value==4 then let value=float_parse(text) in if !value.ok then "error" else let result=math_log1p(value.value) in if result.ok then float_text(result.value).value else "error" else
+      if mode.value==5 then let value=float_parse(text) in if !value.ok then "error" else let result=math_exp(value.value) in if result.ok then float_text(result.value).value else "error" else
+      if mode.value==6 then let path=cli_arg(2) in let written=fs_atomic_replace(path.value,text) in if written.ok then "stored" else concat("error:",int_text(written.error.code)) else
+        let value=int_parse(text) in if value.ok && unicode_word(value.value) then "true" else "false" in
+    let printed=print_out(result) in noop()

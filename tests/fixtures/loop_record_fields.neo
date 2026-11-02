@@ -1,0 +1,25 @@
+import "std:io"
+type LoopPair = {left:Arr i64 _,right:Arr i64 _,salt:i64}
+fn loop_pair_step(at:i64,value:i64,salt:i64,move left:Arr i64 n,move right:Arr i64 m) -> LoopPair
+  = check n>0 && m==n && at>=0 && at<n in LoopPair {left=set(left,at,value),right=set(right,at,0-value),salt=salt}
+fn loop_pair_run(move initial:LoopPair,rounds:i64) -> LoopPair
+  = loop(i=0,state=initial) while i<rounds next(i+1,check len(state.left)>0 in loop_pair_step(i%len(state.left),i+state.salt,state.salt,state.left,state.right)) yield state
+fn loop_left_run(move initial:LoopPair,rounds:i64) -> Arr i64 _
+  = loop(i=0,state=initial) while i<rounds next(i+1,check len(state.left)>0 in loop_pair_step(i%len(state.left),i+state.salt,state.salt,state.left,state.right)) yield state.left
+; The observer overlaps the moved argument; it must remain readable while the
+; helper mutates a detached copy. Its result is returned as the second field.
+fn loop_pair_observe(at:i64,move changed:Arr i64 n,borrow original:Arr i64 m) -> LoopPair
+  = check n>0 && n==m && at>=0 && at<n in let updated=set(changed,at,777) in
+    LoopPair {left=updated,right=original,salt=sum(i in 0..m) original[i]}
+fn loop_observed_run(move initial:LoopPair,rounds:i64) -> LoopPair
+  = loop(i=0,state=initial) while i<rounds next(i+1,check len(state.left)>0 in loop_pair_observe(i%len(state.left),state.left,state.left)) yield state
+effect(fs,unsafe) fn main(n:i64,rounds:i64,mode:i64) -> unit
+  = check n>0 && n<=8192 && rounds>=0 && rounds<=4096 && mode>=0 && mode<=3 in
+    let base=LoopPair {left=arr(i in 0..n) i,right=arr(i in 0..n) 0-i,salt=7} in
+    let retained=if mode==1 then base.left else arr(i in 0..0) 0 in
+    let before=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let output=if mode==2 then let left=loop_left_run(base,rounds) in LoopPair {left=left,right=arr(i in 0..0) 0,salt=7} else
+      if mode==3 then loop_observed_run(base,rounds) else loop_pair_run(base,rounds) in
+    let requests=load_i64(runtime_state(),64)-before in let allocated=load_i64(runtime_state(),80)-bytes in
+    let left=output.left in let right=output.right in
+    let shown=print_out(concat(int_text(sum(i in 0..len(left)) left[i])," ",int_text(sum(i in 0..len(right)) right[i])," ",int_text(sum(i in 0..len(retained)) retained[i])," ",int_text(output.salt)," ",int_text(requests)," ",int_text(allocated),"\n")) in noop()

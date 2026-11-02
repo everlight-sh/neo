@@ -1,0 +1,29 @@
+import "std:arena"
+import "std:file"
+import "std:vec"
+resource type Tracked = { number:i64 } drop tracked_release
+effect(fs) fn tracked_release(value:Tracked) -> unit = let printed=print_out(concat(int_text(value.number),"\n")) in noop()
+effect fn tracked(number:i64) -> Tracked = Tracked { number=number }
+fn inspect(value:Tracked) -> i64 = value.number
+effect(fs,net,process) fn exercise() -> Ref<Tracked>
+  = using arena=new_arena(8) in using a=tracked(1) in using b=tracked(2) in
+    let ra=adopt(a,arena) in let rb=adopt(b,arena) in
+    let refs=vec_push(vec_push(vec_empty::<Ref<Tracked>>(),ra),rb) in
+    let value=match vec_get(refs,0) { None => 0,Some(ref) => inspect(borrow_ref(ref)) } in check value==1 in
+    let closed=ref_release(ra) in let alive=ref_live(ra) in check !alive in
+    using c=tracked(3) in let rc=adopt(c,arena) in let stale_close=ref_release(ra) in let old_live=ref_live(ra) in let new_live=ref_live(rc) in check !old_live && new_live in
+    let closed=ref_release(rc) in rb
+resource type OwnedText = { text:Arr u8 _ } drop text_release
+effect(process) fn text_release(value:OwnedText) -> unit = noop()
+effect(process) fn text_new(n:i64) -> OwnedText = OwnedText { text=concat("hello:",int_text(n)) }
+fn text_length(value:OwnedText) -> i64 = len(value.text)
+effect(fs,net,process) fn recycled() -> unit
+  = using arena=new_arena(1) in
+    let done=loop(i=0) while i<10000 next(
+      using owned=text_new(i) in let held=adopt(owned,arena) in let size=text_length(borrow_ref(held)) in check size>=7 in
+      let closed=ref_release(held) in i+1) yield i in noop()
+effect(fs,net,env,process) fn main() -> unit
+  = let stress=recycled() in let reference=exercise() in let alive=ref_live(reference) in check !alive in
+    let path=cli_arg(1) in using arena=new_arena(8) in using file=open_file(if path.present then path.value else "/dev/null",0) in let held=adopt(file,arena) in
+    let status=file_status(borrow_ref(held)) in check status.ok in
+    let printed=print_out("arena OK\n") in noop()

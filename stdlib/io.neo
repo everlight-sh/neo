@@ -1,0 +1,142 @@
+import "std:strings"
+
+type WriteStep = { offset: i64, error: i64 }
+fn io_path_valid (path: Arr u8 n) -> bool = n > 0 && !str_find(path, "\0").present
+effect(fs) fn file_open (path: Arr u8 n, mode: i64) -> IntResult
+  = if !io_path_valid(path) then int_error(22, "invalid file path", 0) else
+    let terminated = concat(path, "\0") in
+    let fd = rt_open(data(terminated), if mode == 0 then 0 else if mode == 1 then rt_open_write() else if mode == 2 then rt_open_append() else rt_open_update()) in
+    if fd < 0 then int_error(i64(load_i32(rt_errno(), 0)), "open failed", 0) else int_ok(fd)
+effect(fs) fn file_close (fd: i64) -> IntResult
+  = let result = rt_close(fd) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "close failed", 0) else int_ok(0)
+effect(fs) fn file_lock (fd: i64, exclusive: bool) -> IntResult
+  = let result = loop (r = -1, retry = true) while retry
+      next (let clear = store_i32(rt_errno(), 0, i32(0)) in rt_flock(fd, if exclusive then 2 else 1), load_i32(rt_errno(), 0) == i32(4)) yield r in
+    if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "lock failed", 0) else int_ok(0)
+effect(fs) fn file_sync (fd: i64) -> IntResult
+  = let result = rt_fsync(fd) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "sync failed", 0) else int_ok(0)
+
+; File contents and retrieval metadata are durable before success. This does
+; not publish directory-entry changes; sync the containing directory as well.
+effect(fs) fn file_sync_data(fd:i64) -> IntResult
+  = let result=rt_sync_data(fd) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"data sync failed",0) else int_ok(0)
+effect(fs) fn file_seek (fd: i64, offset: i64) -> IntResult
+  = if offset < 0 then int_error(22, "negative seek offset", 0) else
+    let result = rt_seek(fd, offset) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "seek failed", 0) else int_ok(result)
+effect(process) fn process_fork () -> IntResult
+  = let pid = rt_fork() in if pid < 0 then int_error(5, "fork failed", 0) else int_ok(pid)
+effect(process) fn process_id () -> i64 = rt_getpid()
+effect(process) fn process_parent_id () -> i64 = rt_getppid()
+effect(process) fn process_wait(pid:i64) -> IntResult
+  = if pid<=0 then int_error(22,"invalid child process",0) else int_ok(rt_wait(pid))
+effect(fs) fn file_truncate (fd: i64, length: i64) -> IntResult
+  = if length < 0 then int_error(22, "negative file length", 0) else
+    let result = rt_truncate(fd, length) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "truncate failed", 0) else int_ok(0)
+effect(fs) fn file_read_chunk (fd: i64, limit: i64) -> BytesResult
+  = if limit < 1 || limit > 65536 then bytes_error(22, "invalid read size", 0) else
+    let buffer = ax_alloc(limit) in
+    let count = loop (r = -1, again = true) while again
+      next (let clear = store_i32(rt_errno(), 0, i32(0)) in rt_read(fd, buffer, limit),
+            load_i32(rt_errno(), 0) == i32(4)) yield r in
+    let result = if count < 0 then bytes_error(i64(load_i32(rt_errno(), 0)), "read failed", 0)
+      else let bounded = if count > limit then limit else count in
+        check bounded >= 0 in bytes_ok(view(buffer, bounded)) in
+    let released = ax_release(buffer) in result
+effect(fs) fn file_read (fd: i64, limit: i64) -> BytesResult
+  = if limit < 0 || limit > 67108864 then bytes_error(22, "invalid file size limit", 0) else
+    loop (chunk = file_read_chunk(fd, 65536), out = "")
+      while chunk.ok && len(chunk.value) > 0 && len(out) + len(chunk.value) <= limit
+      next (file_read_chunk(fd, 65536), concat(out, chunk.value))
+      yield if !chunk.ok then chunk else if len(out) + len(chunk.value) > limit then bytes_error(27, "file exceeds size limit", len(out)) else bytes_ok(out)
+effect(fs) fn file_write_step (fd: i64, text: Arr u8 n, offset: i64) -> WriteStep
+  = if offset < 0 || offset > n then WriteStep { offset = offset, error = 22 } else
+    let count = rt_write(fd, ptr_add(data(text), offset), n - offset) in
+    if count < 0 then let code = i64(load_i32(rt_errno(), 0)) in WriteStep { offset = offset, error = if code == 4 then 0 else code }
+    else if count == 0 then WriteStep { offset = offset, error = 5 } else WriteStep { offset = offset + count, error = 0 }
+effect(fs) fn file_write (fd: i64, text: Arr u8 n) -> IntResult
+  = if n == 0 then int_ok(0) else
+    loop (step = file_write_step(fd, text, 0)) while step.error == 0 && step.offset < n
+      next (file_write_step(fd, text, step.offset))
+      yield if step.error != 0 then int_error(step.error, "write failed", step.offset) else int_ok(step.offset)
+; One gathered writev for up to 16 parts. A short or interrupted gather
+; resumes with ordinary per-part writes from the exact byte reached, so the
+; result and error positions match writing each part in order.
+effect(fs) fn file_write_parts_each(fd:i64,borrow parts:Arr Arr u8 _ n,skip:i64) -> IntResult
+  = loop(i=0,before=0,result=int_ok(skip)) while result.ok && i<n next(i+1,check i>=0 && i<n in before+len(parts[i]),check i>=0 && i<n in
+      let size=len(parts[i]) in if before+size<=skip then result else
+      if size>9223372036854775807-result.value then int_error(27,"write size overflow",result.value) else
+      let from=if skip>before then skip-before else 0 in
+      let written=if from==0 then file_write(fd,parts[i]) else file_write(fd,byte_slice(parts[i],from,size)) in
+      if written.ok then int_ok(result.value+written.value) else
+        int_error(written.error.code,written.error.message,result.value+written.error.position)) yield result
+effect(fs) fn file_iov_store(iov:ptr,index:i64,borrow text:Arr u8 n) -> unit
+  = let base=store_ptr(iov,16*index,data(text)) in store_i64(iov,16*index+8,n)
+effect(fs) fn file_write_parts(fd:i64,borrow parts:Arr Arr u8 _ n) -> IntResult
+  = let total=loop(i=0,acc=0) while acc>=0 && i<n next(i+1,check i>=0 && i<n in if len(parts[i])>9223372036854775807-acc then -1 else acc+len(parts[i])) yield acc in
+    if total<0 then int_error(27,"write size overflow",0) else
+    if n<2 || n>16 then file_write_parts_each(fd,parts,0) else
+    let iov=stack_alloc(256) in
+    let filled=loop(i=0) while i<n next(check i>=0 && i<n in
+      let stored=file_iov_store(iov,i,parts[i]) in i+1) yield i in
+    let count=rt_writev(fd,iov,n) in
+    let gathered=if count<0 then 0 else count in
+    if count<0 && i64(load_i32(rt_errno(),0))!=4 then int_error(i64(load_i32(rt_errno(),0)),"write failed",0) else
+    if gathered==total then int_ok(total) else file_write_parts_each(fd,parts,gathered)
+; One read into buffer at offset; error -1 marks end of file before size.
+effect(fs) fn file_fill_step (fd: i64, buffer: ptr, size: i64, offset: i64) -> WriteStep
+  = let clear = store_i32(rt_errno(), 0, i32(0)) in let count = rt_read(fd, ptr_add(buffer, offset), size - offset) in
+    if count < 0 then let code = i64(load_i32(rt_errno(), 0)) in WriteStep { offset = offset, error = if code == 4 then 0 else code }
+    else if count == 0 then WriteStep { offset = offset, error = -1 }
+    else WriteStep { offset = if count > size - offset then size else offset + count, error = 0 }
+; Reads a file expected to hold size bytes into one buffer. A file that shrank
+; returns what it holds; one that grew continues in chunks up to limit.
+effect(fs) fn file_read_sized (fd: i64, size: i64, limit: i64) -> BytesResult
+  = let buffer = ax_alloc(size) in
+    let filled = loop (step = WriteStep { offset = 0, error = 0 }) while step.error == 0 && step.offset < size
+      next (file_fill_step(fd, buffer, size, step.offset)) yield step in
+    let got = filled.offset in
+    let head = if filled.error > 0 then bytes_error(filled.error, "read failed", got)
+      else check got >= 0 in bytes_ok(view(buffer, got)) in
+    let released = ax_release(buffer) in
+    if !head.ok || filled.error < 0 then head else
+    let rest = file_read(fd, limit - size) in
+    if !rest.ok then rest else if len(rest.value) == 0 then head else bytes_ok(concat(head.value, rest.value))
+; A regular file is read at its size in one buffer; anything without a usable
+; size (pipes, /proc files, empty files) is read in chunks as before.
+effect(fs) fn fs_read (path: Arr u8 n) -> BytesResult
+  = let opened = file_open(path, 0) in
+    if !opened.ok then bytes_error(opened.error.code, opened.error.message, 0) else
+      let size = rt_file_size(opened.value) in
+      let rewound = if size > 0 && size <= 16777216 then rt_seek(opened.value, 0) else -1 in
+      let result = if size > 16777216 then bytes_error(27, "file exceeds size limit", 0)
+        else if rewound == 0 then file_read_sized(opened.value, size, 16777216)
+        else if size > 0 then bytes_error(i64(load_i32(rt_errno(), 0)), "seek failed", 0)
+        else file_read(opened.value, 16777216) in
+      let closed = file_close(opened.value) in result
+effect(fs) fn fs_store (path: Arr u8 n, text: Arr u8 m, append: bool) -> IntResult
+  = let opened = file_open(path, if append then 2 else 1) in
+    if !opened.ok then opened else
+      let written = file_write(opened.value, text) in
+      let synced = if written.ok then file_sync(opened.value) else written in
+      let closed = file_close(opened.value) in if !written.ok then written else if !synced.ok then synced else if !closed.ok then closed else written
+effect(fs) fn fs_write (path: Arr u8 n, text: Arr u8 m) -> IntResult = fs_store(path, text, false)
+effect(fs) fn fs_append (path: Arr u8 n, text: Arr u8 m) -> IntResult = fs_store(path, text, true)
+
+effect(env) fn env_get (name: Arr u8 n) -> OptionBytes
+  = if n == 0 || str_find(name, "\0").present || str_find(name, "=").present then none_bytes() else
+    let label = concat(name, "\0") in let pointer = rt_getenv(data(label)) in
+    if pointer == null() then none_bytes() else let count = rt_cstrlen(pointer) in
+      check count >= 0 in some_bytes(view(pointer, count))
+effect(env) fn cli_arg (index: i64) -> OptionBytes
+  = let argc = load_i64(runtime_state(), 40) in let argv = load_ptr(runtime_state(), 48) in
+    if index < 0 || index >= argc then none_bytes() else
+      let pointer = load_ptr(argv, index * 8) in let count = rt_cstrlen(pointer) in
+      check count >= 0 in some_bytes(view(pointer, count))
+effect(process) fn process_exit (status: i64) -> unit = ax_exit(status)
+effect(fs) fn print_out (text: Arr u8 n) -> IntResult = file_write(1, text)
+effect(fs) fn print_error (text: Arr u8 n) -> IntResult = file_write(2, text)
+effect(time) fn time_unix_ms () -> IntResult
+  = let value = rt_now_ms() in if value < 0 then int_error(5, "clock failed", 0) else int_ok(value)
+effect(time) fn sleep_ms (milliseconds: i64) -> IntResult
+  = if milliseconds < 0 || milliseconds > 2147483647 then int_error(22, "invalid sleep duration", 0) else
+    let result = rt_wait_ready(-1, 0, milliseconds) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "sleep interrupted", 0) else int_ok(0)

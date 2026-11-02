@@ -1,0 +1,33 @@
+import "std:io"
+import "std:json"
+
+; A transaction owns one independently opened flock descriptor. Every mutation
+; is appended and fsynced before acknowledgment; close releases the lock.
+type Journal = { ok: bool, fd: i64, bytes: Arr u8 _, error: Error }
+fn journal_good_end (bytes: Arr u8 n) -> i64
+  = loop (i: i64{i >= 0} = 0, end = 0) while i < n next (i + 1, if bytes[i] == '\n' then i + 1 else end) yield end
+fn journal_line_end (bytes: Arr u8 n, start: i64) -> i64
+  = loop (i = start) while i < n && str_byte(bytes, i) != 10 next (i + 1) yield i
+fn journal_valid (bytes: Arr u8 n) -> bool
+  = loop (i = 0, valid = true) while valid && i < n
+      next (journal_line_end(bytes, i) + 1, json_parse(str_slice(bytes, i, journal_line_end(bytes, i))).ok) yield valid
+effect(fs) fn journal_fail (fd: i64, error: Error) -> Journal
+  = let closed = if fd >= 0 then file_close(fd) else int_ok(0) in Journal { ok = false, fd = -1, bytes = "", error = error }
+effect(fs) fn journal_begin (path: Arr u8 n) -> Journal
+  = let opened = file_open(path, 3) in if !opened.ok then journal_fail(-1, opened.error) else
+    let locked = file_lock(opened.value, true) in if !locked.ok then journal_fail(opened.value, locked.error) else
+      let read = file_read(opened.value, 16777216) in if !read.ok then journal_fail(opened.value, read.error) else
+        let end = journal_good_end(read.value) in let complete = str_slice(read.value, 0, end) in
+        if !journal_valid(complete) then journal_fail(opened.value, Error { code = 1, message = "corrupt committed journal record", position = 0 }) else
+          let repaired = if end == len(read.value) then int_ok(0) else file_truncate(opened.value, end) in
+          if !repaired.ok then journal_fail(opened.value, repaired.error) else
+            let positioned = file_seek(opened.value, end) in if !positioned.ok then journal_fail(opened.value, positioned.error) else
+              Journal { ok = true, fd = opened.value, bytes = complete, error = no_error() }
+effect(fs) fn journal_close (journal: Journal) -> IntResult = file_close(journal.fd)
+effect(fs) fn journal_commit (journal: Journal, entry: Arr u8 n) -> IntResult
+  = if !journal.ok then int_error(journal.error.code, journal.error.message, 0) else
+    if !json_parse(entry).ok then
+      let closed = journal_close(journal) in int_error(1, "journal entries must be one valid JSON line", 0)
+    else let written = file_write(journal.fd, concat(json_compact(entry), "\n")) in
+      let synced = if written.ok then file_sync(journal.fd) else written in
+      let closed = journal_close(journal) in if !written.ok then written else if !synced.ok then synced else if !closed.ok then closed else written

@@ -1,0 +1,16 @@
+; Decode a 1,000-order JSON array and fold every field; matches
+; bench/rust/src/typed_json.rs. The document is built once; each iteration
+; validates, indexes and reads it again through the dynamic JSON API.
+import "std:json"
+fn orders_append(move text:Arr u8 _,i:i64) -> Arr u8 _
+  = concat(text,if i==0 then "" else ",","{\"customer\":",int_text(i%8),",\"qty\":",int_text(i%17),",\"price\":3,\"name\":\"user",int_text(i),"\"}")
+fn orders_text(n:i64) -> Arr u8 _
+  = concat(loop(i=0,text="[") while i<n next(i+1,orders_append(text,i)) yield text,"]")
+fn orders_decode(borrow text:Arr u8 _) -> i64
+  = let parsed=json_parse(text) in if !parsed.ok then -1 else let rows=json_array_values(parsed.value) in
+    loop(i=0,total=0) while i<len(rows) next(i+1,check i>=0 && i<len(rows) in let row=rows[i] in
+      let qty=json_int(json_get(row,"qty").value) in let price=json_int(json_get(row,"price").value) in
+      let customer=json_int(json_get(row,"customer").value) in let name=json_text(json_get(row,"name").value) in
+      total+qty.value*price.value+customer.value+len(name.value)) yield total
+fn main(rows:i64{rows > 0, rows <= 1000000},iterations:i64{iterations > 0, iterations <= 1000000}) -> i64
+  = let text=orders_text(rows) in loop(k=0,total=0) while k<iterations next(k+1,total+orders_decode(text)) yield total

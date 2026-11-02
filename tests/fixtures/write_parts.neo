@@ -1,0 +1,7 @@
+import "std:io"
+effect(fs) fn main(mode:i64) -> unit
+  = let empty=file_write_parts(-1,arr(i in 0..0) "") in check empty.ok && empty.value==0 in
+    let parts=arr(i in 0..5) if i==0 then "" else if i==1 then "abc" else if i==2 then "defgh" else if i==3 then "" else "ij" in
+    let result=file_write_parts(1,parts) in
+    if mode==0 then check result.ok && result.value==10 in noop() else
+      check !result.ok && result.error.position==7 in let shown=print_error("partial 7\n") in noop()

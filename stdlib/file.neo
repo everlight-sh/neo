@@ -1,0 +1,25 @@
+import "std:io"
+
+resource type File = { token: i64 } drop file_release
+
+effect(fs) fn open_file(path:Arr u8 n,mode:i64) -> File
+  = if mode<0 || mode>3 then File { token=-22 } else let opened = file_open(path,mode) in
+    File { token = if opened.ok then rt_handle_new(opened.value,1) else 0 - opened.error.code }
+
+effect(fs) fn file_status(file:File) -> IntResult
+  = if file.token < 0 then int_error(0 - file.token,"file open failed",0) else
+    let fd = rt_handle_fd(file.token,1) in if fd < 0 then int_error(9,"file owner is no longer live",0) else int_ok(0)
+
+private effect(fs) fn file_release(file:File) -> unit = rt_handle_drop(file.token,1)
+
+effect(fs) fn read_file(file:File,limit:i64) -> BytesResult
+  = let fd = rt_handle_fd(file.token,1) in if fd < 0 then bytes_error(9,"file owner is no longer live",0) else file_read(fd,limit)
+
+effect(fs) fn write_file(file:File,text:Arr u8 n) -> IntResult
+  = let fd = rt_handle_fd(file.token,1) in if fd < 0 then int_error(9,"file owner is no longer live",0) else file_write(fd,text)
+
+effect(fs) fn seek_file(file:File,offset:i64) -> IntResult
+  = let fd = rt_handle_fd(file.token,1) in if fd < 0 then int_error(9,"file owner is no longer live",0) else file_seek(fd,offset)
+
+effect(fs) fn sync_file(file:File) -> IntResult
+  = let fd = rt_handle_fd(file.token,1) in if fd < 0 then int_error(9,"file owner is no longer live",0) else file_sync(fd)

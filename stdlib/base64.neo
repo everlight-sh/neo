@@ -1,0 +1,35 @@
+import "std:strings"
+private fn base64_digit(value:i64,url:bool) -> u8
+  = check value>=0 && value<64 in if value<26 then u8(65+value) else if value<52 then u8(97+value-26) else
+    if value<62 then u8(48+value-52) else if value==62 then if url then '-' else '+' else if url then '_' else '/'
+fn base64_encode_mode(bytes:Arr u8 n,url:bool,padding:bool) -> Arr u8 _
+  = check n<=4611686018427387900 in let length=(n/3)*4+(if n%3==0 then 0 else if padding then 4 else n%3+1) in
+    arr(i in 0..length) let group=i/4*3 in let part=i%4 in
+      check group>=0 && group<n in let a=i64(bytes[group]) in
+      let b=if group+1<n then i64(bytes[group+1]) else 0 in let c=if group+2<n then i64(bytes[group+2]) else 0 in
+      if part==0 then base64_digit(a/4,url) else if part==1 then base64_digit((a%4)*16+b/16,url) else
+      if part==2 then if group+1>=n then '=' else base64_digit((b%16)*4+c/64,url) else
+        if group+2>=n then '=' else base64_digit(c%64,url)
+fn base64_encode(bytes:Arr u8 n) -> Arr u8 _ = base64_encode_mode(bytes,false,true)
+fn base64url_encode(bytes:Arr u8 n) -> Arr u8 _ = base64_encode_mode(bytes,true,false)
+private fn base64_value(byte:u8,url:bool) -> i64
+  = let b=i64(byte) in if b>=65 && b<=90 then b-65 else if b>=97 && b<=122 then b-97+26 else
+    if b>=48 && b<=57 then b-48+52 else if byte==(if url then '-' else '+') then 62 else if byte==(if url then '_' else '/') then 63 else -1
+fn base64_decode_mode(text:Arr u8 n,url:bool,padded:bool) -> BytesResult
+  = let pads=if n>0 && text[n-1]=='=' then if n>1 && text[n-2]=='=' then 2 else 1 else 0 in
+    let useful=n-pads in
+    let valid=(!padded || n%4==0) && (padded || pads==0) && useful%4!=1 && pads<=2 &&
+      (pads==0 || useful%4==4-pads) && loop(i=0,ok=true) while ok && i<useful
+        next(i+1,check i>=0 && i<n in base64_value(text[i],url)>=0) yield ok in
+    if !valid then bytes_error(22,"invalid base64 encoding",0) else
+    let tail=if useful==0 then 0 else base64_value(text[useful-1],url) in
+    if useful%4==2 && tail%16!=0 || useful%4==3 && tail%4!=0 then bytes_error(22,"noncanonical base64 tail",useful) else
+      let length=(useful/4)*3+(if useful%4==0 then 0 else useful%4-1) in check length>=0 in
+      bytes_ok(arr(i in 0..length)
+        let at=i/3*4 in let part=i%3 in check at>=0 && at+1<n in
+        let a=base64_value(text[at],url) in let b=base64_value(text[at+1],url) in
+        let c=if at+2<useful then check at+2>=0 && at+2<n in base64_value(text[at+2],url) else 0 in
+        let d=if at+3<useful then check at+3>=0 && at+3<n in base64_value(text[at+3],url) else 0 in
+        u8(if part==0 then a*4+b/16 else if part==1 then (b%16)*16+c/4 else (c%4)*64+d))
+fn base64_decode(text:Arr u8 n) -> BytesResult = base64_decode_mode(text,false,true)
+fn base64url_decode(text:Arr u8 n) -> BytesResult = base64_decode_mode(text,true,false)

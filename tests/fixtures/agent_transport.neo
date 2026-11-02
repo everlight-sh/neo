@@ -1,0 +1,25 @@
+import "std:https_client"
+import "std:sse"
+import "std:debug"
+effect(fs,net,env,time,process) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let root_arg=cli_arg(2) in check port.ok in
+    using arena=new_arena(8) in let timer=deadline_after(3000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port.value,timer.value) in let connected=socket_status(socket) in check connected.ok in
+    let socket_ref=adopt(socket,arena) in
+    using cancel=new_cancellation() in let cancellation=adopt(cancel,arena) in
+    let roots=if root_arg.present then let der=fs_read(root_arg.value) in check der.ok in arr(i in 0..1) x509_parse(der.value) else arr(i in 0..0) x509_parse("") in
+    let headers=arr(i in 0..2) if i==0 then HttpHeader { name="Authorization",value="Bearer test-token" } else HttpHeader { name="Content-Type",value="application/json" } in
+    let output=if root_arg.present then
+      using session=tls_connect(borrow_ref(socket_ref),"localhost",roots,timer.value) in
+      let session_ref=adopt(session,arena) in
+      let io=http_tls_transport(socket_ref,session_ref) in
+      let reader=http_start_io(io,"POST","/stream","localhost","{\"question\":42}",timer.value,1048576,headers) in
+      loop(state=reader,events=sse_new(),out="") while state.ok && !state.done next(
+        http_read_next_io(io,state,timer.value),sse_feed(events,state.chunk,65536).state,
+        let fed=sse_feed(events,state.chunk,65536) in loop(i=0,text=out) while i<vec_len(fed.events) next(i+1,match vec_get(fed.events,i) { None => text,Some(event) => concat(text,event.data,"\n") }) yield text)
+        yield check state.ok in let fed=sse_feed(events,state.chunk,65536) in
+          loop(i=0,text=out) while i<vec_len(fed.events) next(i+1,match vec_get(fed.events,i) { None => text,Some(event) => concat(text,event.data,"\n") }) yield text else
+      let io=http_plain_transport(socket_ref,cancellation) in
+      let reader=http_start_io(io,"POST","/stream","localhost","{\"question\":42}",timer.value,1048576,headers) in
+      loop(state=reader,out="") while state.ok && !state.done next(http_read_next_io(io,state,timer.value),concat(out,state.chunk)) yield check state.ok in concat(out,state.chunk) in
+    let printed=print_out(output) in noop()

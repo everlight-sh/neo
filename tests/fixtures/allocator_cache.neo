@@ -1,0 +1,46 @@
+import "std:io"
+; The large-block contract of runtime/core.neo, for both heap kinds (ax_allocate's
+; second argument: false = shared pages, true = private pages).
+; - A freed mapped block stays on its class free list while the retained blocks
+;   of its heap kind total at most 64 MiB, and the next allocation of the class
+;   takes it back.
+; - A freed block beyond that cap is parked, one per heap kind (runtime state
+;   136 shared, 144 private), and the next allocation of its size class takes
+;   it back. Parking unmaps the block parked before it, and every new allocator
+;   mapping (a large block of another class or a slab refill) first unmaps both
+;   parked blocks, so resident memory never exceeds what was live before the free.
+; - Forked children forget the parent's parked blocks.
+effect fn parked(is_private:bool) -> ptr = load_ptr(runtime_state(),if is_private then 144 else 136)
+effect fn nothing_parked() -> bool = parked(false)==null() && parked(true)==null()
+; 100 MB and 200 MB requests: the 128 MiB and 256 MiB classes, both beyond the cap.
+effect fn heap_kind(is_private:bool) -> unit
+  = let a=ax_allocate(100000000,is_private) in let released=ax_release(a) in
+    let mine=parked(is_private) in let other=parked(!is_private) in check mine==a && other==null() in
+    let b=ax_allocate(100000000,is_private) in let taken=parked(is_private) in check b==a && taken==null() in
+    let c=ax_allocate(100000000,is_private) in check c!=b in
+    let first=ax_release(b) in let second=ax_release(c) in let replaced=parked(is_private) in check replaced==c in
+    let d=ax_allocate(200000000,is_private) in let evicted=nothing_parked() in check evicted in
+    let released=ax_release(d) in let latest=parked(is_private) in check latest==d in
+    ; Fresh slab chunks: three 32 KiB blocks need at least one 64 KiB refill.
+    let s1=ax_allocate(32768,is_private) in let s2=ax_allocate(32768,is_private) in let s3=ax_allocate(32768,is_private) in
+    let refilled=nothing_parked() in check refilled in
+    let r1=ax_release(s1) in let r2=ax_release(s2) in let r3=ax_release(s3) in
+    ; Under the cap the block goes to its class list, not the parking slot.
+    let m=ax_allocate(8388608,is_private) in let released=ax_release(m) in let listed=nothing_parked() in check listed in
+    let again=ax_allocate(8388608,is_private) in check again==m in
+    let released=ax_release(again) in noop()
+effect fn main() -> unit
+  = let shared_kind=heap_kind(false) in let private_kind=heap_kind(true) in
+    ; Parking one kind leaves the other kind's block; a new mapping unmaps both.
+    let s=ax_allocate(100000000,false) in let p=ax_allocate(100000000,true) in
+    let rs=ax_release(s) in let rp=ax_release(p) in
+    let ps=parked(false) in let pp=parked(true) in check ps==s && pp==p in
+    let mapped=ax_allocate(16777216,false) in let evicted=nothing_parked() in check evicted in
+    let released=ax_release(mapped) in
+    let kept=ax_allocate(100000000,false) in let released=ax_release(kept) in
+    let held=parked(false) in check held==kept in
+    let forked=process_fork() in check forked.ok in
+    if forked.value==0 then let forgotten=nothing_parked() in let checked=(check forgotten in noop()) in noop() else
+      let waited=process_wait(forked.value) in check waited.ok && waited.value==0 in
+      let still=parked(false) in check still==kept in
+      let printed=print_out("allocator cache OK\n") in noop()

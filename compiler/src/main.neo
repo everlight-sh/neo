@@ -1,0 +1,21 @@
+; The Neo compiler, written in Neo. So far it parses and loads modules:
+; `neoc parse FILE` and `neoc modules ROOT FILE` print the canonical dumps that
+; compiler/tests/ast_dump.py and modules_dump.py print from the Python compiler
+; (neoc/). ROOT holds stdlib/ and runtime/.
+import "std:io"
+import "std:strings"
+import "text.neo"
+import "dump.neo"
+import "modules.neo"
+
+effect fn parse_file(borrow path:Arr u8 _) -> unit
+  = let source=fs_read(path) in
+    if !source.ok || !utf8_valid(source.value) then let shown=print_out("(ioerror)\n") in process_exit(1)
+    else let shown=print_out(dp_source(tx_newlines(source.value))) in noop()
+
+effect fn main() -> unit
+  = let command=cli_arg(1) in let first=cli_arg(2) in let second=cli_arg(3) in
+    if command.present && first.present && tx_equal(command.value,"parse") then parse_file(first.value)
+    else if command.present && first.present && second.present && tx_equal(command.value,"modules") then
+      let shown=print_out(md_dump(md_load(first.value,second.value))) in noop()
+    else let shown=print_error("usage: neoc parse FILE | neoc modules ROOT FILE\n") in process_exit(2)

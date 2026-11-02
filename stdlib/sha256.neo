@@ -1,0 +1,58 @@
+import "std:strings"
+
+type Sha256State = { a:i64,b:i64,c:i64,d:i64,e:i64,f:i64,g:i64,h:i64 }
+fn crypto_equal(a:Arr u8 n,b:Arr u8 m) -> bool
+  = loop(i=0,difference=bit_xor(n,m)) while i<n
+      next(i+1,check i>=0 && i<n in bit_or(difference,bit_xor(i64(a[i]),if i<m then check i>=0 && i<m in i64(b[i]) else 0))) yield difference==0
+private fn sha_u32(value:i64) -> i64 = bit_and(value,4294967295)
+private fn sha_rotr(value:i64,bits:i64) -> i64 = sha_u32(bit_or(shift_right(value,bits),shift_left(value,32-bits)))
+private fn sha_small0(value:i64) -> i64 = bit_xor(bit_xor(sha_rotr(value,7),sha_rotr(value,18)),shift_right(value,3))
+private fn sha_small1(value:i64) -> i64 = bit_xor(bit_xor(sha_rotr(value,17),sha_rotr(value,19)),shift_right(value,10))
+private fn sha_round(s:Sha256State,word:i64,constant:i64) -> Sha256State
+  = let choose=bit_xor(bit_and(s.e,s.f),bit_and(bit_xor(s.e,4294967295),s.g)) in
+    let majority=bit_xor(bit_xor(bit_and(s.a,s.b),bit_and(s.a,s.c)),bit_and(s.b,s.c)) in
+    let sum0=bit_xor(bit_xor(sha_rotr(s.a,2),sha_rotr(s.a,13)),sha_rotr(s.a,22)) in
+    let sum1=bit_xor(bit_xor(sha_rotr(s.e,6),sha_rotr(s.e,11)),sha_rotr(s.e,25)) in
+    let first=sha_u32(s.h+sum1+choose+constant+word) in let second=sha_u32(sum0+majority) in
+    Sha256State { a=sha_u32(first+second),b=s.a,c=s.b,d=s.c,e=sha_u32(s.d+first),f=s.e,g=s.f,h=s.g }
+private fn sha_word(s:Sha256State,index:i64) -> i64
+  = if index==0 then s.a else if index==1 then s.b else if index==2 then s.c else if index==3 then s.d else if index==4 then s.e else if index==5 then s.f else if index==6 then s.g else s.h
+private fn sha_add(a:Sha256State,b:Sha256State) -> Sha256State
+  = Sha256State { a=sha_u32(a.a+b.a),b=sha_u32(a.b+b.b),c=sha_u32(a.c+b.c),d=sha_u32(a.d+b.d),e=sha_u32(a.e+b.e),f=sha_u32(a.f+b.f),g=sha_u32(a.g+b.g),h=sha_u32(a.h+b.h) }
+private fn sha_block(state:Sha256State,text:Arr u8 n,block:i64,padded:i64) -> Sha256State
+  = check n<=1152921504606846975 && block>=0 && block<=144115188075855870 && padded>=8 in
+    let initial=arr(j in 0..64) if j>=16 then 0 else
+      loop(k=0,value=0) while k<4
+        next(k+1,let at=block*64+j*4+k in
+          let byte=if at<n then check at>=0 && at<n in i64(text[at]) else if at==n then 128 else if at>=padded-8 then bit_and(shift_right(n*8,(padded-1-at)*8),255) else 0 in
+          value*256+byte) yield value in
+    let words=loop(i=16,words=initial) while i<64
+      next(i+1,check i>=16 && i<64 && len(words)==64 in
+        set(words,i,sha_u32(sha_small1(words[i-2])+words[i-7]+sha_small0(words[i-15])+words[i-16]))) yield words in
+    let result=loop(i=0,state=state) while i<64
+      next(i+1,check i>=0 && i<len(words) in sha_round(state,words[i],sha_constant(i))) yield state in sha_add(state,result)
+fn sha256(text:Arr u8 n) -> Arr u8 _
+  = check n<=1152921504606846975 in let padded=(n+72)/64*64 in
+    let initial=Sha256State { a=1779033703,b=3144134277,c=1013904242,d=2773480762,e=1359893119,f=2600822924,g=528734635,h=1541459225 } in
+    let result=loop(i=0,state=initial) while i<padded/64 next(i+1,sha_block(state,text,i,padded)) yield state in
+    arr(i in 0..32) u8(shift_right(sha_word(result,i/4),(3-i%4)*8))
+fn hmac_sha256(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _
+  = let bounded=if n>64 then sha256(key) else key in
+    let inner=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,54)) in
+    let outer=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,92)) in
+    sha256(concat(outer,sha256(concat(inner,message))))
+type HkdfState = { previous:Arr u8 _,out:Arr u8 _,index:i64 }
+private fn hkdf_step(move state:HkdfState,key:Arr u8 n,info:Arr u8 m) -> HkdfState
+  = let block=hmac_sha256(key,concat(state.previous,info,arr(i in 0..1) u8(state.index))) in
+    HkdfState { previous=block,out=concat(state.out,block),index=state.index+1 }
+fn hkdf_extract(salt:Arr u8 n,key:Arr u8 m) -> Arr u8 _ = hmac_sha256(salt,key)
+fn hkdf_expand(key:Arr u8 n,info:Arr u8 m,count:i64{count>=0 && count<=8160}) -> Arr u8 _
+  = let result=loop(state=HkdfState { previous="",out="",index=1 }) while len(state.out)<count next(hkdf_step(state,key,info)) yield state.out in str_slice(result,0,count)
+fn hkdf_label(key:Arr u8 n,label:Arr u8 m,context:Arr u8 k,count:i64{count>=0 && count<=8160}) -> Arr u8 _
+  = check m<=249 && k<=255 in
+    let header=arr(i in 0..3) u8(if i==0 then count/256 else if i==1 then count%256 else m+6) in
+    hkdf_expand(key,concat(header,"tls13 ",label,arr(i in 0..1) u8(k),context),count)
+
+private fn sha_constant(index:i64) -> i64
+  = let data="\x42\x8a\x2f\x98\x71\x37\x44\x91\xb5\xc0\xfb\xcf\xe9\xb5\xdb\xa5\x39\x56\xc2\x5b\x59\xf1\x11\xf1\x92\x3f\x82\xa4\xab\x1c\x5e\xd5\xd8\x07\xaa\x98\x12\x83\x5b\x01\x24\x31\x85\xbe\x55\x0c\x7d\xc3\x72\xbe\x5d\x74\x80\xde\xb1\xfe\x9b\xdc\x06\xa7\xc1\x9b\xf1\x74\xe4\x9b\x69\xc1\xef\xbe\x47\x86\x0f\xc1\x9d\xc6\x24\x0c\xa1\xcc\x2d\xe9\x2c\x6f\x4a\x74\x84\xaa\x5c\xb0\xa9\xdc\x76\xf9\x88\xda\x98\x3e\x51\x52\xa8\x31\xc6\x6d\xb0\x03\x27\xc8\xbf\x59\x7f\xc7\xc6\xe0\x0b\xf3\xd5\xa7\x91\x47\x06\xca\x63\x51\x14\x29\x29\x67\x27\xb7\x0a\x85\x2e\x1b\x21\x38\x4d\x2c\x6d\xfc\x53\x38\x0d\x13\x65\x0a\x73\x54\x76\x6a\x0a\xbb\x81\xc2\xc9\x2e\x92\x72\x2c\x85\xa2\xbf\xe8\xa1\xa8\x1a\x66\x4b\xc2\x4b\x8b\x70\xc7\x6c\x51\xa3\xd1\x92\xe8\x19\xd6\x99\x06\x24\xf4\x0e\x35\x85\x10\x6a\xa0\x70\x19\xa4\xc1\x16\x1e\x37\x6c\x08\x27\x48\x77\x4c\x34\xb0\xbc\xb5\x39\x1c\x0c\xb3\x4e\xd8\xaa\x4a\x5b\x9c\xca\x4f\x68\x2e\x6f\xf3\x74\x8f\x82\xee\x78\xa5\x63\x6f\x84\xc8\x78\x14\x8c\xc7\x02\x08\x90\xbe\xff\xfa\xa4\x50\x6c\xeb\xbe\xf9\xa3\xf7\xc6\x71\x78\xf2" in
+    loop(j=0,value=0) while j<4 next(j+1,value*256+str_byte(data,index*4+j)) yield value

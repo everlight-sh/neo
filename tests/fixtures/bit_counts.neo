@@ -1,0 +1,5 @@
+import "std:process"
+import "std:strings"
+effect(fs,env) fn main() -> unit
+  = let arg=cli_arg(1) in let n=int_parse(arg.value).value in
+    let shown=print_out(concat(int_text(count_trailing_zeros(n)),"\n")) in noop()

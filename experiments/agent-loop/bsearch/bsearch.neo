@@ -1,0 +1,32 @@
+; Binary search over the sorted array a[i] = 3 * i for i in 0..n.
+;
+; `midpoint` computes lo + (hi - lo) / 2, but integer division is opaque to
+; the checker (no built-in facts about its result), so the raw division has
+; no provable relation to lo/hi. Clamping it through an if/else exposes the
+; fact instead: in the else-of-else branch the negated conditions give
+; lo <= m <= hi directly, which is enough to prove the return refinement.
+;
+; `search`'s loop keeps the invariant 0 <= lo and hi < n, so whenever the
+; loop body runs (lo <= hi, from the while condition), midpoint's return
+; refinement lo <= mid <= hi puts mid in [0, n), proving a[mid] in range.
+
+fn midpoint (lo : i64{lo >= 0}, hi : i64{lo <= hi}) -> i64 {lo <= result, result <= hi}
+  = let m = lo + (hi - lo) / 2 in
+    if m < lo then lo else if m > hi then hi else m
+
+fn search (a : Arr i64 n, t : i64) -> i64
+  = loop (lo : i64{lo >= 0} = 0, hi : i64{hi < n} = n - 1, r = -1)
+      while r == -1 && lo <= hi
+      next (
+        let mid = midpoint(lo, hi) in
+          if a[mid] == t then lo else if a[mid] < t then mid + 1 else lo,
+        let mid = midpoint(lo, hi) in
+          if a[mid] == t then hi else if a[mid] < t then hi else mid - 1,
+        let mid = midpoint(lo, hi) in
+          if a[mid] == t then mid else -1
+      )
+      yield r
+
+fn main (n : i64{n >= 1}, t : i64) -> i64
+  = let a = arr(i in 0..n) 3 * i in
+    search(a, t)

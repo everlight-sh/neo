@@ -1,0 +1,42 @@
+import "std:json"
+import "std:io"
+fn construct_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn construct_case(input:Json) -> Json
+  = let items=json_array_values(json_get(input,"values").value) in let key_values=json_array_values(json_get(input,"keys").value) in
+    let keys=arr(i in 0..len(key_values)) check i>=0 && i<len(key_values) in json_text(key_values[i]).value in
+    let object=json_value_object(keys,items) in let list=json_value_array(items) in
+    let key=json_text(json_get(input,"key").value).value in let replacement=json_get(input,"replacement").value in
+    let built=loop(i=0,out=json_array_builder()) while i<len(items) next(i+1,check i>=0 && i<len(items) in json_array_builder_push(out,items[i])) yield out in
+    let saved=built in let appended=json_array_builder_push(built,replacement) in
+    let streamed=json_array_builder_finish(saved) in let extended=json_array_builder_finish(appended) in
+    check streamed.ok && extended.ok && str_equal(streamed.value.raw,list.value.raw) && json_array_len(extended.value)==len(items)+1 in
+    let updated=json_object_set(object.value,key,replacement) in
+    let alias=updated.value.raw in let original=object.value.raw in
+    let mutation=if len(alias)==0 then "" else set(alias,0,'X') in
+    let quoted=json_value_string(json_text(json_get(input,"text").value).value) in
+    let nested=json_parse(json_text(json_get(input,"nested").value).value) in
+    let wrapped=json_value_array(arr(i in 0..1) nested.value) in let parsed_wrapper=json_parse(concat("[",nested.value.raw,"]")) in
+    let missing=json_value_array(arr(i in 0..1) json_none().value) in
+    let streaming_depth=json_array_builder_finish(json_array_builder_push(json_array_builder(),nested.value)) in
+    let streaming_missing=json_array_builder_finish(json_array_builder_push(json_array_builder(),json_none().value)) in
+    check streaming_depth.ok==wrapped.ok && !streaming_missing.ok in
+    let all_keys=json_object_keys(updated.value) in let key_count=len(all_keys) in check key_count>=0 in
+    let atom=json_get_atom(updated.value,key) in
+    let indexed=arr(i in 0..len(items)) json_object_value_at(object.value,i).value in
+    let indexed_keys=arr(i in 0..len(items)) json_value_string(json_object_key_at(object.value,i).value).value in
+    check !json_object_value_at(object.value,-1).present && !json_object_value_at(object.value,len(items)).present &&
+      !json_object_key_at(object.value,-1).ok && !json_object_key_at(object.value,len(items)).ok && !json_object_value_at(json_value_null(),0).present in
+    json_value_object(arr(i in 0..16) if i==0 then "object" else if i==1 then "array" else if i==2 then "updated" else if i==3 then "keys" else if i==4 then "got" else if i==5 then "quoted" else if i==6 then "alias" else if i==7 then "nested" else if i==8 then "wrapped" else if i==9 then "parsedWrapper" else if i==10 then "missingRejected" else if i==11 then "atomKind" else if i==12 then "atomInteger" else if i==13 then "atomValue" else if i==14 then "indexed" else "indexedKeys",
+      arr(i in 0..16) if i==0 then object.value else if i==1 then list.value else if i==2 then updated.value else if i==3 then json_value_array(arr(j in 0..key_count)
+          check j>=0 && j<key_count in json_value_string(all_keys[j]).value).value
+        else if i==4 then json_get(updated.value,key).value else if i==5 then quoted.value
+        else if i==6 then json_value_bool(str_byte(original,0)==123 && str_byte(updated.value.raw,0)==123 && str_byte(mutation,0)==88)
+        else if i==7 then json_value_bool(nested.ok) else if i==8 then json_value_bool(wrapped.ok) else if i==9 then json_value_bool(parsed_wrapper.ok) else if i==10 then json_value_bool(!missing.ok)
+        else if i==11 then json_value_int(atom.kind) else if i==12 then json_value_bool(atom.integer) else if i==13 then json_value_int(atom.value) else if i==14 then json_value_array(indexed).value else json_value_array(indexed_keys).value).value
+effect(fs) fn main() -> unit
+  = let read=file_read(0,16777216) in let text=read.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let input=json_parse(construct_decode(str_slice(text,at,end))) in let result=construct_case(input.value) in
+      let shown=print_out(concat(result.raw,"\n")) in end+1) yield at in noop()

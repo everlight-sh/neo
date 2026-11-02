@@ -1,0 +1,41 @@
+{
+  "translator_tests": 31,
+  "compiler_unit_tests": 28,
+  "optimized_native_parity": {
+    "inputs": 1000,
+    "platforms": [
+      "macOS ARM64",
+      "Linux ARM64"
+    ],
+    "worker_counts": [
+      1,
+      4
+    ],
+    "concurrency_and_pipelining": "passed"
+  },
+  "linux_empty_root": "passed",
+  "linux_undefined_imports": 0,
+  "core_compiler_runtime_changed": false,
+  "binaries": {
+    "baseline-macos": {
+      "bytes": 34880,
+      "sha256": "a885d7a53f96d2336ddb1d126a7660bd4a88b87c18bf07d00eb96d0bdc6ffd73"
+    },
+    "optimized-macos": {
+      "bytes": 34848,
+      "sha256": "8da4af61b8adc992892276d2e0aa73a0514139c5abbea7a822c75f41ffd6f36d"
+    },
+    "baseline-linux": {
+      "bytes": 25544,
+      "sha256": "6db35a8fa5d20d52ada573a366e3c50f70cc420684e7968e5eeb962263ba07bf"
+    },
+    "optimized-linux": {
+      "bytes": 23728,
+      "sha256": "f4385f97a9754f14353960ff809eb26e09c33eee6475b66aefed64bf58633544"
+    },
+    "render-bench": {
+      "bytes": 34848,
+      "sha256": "78d8e892634d4acb2adcb25c08ce0918a21f0f3bd7b29e34964838ff8b03cd89"
+    }
+  }
+}

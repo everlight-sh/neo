@@ -1,0 +1,24 @@
+; Example route shell: props are supplied at request time, not prerendered.
+fn page (n : i64{n >= 0}) -> Arr u8 _
+  = concat("<!DOCTYPE html>", jsx_Page(
+      if n == 13 then "<script>alert(\"x\")</script> & \' café 🚀"
+      else "Axon & React\'s \"JSX\" <components>", n, n % 2 == 0))
+
+fn page_response (n : i64{n >= 0}) -> Arr u8 _
+  = let body = page(n) in
+    let clen = utoa(len(body)) in
+    concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ", clen, "\r\n\r\n", body)
+
+fn handle (req : Arr u8 n) -> Arr u8 _
+  = let home = starts_with(req, "GET / ") || starts_with(req, "GET /?") in
+    if home || starts_with(req, "GET /page/") then
+      let count = if home then 3 else page_count(req) in
+      if count < 1 || count > 1000 then
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 30\r\n\r\nusage: /page/N, 1 <= N <= 1000"
+      else page_response(count)
+    else if starts_with(req, "GET ") then
+      "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\n\r\nNot Found"
+    else "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+
+effect fn main (port : i64{port > 0, port < 65536}) -> i64
+  = serve(port, handle)

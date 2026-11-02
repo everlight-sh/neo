@@ -1,0 +1,119 @@
+import "std:io"
+import "std:http"
+import "std:time"
+
+type HttpResult = { ok: bool, status: i64, body: Arr u8 _, error: Error }
+type NetProgress = { offset: i64, error: i64 }
+fn net_error (code: i64, message: Arr u8 n) -> HttpResult
+  = HttpResult { ok = false, status = 0, body = "", error = Error { code = code, message = message, position = 0 } }
+fn net_ipv4 (host: Arr u8 n) -> Arr i64 _
+  = let text = if str_equal(host, "localhost") then "127.0.0.1" else host in
+    let initial = arr(i in 0..4) 0 in
+    loop (i = 0, part = 0, acc = 0, digits = 0, valid = true, result = initial) while valid && i <= len(text)
+      next (i + 1, part + (if i == len(text) || str_byte(text, i) == 46 then 1 else 0),
+        if str_byte(text, i) == 46 then 0 else acc * 10 + str_byte(text, i) - 48,
+        if str_byte(text, i) == 46 then 0 else digits + 1,
+        if i == len(text) || str_byte(text, i) == 46 then digits > 0 && acc <= 255 && part < 4
+        else (str_byte(text, i) >= 48 && str_byte(text, i) <= 57) && digits < 3 && acc * 10 + str_byte(text, i) - 48 <= 255,
+        if (i == len(text) || str_byte(text, i) == 46) && part >= 0 && part < 4 then set(result, part, acc) else result)
+      yield if valid && part == 4 then result else arr(i in 0..0) i
+effect(time) fn net_remaining (deadline: i64) -> i64
+  = deadline_remaining(deadline)
+effect(net,time) fn net_wait_once(fd:i64,mask:i64,deadline:i64) -> IntResult
+  = let remaining=net_remaining(deadline) in if remaining==0 then int_ok(0) else
+    let result=rt_wait_ready(fd,mask,remaining) in
+    if result<0 then int_error(i64(load_i32(rt_errno(),0)),"socket wait interrupted",0) else int_ok(result)
+effect(net,time) fn net_wait (fd: i64, mask: i64, deadline: i64) -> bool
+  = loop(result=int_error(4,"interrupted",0)) while !result.ok && result.error.code==4
+      next(net_wait_once(fd,mask,deadline)) yield result.ok && result.value>0
+effect(net,time) fn net_send_step (fd: i64, request: Arr u8 n, offset: i64, deadline: i64) -> NetProgress
+  = if offset < 0 || offset > n || net_remaining(deadline) == 0 then NetProgress { offset = offset, error = 110 } else
+    let count = rt_send(fd, ptr_add(data(request), offset), n - offset) in
+    if count > 0 then NetProgress { offset = offset + count, error = 0 } else
+    if count == 0 then NetProgress { offset = offset, error = 5 } else
+      let code = i64(load_i32(rt_errno(), 0)) in
+      if code == 4 then NetProgress { offset = offset, error = 0 }
+      else if code == rt_again() then NetProgress { offset = offset, error = if net_wait(fd, 4, deadline) then 0 else 110 }
+      else NetProgress { offset = offset, error = code }
+effect(net,time) fn net_send (fd: i64, request: Arr u8 n, deadline: i64) -> IntResult
+  = loop (step = NetProgress { offset = 0, error = 0 }) while step.error == 0 && step.offset < n
+      next (net_send_step(fd, request, step.offset, deadline))
+      yield if step.error != 0 then int_error(step.error, "HTTP write failed", step.offset) else int_ok(step.offset)
+; The read is tried first and the socket waited on only when it has nothing
+; queued, so a stream of ready data costs one system call per chunk.
+effect(net,time) fn net_read_attempt(fd:i64,buffer:ptr,deadline:i64) -> IntResult
+  = if net_remaining(deadline)==0 then int_error(110,"HTTP read timed out",0) else
+    let count=rt_read(fd,buffer,16384) in if count>=0 then int_ok(count) else
+    let code=i64(load_i32(rt_errno(),0)) in if code!=rt_again() then int_error(code,"HTTP read failed",0) else
+    if net_wait(fd,1,deadline) then int_error(4,"interrupted",0) else int_error(110,"HTTP read timed out",0)
+effect(net,time) fn net_receive_chunk (fd: i64, deadline: i64) -> BytesResult
+  = let buffer = ax_alloc(16384) in
+    let read=loop(result=int_error(4,"interrupted",0)) while !result.ok && (result.error.code==4 || result.error.code==rt_again())
+      next(net_read_attempt(fd,buffer,deadline)) yield result in
+    let count=read.value in
+    let result = if !read.ok then bytes_error(read.error.code,read.error.message,0)
+      else check count >= 0 && count <= 16384 in bytes_ok(view(buffer, count)) in
+    let released = ax_release(buffer) in result
+effect(net,time) fn net_receive (fd: i64, deadline: i64) -> BytesResult
+  = loop (piece = net_receive_chunk(fd, deadline), out = "") while piece.ok && len(piece.value) > 0 && len(out) + len(piece.value) <= 1048576
+      next (net_receive_chunk(fd, deadline), concat(out, piece.value))
+      yield if !piece.ok then piece else if len(out) + len(piece.value) > 1048576 then bytes_error(27, "HTTP response exceeds 1 MiB", 0) else bytes_ok(out)
+fn net_status (response: Arr u8 n) -> IntResult
+  = if !(str_starts(response,"HTTP/1.1 ") || str_starts(response,"HTTP/1.0 ")) || n < 12 || n>12 && str_byte(response,12)!=32 && str_byte(response,12)!=13 then int_error(1, "invalid HTTP status", 0) else
+    let parsed = int_parse(str_slice(response, 9, 12)) in if !parsed.ok || parsed.value < 100 || parsed.value > 599 then int_error(1, "invalid HTTP status", 0) else parsed
+effect(net,time) fn http_post_ipv4 (host: Arr u8 n, port: i64, path: Arr u8 m, body: Arr u8 k, key: Arr u8 q, timeout: i64) -> HttpResult
+  = let ip = net_ipv4(host) in
+    if len(ip) != 4 || port < 1 || port > 65535 || timeout < 1 || timeout > 60000 || !str_starts(path, "/") ||
+      str_find(path, "\r").present || str_find(path, "\n").present || str_find(key, "\r").present || str_find(key, "\n").present then net_error(22, "invalid IPv4 HTTP destination") else
+    let fd = rt_socket(2, 1, 0) in if fd < 0 then net_error(5, "socket failed") else
+    let nonblocking = rt_nonblock(fd) in
+    let address = stack_alloc(32) in let cleared = memset(address, i32(0), 32) in let family = rt_address(address) in
+    let high = store_u8(address, 2, u8(port / 256)) in let low = store_u8(address, 3, u8(port % 256)) in
+    let copied = loop (i: i64{i >= 0} = 0) while i < 4 next (let byte = if i < len(ip) then ip[i] else 0 in let stored = store_u8(address, 4 + i, u8(byte)) in i + 1) yield i in
+    let timer = deadline_after(timeout) in let deadline = if timer.ok then timer.value else 0 in
+    let connected = if nonblocking < 0 then -1 else rt_connect(fd, address) in
+    let ready = connected == 0 || net_wait(fd, 4, deadline) in
+    let socket_error = if ready then rt_socket_error(fd) else -1 in
+    if !ready || socket_error != 0 then let closed = rt_close(fd) in net_error(if !ready then 110 else socket_error, "connect failed or timed out") else
+      let request = concat("POST ", path, " HTTP/1.1\r\nHost: ", host, ":", int_text(port), "\r\nContent-Type: application/json\r\nContent-Length: ", int_text(k),
+        "\r\nIdempotency-Key: ", key, "\r\nConnection: close\r\n\r\n", body) in
+      let written = net_send(fd, request, deadline) in
+      let received = if written.ok then net_receive(fd, deadline) else bytes_error(written.error.code, written.error.message, 0) in
+      let closed = rt_close(fd) in
+      if !received.ok then net_error(received.error.code, received.error.message) else
+        let status = net_status(received.value) in
+        if !status.ok then net_error(status.error.code, status.error.message) else
+          let decoded = http_decode_response(received.value) in
+          if !decoded.ok then net_error(decoded.error.code, decoded.error.message) else
+          HttpResult { ok = true, status = status.value, body = decoded.value, error = no_error() }
+
+; A zero cancellation identity means no cancellation. Nonzero identities are
+; resolved through the generational table on every wait; stale fails closed.
+effect(net) fn net_is_cancelled(identity:i64) -> bool
+  = if identity==0 then false else let address=rt_handle_fd(identity,5) in address<0 || atomic_load_i64(ptr_from_i64(address),8)!=0
+effect(net,time) fn net_wait_cancel(fd:i64,events:i64,deadline:i64,identity:i64) -> IntResult
+  = loop(result=int_error(11,"pending",0)) while !result.ok && result.error.code==11 next(
+      if net_is_cancelled(identity) then int_error(125,"operation cancelled",0) else
+      let left=deadline_remaining(deadline) in if left==0 then int_error(110,"I/O deadline elapsed",0) else
+      let ready=rt_wait_ready(fd,events,if identity==0 then left else if left<10 then left else 10) in
+      if net_is_cancelled(identity) then int_error(125,"operation cancelled",0) else
+      if ready>0 then int_ok(ready) else
+      if ready<0 && i64(load_i32(rt_errno(),0))!=4 then int_error(i64(load_i32(rt_errno(),0)),"readiness failed",0) else int_error(11,"pending",0)) yield result
+private effect(net,time) fn net_receive_cancel_step(fd:i64,p:ptr,deadline:i64,identity:i64) -> IntResult
+  = let ready=net_wait_cancel(fd,1,deadline,identity) in if !ready.ok then ready else
+    let count=rt_read(fd,p,16384) in if count<0 then int_error(i64(load_i32(rt_errno(),0)),"read failed",0) else int_ok(count)
+effect(net,time) fn net_receive_cancel(fd:i64,deadline:i64,identity:i64) -> BytesResult
+  = let buffer=ax_alloc(16384) in
+    let read=loop(result=int_error(4,"interrupted",0)) while !result.ok && (result.error.code==4 || result.error.code==rt_again())
+      next(net_receive_cancel_step(fd,buffer,deadline,identity)) yield result in
+    let count=read.value in let result=if !read.ok then bytes_error(read.error.code,read.error.message,0) else
+      check count>=0 && count<=16384 in bytes_ok(view(buffer,count)) in let freed=ax_release(buffer) in result
+private effect(net,time) fn net_send_cancel_step(fd:i64,bytes:Arr u8 n,offset:i64,deadline:i64,identity:i64) -> NetProgress
+  = let ready=net_wait_cancel(fd,4,deadline,identity) in if !ready.ok then NetProgress { offset=offset,error=ready.error.code } else
+    let count=rt_send(fd,ptr_add(data(bytes),offset),n-offset) in
+    let error=if count<0 then i64(load_i32(rt_errno(),0)) else if count==0 then 5 else 0 in
+    NetProgress { offset=offset+(if count>0 then count else 0),error=if error==4 || error==rt_again() then 0 else error }
+effect(net,time) fn net_send_cancel(fd:i64,bytes:Arr u8 n,deadline:i64,identity:i64) -> IntResult
+  = if net_is_cancelled(identity) then int_error(125,"operation cancelled",0) else
+    loop(state=NetProgress { offset=0,error=0 }) while state.offset<n && state.error==0 next(net_send_cancel_step(fd,bytes,state.offset,deadline,identity))
+      yield if state.error==0 then int_ok(state.offset) else int_error(state.error,"write failed",state.offset)

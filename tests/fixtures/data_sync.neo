@@ -1,0 +1,9 @@
+import "std:io"
+effect(fs,env,unsafe) fn main() -> unit
+  = let path=cli_arg(1).value in let opened=file_open(path,3) in check opened.ok in
+    let first=file_write(opened.value,"first") in check first.ok in let synced=file_sync_data(opened.value) in check synced.ok in
+    let appended=file_write(opened.value,"-second") in check appended.ok in let synced=file_sync_data(opened.value) in check synced.ok in
+    let positioned=file_seek(opened.value,0) in check positioned.ok in let replaced=file_write(opened.value,"FIRST") in check replaced.ok in
+    let synced=file_sync_data(opened.value) in check synced.ok in let closed=file_close(opened.value) in check closed.ok in
+    let bad=file_sync_data(-1) in check !bad.ok && bad.error.code==9 in
+    let read=fs_read(path) in check read.ok && str_equal(read.value,"FIRST-second") in let output=print_out("ok\n") in noop()

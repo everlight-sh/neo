@@ -1,0 +1,21 @@
+import "std:json"
+import "std:io"
+type EqualBox = {bytes:Arr u8 _,extra:Arr u8 _}
+fn equal_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn equal_update(move bytes:Arr u8 _) -> bool
+  = if len(bytes)==0 then true else check len(bytes)>0 in byte_equal(bytes,byte_write_le(bytes,0,bit_xor(i64(bytes[0]),1),1))
+fn equal_field_update(move box:EqualBox) -> bool
+  = if len(box.bytes)==0 then true else check len(box.bytes)>0 in byte_equal(box.bytes,byte_write_le(box.bytes,0,bit_xor(i64(box.bytes[0]),1),1))
+fn equal_case(a:Arr u8 n,b:Arr u8 m) -> bool
+  = let expected=if n!=m then false else loop(i=0,same=true) while same && i<n next(i+1,check i>=0 && i<n && i<m in a[i]==b[i]) yield same in
+    let result=byte_equal(a,b) in
+    check bytes_match_at(a,0,b)==str_starts(a,b) && bytes_match_at(concat("padding13",a,"tail"),9,a) && !bytes_match_at(a,-1,b) && !bytes_match_at(a,n+1,b) && result==expected && str_equal(a,b)==expected && byte_equal(a,a) && byte_equal(byte_slice(a,0,n),a) &&
+      byte_equal(concat(a,"x"),concat(b,"x"))==expected && equal_update(a)==(n==0) && equal_field_update(EqualBox {bytes=a,extra=b})==(n==0) in result
+effect(fs) fn main() -> unit
+  = let input=file_read(0,4194304) in let text=input.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let values=json_array_values(json_parse(equal_decode(str_slice(text,at,end))).value) in check len(values)==2 in
+      let result=equal_case(equal_decode(json_text(values[0]).value),equal_decode(json_text(values[1]).value)) in
+      let shown=print_out(if result then "true\n" else "false\n") in end+1) yield at in noop()

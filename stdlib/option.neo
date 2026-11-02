@@ -1,0 +1,8 @@
+; Statically specialized optional values. Payloads obey ordinary value ownership.
+enum Option<T> { None, Some(T) }
+
+fn option_is_some<T>(value: Option<T>) -> bool
+  = match value { None => false, Some(_) => true }
+
+fn option_or<T>(value: Option<T>, fallback: T) -> T
+  = match value { None => fallback, Some(item) => item }

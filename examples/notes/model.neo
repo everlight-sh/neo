@@ -1,0 +1,37 @@
+import "std:journal"
+import "std:http"
+
+type Note = { id: i64, title: Arr u8 _, deleted: bool }
+type Notes = { ok: bool, values: Arr Note _, next_id: i64 }
+fn notes_empty () -> Notes = Notes { ok = true, values = arr(i in 0..0) Note { id = 0, title = "", deleted = true }, next_id = 1 }
+fn notes_find (notes: Notes, id: i64) -> i64
+  = let values = notes.values in loop (i: i64{i >= 0} = 0, found = -1) while found < 0 && i < len(values)
+      next (i + 1, if values[i].id == id then i else -1) yield found
+fn notes_apply (notes: Notes, event: Json) -> Notes
+  = let operation = json_get(event, "op") in let op = json_text(operation.value) in
+    let key = json_get(event, "id") in let id = json_int(key.value) in
+    let text = json_get(event, "title") in let title = if text.present then json_text(text.value) else bytes_ok("") in
+    let deletion = str_equal(op.value, "delete") in
+    if !notes.ok || !op.ok || !id.ok || id.value < 1 || id.value > 1000000000 ||
+      (!deletion && (!str_equal(op.value, "put") || !title.ok)) then notes with { ok = false } else
+      let found = notes_find(notes, id.value) in let values = notes.values in
+      let count = len(values) + (if found < 0 then 1 else 0) in
+      Notes { ok = true, next_id = if id.value >= notes.next_id then id.value + 1 else notes.next_id,
+        values = arr(i in 0..count) if i == found || i == len(values) then Note { id = id.value, title = title.value, deleted = deletion }
+          else if i < len(values) then values[i] else Note { id = 0, title = "", deleted = true } }
+fn notes_replay (bytes: Arr u8 n) -> Notes
+  = loop (position = 0, state = notes_empty()) while state.ok && position < n
+      next (journal_line_end(bytes, position) + 1,
+        notes_apply(state, json_parse(str_slice(bytes, position, journal_line_end(bytes, position))).value)) yield state
+fn note_json (note: Note) -> Arr u8 _ = concat("{\"id\":", int_text(note.id), ",\"title\":", json_quote(note.title), "}")
+fn notes_json (notes: Notes) -> Arr u8 _
+  = let values = notes.values in
+    loop (i: i64{i >= 0} = 0, out = "[", first = true) while i < len(values)
+      next (i + 1, if values[i].deleted then out else concat(out, if first then "" else ",", note_json(values[i])), first && values[i].deleted)
+      yield concat(out, "]")
+fn notes_html (notes: Notes) -> Arr u8 _
+  = let values = notes.values in
+    let rows = loop (i: i64{i >= 0} = 0, out = "") while i < len(values)
+      next (i + 1, if values[i].deleted then out else concat(out, "<li data-id=\"", int_text(values[i].id), "\">", html_escape(values[i].title), "</li>")) yield out in
+    concat("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Neo Notes</title></head><body><h1>Neo Notes</h1><ul>", rows,
+      "</ul><p>CRUD API: /api/notes. Titles are JSON strings; changes survive restarts.</p></body></html>")

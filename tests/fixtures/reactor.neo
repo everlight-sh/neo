@@ -1,0 +1,22 @@
+import "std:reactor"
+import "std:io"
+import "std:debug"
+private fn no_args() -> Arr Arr u8 _ _ = arr(i in 0..0) ""
+private effect(process,fs,env) fn stale_interest(path:Arr u8 _) -> Interest
+  = let args=arr(i in 0..1) "child" in using child=process_start(path,args,no_args()) in process_interest(child,1,1,9)
+effect(fs,net,time,process,env) fn main() -> unit
+  = let mode=cli_arg(1) in
+    if mode.present && str_equal(mode.value,"child") then
+      let input=file_read(0,65536) in check input.ok in let output=print_out(input.value) in noop() else
+    let self=cli_arg(0).value in let baseline=live_resources() in
+    let tested=exercise(self) in let live=live_resources() in check live==baseline in let out=print_out("reactor OK\n") in noop()
+private effect(fs,net,time,process,env) fn exercise(self:Arr u8 _) -> unit
+  = using cancellation=new_cancellation() in
+    let arguments=arr(i in 0..1) "child" in using child=process_start(self,arguments,no_args()) in
+    let sent=process_try_write(child,"payload",0) in check sent.ok in let closed=process_close_input(child) in check closed.ok in
+    let interest=process_interest(child,1,1,41) in let timer=deadline_after(1000) in
+    let ready=reactor_wait(arr(i in 0..1) interest,timer.value,cancellation) in check ready.ok && !ready.timed_out && vec_len(ready.events)>0 in
+    let read=process_try_read(child,1,65536) in check read.ok && str_equal(read.value,"payload") in
+    let stale=stale_interest(self) in let missing=reactor_wait(arr(i in 0..1) stale,timer.value,cancellation) in check !missing.ok && missing.error.code==9 in
+    let empty=arr(i in 0..0) interest in let deadline=deadline_after(15) in let timeout=reactor_wait(empty,deadline.value,cancellation) in check timeout.ok && timeout.timed_out in
+    let stopped=cancel(cancellation) in let cancelled=reactor_wait(empty,timer.value,cancellation) in check !cancelled.ok && cancelled.cancelled in noop()

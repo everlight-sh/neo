@@ -1,0 +1,10 @@
+; Deliberately wrong: `xs[i+1]` is out of range when i = n-1.
+; The compiler must refuse this with a counterexample, not emit a bounds check.
+
+fn shift (xs : Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n) xs[i + 1]
+
+fn main (n : i64{n > 0}) -> i64
+  = let xs = arr(i in 0..n) i in
+    let ys = shift(xs) in
+    sum(i in 0..n) ys[i]

@@ -1,0 +1,16 @@
+type Item = { text: Arr u8 _, numbers: Arr i64 _ }
+type Box = { item: Item, label: Arr u8 _ }
+fn make (n: i64{n >= 1}) -> Box
+  = Box { item = Item { text = concat("hello", " world"), numbers = arr(i in 0..n) i * 3 }, label = "box" }
+fn identity (b: Box) -> Box = b
+fn main (n: i64{n >= 1, n < 1000}) -> Arr u8 _
+  = let b = make(n) in
+    let items = arr(i in 0..8) identity(b) in
+    let replaced = set(items, 0, make(2)) in
+    let nested = arr(i in 0..4) (arr(j in 0..3) i + j) in
+    let text = replaced[0].item.text in
+    let keep = identity(b) with { label = concat("new", " label") } in
+    let repeated = loop (i = 0, current = keep) while i < 1000
+      next (i + 1, identity(current)) yield current in
+    check len(text) == 11 && len(repeated.item.numbers) == n && nested[3][2] == 5 in
+    concat(text, " / ", repeated.label, "\n")

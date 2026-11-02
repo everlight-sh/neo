@@ -1,0 +1,32 @@
+import "std:strings"
+import "std:vec"
+; Incremental SSE framing. Feed decoded HTTP body chunks; fields can span
+; arbitrary chunk boundaries. A blank line dispatches an event, EOF does not.
+type SSEEvent = { data:Arr u8 _,event:Arr u8 _,id:Arr u8 _,retry:i64 }
+sealed type SSE = { pending:Arr u8 _,data:Arr u8 _,event:Arr u8 _,id:Arr u8 _,retry:i64,has_data:bool,started:bool,skip_lf:bool,failed:bool }
+type SSEFeed = { state:SSE,events:Vec<SSEEvent>,ok:bool }
+fn sse_new() -> SSE = SSE { pending="",data="",event="",id="",retry= -1,has_data=false,started=false,skip_lf=false,failed=false }
+private fn sse_line(state:SSE,events:Vec<SSEEvent>) -> SSEFeed
+  = let raw=state.pending in let line=if !state.started && str_starts(raw,"\xef\xbb\xbf") then str_slice(raw,3,len(raw)) else raw in
+    if len(line)==0 then
+      let emitted=if state.has_data then vec_push(events,SSEEvent { data=str_slice(state.data,0,len(state.data)-1),event=if len(state.event)==0 then "message" else state.event,id=state.id,retry=state.retry }) else events in
+      SSEFeed { state=state with { pending="",data="",event="",has_data=false,started=true },events=emitted,ok=true } else
+    if str_starts(line,":") then SSEFeed { state=state with { pending="",started=true },events=events,ok=true } else
+      let colon=str_find(line,":") in let field=if colon.present then str_slice(line,0,colon.value) else line in
+      let start=if colon.present then colon.value+1+(if str_byte(line,colon.value+1)==32 then 1 else 0) else len(line) in
+      let value=str_slice(line,start,len(line)) in let number=int_parse(value) in
+      let retry_valid=len(value)>0 && loop(i=0,ok=true) while ok && i<len(value) next(i+1,str_byte(value,i)>=48 && str_byte(value,i)<=57) yield ok in
+      SSEFeed { state=state with { pending="",started=true,
+        data=if str_equal(field,"data") then concat(state.data,value,"\n") else state.data,
+        has_data=state.has_data || str_equal(field,"data"),event=if str_equal(field,"event") then value else state.event,
+        id=if str_equal(field,"id") && !str_find(value,"\0").present then value else state.id,
+        retry=if str_equal(field,"retry") && retry_valid && number.ok then number.value else state.retry },events=events,ok=true }
+fn sse_feed(state:SSE,chunk:Arr u8 n,limit:i64) -> SSEFeed
+  = if state.failed || limit<1 || limit>16777216 then SSEFeed { state=state with { failed=true },events=vec_empty::<SSEEvent>(),ok=false } else
+    loop(i=0,result=SSEFeed { state=state,events=vec_empty::<SSEEvent>(),ok=true }) while result.ok && i<n next(i+1,
+      let c=str_byte(chunk,i) in let current=result.state in
+      if current.skip_lf && c==10 then SSEFeed { state=current with { skip_lf=false },events=result.events,ok=true } else
+      if c==10 || c==13 then let parsed=sse_line(current,result.events) in
+        SSEFeed { state=parsed.state with { skip_lf=c==13 },events=parsed.events,ok=parsed.ok } else
+      if len(current.pending)+len(current.data)>=limit then SSEFeed { state=current with { failed=true },events=result.events,ok=false } else
+        SSEFeed { state=current with { pending=concat(current.pending,str_slice(chunk,i,i+1)),skip_lf=false },events=result.events,ok=true }) yield result

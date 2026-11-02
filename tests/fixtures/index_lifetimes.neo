@@ -1,0 +1,42 @@
+import "std:io"
+type IndexBox = {text:Arr u8 _,value:i64}
+type IndexHolder = {rows:Arr IndexBox _}
+fn index_drop_boxes(move rows:Arr IndexBox _) -> i64 = 0
+fn index_drop_bytes(move rows:Arr Arr u8 _ _) -> i64 = 0
+fn index_drop_ints(move rows:Arr i64 _) -> i64 = 0
+fn index_drop_holder(move holder:IndexHolder) -> i64 = 0
+fn index_boxes(n:i64,heap:bool) -> Arr IndexBox n
+  = check n>0 in arr(i in 0..n) IndexBox {text=if heap then arr(j in 0..128) u8(65+j%26) else "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",value=42}
+fn index_recycle_boxes(move rows:Arr IndexBox n) -> i64 {result==0}
+  = let gone=index_drop_boxes(rows) in let fresh=arr(i in 0..n) IndexBox {text="shorter",value=999} in
+    let observed=sum(i in 0..n) len(fresh[i].text)+fresh[i].value in check observed==1006*n in 0
+fn index_recycle_bytes(move rows:Arr Arr u8 _ n) -> i64 {result==0}
+  = let gone=index_drop_bytes(rows) in let fresh=arr(i in 0..n) "shorter" in
+    let observed=sum(i in 0..n) len(fresh[i]) in check observed==7*n in 0
+fn index_recycle_ints(move rows:Arr i64 n) -> i64 {result==0}
+  = let gone=index_drop_ints(rows) in let fresh=arr(i in 0..n) 999 in
+    let observed=sum(i in 0..n) fresh[i] in check observed==999*n in 0
+fn index_recycle_holder(move holder:IndexHolder) -> i64 {result==0}
+  = let n=len(holder.rows) in let gone=index_drop_holder(holder) in let fresh=arr(i in 0..n) IndexBox {text="shorter",value=999} in
+    let observed=sum(i in 0..n) len(fresh[i].text)+fresh[i].value in check observed==1006*n in 0
+fn index_observe(borrow rows:Arr IndexBox n) -> i64 {result==0} = 0
+fn index_record_case(n:i64,mode:i64) -> i64
+  = check n>0 in let rows=index_boxes(n,mode==9) in
+    if mode==1 then rows[index_recycle_boxes(rows)].value else if mode==8 then let child=rows[index_recycle_boxes(rows)].text in check len(child)>0 in i64(child[0]) else
+    if mode==6 then len(rows[index_observe(rows)].text) else len(rows[index_recycle_boxes(rows)].text)
+fn index_bytes_case(n:i64) -> i64
+  = check n>0 in let rows=arr(i in 0..n) "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" in len(rows[index_recycle_bytes(rows)])
+fn index_ints_case(n:i64) -> i64
+  = check n>0 in let rows=arr(i in 0..n) 42 in rows[index_recycle_ints(rows)]
+fn index_holder_case(n:i64) -> i64
+  = check n>0 in let holder=IndexHolder {rows=index_boxes(n,false)} in
+    check len(holder.rows)>0 in len(holder.rows[index_recycle_holder(holder)].text)
+fn index_retained_case(n:i64) -> i64
+  = check n>0 in let rows=index_boxes(n,false) in let saved=rows in
+    let value=len(rows[index_recycle_boxes(rows)].text) in check len(saved)>0 in value+len(saved[0].text)
+fn index_temporary_case(n:i64) -> i64
+  = check n>0 in len(index_boxes(n,false)[0].text)
+effect(fs) fn main(n:i64,mode:i64) -> unit
+  = check n>0 && n<=8192 && mode>=0 && mode<=9 in
+    let result=if mode==2 then index_bytes_case(n) else if mode==3 then index_ints_case(n) else if mode==4 then index_holder_case(n) else if mode==5 then index_temporary_case(n) else if mode==7 then index_retained_case(n) else index_record_case(n,mode) in
+    let shown=print_out(concat(int_text(result),"\n")) in noop()

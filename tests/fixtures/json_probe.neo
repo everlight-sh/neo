@@ -1,0 +1,16 @@
+import "std:json"
+import "std:io"
+fn probe_decode (text: Arr u8 n) -> Arr u8 _
+  = let count = n / 2 in check count >= 0 in
+    arr(i in 0..count) u8(json_hex(str_byte(text, i * 2)) * 16 + json_hex(str_byte(text, i * 2 + 1)))
+effect(fs) fn main () -> unit
+  = let input = file_read(0, 4194304) in
+    let bytes = input.value in
+    let replies = loop (position = 0, out = "") while position < len(bytes)
+      next (let rest = str_slice(bytes, position, len(bytes)) in let end = str_find(rest, "\n") in if end.present then position + end.value + 1 else len(bytes),
+        let rest = str_slice(bytes, position, len(bytes)) in let end = str_find(rest, "\n") in
+        let text = probe_decode(if end.present then str_slice(rest, 0, end.value) else rest) in
+        let parsed = json_parse(text) in
+        if !parsed.ok then concat(out, "{\"ok\":false}\n") else
+          concat(out, "{\"ok\":true,\"value\":", json_compact(parsed.value.raw), "}\n")) yield out in
+    let printed = print_out(replies) in noop()

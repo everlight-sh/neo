@@ -1,0 +1,18 @@
+import "std:datagram"
+import "std:reactor"
+import "std:debug"
+import "std:io"
+effect(fs,net,time,process) fn exercise() -> unit
+  = using socket=udp_bind_ipv4("127.0.0.1",0) in let status=datagram_status(socket) in check status.ok in
+    using cancellation=new_cancellation() in let port=datagram_local_port(socket) in check port.ok in
+    let sent=datagram_try_send(socket,"127.0.0.1",port.value,"datagram") in check sent.ok && sent.value==8 in
+    let interest=datagram_interest(socket,1,7) in let timer=deadline_after(1000) in
+    let ready=reactor_wait(arr(i in 0..1) interest,timer.value,cancellation) in check ready.ok && !ready.timed_out in
+    let got=datagram_receive(socket,32,timer.value,cancellation) in check got.ok && str_equal(got.bytes,"datagram") && got.port==port.value && str_equal(got.host,"127.0.0.1") in
+    let sent=datagram_try_send(socket,"127.0.0.1",port.value,"") in check sent.ok in
+    let got=datagram_receive(socket,0,timer.value,cancellation) in check got.ok && len(got.bytes)==0 in
+    let sent=datagram_try_send(socket,"127.0.0.1",port.value,"oversize") in check sent.ok in
+    let got=datagram_receive(socket,2,timer.value,cancellation) in check !got.ok && got.error.code==90 in
+    let stopped=cancel(cancellation) in let got=datagram_receive(socket,32,timer.value,cancellation) in check !got.ok && got.error.code==125 in noop()
+effect(fs,net,time,process) fn main() -> unit
+  = let baseline=live_resources() in let done=exercise() in let live=live_resources() in check live==baseline in let output=print_out("UDP OK\n") in noop()

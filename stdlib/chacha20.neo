@@ -1,0 +1,148 @@
+import "std:sha256"
+
+; RFC 8439 primitives. Protocols must enforce unique nonces for each key.
+; The ChaCha20 state and the Poly1305 accumulator are records of scalars, so
+; a block allocates nothing; keystream and message words move eight bytes at
+; a time. 32-bit words live in i64 values below 2^32; Poly1305 uses five
+; 26-bit limbs whose products and sums stay below 2^58.
+type CcKey = { k0:i64,k1:i64,k2:i64,k3:i64,k4:i64,k5:i64,k6:i64,k7:i64,n0:i64,n1:i64,n2:i64 }
+type CcBlock = { x0:i64,x1:i64,x2:i64,x3:i64,x4:i64,x5:i64,x6:i64,x7:i64,x8:i64,x9:i64,x10:i64,x11:i64,x12:i64,x13:i64,x14:i64,x15:i64 }
+type Cc4 = { a:i64,b:i64,c:i64,d:i64 }
+private fn cc_word(bytes:Arr u8 n,offset:i64) -> i64 = byte_read_le(bytes,offset,4)
+private fn cc_key(key:Arr u8 n,nonce:Arr u8 m) -> CcKey
+  = CcKey { k0=cc_word(key,0),k1=cc_word(key,4),k2=cc_word(key,8),k3=cc_word(key,12),k4=cc_word(key,16),k5=cc_word(key,20),
+      k6=cc_word(key,24),k7=cc_word(key,28),n0=cc_word(nonce,0),n1=cc_word(nonce,4),n2=cc_word(nonce,8) }
+private fn cc_rot(value:i64,bits:i64) -> i64
+  = bit_and(bit_or(shift_left(value,bits),shift_right(value,32-bits)),4294967295)
+private fn cc_quarter(a:i64,b:i64,c:i64,d:i64) -> Cc4
+  = let a=bit_and(a+b,4294967295) in let d=cc_rot(bit_xor(d,a),16) in
+    let c=bit_and(c+d,4294967295) in let b=cc_rot(bit_xor(b,c),12) in
+    let a=bit_and(a+b,4294967295) in let d=cc_rot(bit_xor(d,a),8) in
+    let c=bit_and(c+d,4294967295) in let b=cc_rot(bit_xor(b,c),7) in Cc4 { a=a,b=b,c=c,d=d }
+; A column round, then a diagonal round.
+private fn cc_double(s:CcBlock) -> CcBlock
+  = let q0=cc_quarter(s.x0,s.x4,s.x8,s.x12) in let q1=cc_quarter(s.x1,s.x5,s.x9,s.x13) in
+    let q2=cc_quarter(s.x2,s.x6,s.x10,s.x14) in let q3=cc_quarter(s.x3,s.x7,s.x11,s.x15) in
+    let d0=cc_quarter(q0.a,q1.b,q2.c,q3.d) in let d1=cc_quarter(q1.a,q2.b,q3.c,q0.d) in
+    let d2=cc_quarter(q2.a,q3.b,q0.c,q1.d) in let d3=cc_quarter(q3.a,q0.b,q1.c,q2.d) in
+    CcBlock { x0=d0.a,x1=d1.a,x2=d2.a,x3=d3.a,x4=d3.b,x5=d0.b,x6=d1.b,x7=d2.b,
+      x8=d2.c,x9=d3.c,x10=d0.c,x11=d1.c,x12=d1.d,x13=d2.d,x14=d3.d,x15=d0.d }
+; The keystream words of one block.
+private fn cc_stream(key:CcKey,counter:i64) -> CcBlock
+  = let initial=CcBlock { x0=1634760805,x1=857760878,x2=2036477234,x3=1797285236,x4=key.k0,x5=key.k1,x6=key.k2,x7=key.k3,
+      x8=key.k4,x9=key.k5,x10=key.k6,x11=key.k7,x12=counter,x13=key.n0,x14=key.n1,x15=key.n2 } in
+    let s=loop(i=0,s=initial) while i<10 next(i+1,cc_double(s)) yield s in
+    CcBlock { x0=bit_and(s.x0+initial.x0,4294967295),x1=bit_and(s.x1+initial.x1,4294967295),x2=bit_and(s.x2+initial.x2,4294967295),
+      x3=bit_and(s.x3+initial.x3,4294967295),x4=bit_and(s.x4+initial.x4,4294967295),x5=bit_and(s.x5+initial.x5,4294967295),
+      x6=bit_and(s.x6+initial.x6,4294967295),x7=bit_and(s.x7+initial.x7,4294967295),x8=bit_and(s.x8+initial.x8,4294967295),
+      x9=bit_and(s.x9+initial.x9,4294967295),x10=bit_and(s.x10+initial.x10,4294967295),x11=bit_and(s.x11+initial.x11,4294967295),
+      x12=bit_and(s.x12+initial.x12,4294967295),x13=bit_and(s.x13+initial.x13,4294967295),x14=bit_and(s.x14+initial.x14,4294967295),
+      x15=bit_and(s.x15+initial.x15,4294967295) }
+private fn cc_pair(low:i64,high:i64) -> i64 = bit_or(low,shift_left(high,32))
+; Eight keystream words as 64-bit little-endian pairs.
+private fn cc_lane(s:CcBlock,index:i64) -> i64
+  = if index==0 then cc_pair(s.x0,s.x1) else if index==1 then cc_pair(s.x2,s.x3) else if index==2 then cc_pair(s.x4,s.x5) else
+    if index==3 then cc_pair(s.x6,s.x7) else if index==4 then cc_pair(s.x8,s.x9) else if index==5 then cc_pair(s.x10,s.x11) else
+    if index==6 then cc_pair(s.x12,s.x13) else cc_pair(s.x14,s.x15)
+private fn cc_block_bytes(s:CcBlock) -> Arr u8 _
+  = let out=arr(i in 0..64) u8(0) in
+    let out=byte_write_le(out,0,cc_pair(s.x0,s.x1),8) in let out=byte_write_le(out,8,cc_pair(s.x2,s.x3),8) in
+    let out=byte_write_le(out,16,cc_pair(s.x4,s.x5),8) in let out=byte_write_le(out,24,cc_pair(s.x6,s.x7),8) in
+    let out=byte_write_le(out,32,cc_pair(s.x8,s.x9),8) in let out=byte_write_le(out,40,cc_pair(s.x10,s.x11),8) in
+    let out=byte_write_le(out,48,cc_pair(s.x12,s.x13),8) in byte_write_le(out,56,cc_pair(s.x14,s.x15),8)
+fn chacha20_block(key:Arr u8 n,nonce:Arr u8 m,counter:i64) -> Arr u8 _
+  = check n==32 && m==12 && counter>=0 && counter<=4294967295 in cc_block_bytes(cc_stream(cc_key(key,nonce),counter))
+; out[at..at+64) = text[from..from+64) xor one keystream block.
+private fn cc_xor64(move out:Arr u8 n,at:i64,text:Arr u8 m,from:i64,s:CcBlock) -> Arr u8 _
+  = let out=byte_write_le(out,at,bit_xor(byte_read_le(text,from,8),cc_pair(s.x0,s.x1)),8) in
+    let out=byte_write_le(out,at+8,bit_xor(byte_read_le(text,from+8,8),cc_pair(s.x2,s.x3)),8) in
+    let out=byte_write_le(out,at+16,bit_xor(byte_read_le(text,from+16,8),cc_pair(s.x4,s.x5)),8) in
+    let out=byte_write_le(out,at+24,bit_xor(byte_read_le(text,from+24,8),cc_pair(s.x6,s.x7)),8) in
+    let out=byte_write_le(out,at+32,bit_xor(byte_read_le(text,from+32,8),cc_pair(s.x8,s.x9)),8) in
+    let out=byte_write_le(out,at+40,bit_xor(byte_read_le(text,from+40,8),cc_pair(s.x10,s.x11)),8) in
+    let out=byte_write_le(out,at+48,bit_xor(byte_read_le(text,from+48,8),cc_pair(s.x12,s.x13)),8) in
+    byte_write_le(out,at+56,bit_xor(byte_read_le(text,from+56,8),cc_pair(s.x14,s.x15)),8)
+; Fewer than 64 bytes, one at a time.
+private fn cc_xor_tail(move out:Arr u8 n,at:i64,text:Arr u8 m,from:i64,count:i64,s:CcBlock) -> Arr u8 _
+  = loop(i=0,out=out) while i<count
+      next(i+1,byte_write_le(out,at+i,bit_xor(byte_read_le(text,from+i,1),bit_and(shift_right(cc_lane(s,i/8),i%8*8),255)),1)) yield out
+; out[at..at+count) = text[from..from+count) xor the keystream from block counter.
+private fn cc_xor_into(move out:Arr u8 n,at:i64,text:Arr u8 m,from:i64,count:i64,key:CcKey,counter:i64) -> Arr u8 _
+  = let full=count/64 in
+    let out=loop(i=0,out=out) while i<full next(i+1,cc_xor64(out,at+i*64,text,from+i*64,cc_stream(key,counter+i))) yield out in
+    if full*64==count then out else cc_xor_tail(out,at+full*64,text,from+full*64,count-full*64,cc_stream(key,counter+full))
+fn chacha20_xor(key:Arr u8 n,nonce:Arr u8 m,counter:i64,text:Arr u8 k) -> Arr u8 _
+  = check n==32 && m==12 && k<=1048576 && counter>=0 && counter+(k+63)/64<=4294967296 in
+    cc_xor_into(arr(i in 0..k) u8(0),0,text,0,k,cc_key(key,nonce),counter)
+
+type PolyState = { a:i64,b:i64,c:i64,d:i64,e:i64 }
+; r in five 26-bit limbs (clamped) and the products by 5 used for reduction.
+type PolyKey = { r0:i64,r1:i64,r2:i64,r3:i64,r4:i64,s1:i64,s2:i64,s3:i64,s4:i64 }
+private fn poly_key(low:i64,high:i64) -> PolyKey
+  = let r0=bit_and(low,67108863) in let r1=bit_and(shift_right(low,26),67108611) in
+    let r2=bit_and(bit_or(shift_right(low,52),shift_left(high,12)),67092735) in
+    let r3=bit_and(shift_right(high,14),66076671) in let r4=bit_and(shift_right(high,40),1048575) in
+    PolyKey { r0=r0,r1=r1,r2=r2,r3=r3,r4=r4,s1=r1*5,s2=r2*5,s3=r3*5,s4=r4*5 }
+; h = (h + block) * r, partially reduced; top is 1 for a full 16-byte block.
+private fn poly_block(h:PolyState,r:PolyKey,low:i64,high:i64,top:i64) -> PolyState
+  = let h0=h.a+bit_and(low,67108863) in let h1=h.b+bit_and(shift_right(low,26),67108863) in
+    let h2=h.c+bit_and(bit_or(shift_right(low,52),shift_left(high,12)),67108863) in
+    let h3=h.d+bit_and(shift_right(high,14),67108863) in let h4=h.e+bit_or(shift_right(high,40),shift_left(top,24)) in
+    let d0=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r0),wrapping_mul(h1,r.s4)),wrapping_add(wrapping_mul(h2,r.s3),wrapping_mul(h3,r.s2))),wrapping_mul(h4,r.s1)) in
+    let d1=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r1),wrapping_mul(h1,r.r0)),wrapping_add(wrapping_mul(h2,r.s4),wrapping_mul(h3,r.s3))),wrapping_mul(h4,r.s2)) in
+    let d2=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r2),wrapping_mul(h1,r.r1)),wrapping_add(wrapping_mul(h2,r.r0),wrapping_mul(h3,r.s4))),wrapping_mul(h4,r.s3)) in
+    let d3=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r3),wrapping_mul(h1,r.r2)),wrapping_add(wrapping_mul(h2,r.r1),wrapping_mul(h3,r.r0))),wrapping_mul(h4,r.s4)) in
+    let d4=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r4),wrapping_mul(h1,r.r3)),wrapping_add(wrapping_mul(h2,r.r2),wrapping_mul(h3,r.r1))),wrapping_mul(h4,r.r0)) in
+    let d1=d1+shift_right(d0,26) in let d2=d2+shift_right(d1,26) in let d3=d3+shift_right(d2,26) in let d4=d4+shift_right(d3,26) in
+    let a=bit_and(d0,67108863)+shift_right(d4,26)*5 in
+    PolyState { a=bit_and(a,67108863),b=bit_and(d1,67108863)+shift_right(a,26),c=bit_and(d2,67108863),d=bit_and(d3,67108863),e=bit_and(d4,67108863) }
+; The 16-byte blocks of text[at..at+count); a last partial block is padded with
+; marker (1 for plain Poly1305) and zeros, and keeps top (1 for AEAD padding).
+private fn poly_tail(text:Arr u8 n,at:i64,count:i64,start:i64,marker:i64) -> i64
+  = loop(i=0,value=0) while i<8
+      next(i+1,bit_or(value,shift_left(if start+i<count then byte_read_le(text,at+start+i,1) else if start+i==count then marker else 0,i*8))) yield value
+private fn poly_feed(h:PolyState,r:PolyKey,text:Arr u8 n,at:i64,count:i64,padded:bool) -> PolyState
+  = let full=count/16 in
+    let h=loop(i=0,h=h) while i<full next(i+1,poly_block(h,r,byte_read_le(text,at+i*16,8),byte_read_le(text,at+i*16+8,8),1)) yield h in
+    let rest=count-full*16 in if rest==0 then h else
+    let marker=if padded then 0 else 1 in let from=at+full*16 in
+    poly_block(h,r,poly_tail(text,from,rest,0,marker),poly_tail(text,from,rest,8,marker),if padded then 1 else 0)
+private fn poly_select(a:i64,b:i64,mask:i64) -> i64 = bit_or(bit_and(a,mask),bit_and(b,bit_xor(mask,-1)))
+; The tag (h + s) mod 2^128 as little-endian bytes; s is the pad words.
+private fn poly_finish(h:PolyState,s0:i64,s1:i64,s2:i64,s3:i64) -> Arr u8 _
+  = let c=h.c+shift_right(h.b,26) in let b=bit_and(h.b,67108863) in
+    let d=h.d+shift_right(c,26) in let c=bit_and(c,67108863) in
+    let e=h.e+shift_right(d,26) in let d=bit_and(d,67108863) in
+    let a=h.a+shift_right(e,26)*5 in let e=bit_and(e,67108863) in
+    let b=b+shift_right(a,26) in let a=bit_and(a,67108863) in
+    let ga=a+5 in let gb=b+shift_right(ga,26) in let gc=c+shift_right(gb,26) in let gd=d+shift_right(gc,26) in
+    let ge=e+shift_right(gd,26)-67108864 in let mask=arithmetic_shift_right(ge,63) in
+    let a=poly_select(a,bit_and(ga,67108863),mask) in let b=poly_select(b,bit_and(gb,67108863),mask) in
+    let c=poly_select(c,bit_and(gc,67108863),mask) in let d=poly_select(d,bit_and(gd,67108863),mask) in let e=poly_select(e,ge,mask) in
+    let w0=bit_and(bit_or(a,shift_left(b,26)),4294967295)+s0 in
+    let w1=bit_and(bit_or(shift_right(b,6),shift_left(c,20)),4294967295)+s1+shift_right(w0,32) in
+    let w2=bit_and(bit_or(shift_right(c,12),shift_left(d,14)),4294967295)+s2+shift_right(w1,32) in
+    let w3=bit_and(bit_or(shift_right(d,18),shift_left(e,8)),4294967295)+s3+shift_right(w2,32) in
+    let out=arr(i in 0..16) u8(0) in
+    let out=byte_write_le(out,0,bit_or(bit_and(w0,4294967295),shift_left(w1,32)),8) in
+    byte_write_le(out,8,bit_or(bit_and(w2,4294967295),shift_left(w3,32)),8)
+private fn poly_zero() -> PolyState = PolyState { a=0,b=0,c=0,d=0,e=0 }
+fn poly1305(key:Arr u8 n,text:Arr u8 m) -> Arr u8 _
+  = check n==32 && m<=1048576 in
+    let h=poly_feed(poly_zero(),poly_key(byte_read_le(key,0,8),byte_read_le(key,8,8)),text,0,m,false) in
+    poly_finish(h,cc_word(key,16),cc_word(key,20),cc_word(key,24),cc_word(key,28))
+; The RFC 8439 AEAD tag over aad and text[0..count), keyed by keystream block 0.
+private fn cc_tag(key:CcKey,aad:Arr u8 k,text:Arr u8 m,count:i64) -> Arr u8 _
+  = let s=cc_stream(key,0) in let r=poly_key(cc_pair(s.x0,s.x1),cc_pair(s.x2,s.x3)) in
+    let h=poly_feed(poly_zero(),r,aad,0,k,true) in let h=poly_feed(h,r,text,0,count,true) in
+    poly_finish(poly_block(h,r,k,count,1),s.x4,s.x5,s.x6,s.x7)
+fn chacha20_poly1305_seal(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 k,plaintext:Arr u8 q) -> Arr u8 _
+  = check n==32 && m==12 && k<=16384 && q<=65536 in
+    let words=cc_key(key,nonce) in let boxed=cc_xor_into(arr(i in 0..q+16) u8(0),0,plaintext,0,q,words,1) in
+    let tag=cc_tag(words,aad,boxed,q) in
+    let boxed=byte_write_le(boxed,q,byte_read_le(tag,0,8),8) in byte_write_le(boxed,q+8,byte_read_le(tag,8,8),8)
+fn chacha20_poly1305_open(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 k,ciphertext:Arr u8 q) -> BytesResult
+  = if n!=32 || m!=12 || k>16384 || q<16 || q>65552 then bytes_error(22,"invalid AEAD lengths",0) else
+    let words=cc_key(key,nonce) in let expected=cc_tag(words,aad,ciphertext,q-16) in
+    if !crypto_equal(str_slice(ciphertext,q-16,q),expected) then bytes_error(74,"AEAD authentication failed",0) else
+    bytes_ok(cc_xor_into(arr(i in 0..q-16) u8(0),0,ciphertext,0,q-16,words,1))

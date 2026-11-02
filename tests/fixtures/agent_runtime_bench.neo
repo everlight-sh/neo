@@ -1,0 +1,25 @@
+import "std:arena"
+import "std:queue"
+import "std:task"
+import "std:debug"
+fn add_capture(capture:i64,value:i64) -> i64 = capture+value
+resource type BenchResource = { bytes:Arr u8 _ } drop bench_release
+effect(process) fn bench_release(value:BenchResource) -> unit = noop()
+effect(process) fn bench_resource() -> BenchResource = BenchResource { bytes=arr(i in 0..64) u8(i) }
+fn bench_resource_size(value:BenchResource) -> i64 = len(value.bytes)
+effect(fs,net,env,time,process) fn bench_step(state:i64,cancelled:bool,now:i64) -> TaskStep<i64>
+  = TaskStep::<i64> { state=state+1,done=cancelled,wake_ms=now }
+type QueueBenchState = { queue:Queue<i64>,total:i64 }
+fn queue_bench_step(move state:QueueBenchState,i:i64) -> QueueBenchState
+  = let pushed=queue_push(state.queue,i) in check pushed.accepted in let taken=queue_take(pushed.queue) in
+    QueueBenchState { queue=taken.queue,total=state.total+match taken.value { None => 0,Some(value) => value } }
+effect(fs,net,env,time,process) fn main(mode:i64,n:i64{n>=0 && n<=10000000}) -> unit
+  = let start=monotonic_ns() in
+    let checksum=if mode==0 then let invoke=function(add_capture) in loop(i=0,total=0) while i<n next(i+1,total+invoke(1,i)) yield total else
+      if mode==1 then loop(i=0,state=QueueBenchState { queue=queue_new::<i64>(64),total=0 }) while i<n next(i+1,queue_bench_step(state,i)) yield state.total else
+      if mode==2 then using arena=new_arena(1) in loop(i=0,total=0) while i<n next(i+1,
+        using owner=bench_resource() in let ref=adopt(owner,arena) in let size=bench_resource_size(borrow_ref(ref)) in
+          let closed=ref_release(ref) in total+size) yield total else
+        let admitted=tasks_spawn(tasks_new::<i64>(1),0,function(bench_step)) in
+        loop(i=0,state=admitted.tasks) while i<n next(i+1,tasks_tick(state,false,i).tasks) yield match tasks_state(state,0) { None => -1,Some(value) => value } in
+    let finish=monotonic_ns() in let output=print_out(concat(int_text(checksum)," ",int_text(finish.value-start.value),"\n")) in noop()

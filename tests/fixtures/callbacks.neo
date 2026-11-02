@@ -1,0 +1,12 @@
+import "std:vec"
+import "std:io"
+type Closure = { function:Fn(i64,i64)->i64,capture:i64 }
+fn add(a:i64,b:i64) -> i64 = a+b
+fn multiply(a:i64,b:i64) -> i64 = a*b
+fn apply(closure:Closure,x:i64) -> i64 = let invoke=closure.function in invoke(closure.capture,x)
+effect(fs) fn emit(value:i64) -> unit = let printed=print_out(concat(int_text(value),"\n")) in noop()
+effect(fs) fn main() -> unit
+  = let a=Closure { function=function(add),capture=2 } in let b=Closure { function=function(multiply),capture=6 } in
+    let callbacks=vec_push(vec_push(vec_empty::<Closure>(),a),b) in
+    let answer=match vec_get(callbacks,1) { None => 0,Some(closure) => apply(closure,7) } in
+    let output=function(emit) in check apply(a,40)==42 && answer==42 in output(answer)

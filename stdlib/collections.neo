@@ -1,0 +1,41 @@
+import "std:strings"
+import "std:hashmap"
+import "std:bytesmap"
+
+type IntVector = { values: Arr i64 _ }
+type BytesVector = { values: Arr OptionBytes _ }
+type MapEntry = { key: Arr u8 _, value: Arr u8 _ }
+sealed type StringMap = { table: BytesMap }
+fn vector_empty () -> IntVector = IntVector { values = arr(i in 0..0) i }
+fn vector_push (move vector: IntVector, value: i64) -> IntVector
+  = IntVector { values = push(vector.values,value) }
+fn vector_get (vector: IntVector, index: i64) -> OptionInt
+  = let a = vector.values in if index >= 0 && index < len(a) then some_int(a[index]) else none_int()
+fn vector_heap_child(borrow values:Arr i64 n,count:i64,root:i64,held:i64) -> i64
+  = if root>=count/2 then -1 else let left=root*2+1 in let right=left+1 in
+    check left>=0 && left<count && left<n in
+    let child=if right<count then check right>=0 && right<n in if values[right]>values[left] then right else left else left in
+    check child>=0 && child<n in if held>=values[child] then -1 else child
+fn vector_heap_down(move values:Arr i64 n,count:i64,root:i64) -> Arr i64 n
+  = check root>=0 && root<count && count<=n in let held=values[root] in
+    loop(index=root,child=vector_heap_child(values,count,root,held),row=values) while child>=0
+      next(child,vector_heap_child(row,count,child,held),check index>=0 && index<len(row) && child>=0 && child<len(row) in set(row,index,row[child])) yield
+      check index>=0 && index<len(row) in set(row,index,held)
+
+fn vector_sort (move vector: IntVector) -> IntVector
+  = let initial = vector.values in let n = len(initial) in
+    let heap = loop(i = n / 2, row = initial) while i > 0
+      next(i - 1,vector_heap_down(row,n,i - 1)) yield row in
+    IntVector { values = loop(left = n, row = heap) while left > 1
+      next(left - 1,check len(row) == n && left <= n && left > 1 in
+           let top = row[0] in let last = row[left - 1] in
+           let swapped = set(set(row,0,last),left - 1,top) in
+           vector_heap_down(swapped,left - 1,0)) yield row }
+; Compatibility wrappers use deterministic seeds. For untrusted keys use
+; hashmap_random to obtain a kernel-seeded map with the typed Result API.
+fn map_empty () -> StringMap
+  = StringMap { table = bytesmap_empty(0,0) }
+fn map_get (map: StringMap, key: Arr u8 n) -> OptionBytes
+  = bytesmap_get(map.table,key)
+fn map_put (move map: StringMap, key: Arr u8 n, value: Arr u8 m) -> StringMap
+  = StringMap { table = bytesmap_put(map.table,key,value) }

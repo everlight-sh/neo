@@ -1,0 +1,36 @@
+import "std:json"
+import "std:io"
+fn access_decode (text: Arr u8 n) -> Arr u8 _
+  = let count = n / 2 in check count >= 0 in
+    arr(i in 0..count) u8(json_hex(str_byte(text, i * 2)) * 16 + json_hex(str_byte(text, i * 2 + 1)))
+fn access_items (value: Json) -> Arr u8 _
+  = let items = json_array_values(value) in
+    let body = loop (i: i64{i >= 0} = 0, out = "[") while i < len(items)
+      next (i + 1, concat(out, if i == 0 then "" else ",", items[i].raw)) yield out in concat(body, "]")
+fn access_reply (text: Arr u8 n) -> Arr u8 _
+  = let parsed = json_parse(text) in
+    if !parsed.ok then "{\"ok\":false}\n" else
+      let field = json_get(parsed.value, "target") in let decoded = json_text(field.value) in
+      let items = access_items(field.value) in let item = json_array_get(field.value, 1) in
+      let inner = json_get(field.value, "inner") in
+      let independent = parsed.value.raw in
+      let changed = if len(independent) > 0 then set(independent, 0, u8(88)) else independent in
+      let offsets = parsed.value.offsets in
+      let changed_offsets = if len(offsets) > 0 then set(offsets, 0, 12345) else offsets in
+      let again = json_get(parsed.value, "target") in
+      check len(changed) == len(parsed.value.raw) && (len(changed) == 0 || str_byte(changed, 0) == 88) in
+      check len(changed_offsets) == len(parsed.value.offsets) && (len(changed_offsets) == 0 || changed_offsets[0] == 12345) in
+      check field.present == again.present && str_equal(field.value.raw, again.value.raw) in
+      concat("{\"ok\":true,\"present\":", if field.present then "true" else "false",
+        ",\"value\":", if field.present then field.value.raw else "null",
+        ",\"text\":", if decoded.ok then json_quote(decoded.value) else "null",
+        ",\"count\":", int_text(json_array_len(field.value)), ",\"items\":", items,
+        ",\"second\":", if item.present then item.value.raw else "null",
+        ",\"inner\":", if inner.present then inner.value.raw else "null", "}\n")
+effect(fs) fn main () -> unit
+  = let input = file_read(0, 4194304) in let bytes = input.value in
+    let replies = loop (position = 0, out = "") while position < len(bytes)
+      next (let rest = str_slice(bytes, position, len(bytes)) in let end = str_find(rest, "\n") in if end.present then position + end.value + 1 else len(bytes),
+        let rest = str_slice(bytes, position, len(bytes)) in let end = str_find(rest, "\n") in
+        concat(out, access_reply(access_decode(if end.present then str_slice(rest, 0, end.value) else rest)))) yield out in
+    let printed = print_out(replies) in noop()

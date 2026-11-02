@@ -1,0 +1,1893 @@
+{
+  "started": "2026-10-25T09:43:36.179777+00:00",
+  "directory": "/axon/bench/usability/results/2026-10-25-094336-compute",
+  "platform": "Linux-6.8.0-64-generic-aarch64-with-glibc2.39",
+  "repeats": 7,
+  "cases": {
+    "mandel": [
+      "1200",
+      "1200",
+      "300"
+    ],
+    "stencil": [
+      "1000000",
+      "20"
+    ],
+    "nbody": [
+      "1024",
+      "3"
+    ]
+  },
+  "results": [
+    {
+      "workload": "mandel",
+      "workers": 1,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.0993957300000261,
+          "cpu_s": 0.09868699999999991,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0983293719999665,
+          "cpu_s": 0.09775199999999978,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.09895104700001411,
+          "cpu_s": 0.09828100000000006,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0984916980000321,
+          "cpu_s": 0.09789799999999993,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.09796685000003436,
+          "cpu_s": 0.09738099999999966,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0983235109999896,
+          "cpu_s": 0.09761200000000037,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.09923655800002962,
+          "cpu_s": 0.09852899999999981,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "mandel",
+      "workers": 1,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.25931856599999037,
+          "cpu_s": 0.25851799999999975,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2621201469999619,
+          "cpu_s": 0.26121199999999994,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2621114460000058,
+          "cpu_s": 0.26016599999999995,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2619613319999985,
+          "cpu_s": 0.2610140000000004,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2611131920000389,
+          "cpu_s": 0.2604680000000008,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2623003349999635,
+          "cpu_s": 0.26010199999999994,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2641349019999666,
+          "cpu_s": 0.2622960000000001,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "mandel",
+      "workers": 1,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.2676579729999844,
+          "cpu_s": 0.2667230000000003,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2702534840000226,
+          "cpu_s": 0.269228,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2719701230000169,
+          "cpu_s": 0.27103000000000016,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2681284669999968,
+          "cpu_s": 0.26700999999999997,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2694100059999869,
+          "cpu_s": 0.2672899999999988,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.2746806829999855,
+          "cpu_s": 0.2731809999999994,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.27078400199997077,
+          "cpu_s": 0.26732199999999995,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 1,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.022310031999950297,
+          "cpu_s": 0.021249000000000073,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.02285839799998257,
+          "cpu_s": 0.021256000000000996,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.024088254999981018,
+          "cpu_s": 0.022569999999999035,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.024227252000002863,
+          "cpu_s": 0.022714000000000234,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.023297770999988643,
+          "cpu_s": 0.02179600000000076,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.021413841000025968,
+          "cpu_s": 0.020043000000000255,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.021170761999997012,
+          "cpu_s": 0.019827999999999624,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 1,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.038155039000002944,
+          "cpu_s": 0.03631799999999974,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.04142144599995845,
+          "cpu_s": 0.04034800000000022,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.03676105900001403,
+          "cpu_s": 0.03591200000000033,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.04151198699997849,
+          "cpu_s": 0.040649000000000435,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.0372460600000295,
+          "cpu_s": 0.035451000000000454,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.03686043999999811,
+          "cpu_s": 0.03621800000000014,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.03533463000002257,
+          "cpu_s": 0.034597000000000266,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 1,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.0420144380000238,
+          "cpu_s": 0.039512999999999354,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.04299654700002975,
+          "cpu_s": 0.040786000000000155,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.04384153400002333,
+          "cpu_s": 0.04171699999999923,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.05066038799998296,
+          "cpu_s": 0.0453650000000001,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.05720096499999272,
+          "cpu_s": 0.0524659999999994,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.04081879700004265,
+          "cpu_s": 0.0385389999999996,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.03960168999998359,
+          "cpu_s": 0.038430000000000186,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 1,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.005635080999979891,
+          "cpu_s": 0.0052120000000005495,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.005828452999992351,
+          "cpu_s": 0.005345999999999962,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.0056175400000029185,
+          "cpu_s": 0.005214999999999748,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.005662913999969987,
+          "cpu_s": 0.00517000000000023,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.005565665000005993,
+          "cpu_s": 0.005117999999999845,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.006853271000011318,
+          "cpu_s": 0.00516499999999942,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        },
+        {
+          "wall_s": 0.005489624000006188,
+          "cpu_s": 0.005103000000000191,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128208e-1"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 1,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.007442387000025974,
+          "cpu_s": 0.0068790000000004126,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.007774173000029805,
+          "cpu_s": 0.0071059999999992796,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.008333164999953624,
+          "cpu_s": 0.006581999999999866,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.007716673999993873,
+          "cpu_s": 0.0071110000000005336,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.00864616000001206,
+          "cpu_s": 0.0067829999999998725,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.008865406999973402,
+          "cpu_s": 0.006996000000001001,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.007558635000009417,
+          "cpu_s": 0.007029000000000285,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 1,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.01057146499999817,
+          "cpu_s": 0.008867999999999987,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.0097959760000208,
+          "cpu_s": 0.008746000000000254,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.00926219199999423,
+          "cpu_s": 0.00840200000000002,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.010980291000009856,
+          "cpu_s": 0.008660999999999364,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.00917094400000451,
+          "cpu_s": 0.008378000000000108,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.009349482999994052,
+          "cpu_s": 0.008464000000000027,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        },
+        {
+          "wall_s": 0.009108235999974568,
+          "cpu_s": 0.008284999999999987,
+          "command": [
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128179"
+        }
+      ]
+    },
+    {
+      "workload": "mandel",
+      "workers": 4,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.04698857800002543,
+          "cpu_s": 0.09745100000000018,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.04819840200002545,
+          "cpu_s": 0.09750000000000025,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.04672967400000516,
+          "cpu_s": 0.09744900000000101,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.04776036700002351,
+          "cpu_s": 0.09957799999999972,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.04754020300003958,
+          "cpu_s": 0.09879399999999983,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.04683725500001401,
+          "cpu_s": 0.0973889999999995,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.048150577999990674,
+          "cpu_s": 0.1000539999999992,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "mandel",
+      "workers": 4,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.07028680799999165,
+          "cpu_s": 0.27186200000000116,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07668584700002157,
+          "cpu_s": 0.26957499999999956,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.06908050499998808,
+          "cpu_s": 0.264180999999999,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07215954199995167,
+          "cpu_s": 0.26585899999999896,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.06907104599997638,
+          "cpu_s": 0.26647400000000054,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0694080000000099,
+          "cpu_s": 0.26592699999999936,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.06836034899998822,
+          "cpu_s": 0.2651179999999992,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "mandel",
+      "workers": 4,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.07242731600001662,
+          "cpu_s": 0.2764050000000008,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07224377799997228,
+          "cpu_s": 0.275732,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0712628059999929,
+          "cpu_s": 0.27255500000000077,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.0715660509999907,
+          "cpu_s": 0.27235000000000087,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07155055200001925,
+          "cpu_s": 0.2718560000000001,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07303027900002235,
+          "cpu_s": 0.2731060000000003,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        },
+        {
+          "wall_s": 0.07302436599997009,
+          "cpu_s": 0.2740479999999996,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-mandel",
+            "1200",
+            "1200",
+            "300"
+          ],
+          "output": "79165632"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 4,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.011588327999959347,
+          "cpu_s": 0.02781500000000059,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01130283300000201,
+          "cpu_s": 0.02671399999999957,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01118625100002646,
+          "cpu_s": 0.026060000000000416,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01130637400001433,
+          "cpu_s": 0.025344000000000477,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01097204600000623,
+          "cpu_s": 0.026366999999999585,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.011069086000020434,
+          "cpu_s": 0.026952000000000642,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.011584037000034186,
+          "cpu_s": 0.02709799999999929,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 4,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.012898808999977973,
+          "cpu_s": 0.039317000000001046,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.014670615999989423,
+          "cpu_s": 0.041780999999998736,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.012544063999996524,
+          "cpu_s": 0.04045799999999922,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01240831600000547,
+          "cpu_s": 0.03845400000000154,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01326505399998723,
+          "cpu_s": 0.03809099999999932,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.014068832999953429,
+          "cpu_s": 0.03906199999999882,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01260247900000877,
+          "cpu_s": 0.03966999999999976,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "stencil",
+      "workers": 4,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.01608705299997837,
+          "cpu_s": 0.04279299999999919,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.017538240000021688,
+          "cpu_s": 0.042635000000000645,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.01621009299998377,
+          "cpu_s": 0.04294500000000079,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.015171192000025258,
+          "cpu_s": 0.04101199999999916,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.0160116790000302,
+          "cpu_s": 0.04197900000000032,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.017397117000029994,
+          "cpu_s": 0.041878999999999444,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        },
+        {
+          "wall_s": 0.016228259999991224,
+          "cpu_s": 0.040942000000001255,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-stencil",
+            "1000000",
+            "20"
+          ],
+          "output": "499998359740"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 4,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.002552421000018512,
+          "cpu_s": 0.005793999999998856,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.0034327820000044085,
+          "cpu_s": 0.005676999999999488,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.002835749999917425,
+          "cpu_s": 0.006017000000000494,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.003992773999925703,
+          "cpu_s": 0.005911999999999806,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.002991038999994089,
+          "cpu_s": 0.00607700000000011,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.0038152350000473234,
+          "cpu_s": 0.005403999999999187,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        },
+        {
+          "wall_s": 0.0035819469999296416,
+          "cpu_s": 0.005514999999998382,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/axon-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-8.8866460414128096e-1"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 4,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.00497809299997698,
+          "cpu_s": 0.008146000000001319,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.003219661000002816,
+          "cpu_s": 0.0075820000000002,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.005028967000043849,
+          "cpu_s": 0.008254999999999568,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.004274979000001622,
+          "cpu_s": 0.008983999999998882,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.0036195289999341185,
+          "cpu_s": 0.008060999999998986,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.0035279900000659836,
+          "cpu_s": 0.007896000000001124,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        },
+        {
+          "wall_s": 0.003908859000034681,
+          "cpu_s": 0.008098999999999634,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/rust/target/release/nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128090"
+        }
+      ]
+    },
+    {
+      "workload": "nbody",
+      "workers": 4,
+      "implementation": "Go",
+      "runs": [
+        {
+          "wall_s": 0.005341171000054601,
+          "cpu_s": 0.008528000000000868,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.005843079999976908,
+          "cpu_s": 0.008808000000000038,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.007037521000029301,
+          "cpu_s": 0.009284999999999322,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.005243463000056181,
+          "cpu_s": 0.00927600000000195,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.007060561999992387,
+          "cpu_s": 0.009059000000001816,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.00555791700003283,
+          "cpu_s": 0.008746000000000032,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        },
+        {
+          "wall_s": 0.006166949999965254,
+          "cpu_s": 0.008708999999999634,
+          "command": [
+            "taskset",
+            "-c",
+            "0-3",
+            "/axon/bench/usability/results/2026-10-25-094336-compute/go-nbody",
+            "1024",
+            "3"
+          ],
+          "output": "-0.88866460414128101"
+        }
+      ]
+    }
+  ],
+  "valid": true,
+  "versions": {
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "go": "go version go1.25.1 linux/arm64",
+    "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: aarch64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin"
+  },
+  "binary_sha256": {
+    "mandel-Axon": "12737e2d0362f63f263d56554d3dfc919f4d4e69f9bd4e97a78a1d5501720809",
+    "mandel-Go": "89710460175ef2e086b8d955866a1e9c4df951a9c7f0facf8355151504713d19",
+    "stencil-Axon": "a1b365f8a41dc501c70548eeb10823fbea77ffe45a09258f670875cfab5a4d92",
+    "stencil-Go": "a50791d5aff7482abcd46e2e4159c3f5e47f301dc5fcaadd5dbce2dce6beefdd",
+    "nbody-Axon": "43c28b7c6f9bd67c740a5fabaa6c127fc19586732c55fe60f30cf03255cd807c",
+    "nbody-Go": "983fbbecfbb1d52c0612b6e3940fa2c2ed77e1e6777c2faead443806c44aed83",
+    "mandel-Rust": "1dce3199148d8194cc0f7f307f19b2d4d616b63a0f788dbf009aafffd8b1a447",
+    "stencil-Rust": "1713b55a741359d21b1d8088e7a7cd60f242750712283589246fea52c6cd8887",
+    "nbody-Rust": "e4540acb2d6897ef6efc26e99d69fca9bb6f3c9d8a34aaa0c3fc857ec4609e84"
+  },
+  "source_sha256": {
+    "axonc/formatter.py": "a0bffe30e3163150e86b2d405447cf1971c5fa3859afbd87d897f8c046e25a03",
+    "axonc/release.py": "caa3847161224e1407e9e553af8e29963fc869f2fdac962c265aac24041d3192",
+    "axonc/check.py": "9bf761f54c63269a580773538a1bedb5a775fa301fe7616ac6449e632f536f13",
+    "axonc/diagnostics.py": "9a90bb2a9e042045d4a0dd8a7721b87d34a6347ca71559e313321d4549a192b1",
+    "axonc/linear.py": "950588b5b9bed2ab2daae6a63bec9a1d22fba796abe506fd2991baaa65a9f663",
+    "axonc/graph.py": "b7fefe7afbcd460af382c8691c3f0d3f3749cf550c8e0e7a9439a6e194b29a0d",
+    "axonc/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "axonc/packages.py": "109614c0efb3407c22fc9f6751af365121ce39e5ed72a563a10ac3cd4ebde184",
+    "axonc/kernel_workers.py": "fe42649e5648d128d27a3f12d36d5e4e55292ca77441b9e75a4ec16890f4fe74",
+    "axonc/llvm.py": "16fe2ab0efbd62e59c7839a70673286911aa0800cc8d09c786b7c12b9c9afb3f",
+    "axonc/lsp.py": "cf3930d83e92e87e02d548645e7f0f927203c7aadaacf00874c541f20928476e",
+    "axonc/ranges.py": "744200711fd2f2836d30043273b73b03f0d6b2876f1f2c9b92a078c0f4ebe097",
+    "axonc/cli.py": "882b435670afaf197f808473e73156ddfabae16a97a95b11ee0dd83b3f4207d6",
+    "axonc/elaborate.py": "90a0e1968adbd0f026658f3be856a840e4a657dd7652341a0c3868871115c156",
+    "axonc/vectorize.py": "fb7aed863ab2a97beaa4fadf26eb87fb3f3f638efd62bd30931d789dfc3cb513",
+    "axonc/reference.py": "dee75be51b4f10984b9fdc486ef9e64e20ba0cb74cbd9610f288fe40a3e25f78",
+    "axonc/syntax.py": "2d12da900cd212a3a73d216b796f6eda440ea6efe908c4986668f87109c4aa50",
+    "axonc/resources.py": "28150f563102fb7dc83c07c9099a44070935c4b83e79a0f65ebcf0b18fd992da",
+    "axonc/modules.py": "96e3188bc5fe266f56e5705b6c0af54b7693e1db3de4cef5a7b7e61095a69ebc",
+    "axonc/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "axonc/fold.py": "597097d1c4ed1fad6050ee077b37626aab6970bd815ddf04a723334abe8a3776",
+    "axonc/project.py": "0fd8a9cb3c2b125f9cfc863ead2a10350199e525af76a50d3e659ada8197b516",
+    "axonc/inline.py": "793d7f0675eb34ca5c631ecb553b2948f77e84e8d541d3f861eb053147580ad3",
+    "runtime/platform_macos.ax": "c58725f9ecdf201b8a3f1fd23cc3a8734b16f1d0201a2d0d6787ffcede6682d5",
+    "runtime/handles.ax": "d76038a67d320f1f91fa146cc06350b344dbc9bfb56f7288cc6b5ed08c6c398d",
+    "runtime/platform_linux_x86_64.ax": "030452aae096633dcfef437a6c0aa1ae6d33e4c7cbb8a44845d955c71eaf406e",
+    "runtime/core.ax": "2710f9da9aaef7db443a15d2d3d0fb7460e4aa6904393d3c7f1848dfbfe20e73",
+    "runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "runtime/platform_linux.ax": "58346bec0c85b7aa1f39abddc558eee7874c048f34d79421c609c558cccd926d",
+    "runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1",
+    "bench/rust/src/nbody.rs": "17bb4e086a07e8c508fdd127d64e6c958af9f06b9926c38c2ef5f5a0283524c2",
+    "bench/rust/src/mandel_tuned.rs": "090511989db6d4771a6615313363ecba66ecf0fca56626f5ef2b9b7658c4db6d",
+    "bench/rust/src/http_hyper.rs": "589f7465deec73a9edb35992554144086c4b6372c59fda0f50514d03efb666f0",
+    "bench/rust/src/stencil.rs": "d56aa482732ac488939eb8e3ac8da63034094a107ca5c93fb8299c4f2cd8acf2",
+    "bench/rust/src/ssr.rs": "43b63e59b2bd62957e0a6ca9b6ce76438dd6a06d3d5d9d72ccbcefa2c438b81f",
+    "bench/rust/src/mandel.rs": "571cb57d1c914370d7a95e8aa3009f0660d0d21b11c335f4a7004a64e40dd719",
+    "bench/rust/src/nbody_seq.rs": "3554a347a0b54b7530e8a26caf4955e9a90df2e9b7eb446204bcfe9418fa7084",
+    "bench/rust/src/usability.rs": "6019bcb41e3f5aa0b95d701ce8f807b322872bb21a88c92f3f4b588f6e6bd18a",
+    "bench/rust/src/smooth.rs": "f0f5a19b068eedc1dbec1db09b89a977000b0c7a89837bf703ada6886902e383",
+    "bench/rust/src/ssr_container.rs": "bcf49b1173fc66363b62e9e35021f2c3186300dbe443b09af52147ead5a5329e",
+    "bench/rust/src/http_std.rs": "357d03ad886ac96e187d907b4e83f93918ed35446427c4cf06535684527c8fc7",
+    "bench/go/mandel/main.go": "89a05f56e86a86c12a078b1d14c4eb263c6b6b62c9d4e2303932284e2c893084",
+    "bench/go/stencil/main.go": "887ce949f6ffdaf62f39addfa020d58adcc84a1941ee037cb666515a9410e9e9",
+    "bench/go/nbody/main.go": "ac6f0ef6d58df2a654a13c565306e7a0ba2454d16de92437f5799eb2bcd49723"
+  },
+  "finished": "2026-10-25T09:43:45.575014+00:00"
+}

@@ -1,0 +1,503 @@
+; Parser: tokens to the syntax tree, as neoc/syntax.py Parser does, with its
+; error messages and positions. Errors do not unwind: P keeps the first one,
+; and every later step leaves a failed P unchanged.
+import "std:strings"
+import "std:hashmap"
+import "std:option"
+import "std:numbers"
+import "text.neo"
+import "lex.neo"
+import "ast.neo"
+
+; r is the result of the last step: a node, list or string index. acc holds
+; the items of the lists being parsed, innermost last.
+type P = { toks:Arr i64 _, text:Arr u8 _, i:i64, nodes:Arr i64 _, lists:Arr i64 _, strs:Arr Arr u8 _ _,
+           acc:Arr i64 _, imports:Arr i64 _, types:Arr i64 _, fns:Arr i64 _, names:HashMap<Arr u8 _,i64>,
+           vari:bool, r:i64, ok:bool, err:Arr u8 _, eline:i64, ecol:i64 }
+type Lit = { value:i64, big:bool }
+
+; ---------------------------------------------------------------- tokens
+fn ps_eof() -> Tok = Tok { kind=8, code=0, start=0, size=0, line=1, col=1 }
+fn ps_tok_at(borrow p:P, i:i64) -> Tok
+  = let last=lx_tok_count(p.toks)-1 in let k=if i<last then i else last in
+    if k>=0 then lx_tok(p.toks,k) else ps_eof()
+fn ps_tok(borrow p:P) -> Tok = ps_tok_at(p,p.i)
+fn ps_peek(borrow p:P) -> Tok = ps_tok_at(p,p.i+1)
+fn ps_tok_text(borrow p:P, t:Tok) -> Arr u8 _
+  = if t.start>=0 && t.size>=0 && t.start+t.size<=len(p.text) then byte_slice(p.text,t.start,t.start+t.size) else tx_empty()
+fn ps_tok_is(borrow p:P, t:Tok, borrow word:Arr u8 _) -> bool = t.size==len(word) && bytes_match_at(p.text,t.start,word)
+fn ps_at_sym(borrow p:P, code:i64) -> bool = let t=ps_tok(p) in t.kind==tk_sym() && t.code==code
+fn ps_at_kw(borrow p:P, code:i64) -> bool = let t=ps_tok(p) in t.kind==tk_kw() && t.code==code
+fn ps_at_ident(borrow p:P, borrow word:Arr u8 _) -> bool = let t=ps_tok(p) in t.kind==tk_ident() && ps_tok_is(p,t,word)
+fn ps_next(move p:P) -> P = if !p.ok then p else p with { i=p.i+1 }
+
+; ---------------------------------------------------------------- errors
+fn ps_fail(move p:P, borrow msg:Arr u8 _, line:i64, col:i64) -> P
+  = if !p.ok then p else p with { ok=false, err=msg, eline=line, ecol=col }
+fn ps_fail_expected(move p:P, borrow want:Arr u8 _) -> P
+  = if !p.ok then p else let t=ps_tok(p) in
+    let msg=concat("expected ",tx_repr(want,false),", got ",tx_repr(ps_tok_text(p,t),t.kind==tk_str())) in
+    ps_fail(p,msg,t.line,t.col)
+; what followed by the repr of t's text, at t.
+fn ps_fail_token(move p:P, borrow what:Arr u8 _, t:Tok) -> P
+  = let msg=concat(what,tx_repr(ps_tok_text(p,t),t.kind==tk_str())) in ps_fail(p,msg,t.line,t.col)
+fn ps_expect_sym(move p:P, code:i64) -> P
+  = if !p.ok then p else if ps_at_sym(p,code) then ps_next(p) else ps_fail_expected(p,lx_sym_text(code))
+fn ps_expect_kw(move p:P, code:i64) -> P
+  = if !p.ok then p else if ps_at_kw(p,code) then ps_next(p) else ps_fail_expected(p,lx_kw_text(code))
+
+; ---------------------------------------------------------------- tables
+fn ps_node8(move p:P, kind:i64, a:i64, b:i64, c:i64, d:i64, e:i64, f:i64, g:i64, h:i64, line:i64, col:i64) -> P
+  = if !p.ok then p else let id=len(p.nodes)/11 in
+    p with { nodes=ast_push_node(p.nodes,Node { kind=kind, a=a, b=b, c=c, d=d, e=e, f=f, g=g, h=h, line=line, col=col }), r=id }
+fn ps_node(move p:P, kind:i64, a:i64, b:i64, c:i64, d:i64, line:i64, col:i64) -> P
+  = ps_node8(p,kind,a,b,c,d,-1,-1,-1,-1,line,col)
+fn ps_nodev(borrow p:P, id:i64) -> Node = ast_node_at(p.nodes,id)
+
+fn ps_str_bytes(move p:P, borrow bytes:Arr u8 _) -> P
+  = if !p.ok then p else let id=len(p.strs) in p with { strs=push(p.strs,bytes), r=id }
+fn ps_tok_str(move p:P, t:Tok) -> P = let bytes=ps_tok_text(p,t) in ps_str_bytes(p,bytes)
+fn ps_strv(borrow p:P, id:i64) -> Arr u8 _ = if id>=0 && id<len(p.strs) then p.strs[id] else tx_empty()
+
+fn ps_push(move p:P, item:i64) -> P = if !p.ok then p else p with { acc=push(p.acc,item) }
+fn ps_push_r(move p:P) -> P = let item=p.r in ps_push(p,item)
+fn ps_items(borrow p:P, base:i64) -> Arr i64 _
+  = let start=if base<0 then 0 else base in let n=len(p.acc)-start in
+    arr(i in 0..(if n<0 then 0 else n)) if start+i>=0 && start+i<len(p.acc) then p.acc[start+i] else -1
+fn ps_list_of(move p:P, borrow items:Arr i64 _) -> P
+  = let id=len(p.lists) in
+    let lists=loop (l=push(p.lists,len(items)), k:i64{k>=0}=0) while k<len(items) next (push(l,items[k]), k+1) yield l in
+    p with { lists=lists, r=id }
+; The items pushed since acc had length base, as a list.
+fn ps_list(move p:P, base:i64) -> P
+  = let items=ps_items(p,base) in let rest=tx_take(p.acc,base) in ps_list_of(p with { acc=rest },items)
+fn ps_list_count(borrow p:P, list:i64) -> i64 = if list>=0 && list<len(p.lists) then p.lists[list] else 0
+
+fn ps_swap(move a:Arr i64 _, i:i64, j:i64) -> Arr i64 _
+  = if i>=0 && j>=0 && i<len(a) && j<len(a) then let x=a[i] in let y=a[j] in set(set(a,i,y),j,x) else a
+fn ps_sink(borrow p:P, move a:Arr i64 _, k:i64) -> Arr i64 _
+  = loop (b=a, j=k) while j>0 && j<len(b) && tx_less(ps_strv(p,b[j]),ps_strv(p,b[j-1]))
+      next (ps_swap(b,j-1,j), j-1) yield b
+; Like ps_list, with the names sorted and repeats dropped: sorted(set(names)).
+fn ps_sorted_list(move p:P, base:i64) -> P
+  = let items=ps_items(p,base) in
+    let sorted=loop (a=items, k=1) while k<len(a) next (ps_sink(p,a,k), k+1) yield a in
+    let unique=loop (out=tx_ints(), k:i64{k>=0}=0) while k<len(sorted)
+      next (if k>0 && tx_equal(ps_strv(p,sorted[k]),ps_strv(p,sorted[k-1])) then out else push(out,sorted[k]), k+1)
+      yield out in
+    let rest=tx_take(p.acc,base) in ps_list_of(p with { acc=rest },unique)
+fn ps_has_duplicate(borrow p:P, base:i64) -> bool
+  = let items=ps_items(p,base) in
+    loop (i:i64{i>=0}=0, found=false) while !found && i<len(items)
+      next (i+1, loop (j:i64{j>=0}=0, same=false) while !same && j<i && j<len(items)
+                   next (j+1, tx_equal(ps_strv(p,items[i]),ps_strv(p,items[j]))) yield same)
+      yield found
+
+; ---------------------------------------------------------------- names
+fn ps_ident(move p:P) -> P
+  = if !p.ok then p else let t=ps_tok(p) in
+    if t.kind!=tk_ident() then ps_fail_expected(p,"IDENT") else ps_next(ps_tok_str(p,t))
+fn ps_qident_more(move p:P) -> P
+  = let first=p.r in let p=ps_ident(ps_next(p)) in let second=p.r in
+    if !p.ok then p else let joined=concat(ps_strv(p,first),"::",ps_strv(p,second)) in ps_str_bytes(p,joined)
+fn ps_qident_at(borrow p:P) -> bool = p.ok && ps_at_sym(p,2) && ps_peek(p).kind==tk_ident()
+fn ps_qident(move p:P) -> P = loop (s=ps_ident(p)) while ps_qident_at(s) next (ps_qident_more(s)) yield s
+fn ps_type_name(borrow p:P, borrow name:Arr u8 _) -> bool
+  = option_is_some(hashmap_get(p.names,name)) || str_find(name,"::").present
+
+; ---------------------------------------------------------------- types
+fn ps_scalar_kind(code:i64) -> i64
+  = if code==17 then n_t_i64() else if code==18 then n_t_f64() else if code==21 then n_t_bool() else if code==19 then n_t_u8()
+    else if code==20 then n_t_u16() else if code==29 then n_t_i32() else if code==28 then n_t_ptr() else if code==30 then n_t_unit()
+    else 0
+
+fn ps_type_item(move p:P, close:i64) -> P
+  = let p=ps_push_r(ps_type(p)) in
+    if ps_at_sym(p,19) then ps_next(p) else if !ps_at_sym(p,close) then ps_expect_sym(p,close) else p
+fn ps_cap_item(move p:P, close:i64) -> P
+  = let p=ps_push_r(ps_ident(p)) in
+    if ps_at_sym(p,19) then ps_next(p) else if !ps_at_sym(p,close) then ps_expect_sym(p,close) else p
+
+fn ps_type_args(move p:P) -> P
+  = let base=len(p.acc) in let p=ps_push_r(ps_type(ps_expect_sym(p,22))) in
+    let p=loop (s=p) while s.ok && ps_at_sym(s,19) next (ps_push_r(ps_type(ps_next(s)))) yield s in
+    ps_list(ps_expect_sym(p,23),base)
+
+fn ps_type_params(move p:P) -> P
+  = if !ps_at_sym(p,22) then ps_list(p,len(p.acc)) else
+    let base=len(p.acc) in let p=ps_push_r(ps_ident(ps_next(p))) in
+    let p=loop (s=p) while s.ok && ps_at_sym(s,19) next (ps_push_r(ps_ident(ps_next(s)))) yield s in
+    let p=ps_expect_sym(p,23) in
+    if p.ok && ps_has_duplicate(p,base) then let t=ps_tok(p) in ps_fail(p,"duplicate type parameter",t.line,t.col)
+    else ps_list(p,base)
+
+fn ps_type_arr(move p:P, t:Tok) -> P
+  = let p=ps_type(p) in let elem=p.r in
+    if ps_at_sym(p,13) then
+      let p=ps_add(ps_next(p)) in let size=p.r in ps_node(ps_expect_sym(p,14),n_t_arr(),elem,size,1,-1,t.line,t.col)
+    else let p=ps_ident(p) in let size=p.r in ps_node(p,n_t_arr(),elem,size,0,-1,t.line,t.col)
+
+fn ps_type_rec(move p:P, t:Tok) -> P
+  = let p=loop (s=ps_tok_str(p,t)) while ps_qident_at(s) next (ps_qident_more(s)) yield s in
+    let name=p.r in
+    let p=if ps_at_sym(p,22) then ps_type_args(p) else ps_list(p,len(p.acc)) in let args=p.r in
+    ps_node(p,n_t_rec(),name,args,-1,-1,t.line,t.col)
+
+; Effect<...> capabilities, after the '<'.
+fn ps_caps(move p:P) -> P
+  = let base=len(p.acc) in
+    let p=loop (s=p) while s.ok && !ps_at_sym(s,23) next (ps_cap_item(s,23)) yield s in
+    ps_sorted_list(ps_next(p),base)
+
+fn ps_type_fn(move p:P, t:Tok) -> P
+  = let p=if ps_tok_is(p,t,"Effect") then ps_caps(ps_expect_sym(p,22)) else p with { r=-1 } in let caps=p.r in
+    let p=ps_expect_sym(p,13) in let base=len(p.acc) in
+    let p=loop (s=p) while s.ok && !ps_at_sym(s,14) next (ps_type_item(s,14)) yield s in
+    let p=ps_list(ps_next(p),base) in let params=p.r in
+    let p=ps_type(ps_expect_sym(p,4)) in let ret=p.r in
+    ps_node(p,n_t_fn(),params,ret,caps,-1,t.line,t.col)
+
+fn ps_type(move p:P) -> P
+  = if !p.ok then p else let t=ps_tok(p) in let p=ps_next(p) in
+    if t.kind==tk_kw() && ps_scalar_kind(t.code)>0 then ps_node(p,ps_scalar_kind(t.code),-1,-1,-1,-1,t.line,t.col)
+    else if t.kind==tk_kw() && t.code==22 then ps_type_arr(p,t)
+    else if t.kind==tk_ident() && ps_tok_is(p,t,"Ref") then
+      let p=ps_type(ps_expect_sym(p,22)) in let inner=p.r in ps_node(ps_expect_sym(p,23),n_t_ref(),inner,-1,-1,-1,t.line,t.col)
+    else if t.kind==tk_ident() && (ps_tok_is(p,t,"Fn") || ps_tok_is(p,t,"Effect")) then ps_type_fn(p,t)
+    else if t.kind==tk_ident() then ps_type_rec(p,t)
+    else ps_fail_token(p,"expected type, got ",t)
+
+; ---------------------------------------------------------------- expressions
+fn ps_expr(move p:P) -> P = ps_or(p)
+
+fn ps_or_more(move p:P) -> P
+  = let t=ps_tok(p) in let left=p.r in let p=ps_and(ps_next(p)) in let right=p.r in
+    ps_node(p,n_bin(),t.code,left,right,-1,t.line,t.col)
+fn ps_or(move p:P) -> P = loop (s=ps_and(p)) while s.ok && ps_at_sym(s,11) next (ps_or_more(s)) yield s
+
+fn ps_and_more(move p:P) -> P
+  = let t=ps_tok(p) in let left=p.r in let p=ps_cmp(ps_next(p)) in let right=p.r in
+    ps_node(p,n_bin(),t.code,left,right,-1,t.line,t.col)
+fn ps_and(move p:P) -> P = loop (s=ps_cmp(p)) while s.ok && ps_at_sym(s,10) next (ps_and_more(s)) yield s
+
+fn ps_cmp_code(code:i64) -> bool = code==22 || code==8 || code==23 || code==9 || code==6 || code==7
+fn ps_cmp(move p:P) -> P
+  = let p=ps_add(p) in let t=ps_tok(p) in
+    if p.ok && t.kind==tk_sym() && ps_cmp_code(t.code) then
+      let left=p.r in let p=ps_add(ps_next(p)) in let right=p.r in ps_node(p,n_bin(),t.code,left,right,-1,t.line,t.col)
+    else p
+
+fn ps_add_more(move p:P) -> P
+  = let t=ps_tok(p) in let left=p.r in let p=ps_mul(ps_next(p)) in let right=p.r in
+    ps_node(p,n_bin(),t.code,left,right,-1,t.line,t.col)
+fn ps_add(move p:P) -> P = loop (s=ps_mul(p)) while s.ok && (ps_at_sym(s,24) || ps_at_sym(s,25)) next (ps_add_more(s)) yield s
+
+fn ps_mul_more(move p:P) -> P
+  = let t=ps_tok(p) in let left=p.r in let p=ps_unary(ps_next(p)) in let right=p.r in
+    ps_node(p,n_bin(),t.code,left,right,-1,t.line,t.col)
+fn ps_mul(move p:P) -> P
+  = loop (s=ps_unary(p)) while s.ok && (ps_at_sym(s,26) || ps_at_sym(s,27) || ps_at_sym(s,28)) next (ps_mul_more(s)) yield s
+
+fn ps_min() -> i64 = shift_left(1,63)
+
+; neoc folds a minus sign into a number literal, making a new node at the sign.
+fn ps_negate(move p:P, line:i64, col:i64) -> P
+  = if !p.ok then p else let operand=p.r in let node=ps_nodev(p,operand) in
+    if node.kind==n_num() && node.b==0 then
+      (if node.a==ps_min() then let p=ps_str_bytes(p,"9223372036854775808") in let text=p.r in ps_node(p,n_num(),node.a,1,text,-1,line,col)
+       else ps_node(p,n_num(),0-node.a,0,-1,-1,line,col))
+    else if node.kind==n_num() then
+      let digits=ps_strv(p,node.c) in
+      (if tx_equal(digits,"9223372036854775808") then ps_node(p,n_num(),ps_min(),0,-1,-1,line,col)
+       else let negated=if tx_byte(digits,0)==45 then byte_slice(digits,1,len(digits)) else concat("-",digits) in
+            let p=ps_str_bytes(p,negated) in let text=p.r in ps_node(p,n_num(),wrapping_sub(0,node.a),1,text,-1,line,col))
+    else if node.kind==n_flt() then ps_node(p,n_flt(),bit_xor(node.a,ps_min()),-1,-1,-1,line,col)
+    else ps_node(p,n_un(),25,operand,-1,-1,line,col)
+
+fn ps_unary(move p:P) -> P
+  = if !p.ok then p
+    else if ps_at_sym(p,25) then let t=ps_tok(p) in let p=ps_unary(ps_next(p)) in ps_negate(p,t.line,t.col)
+    else if ps_at_sym(p,29) then
+      let t=ps_tok(p) in let p=ps_unary(ps_next(p)) in let operand=p.r in ps_node(p,n_un(),29,operand,-1,-1,t.line,t.col)
+    else ps_postfix(p)
+
+fn ps_postfix_at(borrow p:P) -> bool = p.ok && (ps_at_sym(p,17) || ps_at_sym(p,30) || ps_at_kw(p,24) || ps_at_sym(p,12))
+fn ps_postfix_one(move p:P) -> P
+  = let t=ps_tok(p) in let left=p.r in let p=ps_next(p) in
+    if t.kind==tk_sym() && t.code==17 then
+      let p=ps_expr(p) in let index=p.r in ps_node(ps_expect_sym(p,18),n_index(),left,index,-1,-1,t.line,t.col)
+    else if t.kind==tk_sym() && t.code==30 then let p=ps_ident(p) in let name=p.r in ps_node(p,n_field(),left,name,-1,-1,t.line,t.col)
+    else if t.kind==tk_kw() then let p=ps_field_inits(p) in let fields=p.r in ps_node(p,n_with(),left,fields,-1,-1,t.line,t.col)
+    else ps_node(p,n_try(),left,-1,-1,-1,t.line,t.col)
+fn ps_postfix(move p:P) -> P = loop (s=ps_atom(p)) while ps_postfix_at(s) next (ps_postfix_one(s)) yield s
+
+fn ps_field_init(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_ident(p) in let name=p.r in
+    let p=ps_expr(ps_expect_sym(p,21)) in let value=p.r in
+    let p=ps_push_r(ps_node(p,n_finit(),name,value,-1,-1,t.line,t.col)) in
+    if ps_at_sym(p,19) then ps_next(p) else p
+fn ps_field_inits(move p:P) -> P
+  = let base=len(p.acc) in
+    let p=loop (s=ps_expect_sym(p,15)) while s.ok && !ps_at_sym(s,16) next (ps_field_init(s)) yield s in
+    ps_list(ps_expect_sym(p,16),base)
+
+fn ps_range(move p:P, kind:i64, t:Tok) -> P
+  = let p=ps_ident(ps_expect_sym(ps_next(p),13)) in let var=p.r in
+    let p=ps_add(ps_expect_kw(p,3)) in let low=p.r in
+    let p=ps_add(ps_expect_sym(p,5)) in let high=p.r in
+    let p=ps_expr(ps_expect_sym(p,14)) in let body=p.r in
+    ps_node(p,kind,var,low,high,body,t.line,t.col)
+
+fn ps_binder(move p:P) -> P
+  = let p=ps_push_r(ps_ident(p)) in
+    if ps_at_sym(p,19) then ps_next(p) else if !ps_at_sym(p,14) then ps_expect_sym(p,14) else p
+fn ps_arm(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_qident(p) in let variant=p.r in let base=len(p.acc) in
+    let p=if ps_at_sym(p,13) then
+        let q=loop (s=ps_next(p)) while s.ok && !ps_at_sym(s,14) next (ps_binder(s)) yield s in ps_next(q)
+      else p in
+    let p=ps_list(p,base) in let binders=p.r in
+    let p=ps_expr(ps_expect_sym(p,3)) in let body=p.r in
+    let p=ps_push_r(ps_node(p,n_arm(),variant,binders,body,-1,t.line,t.col)) in
+    if ps_at_sym(p,19) then ps_next(p) else if !ps_at_sym(p,16) then ps_expect_sym(p,16) else p
+fn ps_match(move p:P, t:Tok) -> P
+  = let p=ps_expr(p) in let value=p.r in let base=len(p.acc) in
+    let p=loop (s=ps_expect_sym(p,15)) while s.ok && !ps_at_sym(s,16) next (ps_arm(s)) yield s in
+    let p=ps_list(ps_next(p),base) in let arms=p.r in
+    ps_node(p,n_match(),value,arms,-1,-1,t.line,t.col)
+
+fn ps_state(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_ident(p) in let name=p.r in
+    let p=if ps_at_sym(p,20) then
+        let p=ps_type(ps_next(p)) in let ty=p.r in let p=ps_preds(p) in let preds=p.r in
+        ps_node(p,n_annot(),ty,preds,-1,-1,t.line,t.col)
+      else p with { r=-1 } in
+    let annot=p.r in
+    let p=ps_expr(ps_expect_sym(p,21)) in let init=p.r in
+    ps_push_r(ps_node(p,n_state(),name,annot,init,-1,t.line,t.col))
+fn ps_loop(move p:P, t:Tok) -> P
+  = let p=ps_expect_sym(p,13) in let base=len(p.acc) in
+    let p=loop (s=ps_state(p)) while s.ok && ps_at_sym(s,19) next (ps_state(ps_next(s))) yield s in
+    let p=ps_list(ps_expect_sym(p,14),base) in let states=p.r in
+    let p=ps_expr(ps_expect_kw(p,10)) in let cond=p.r in
+    let p=ps_expect_sym(ps_expect_kw(p,11),13) in let base=len(p.acc) in
+    let p=loop (s=ps_push_r(ps_expr(p))) while s.ok && ps_at_sym(s,19) next (ps_push_r(ps_expr(ps_next(s)))) yield s in
+    let p=ps_list(ps_expect_sym(p,14),base) in let nexts=p.r in
+    let p=ps_expr(ps_expect_kw(p,12)) in let result=p.r in
+    if p.ok && ps_list_count(p,states)!=ps_list_count(p,nexts) then ps_fail(p,"loop: next arity differs from state arity",t.line,t.col)
+    else ps_node(p,n_loop(),states,cond,nexts,result,t.line,t.col)
+
+fn ps_keyword(move p:P, t:Tok) -> P
+  = let c=t.code in
+    if c==34 then ps_match(ps_next(p),t)
+    else if c==14 || c==15 then ps_node(ps_next(p),n_bool(),if c==14 then 1 else 0,-1,-1,-1,t.line,t.col)
+    else if c==2 || c==41 then
+      let p=ps_ident(ps_next(p)) in let name=p.r in
+      let p=ps_expr(ps_expect_sym(p,21)) in let value=p.r in
+      let p=ps_expr(ps_expect_kw(p,3)) in let body=p.r in
+      ps_node(p,if c==41 then n_using() else n_let(),name,value,body,-1,t.line,t.col)
+    else if c==4 then
+      let p=ps_expr(ps_next(p)) in let cond=p.r in
+      let p=ps_expr(ps_expect_kw(p,5)) in let yes=p.r in
+      let p=ps_expr(ps_expect_kw(p,6)) in let no=p.r in
+      ps_node(p,n_if(),cond,yes,no,-1,t.line,t.col)
+    else if c==7 || c==8 then ps_range(p,if c==7 then n_sum() else n_arrc(),t)
+    else if c==13 then
+      let p=ps_expr(ps_next(p)) in let pred=p.r in let p=ps_expr(ps_expect_kw(p,3)) in let body=p.r in
+      ps_node(p,n_check(),pred,body,-1,-1,t.line,t.col)
+    else if c==16 then
+      let p=ps_expr(ps_expect_sym(ps_next(p),13)) in let operand=p.r in
+      ps_node(ps_expect_sym(p,14),n_len(),operand,-1,-1,-1,t.line,t.col)
+    else if c==17 || c==18 || c==19 || c==20 || c==29 then
+      let p=ps_expr(ps_expect_sym(ps_next(p),13)) in let operand=p.r in
+      let p=ps_node(ps_expect_sym(p,14),ps_scalar_kind(c),-1,-1,-1,-1,t.line,t.col) in let to=p.r in
+      ps_node(p,n_cast(),to,operand,-1,-1,t.line,t.col)
+    else if c==9 then ps_loop(ps_next(p),t)
+    else ps_fail_token(p,"unexpected keyword ",t)
+
+fn ps_arg(move p:P) -> P = let p=ps_push_r(ps_expr(p)) in if ps_at_sym(p,19) then ps_next(p) else p
+fn ps_name(move p:P, t:Tok) -> P
+  = let p=ps_qident(p) in let name=p.r in
+    let targs=ps_at_sym(p,2) && ps_tok_is(p,ps_peek(p),"<") in
+    let p=if targs then ps_type_args(ps_next(p)) else ps_list(p,len(p.acc)) in let types=p.r in
+    if !p.ok then p
+    else if ps_at_sym(p,13) then
+      let base=len(p.acc) in
+      let p=loop (s=ps_next(p)) while s.ok && !ps_at_sym(s,14) next (ps_arg(s)) yield s in
+      let p=ps_list(ps_expect_sym(p,14),base) in let args=p.r in
+      ps_node(p,n_call(),name,args,types,-1,t.line,t.col)
+    else if ps_at_sym(p,15) && (targs || ps_type_name(p,ps_strv(p,name))) then
+      let p=ps_field_inits(p) in let fields=p.r in ps_node(p,n_reclit(),name,fields,types,-1,t.line,t.col)
+    else if targs then ps_fail(p,"type arguments require a call or record constructor",t.line,t.col)
+    else ps_node(p,n_var(),name,-1,-1,-1,t.line,t.col)
+
+fn ps_strip_zeros(borrow digits:Arr u8 _) -> Arr u8 _
+  = let first=loop (i=0) while i+1<len(digits) && tx_byte(digits,i)==48 next (i+1) yield i in
+    if first>=0 && first<=len(digits) then byte_slice(digits,first,len(digits)) else tx_empty()
+; A decimal literal: its i64 value, or its low 64 bits and big when it does not fit.
+fn ps_decimal(borrow digits:Arr u8 _) -> Lit
+  = loop (i:i64{i>=0}=0, value=0, big=false) while i<len(digits)
+      next (i+1, wrapping_add(wrapping_mul(value,10),i64(digits[i])-48),
+            big || value>(9223372036854775807-(i64(digits[i])-48))/10)
+      yield Lit { value=value, big=big }
+fn ps_int(move p:P, t:Tok) -> P
+  = let digits=ps_tok_text(p,t) in let lit=ps_decimal(digits) in
+    if !lit.big then ps_node(p,n_num(),lit.value,0,-1,-1,t.line,t.col)
+    else let p=ps_str_bytes(p,ps_strip_zeros(digits)) in let text=p.r in ps_node(p,n_num(),lit.value,1,text,-1,t.line,t.col)
+; float() rounds to nearest; past the f64 range it gives infinity.
+fn ps_float(move p:P, t:Tok) -> P
+  = let parsed=float_parse(ps_tok_text(p,t)) in
+    ps_node(p,n_flt(),if parsed.ok then float_bits(parsed.value) else 9218868437227405312,-1,-1,-1,t.line,t.col)
+
+fn ps_atom(move p:P) -> P
+  = if !p.ok then p else let t=ps_tok(p) in
+    if t.kind==tk_int() then ps_int(ps_next(p),t)
+    else if t.kind==tk_float() then ps_float(ps_next(p),t)
+    else if t.kind==tk_str() then let p=ps_tok_str(ps_next(p),t) in let text=p.r in ps_node(p,n_str(),text,-1,-1,-1,t.line,t.col)
+    else if t.kind==tk_char() then ps_node(ps_next(p),n_byte(),t.code,-1,-1,-1,t.line,t.col)
+    else if t.kind==tk_kw() then ps_keyword(p,t)
+    else if t.kind==tk_ident() then ps_name(p,t)
+    else if t.kind==tk_sym() && t.code==13 then ps_expect_sym(ps_expr(ps_next(p)),14)
+    else ps_fail_token(p,"unexpected token ",t)
+
+fn ps_preds(move p:P) -> P
+  = if !p.ok then p else let base=len(p.acc) in
+    if !ps_at_sym(p,15) then ps_list(p,base)
+    else let p=loop (s=ps_push_r(ps_expr(ps_next(p)))) while s.ok && ps_at_sym(s,19) next (ps_push_r(ps_expr(ps_next(s)))) yield s in
+         ps_list(ps_expect_sym(p,16),base)
+
+; ---------------------------------------------------------------- declarations
+fn ps_tfield(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_ident(p) in let name=p.r in
+    let p=ps_type(ps_expect_sym(p,20)) in let ty=p.r in
+    let p=ps_push_r(ps_node(p,n_tfield(),name,ty,-1,-1,t.line,t.col)) in
+    if ps_at_sym(p,19) then ps_next(p) else p
+fn ps_variant(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_ident(p) in let name=p.r in let base=len(p.acc) in
+    let p=if ps_at_sym(p,13) then
+        let q=loop (s=ps_next(p)) while s.ok && !ps_at_sym(s,14) next (ps_type_item(s,14)) yield s in ps_next(q)
+      else p in
+    let p=ps_list(p,base) in let payload=p.r in
+    let p=ps_push_r(ps_node(p,n_variant(),name,payload,-1,-1,t.line,t.col)) in
+    if ps_at_sym(p,19) then ps_next(p) else if !ps_at_sym(p,16) then ps_expect_sym(p,16) else p
+fn ps_enum(move p:P, visible:i64) -> P
+  = let t=ps_tok(p) in let p=ps_ident(ps_next(p)) in let name=p.r in
+    let p=ps_type_params(p) in let params=p.r in
+    let base=len(p.acc) in
+    let p=loop (s=ps_expect_sym(p,15)) while s.ok && !ps_at_sym(s,16) next (ps_variant(s)) yield s in
+    let p=ps_list(ps_next(p),base) in let variants=p.r in
+    let p=ps_list(p,len(p.acc)) in let fields=p.r in
+    ps_node8(p,n_type(),name,fields,params,variants,-1,fl_sealed()+visible,-1,-1,t.line,t.col)
+; neoc ignores `resource` before an enum.
+fn ps_type_decl(move p:P, visible:bool) -> P
+  = let res=ps_at_kw(p,39) in let p=if res then ps_next(p) else p in
+    let closed=ps_at_kw(p,32) in let p=if closed then ps_next(p) else p in
+    let visibility=if visible then fl_type_visible() else 0 in
+    if ps_at_kw(p,33) then ps_enum(p,visibility)
+    else
+      let t=ps_tok(p) in let p=ps_ident(ps_expect_kw(p,23)) in let name=p.r in
+      let p=ps_type_params(p) in let params=p.r in
+      let p=ps_expect_sym(ps_expect_sym(p,21),15) in let base=len(p.acc) in
+      let p=loop (s=p) while s.ok && !ps_at_sym(s,16) next (ps_tfield(s)) yield s in
+      let p=ps_list(ps_expect_sym(p,16),base) in let fields=p.r in
+      let p=if res then ps_qident(ps_expect_kw(p,40)) else p with { r=-1 } in let dtor=p.r in
+      ps_node8(p,n_type(),name,fields,params,-1,dtor,(if closed || res then fl_sealed() else 0)+visibility,-1,-1,t.line,t.col)
+
+; `cold`/`inline` are modifiers only before fn, effect or another modifier.
+fn ps_mod_at(borrow p:P, i:i64) -> bool
+  = let t=ps_tok_at(p,i) in let u=ps_tok_at(p,i+1) in
+    t.kind==tk_ident() && (ps_tok_is(p,t,"cold") || ps_tok_is(p,t,"inline"))
+    && (u.kind==tk_kw() || u.kind==tk_ident())
+    && (ps_tok_is(p,u,"fn") || ps_tok_is(p,u,"effect") || ps_tok_is(p,u,"cold") || ps_tok_is(p,u,"inline"))
+; Leading modifiers: their count times 4, plus 1 for cold and 2 for inline.
+fn ps_mods(borrow p:P) -> i64
+  = loop (k=0, flags=0, more=true) while more
+      next (if ps_mod_at(p,p.i+k) then k+1 else k,
+            if ps_mod_at(p,p.i+k) then bit_or(flags,if ps_tok_is(p,ps_tok_at(p,p.i+k),"cold") then 1 else 2) else flags,
+            ps_mod_at(p,p.i+k))
+      yield k*4+flags
+
+fn ps_param(move p:P) -> P
+  = if ps_at_sym(p,1) then ps_next(p) with { vari=true }
+    else let t=ps_tok(p) in
+    let owned=ps_at_kw(p,36) in let p=if owned then ps_next(p) else p in
+    let borrowed=ps_at_ident(p,"borrow") && ps_peek(p).kind==tk_ident() in let p=if borrowed then ps_next(p) else p in
+    if owned && borrowed then ps_fail(p,"parameter cannot be both move and borrow",t.line,t.col)
+    else let p=ps_ident(p) in let name=p.r in
+    let p=ps_type(ps_expect_sym(p,20)) in let ty=p.r in
+    let p=ps_preds(p) in let preds=p.r in
+    let p=ps_push_r(ps_node8(p,n_param(),name,ty,preds,-1,-1,(if owned then 1 else 0)+(if borrowed then 2 else 0),-1,-1,t.line,t.col)) in
+    if ps_at_sym(p,19) then ps_next(p) else p
+
+fn ps_fn(move p:P, visible:bool) -> P
+  = let mods=ps_mods(p) in let cold=bit_and(mods,1)!=0 in let inline=bit_and(mods,2)!=0 in
+    let p=p with { i=p.i+mods/4, vari=false } in
+    if cold && inline then let t=ps_tok(p) in ps_fail(p,"a function cannot be both cold and inline",t.line,t.col)
+    else
+    let external=ps_at_kw(p,26) in let exported=!external && ps_at_kw(p,27) in
+    let p=if external || exported then ps_next(p) else p in
+    let said=ps_at_kw(p,25) in let p=if said then ps_next(p) else p in
+    let p=if said && ps_at_sym(p,13) then
+        let base=len(p.acc) in
+        let q=loop (s=ps_next(p)) while s.ok && !ps_at_sym(s,14) next (ps_cap_item(s,14)) yield s in
+        ps_list(ps_next(q),base)
+      else p with { r=-1 } in
+    let caps=p.r in
+    let t=ps_tok(p) in let p=ps_ident(ps_expect_kw(p,1)) in let name=p.r in
+    let p=ps_type_params(p) in let params_t=p.r in
+    let base=len(p.acc) in
+    let p=loop (s=ps_expect_sym(p,13)) while s.ok && !s.vari && !ps_at_sym(s,14) next (ps_param(s)) yield s in
+    let variadic=p.vari in
+    let p=ps_list(p,base) in let params=p.r in
+    let p=ps_type(ps_expect_sym(ps_expect_sym(p,14),4)) in let ret=p.r in
+    let p=ps_preds(p) in let ret_preds=p.r in
+    let shown=if visible then fl_visible() else 0 in
+    if external then
+      let p=ps_node(p,n_num(),0,0,-1,-1,t.line,t.col) in let body=p.r in
+      ps_node8(p,n_fn(),name,params,ret,body,ret_preds,fl_effect()+fl_external()+(if variadic then fl_variadic() else 0)+shown,
+               -1,params_t,t.line,t.col)
+    else if variadic then ps_fail(p,"only extern functions may be variadic",t.line,t.col)
+    else
+      let p=ps_expr(ps_expect_sym(p,21)) in let body=p.r in
+      let flags=(if said then fl_effect() else 0)+(if exported then fl_exported() else 0)+(if cold then fl_cold() else 0)
+                +(if inline then fl_inline() else 0)+shown in
+      ps_node8(p,n_fn(),name,params,ret,body,ret_preds,flags,caps,params_t,t.line,t.col)
+
+fn ps_import(move p:P) -> P
+  = let t=ps_tok(p) in let p=ps_next(p) in let s=ps_tok(p) in
+    let p=if s.kind==tk_str() then ps_next(ps_tok_str(p,s)) else ps_fail_expected(p,"STR") in let path=p.r in
+    let p=if ps_at_kw(p,35) then ps_ident(ps_next(p)) else p with { r=-1 } in let alias=p.r in
+    let p=ps_node(p,n_import(),path,alias,-1,-1,t.line,t.col) in let id=p.r in
+    if !p.ok then p else p with { imports=push(p.imports,id) }
+
+fn ps_top(move p:P) -> P
+  = if ps_at_kw(p,31) then ps_import(p)
+    else let marked=ps_at_kw(p,38) || ps_at_kw(p,37) in let visible=!marked || ps_at_kw(p,37) in
+    let p=if marked then ps_next(p) else p in
+    if ps_at_kw(p,23) || ps_at_kw(p,32) || ps_at_kw(p,33) || ps_at_kw(p,39) then
+      let p=ps_type_decl(p,visible) in let id=p.r in if !p.ok then p else p with { types=push(p.types,id) }
+    else let p=ps_fn(p,visible) in let id=p.r in if !p.ok then p else p with { fns=push(p.fns,id) }
+
+; Every name after `type` or `enum`: `Name { ... }` is a record literal only
+; for a known type name (or a qualified name, or with type arguments).
+fn ps_type_names(borrow toks:Arr i64 _, borrow text:Arr u8 _, move names:HashMap<Arr u8 _,i64>) -> HashMap<Arr u8 _,i64>
+  = loop (m=names, k:i64{k>=0}=0) while k+1<lx_tok_count(toks)
+      next (let t=lx_tok(toks,k) in let u=lx_tok(toks,k+1) in
+            if t.kind==tk_kw() && (t.code==23 || t.code==33) && u.kind==tk_ident() && u.start>=0 && u.size>=0 && u.start+u.size<=len(text)
+            then hashmap_put(m,byte_slice(text,u.start,u.start+u.size),1) else m,
+            k+1)
+      yield m
+
+; A parser over toks and text that adds to ast's tables, so the modules of a
+; program share one tree. names holds the record type names.
+fn ps_start(move toks:Arr i64 _, move text:Arr u8 _, move names:HashMap<Arr u8 _,i64>, move ast:Ast) -> P
+  = P { toks=toks, text=text, i=0, nodes=ast.nodes, lists=ast.lists, strs=ast.strs,
+        acc=tx_ints(), imports=tx_ints(), types=tx_ints(), fns=tx_ints(), names=names, vari=false, r=-1, ok=true,
+        err=tx_empty(), eline=0, ecol=0 }
+fn ps_new(move lx:Lx) -> P
+  = let names=ps_type_names(lx.toks,lx.text,hashmap_empty::<Arr u8 _,i64>(7,11)) in ps_start(lx.toks,lx.text,names,ast_empty())
+
+fn ps_run(move p:P) -> P = loop (s=p) while s.ok && ps_tok(s).kind!=tk_eof() next (ps_top(s)) yield s
+fn ps_parse(move lx:Lx) -> P = ps_run(ps_new(lx))
+
+fn ps_ast(move p:P) -> Ast = Ast { nodes=p.nodes, lists=p.lists, strs=p.strs }

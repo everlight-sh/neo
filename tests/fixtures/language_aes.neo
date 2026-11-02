@@ -1,0 +1,13 @@
+import "std:aes"
+import "std:io"
+effect(fs,process) fn main(mode:i64) -> unit
+  = let raw=file_read(0,4194304) in check raw.ok in let input=raw.value in let size=len(input) in
+    let result=if mode==0 then
+      if size!=32 then bytes_error(22,"block size",0) else aes128_encrypt(aes128_key(str_slice(input,0,16)),str_slice(input,16,32)) else
+    if mode==3 then if size<32 then bytes_error(22,"CTR header",0) else aes128_ctr(aes128_key(str_slice(input,0,16)),str_slice(input,16,32),str_slice(input,32,size)) else
+    if size<32 then bytes_error(22,"GCM header",0) else
+      let aad_size=loop(i=28,value=0) while i<32 next(i+1,value*256+str_byte(input,i)) yield value in
+      if aad_size>size-32 then bytes_error(22,"AAD length",0) else
+      if mode==1 then aes128_gcm_seal(str_slice(input,0,16),str_slice(input,16,28),str_slice(input,32,32+aad_size),str_slice(input,32+aad_size,size)) else
+      aes128_gcm_open(str_slice(input,0,16),str_slice(input,16,28),str_slice(input,32,32+aad_size),str_slice(input,32+aad_size,size)) in
+    if !result.ok then process_exit(2) else let out=file_write(1,result.value) in check out.ok in noop()

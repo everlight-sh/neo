@@ -1,0 +1,11 @@
+import "std:json"
+import "std:io"
+fn decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+effect(fs) fn main() -> unit
+  = let input=file_read(0,4194304) in let text=input.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let fields=json_array_values(json_parse(decode(str_slice(text,at,end))).value) in check len(fields)==3 in
+      let bytes=decode(json_text(fields[0]).value) in let start=json_int(fields[1]).value in let stop=json_int(fields[2]).value in
+      let shown=print_out(concat(if utf8_valid_range(bytes,start,stop) then "true" else "false","\n")) in end+1) yield at in noop()

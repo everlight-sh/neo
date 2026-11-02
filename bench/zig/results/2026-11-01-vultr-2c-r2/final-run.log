@@ -1,0 +1,87 @@
+== axon test (unit + native cases + integration)
+Sun Nov  1 12:47:51 PM UTC 2026
+axon test exit 1
+Ran 173 tests in 6.194s
+OK
+FAIL bounded-large-buffer-reuse (1, 'axon: trap: check failed: ((cached == expected) && (size == capacity)) at 4:5\n')
+Ran 31 tests across 1 file. [161.00ms]
+axon test: 37 native cases, 1 failed
+Sun Nov  1 01:04:22 PM UTC 2026
+== build Vif
+Sun Nov  1 01:04:22 PM UTC 2026
+== build Zig (fresh)
+== stencil and sieve faults
+== compute
+Sun Nov  1 01:09:26 PM UTC 2026
+mandel-1200-1200-300   w=1  Vif    132.1 ms  Zig    185.4 ms  Zig native    192.1 ms  Vif before    132.5 ms  ok
+stencil-1000000-20     w=1  Vif     28.5 ms  Zig     34.9 ms  Zig native     35.2 ms  Vif before     33.5 ms  ok
+stencil-50000000-20    w=1  Vif   1310.3 ms  Zig   1674.2 ms  Zig native   1705.3 ms  Vif before   5968.8 ms  ok
+nbody-1024-3           w=1  Vif     10.9 ms  Zig     16.4 ms  Zig native     16.3 ms  Vif before     10.8 ms  ok
+nbody-4096-10          w=1  Vif    347.8 ms  Zig    629.4 ms  Zig native    631.6 ms  Vif before    348.1 ms  ok
+sieve-100000000        w=1  Vif    414.3 ms  Zig    482.6 ms  Zig native    478.6 ms  Vif before    497.3 ms  ok
+mandel-1200-1200-300   w=2  Vif     68.7 ms  Zig     94.6 ms  Zig native     98.2 ms  Vif before     68.2 ms  ok
+stencil-1000000-20     w=2  Vif     25.9 ms  Zig     35.9 ms  Zig native     31.9 ms  Vif before     33.1 ms  ok
+stencil-50000000-20    w=2  Vif    747.2 ms  Zig   1029.5 ms  Zig native    931.6 ms  Vif before   5594.4 ms  ok
+nbody-1024-3           w=2  Vif      6.8 ms  Zig     11.1 ms  Zig native     11.1 ms  Vif before      6.9 ms  ok
+nbody-4096-10          w=2  Vif    182.2 ms  Zig    324.4 ms  Zig native    327.1 ms  Vif before    179.1 ms  ok
+sieve-100000000        w=2  Vif    400.5 ms  Zig    456.3 ms  Zig native    460.0 ms  Vif before    497.5 ms  ok
+== json
+Sun Nov  1 01:13:02 PM UTC 2026
+doc x1M            Vif    169.8  Zig Value    626.1  Zig typed    320.7  Zig Value arena    585.3  Zig typed arena    308.9  Zig Value native    636.2  Zig typed native    322.0  Vif before    168.6  ok
+orders 1000 x1000  Vif    173.0  Zig Value   1012.6  Zig typed    237.4  Zig Value arena    412.0  Zig typed arena    203.8  Zig Value native   1023.6  Zig typed native    244.9  Vif before    173.8  ok
+== headers
+Sun Nov  1 01:14:16 PM UTC 2026
+== http
+Sun Nov  1 01:14:19 PM UTC 2026
+validated Vif
+validated Zig std.http
+validated Zig http.zig 1+1
+validated Zig http.zig default
+validated Vif before
+== hello
+  Vif                    req/s     77966 (runs 75995-78791)  p50     410  p99    1490 us  CPU/req 0.46+9.42  peak RSS 0.8 MiB  threads 1
+  Zig std.http           req/s     63626 (runs 62993-67036)  p50     491  p99    1880 us  CPU/req 1.22+13.52  peak RSS 18.0 MiB  threads 65
+  Zig http.zig 1+1       req/s     71520 (runs 69159-76638)  p50     688  p99    2380 us  CPU/req 1.22+12.42  peak RSS 3.9 MiB  threads 3
+  Zig http.zig default   req/s     79080 (runs 78274-80778)  p50     611  p99    1990 us  CPU/req 1.20+11.11  peak RSS 12.5 MiB  threads 34
+  Vif before             req/s     78306 (runs 76997-80247)  p50     408  p99    1420 us  CPU/req 0.47+9.40  peak RSS 0.8 MiB  threads 1
+== pipeline-16
+  Vif                    req/s   1041294 (runs 1020628-1048563)  p50     482  p99       0 us  CPU/req 0.13+0.58  peak RSS 0.8 MiB  threads 1
+  Zig std.http           req/s    105681 (runs 104372-111017)  p50    5290  p99   11080 us  CPU/req 0.66+8.76  peak RSS 18.0 MiB  threads 65
+  Vif before             req/s   1024730 (runs 1015417-1032230)  p50     475  p99       0 us  CPU/req 0.12+0.58  peak RSS 0.8 MiB  threads 1
+== smooth-10000
+  Vif                    req/s      3124 (runs 3123-3181)  p50   20020  p99   26770 us  CPU/req 310.25+9.27  peak RSS 1.4 MiB  threads 1
+  Zig std.http           req/s      2583 (runs 2510-2627)  p50   24360  p99   33440 us  CPU/req 368.87+17.46  peak RSS 29.3 MiB  threads 66
+  Zig http.zig 1+1       req/s      2554 (runs 2525-2564)  p50   24710  p99   32000 us  CPU/req 369.01+23.09  peak RSS 13.2 MiB  threads 3
+  Zig http.zig default   req/s      2464 (runs 2407-2478)  p50   25560  p99   96390 us  CPU/req 378.94+30.25  peak RSS 24.5 MiB  threads 34
+  Vif before             req/s      3099 (runs 3060-3119)  p50   20250  p99   26480 us  CPU/req 313.78+8.96  peak RSS 1.0 MiB  threads 1
+== nbody-256-4
+  Vif                    req/s      1448 (runs 1443-1456)  p50   43970  p99   46290 us  CPU/req 679.31+12.41  peak RSS 1.3 MiB  threads 1
+  Zig std.http           req/s       870 (runs 869-877)  p50   72700  p99  280440 us  CPU/req 1129.50+20.66  peak RSS 29.8 MiB  threads 75
+  Zig http.zig 1+1       req/s       852 (runs 845-863)  p50   73910  p99   96850 us  CPU/req 1131.17+41.38  peak RSS 4.5 MiB  threads 3
+  Zig http.zig default   req/s       849 (runs 845-852)  p50   66430  p99  414340 us  CPU/req 1153.21+25.95  peak RSS 13.9 MiB  threads 34
+  Vif before             req/s      1447 (runs 1423-1451)  p50   43910  p99  257800 us  CPU/req 679.50+12.42  peak RSS 0.8 MiB  threads 1
+== page-50
+  Vif                    req/s     70858 (runs 68871-76794)  p50     837  p99    2020 us  CPU/req 2.92+10.74  peak RSS 1.3 MiB  threads 1
+  Zig std.http           req/s     54064 (runs 53538-59889)  p50    1100  p99    2640 us  CPU/req 3.22+14.82  peak RSS 18.8 MiB  threads 65
+  Zig http.zig 1+1       req/s     46437 (runs 45082-51057)  p50    1270  p99    3490 us  CPU/req 3.87+17.15  peak RSS 3.9 MiB  threads 3
+  Zig http.zig default   req/s     60373 (runs 58147-79472)  p50    1000  p99    3120 us  CPU/req 3.07+13.21  peak RSS 12.7 MiB  threads 34
+  Vif before             req/s     72800 (runs 69843-78510)  p50     823  p99    2010 us  CPU/req 2.98+10.42  peak RSS 1.3 MiB  threads 1
+Sun Nov  1 01:37:50 PM UTC 2026
+FINAL-OK
+go version go1.25.1 linux/amd64
+## mandel 3000 3000 2000
+after          wall   2419.8  (min   2413.4 max   2442.7)  user  4808.0 sys    1.0  out ['3063818920']
+before         wall   2418.3  (min   2409.9 max   2503.1)  user  4810.9 sys    1.0  out ['3063818920']
+go             wall   3629.0  (min   3598.7 max   3686.9)  user  7172.6 sys    8.0  out ['3063818920']
+## stencil 50000000 20
+after          wall    772.8  (min    711.3 max    790.6)  user  1468.0 sys   46.0  out ['25000046624222']
+before         wall   5607.4  (min   5496.7 max   5767.4)  user  2063.8 sys 7649.4  out ['25000046624222']
+go             wall   1286.5  (min   1242.6 max   1347.0)  user  2019.4 sys  410.0  out ['25000046624222']
+## stencil_small 1000000 2000
+after          wall   1688.9  (min   1531.2 max   1926.3)  user  3238.0 sys   32.0  out ['499967939935']
+before         wall   1715.3  (min   1404.8 max   1831.3)  user  3194.6 sys   32.0  out ['499967939935']
+go             wall   2481.6  (min   1929.3 max   2599.3)  user  4775.7 sys   25.9  out ['499967939935']
+## nbody 16384 10
+after          wall   2809.4  (min   2794.6 max   2836.6)  user  5546.8 sys    3.0  out ['-8.9457810633378992e-1']
+before         wall   2794.4  (min   2792.3 max   2836.6)  user  5538.3 sys    3.0  out ['-8.9457810633378992e-1']
+go             wall   8833.8  (min   8793.1 max   8849.4)  user 17440.4 sys   29.9  out ['-0.89457810633378876']

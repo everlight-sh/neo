@@ -1,0 +1,39 @@
+import "std:vec"
+import "std:cancel"
+; Cooperative tasks are explicit resumable state machines. Steps must not block:
+; use socket_try_* and return a wake time, or a timer. Each tick visits every
+; admitted task once, which prevents an always-ready task starving its peers.
+type TaskStep<S> = { state:S,done:bool,wake_ms:i64 }
+sealed type Task<S> = { state:S,step:Effect<fs,net,env,time,process>(S,bool,i64)->TaskStep<S>,wake_ms:i64,done:bool }
+sealed type Tasks<S> = { slots:Vec<Task<S>>,limit:i64,accepting:bool }
+type TaskAdmission<S> = { tasks:Tasks<S>,accepted:bool }
+type TaskTick<S> = { tasks:Tasks<S>,active:i64,next_wake:i64 }
+fn tasks_new<S>(limit:i64) -> Tasks<S>
+  = check limit>=0 && limit<=65536 in Tasks::<S> { slots=vec_empty::<Task<S>>(),limit=limit,accepting=true }
+fn tasks_count<S>(tasks:Tasks<S>) -> i64 = vec_len(tasks.slots)
+fn tasks_stop<S>(move tasks:Tasks<S>) -> Tasks<S> = tasks with { accepting=false }
+fn tasks_spawn<S>(move tasks:Tasks<S>,state:S,step:Effect<fs,net,env,time,process>(S,bool,i64)->TaskStep<S>) -> TaskAdmission<S>
+  = if !tasks.accepting || vec_len(tasks.slots)>=tasks.limit then TaskAdmission::<S> { tasks=tasks,accepted=false } else
+    TaskAdmission::<S> { tasks=tasks with { slots=vec_push(tasks.slots,Task::<S> { state=state,step=step,wake_ms=0,done=false }) },accepted=true }
+effect(fs,net,env,time,process) fn tasks_tick<S>(move tasks:Tasks<S>,cancelled:bool,now:i64) -> TaskTick<S>
+  = let source=tasks.slots in let count=vec_len(source) in
+    loop(i=0,out=vec_empty::<Task<S>>(),wake=9223372036854775807) while i<count next(i+1,
+      match vec_get(source,i) { None => out,Some(task) =>
+        let ready=cancelled || task.wake_ms<=now in let invoke=task.step in
+        let step=if ready then invoke(task.state,cancelled,now) else TaskStep::<S> { state=task.state,done=task.done,wake_ms=task.wake_ms } in
+        if step.done then out else vec_push(out,task with { state=step.state,wake_ms=step.wake_ms,done=false }) },
+      match vec_get(source,i) { None => wake,Some(task) => if task.wake_ms<wake then task.wake_ms else wake }) yield
+        TaskTick::<S> { tasks=tasks with { slots=out,accepting=tasks.accepting && !cancelled },active=vec_len(out),next_wake=loop(k=0,nearest=9223372036854775807) while k<vec_len(out) next(k+1,match vec_get(out,k) { None => nearest,Some(task) => if task.wake_ms<nearest then task.wake_ms else nearest }) yield nearest }
+; Cancellation is observed at most every 10 ms between ticks. A finite grace
+; deadline bounds shutdown even if a step refuses to mark itself done. Callback
+; code itself must return: cooperative scheduling cannot preempt user code.
+effect(fs,net,env,time,process) fn tasks_run<S>(move tasks:Tasks<S>,cancellation:Cancellation,deadline:i64) -> TaskTick<S>
+  = loop(result=TaskTick::<S> { tasks=tasks,active=tasks_count(tasks),next_wake=0 },running=true) while running && result.active>0 next(
+      let now=monotonic_ms() in if !now.ok then result else
+        tasks_tick(result.tasks,is_cancelled(cancellation) || now.value>=deadline,now.value),
+      let now=monotonic_ms() in if !now.ok || now.value>=deadline then false else
+        let until=result.next_wake-now.value in let remaining=deadline-now.value in
+        let delay=if until<=0 then 0 else if until<remaining && until<10 then until else if remaining<10 then remaining else 10 in
+        let pause=if delay>0 then sleep_ms(delay) else int_ok(0) in true) yield result
+fn tasks_state<S>(tasks:Tasks<S>,index:i64) -> Option<S>
+  = match vec_get(tasks.slots,index) { None => None::<S>(),Some(task) => Some::<S>(task.state) }

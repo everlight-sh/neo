@@ -1,0 +1,16 @@
+import "std:io"
+import "records.neo"
+
+effect(fs,process) fn json_cli_fail (message: Arr u8 n) -> unit
+  = let printed = print_error(concat("neo-json: ", message, "\n")) in process_exit(2)
+effect(fs,env,process) fn main () -> unit
+  = let input = cli_arg(1) in let output = cli_arg(2) in let min_arg = cli_arg(3) in
+    if !input.present || !output.present || cli_arg(4).present then json_cli_fail("usage: INPUT.json OUTPUT.json [MIN_SCORE]") else
+      let minimum = if min_arg.present then int_parse(min_arg.value) else int_ok(0) in
+      if !minimum.ok then json_cli_fail(minimum.error.message) else
+        let source = fs_read(input.value) in
+        if !source.ok then json_cli_fail(source.error.message) else
+          let result = records_process(source.value, minimum.value) in
+          if !result.ok then json_cli_fail(result.error.message) else
+            let written = fs_write(output.value, result.value) in
+            if !written.ok then json_cli_fail(written.error.message) else noop()

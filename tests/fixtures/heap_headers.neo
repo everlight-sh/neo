@@ -1,0 +1,34 @@
+; Keep a whole slab's worth of differently sized allocations live, then
+; exercise every power-of-two boundary and both large-block cache policies.
+effect fn checked_block(n:i64,private_heap:bool) -> ptr
+  = let p=if private_heap then ax_heap_alloc(n) else ax_alloc(n) in
+    let expected=loop(capacity=16) while capacity<n next(capacity*2) yield capacity in
+    let address=ptr_to_i64(p) in let capacity=ax_allocation_capacity(p) in
+    let flags=load_i64(p,-8) in let threads=rt_threads() in
+    check p!=null() && address%16==0 in
+    check capacity==expected in
+    check (bit_and(flags,2)!=0)==(private_heap && threads==1) in
+    let filled=memset(p,i32(173),expected) in p
+effect fn inspect_block(p:ptr,n:i64) -> unit
+  = let first=load_u8(p,0) in let last=load_u8(p,n-1) in check first==u8(173) && last==u8(173) in noop()
+effect fn main() -> i64
+  = let blocks=loop(i=0,out=arr(j in 0..3072) null()) while i<3072 next(
+      i+1,let p=checked_block(i%129,i%2==0) in check i>=0 && i<len(out) in set(out,i,p)) yield out in
+    let disjoint=loop(i=0,ok=true) while ok && i<len(blocks) next(i+1,
+      check i>=0 && i<len(blocks) in let p=blocks[i] in let start=ptr_to_i64(p)-16 in let end=ptr_to_i64(p)+ax_allocation_capacity(p) in
+      loop(j=i+1,separate=true) while separate && j<len(blocks) next(j+1,
+        check j>=0 && j<len(blocks) in let q=blocks[j] in let other_start=ptr_to_i64(q)-16 in let other_end=ptr_to_i64(q)+ax_allocation_capacity(q) in
+        end<=other_start || other_end<=start) yield separate) yield ok in check disjoint in
+    let inspected=loop(i=0) while i<len(blocks) next(
+      check i>=0 && i<len(blocks) in let p=blocks[i] in
+      let valid=inspect_block(p,ax_allocation_capacity(p)) in i+1) yield i in
+    let freed=loop(i=len(blocks)) while i>0 next(
+      check i-1>=0 && i-1<len(blocks) in let released=ax_release(blocks[i-1]) in i-1) yield i in
+    let boundaries=loop(power=4) while power<=24 next(
+      let size=shift_left(1,power) in
+      let exercised=loop(delta= -1) while delta<=1 next(
+        let a=checked_block(size+delta,false) in let b=checked_block(size+delta,true) in
+        let valid=inspect_block(a,ax_allocation_capacity(a)) in let valid=inspect_block(b,ax_allocation_capacity(b)) in
+        let freed=ax_release(a) in let freed=ax_release(b) in
+        let reused=checked_block(size+delta,false) in let valid=inspect_block(reused,ax_allocation_capacity(reused)) in
+        let freed=ax_release(reused) in delta+1) yield delta in power+1) yield power in 0

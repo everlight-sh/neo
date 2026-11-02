@@ -1,0 +1,7 @@
+import "std:file"
+effect(fs,process,unsafe) fn main() -> unit
+  = using file=open_file("/dev/null",0) in let opened=file_status(file) in check opened.ok in
+    let forked=process_fork() in check forked.ok in
+    if forked.value==0 then let status=file_status(file) in check !status.ok && status.error.code==9 in noop() else
+      let waited=process_wait(forked.value) in let status=file_status(file) in check waited.ok && waited.value==0 && status.ok in
+      let printed=print_out("file fork isolation OK\n") in noop()

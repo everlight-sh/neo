@@ -1,0 +1,91 @@
+; Linux level-triggered epoll backend, entirely Axon + direct kernel syscalls.
+; Tokens: listener=0, worker notification=1, dense connection index+2.
+; Registration persists across waits. Ordinary read/render/write requests keep
+; EPOLLIN registered without epoll_ctl per request. EPOLLOUT is armed only for
+; backpressure or complete buffered requests that exceed the 64-response batch.
+
+effect fn rt_epoll_apply (epfd : i64, op : i64, fd : i64, mask : i64, token : i64) -> unit
+  = let result = rt_epoll_ctl(epfd, op, fd, mask, token) in
+    if result < 0 then ax_trap(data("epoll_ctl syscall failed\0")) else noop()
+
+effect fn rt_epoll_sync (epfd : i64, state : ptr, interests : ptr, index : i64) -> unit
+  = if load_i64(state, 0) < 0 then noop() else
+    let wanted = if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1 in
+    if wanted == load_i64(interests, index * 8) then noop() else
+      let updated = rt_epoll_apply(epfd, 3, load_i64(state, 0), wanted, index + 2) in
+      store_i64(interests, index * 8, wanted)
+
+; Finish the entire returned event batch before compacting or accepting.
+; Thus a cached event's old index can never identify a newly moved/reused slot.
+; MOD refreshes moved registrations' tokens before the next epoll_wait.
+effect fn rt_epoll_compact (epfd : i64, states : ptr, interests : ptr, n : i64) -> i64
+  = loop (i = 0, used = 0) while i < n
+      next (i + 1,
+        if load_i64(states, i * 64) < 0 then used else
+          let moved = if i == used then noop() else
+            let state = ptr_add(states, i * 64) in
+            let copied = memcpy(ptr_add(states, used * 64), state, 64) in
+            let mask = load_i64(interests, i * 8) in
+            let interest = store_i64(interests, used * 8, mask) in
+            rt_epoll_apply(epfd, 3, load_i64(state, 0), mask, used + 2) in used + 1)
+      yield used
+
+effect fn rt_epoll_listener (epfd : i64, listener : i64, control : ptr, worker : i64, local : ptr) -> unit
+  = let wanted = if load_i64(control, 0) == worker then 1 else 0 in
+    if wanted == load_i64(local, 8) then noop() else
+      let changed = rt_epoll_apply(epfd, if wanted == 1 then 1 else 2, listener, 1, 0) in
+      store_i64(local, 8, wanted)
+
+effect fn rt_epoll_accept (epfd : i64, listener : i64, states : ptr, interests : ptr, local : ptr,
+                         control : ptr, worker : i64, workers : i64{workers >= 1}) -> unit
+  = let previous = load_i64(local, 0) in
+    let accepted = rt_accept(listener, states, local, control, worker, workers) in
+    if previous == load_i64(local, 0) then noop() else
+      let saved = store_i64(interests, previous * 8, 1) in
+      rt_epoll_apply(epfd, 1, load_i64(states, previous * 64), 1, previous + 2)
+
+effect fn rt_http_epoll_worker (listener : i64, handler : ptr, control : ptr, worker : i64,
+                              workers : i64{workers >= 1}, parent : i64) -> i64
+  = let epfd = rt_epoll_create() in
+    let valid = if epfd < 0 then ax_trap(data("epoll_create1 syscall failed\0")) else noop() in
+    let states = ax_alloc(1024 * 64) in
+    let interests = ax_alloc(1024 * 8) in
+    let events = ax_alloc(1026 * 16) in
+    ; local: active count@0, listener registered@8, closed@16, accept-ready@24.
+    let local = stack_alloc(32) in let cleared = memset(local, i32(0), 32) in
+    let notification = stack_alloc(64) in
+    let registered = rt_epoll_apply(epfd, 1, load_i64(control, 256 + worker * 16), 1, 1) in
+    loop (running = true) while running
+      next (let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+            let listening = rt_epoll_listener(epfd, listener, control, worker, local) in
+            let ready = rt_epoll_wait(epfd, events) in
+            if ready < 0 then if load_i32(rt_errno(), 0) == i32(4) then true
+              else let failed = ax_trap(data("epoll_pwait syscall failed\0")) in false
+            else let reset = store_i64(local, 16, 0) in let reset_accept = store_i64(local, 24, 0) in
+              let n = load_i64(local, 0) in
+              let served = loop (i = 0) while i < ready
+                next (let token = load_i64(events, i * 16 + 8) in
+                      let mask = i64(load_i32(events, i * 16)) in
+                      let stepped = if token == 0 then store_i64(local, 24, 1)
+                        else if token == 1 then
+                          let drained = rt_read(load_i64(control, 256 + worker * 16), notification, 64) in noop()
+                        else let index = token - 2 in
+                          if index < 0 || index >= n then ax_trap(data("invalid epoll token\0")) else
+                            let state = ptr_add(states, index * 64) in
+                            if load_i64(state, 0) < 0 then noop() else
+                              let done = rt_step(state, mask, handler) in
+                              if load_i64(state, 0) < 0 then store_i64(local, 16, 1)
+                              else rt_epoll_sync(epfd, state, interests, index) in i + 1)
+                yield i in
+              let compacted = if load_i64(local, 16) == 0 then noop() else
+                let used = rt_epoll_compact(epfd, states, interests, n) in store_i64(local, 0, used) in
+              let accepted = if load_i64(local, 24) == 1 then
+                rt_epoll_accept(epfd, listener, states, interests, local, control, worker, workers) else noop() in true)
+      yield 0
+
+effect fn rt_serve_worker (listener : i64, handler : ptr, control : ptr, worker : i64,
+                         workers : i64{workers >= 1}, parent : i64) -> i64
+  = let fallback = rt_getenv(data("AXON_HTTP_POLL\0")) in
+    if fallback != null() && load_u8(fallback, 0) == '1' then
+      rt_http_worker(listener, handler, control, worker, workers, parent)
+    else rt_http_epoll_worker(listener, handler, control, worker, workers, parent)

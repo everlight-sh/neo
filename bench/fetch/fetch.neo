@@ -1,0 +1,49 @@
+; GET http(s)://127.0.0.1:PORT/PATH COUNT times: fetch PORT PATH COUNT SIZE KEEP [CA.der]
+; KEEP 0 opens a connection per request: plain HTTP through http_request, the
+; one-call client, and HTTPS through a new HttpClient each time. KEEP 1 sends
+; every request through one keep-alive HttpClient. With a root certificate the
+; requests go over TLS to "localhost". Prints the total nanoseconds and how
+; many responses were 200 with a body of SIZE bytes, then each request's
+; nanoseconds.
+import "std:https_client"
+import "std:time"
+
+type Run = { good:i64, times:Arr i64 _ }
+type Kept = { run:Run, client:HttpClient }
+
+fn run_empty() -> Run = Run { good=0, times=arr(i in 0..0) 0 }
+fn run_add(move run:Run, ok:bool, ns:i64) -> Run = run with { good=if ok then run.good+1 else run.good, times=push(run.times,ns) }
+fn fine(borrow response:HttpResult, size:i64) -> bool = response.ok && response.status==200 && len(response.body)==size
+fn origin(port:i64, roots:Arr Certificate m, tls:bool) -> HttpClient
+  = http_client_at(if tls then https_client("localhost",port,roots) else http_client("localhost",port),"127.0.0.1")
+
+effect(fs,net,time,process) fn once(arena:Arena, port:i64, path:Arr u8 n, roots:Arr Certificate m, tls:bool, size:i64) -> bool
+  = if tls then let sent=http_send(arena,origin(port,roots,true),"GET",path,"",10000,size) in
+      let closed=http_client_close(sent.client) in fine(sent.response,size)
+    else let response=http_request("127.0.0.1",port,"GET",path,"",10000,size) in fine(response,size)
+effect(fs,net,time,process) fn once_step(arena:Arena, move run:Run, port:i64, path:Arr u8 n, roots:Arr Certificate m, tls:bool, size:i64) -> Run
+  = let before=monotonic_ns() in let ok=once(arena,port,path,roots,tls,size) in let after=monotonic_ns() in run_add(run,ok,after.value-before.value)
+effect(fs,net,time,process) fn each(port:i64, path:Arr u8 n, roots:Arr Certificate m, tls:bool, size:i64, count:i64) -> Run
+  = using arena=new_arena(8) in loop(run=run_empty(),i=0) while i<count next(once_step(arena,run,port,path,roots,tls,size),i+1) yield run
+
+effect(fs,net,time,process) fn kept_step(arena:Arena, move kept:Kept, path:Arr u8 n, size:i64) -> Kept
+  = let before=monotonic_ns() in let sent=http_send(arena,kept.client,"GET",path,"",10000,size) in let after=monotonic_ns() in
+    Kept { run=run_add(kept.run,fine(sent.response,size),after.value-before.value), client=sent.client }
+effect(fs,net,time,process) fn kept(port:i64, path:Arr u8 n, roots:Arr Certificate m, tls:bool, size:i64, count:i64) -> Run
+  = using arena=new_arena(8) in
+    let done=loop(state=Kept { run=run_empty(), client=origin(port,roots,tls) },i=0) while i<count next(kept_step(arena,state,path,size),i+1) yield state in
+    let closed=http_client_close(done.client) in done.run
+
+fn times_text(borrow times:Arr i64 _) -> Arr u8 _
+  = loop(out="",i:i64{i>=0}=0) while i<len(times) next(concat(out,if i>0 then " " else "",int_text(times[i])),i+1) yield out
+
+effect(net,time,process,fs,env) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let path=cli_arg(2) in let count=int_parse(cli_arg(3).value) in
+    let size=int_parse(cli_arg(4).value) in let keep=cli_arg(5) in let ca=cli_arg(6) in
+    check port.ok && path.present && count.ok && size.ok && keep.present in
+    let roots=if ca.present then let der=fs_read(ca.value) in check der.ok in arr(i in 0..1) x509_parse(der.value) else arr(i in 0..0) x509_parse("") in
+    let start=monotonic_ns() in
+    let run=if str_equal(keep.value,"1") then kept(port.value,path.value,roots,ca.present,size.value,count.value)
+      else each(port.value,path.value,roots,ca.present,size.value,count.value) in
+    let stop=monotonic_ns() in
+    let shown=print_out(concat(int_text(stop.value-start.value)," ",int_text(run.good),"\n",times_text(run.times),"\n")) in noop()

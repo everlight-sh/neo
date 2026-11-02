@@ -1,0 +1,14 @@
+import "std:x509"
+import "std:io"
+type CertCursor = { value:Certificate,offset:i64,valid:bool,present:bool }
+fn cert_cursor(bytes:Arr u8 n,at:i64) -> CertCursor
+  = let size=str_byte(bytes,at)*65536+str_byte(bytes,at+1)*256+str_byte(bytes,at+2) in
+    CertCursor { value=x509_parse(str_slice(bytes,at+3,at+3+size)),offset=at+3+size,valid=at>=0 && at+3<=n && size>=0 && size<=65536 && at+3+size<=n,present=size>0 }
+effect(fs) fn main() -> unit
+  = let input=file_read(0,262144) in check input.ok in let bytes=input.value in let count=str_byte(bytes,0) in
+    let host=str_slice(bytes,1,count+1) in let now=loop(i=0,value=0) while i<4 next(i+1,value*256+str_byte(bytes,count+1+i)) yield value in
+    let leaf=cert_cursor(bytes,count+5) in let middle=cert_cursor(bytes,leaf.offset) in let root=cert_cursor(bytes,middle.offset) in
+    let chain=arr(i in 0..(if middle.present then 2 else 1)) if i==0 then leaf.value else middle.value in
+    let roots=arr(i in 0..1) root.value in
+    let valid=count>0 && count<=253 && leaf.valid && middle.valid && root.valid && root.offset==len(bytes) && x509_verify(chain,roots,host,now) in
+    let printed=print_out(if valid then "verified\n" else "rejected\n") in noop()

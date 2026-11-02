@@ -1,0 +1,9 @@
+import "std:http"
+fn main () -> i64
+  = let fixed = http_decode_response("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc") in
+    let chunked = http_decode_response("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n") in
+    check fixed.ok && str_equal(fixed.value, "abc") && chunked.ok && str_equal(chunked.value, "Wikipedia") in
+    check !http_decode_response("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nab").ok in
+    check !http_decode_response("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Length: 3\r\n\r\nabc").ok in
+    check !http_decode_response("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").ok in
+    check !http_decode_response("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n100000000000000\r\n").ok in 0

@@ -1,0 +1,15 @@
+; The 1,000-order workload of orders_json.neo through the prepared field decoder:
+; one validating pass per element, only the four wanted fields recorded.
+import "std:json"
+fn orders_append(move text:Arr u8 _,i:i64) -> Arr u8 _
+  = concat(text,if i==0 then "" else ",","{\"customer\":",int_text(i%8),",\"qty\":",int_text(i%17),",\"price\":3,\"name\":\"user",int_text(i),"\"}")
+fn orders_text(n:i64) -> Arr u8 _
+  = concat(loop(i=0,text="[") while i<n next(i+1,orders_append(text,i)) yield text,"]")
+fn orders_rows(move fields:JsonFields,borrow decoder:JsonFieldDecoder,total:i64) -> i64
+  = let step=json_decode_next(fields,decoder) in
+    if !step.present then (if step.ok then total else -1) else
+    orders_rows(step,decoder,total+json_field_int(step,1).value*json_field_int(step,2).value+json_field_int(step,0).value+len(json_field_text(step,3).value))
+fn main(rows:i64{rows > 0, rows <= 1000000},iterations:i64{iterations > 0, iterations <= 1000000}) -> i64
+  = let text=orders_text(rows) in
+    let decoder=json_field_decoder(arr(i in 0..4) if i==0 then "customer" else if i==1 then "qty" else if i==2 then "price" else "name") in
+    loop(k=0,total=0) while k<iterations next(k+1,total+orders_rows(json_decode_array(text,decoder),decoder,0)) yield total

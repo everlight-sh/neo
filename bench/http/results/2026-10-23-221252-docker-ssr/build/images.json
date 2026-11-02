@@ -1,0 +1,525 @@
+{
+  "images": {
+    "Axon JSX": {
+      "tag": "axon-compare-axon:20261023",
+      "id": "sha256:82d2459caa799d7c0c5661a60d97f2bb69283e322f598034e9c3e9c3c8264e11",
+      "engine_reported_image_bytes": 16505,
+      "rootfs_file_bytes": 26224,
+      "gzip_docker_save_bytes": 16627,
+      "architecture": "arm64",
+      "inspect": {
+        "Id": "sha256:82d2459caa799d7c0c5661a60d97f2bb69283e322f598034e9c3e9c3c8264e11",
+        "RepoTags": [
+          "axon-compare-axon:20261023"
+        ],
+        "RepoDigests": [
+          "axon-compare-axon@sha256:82d2459caa799d7c0c5661a60d97f2bb69283e322f598034e9c3e9c3c8264e11"
+        ],
+        "Parent": "",
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-24T00:07:33.47514094+02:00",
+        "DockerVersion": "",
+        "Author": "",
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 16505,
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "RootFS": {
+          "Type": "layers",
+          "Layers": [
+            "sha256:577d23babb6de6f71a38b881981f47964d95b85f3a861aaa7ba676d35747ff6a"
+          ]
+        },
+        "Metadata": {
+          "LastTagTime": "2026-10-23T22:10:38.049266509Z"
+        },
+        "Descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:82d2459caa799d7c0c5661a60d97f2bb69283e322f598034e9c3e9c3c8264e11",
+          "size": 855
+        },
+        "Config": {
+          "Cmd": null,
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Labels": null,
+          "OnBuild": null,
+          "User": "65532:65532",
+          "Volumes": null,
+          "WorkingDir": "/"
+        }
+      }
+    },
+    "Rust Hyper": {
+      "tag": "axon-compare-rust:20261023",
+      "id": "sha256:899b7e342a8d518cd1d025d3c71c0d1b6b06294490bc9a3430f98e8007935c03",
+      "engine_reported_image_bytes": 420883,
+      "rootfs_file_bytes": 790616,
+      "gzip_docker_save_bytes": 421249,
+      "architecture": "arm64",
+      "inspect": {
+        "Id": "sha256:899b7e342a8d518cd1d025d3c71c0d1b6b06294490bc9a3430f98e8007935c03",
+        "RepoTags": [
+          "axon-compare-rust:20261023"
+        ],
+        "RepoDigests": [
+          "axon-compare-rust@sha256:899b7e342a8d518cd1d025d3c71c0d1b6b06294490bc9a3430f98e8007935c03"
+        ],
+        "Parent": "",
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T23:28:03.269425324+02:00",
+        "DockerVersion": "",
+        "Author": "",
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 420883,
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "RootFS": {
+          "Type": "layers",
+          "Layers": [
+            "sha256:278e9c08ed67b8bdc1222776c7015cf56fb4fc5d8a52654c2b43e17cbcebb1ee"
+          ]
+        },
+        "Metadata": {
+          "LastTagTime": "2026-10-23T22:10:38.417636438Z"
+        },
+        "Descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:899b7e342a8d518cd1d025d3c71c0d1b6b06294490bc9a3430f98e8007935c03",
+          "size": 855
+        },
+        "Config": {
+          "Cmd": null,
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Labels": null,
+          "OnBuild": null,
+          "User": "65532:65532",
+          "Volumes": null,
+          "WorkingDir": "/"
+        }
+      }
+    },
+    "Rust Hyper glibc": {
+      "tag": "axon-compare-rust-gnu:20261023",
+      "id": "sha256:85513f5ef4fc13b9b05605f502454fa0d2a42795058c78823b4f1962fc2cf006",
+      "engine_reported_image_bytes": 1655471,
+      "rootfs_file_bytes": 3378128,
+      "gzip_docker_save_bytes": 1654429,
+      "architecture": "arm64",
+      "inspect": {
+        "Id": "sha256:85513f5ef4fc13b9b05605f502454fa0d2a42795058c78823b4f1962fc2cf006",
+        "RepoTags": [
+          "axon-compare-rust-gnu:20261023"
+        ],
+        "RepoDigests": [
+          "axon-compare-rust-gnu@sha256:85513f5ef4fc13b9b05605f502454fa0d2a42795058c78823b4f1962fc2cf006"
+        ],
+        "Parent": "",
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T23:36:36.719778683+02:00",
+        "DockerVersion": "",
+        "Author": "",
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 1655471,
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "RootFS": {
+          "Type": "layers",
+          "Layers": [
+            "sha256:60271bac921357f0b555d05dc6cb28dc3a08ddfac9e2238840b9c1ee6da3936d"
+          ]
+        },
+        "Metadata": {
+          "LastTagTime": "2026-10-23T22:10:38.812107473Z"
+        },
+        "Descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:85513f5ef4fc13b9b05605f502454fa0d2a42795058c78823b4f1962fc2cf006",
+          "size": 855
+        },
+        "Config": {
+          "Cmd": null,
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Labels": null,
+          "OnBuild": null,
+          "User": "65532:65532",
+          "Volumes": null,
+          "WorkingDir": "/"
+        }
+      }
+    },
+    "Bun direct": {
+      "tag": "axon-compare-bun-direct:20261023",
+      "id": "sha256:e984a76060e5c261690a8bf470c5b4b877790f74604c04d67baf137784aeda95",
+      "engine_reported_image_bytes": 46232980,
+      "rootfs_file_bytes": 109513043,
+      "gzip_docker_save_bytes": 46040305,
+      "architecture": "arm64",
+      "inspect": {
+        "Id": "sha256:e984a76060e5c261690a8bf470c5b4b877790f74604c04d67baf137784aeda95",
+        "RepoTags": [
+          "axon-compare-bun-direct:20261023"
+        ],
+        "RepoDigests": [
+          "axon-compare-bun-direct@sha256:e984a76060e5c261690a8bf470c5b4b877790f74604c04d67baf137784aeda95"
+        ],
+        "Parent": "",
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T23:28:03.664686499+02:00",
+        "DockerVersion": "",
+        "Author": "",
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 46232980,
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "RootFS": {
+          "Type": "layers",
+          "Layers": [
+            "sha256:eeaa73608b53c6a3dab2c5a85c971d005a4bddb14082a9b5c1d363c4847972ee",
+            "sha256:388bfcfe6504d1fb68e6414904f87dbef45ba3e1c91289ac569f759ef364b829",
+            "sha256:7bef0567d1611197b4576e88f31b08fc6bda46046c064308b971fb0a282c49c0",
+            "sha256:f7bf6367813e389d696d694fe7922ff00c8052b4694706b43b96f16109ee2755",
+            "sha256:88df9965f9ad161736ccce6a303f288218d24cd4f176f52008e55968c7fa7fe0",
+            "sha256:32abd0fbc59b1814f936296f64d85ec0ae6042a771570b1104124d954d319944",
+            "sha256:d7bf336bf61a836c0f262740940f5d4fd777173d33cab0fe35bce11b1754a8e5",
+            "sha256:f5ffa754a74bb6aa3b3ccb7a5944f159ca327e60f9a2800f3eee52275ad6417a",
+            "sha256:7cbf12347cbb5f8e2f77214dc2e720934823f82da937d850bbd5509540c07bf1"
+          ]
+        },
+        "Metadata": {
+          "LastTagTime": "2026-10-23T22:10:39.249732752Z"
+        },
+        "Descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:e984a76060e5c261690a8bf470c5b4b877790f74604c04d67baf137784aeda95",
+          "size": 856
+        },
+        "Config": {
+          "ArgsEscaped": true,
+          "Cmd": null,
+          "Entrypoint": [
+            "/usr/local/bin/bun",
+            "run",
+            "/app/server.ts",
+            "8080"
+          ],
+          "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bun-node-fallback-bin",
+            "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0",
+            "BUN_INSTALL_BIN=/usr/local/bin",
+            "NODE_ENV=production",
+            "RENDERER=direct"
+          ],
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Labels": {
+            "org.opencontainers.image.created": "2026-04-20T08:09:50.728Z",
+            "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+            "org.opencontainers.image.licenses": "NOASSERTION",
+            "org.opencontainers.image.revision": "bf2e2cecf27e800962b1e7f03d66278f9d5d2e79",
+            "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+            "org.opencontainers.image.title": "bun",
+            "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+            "org.opencontainers.image.version": "1.3.13-alpine"
+          },
+          "OnBuild": null,
+          "User": "65532:65532",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        }
+      }
+    },
+    "Bun React": {
+      "tag": "axon-compare-bun-react:20261023",
+      "id": "sha256:b5384190f6a1743386ffed651bd7bbb67cc5c1646647cce21c6ce2efb0a40d03",
+      "engine_reported_image_bytes": 47560317,
+      "rootfs_file_bytes": 117088054,
+      "gzip_docker_save_bytes": 47367087,
+      "architecture": "arm64",
+      "inspect": {
+        "Id": "sha256:b5384190f6a1743386ffed651bd7bbb67cc5c1646647cce21c6ce2efb0a40d03",
+        "RepoTags": [
+          "axon-compare-bun-react:20261023"
+        ],
+        "RepoDigests": [
+          "axon-compare-bun-react@sha256:b5384190f6a1743386ffed651bd7bbb67cc5c1646647cce21c6ce2efb0a40d03"
+        ],
+        "Parent": "",
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T23:28:05.513042017+02:00",
+        "DockerVersion": "",
+        "Author": "",
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 47560317,
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "RootFS": {
+          "Type": "layers",
+          "Layers": [
+            "sha256:eeaa73608b53c6a3dab2c5a85c971d005a4bddb14082a9b5c1d363c4847972ee",
+            "sha256:388bfcfe6504d1fb68e6414904f87dbef45ba3e1c91289ac569f759ef364b829",
+            "sha256:7bef0567d1611197b4576e88f31b08fc6bda46046c064308b971fb0a282c49c0",
+            "sha256:f7bf6367813e389d696d694fe7922ff00c8052b4694706b43b96f16109ee2755",
+            "sha256:88df9965f9ad161736ccce6a303f288218d24cd4f176f52008e55968c7fa7fe0",
+            "sha256:32abd0fbc59b1814f936296f64d85ec0ae6042a771570b1104124d954d319944",
+            "sha256:d7bf336bf61a836c0f262740940f5d4fd777173d33cab0fe35bce11b1754a8e5",
+            "sha256:f5ffa754a74bb6aa3b3ccb7a5944f159ca327e60f9a2800f3eee52275ad6417a",
+            "sha256:7622fa55290348d34b2a8c5a6687429c37eb6d7f673bc3c8c02b1b60f0fdeed8",
+            "sha256:ff3ab0f61ecb7af686abc371738d2114613d5832a407b1927b487115905e3fa5"
+          ]
+        },
+        "Metadata": {
+          "LastTagTime": "2026-10-23T22:10:41.2749186Z"
+        },
+        "Descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:b5384190f6a1743386ffed651bd7bbb67cc5c1646647cce21c6ce2efb0a40d03",
+          "size": 856
+        },
+        "Config": {
+          "ArgsEscaped": true,
+          "Cmd": null,
+          "Entrypoint": [
+            "/usr/local/bin/bun",
+            "run",
+            "/app/server.ts",
+            "8080"
+          ],
+          "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bun-node-fallback-bin",
+            "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0",
+            "BUN_INSTALL_BIN=/usr/local/bin",
+            "NODE_ENV=production",
+            "RENDERER=react"
+          ],
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Labels": {
+            "org.opencontainers.image.created": "2026-04-20T08:09:50.728Z",
+            "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+            "org.opencontainers.image.licenses": "NOASSERTION",
+            "org.opencontainers.image.revision": "bf2e2cecf27e800962b1e7f03d66278f9d5d2e79",
+            "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+            "org.opencontainers.image.title": "bun",
+            "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+            "org.opencontainers.image.version": "1.3.13-alpine"
+          },
+          "OnBuild": null,
+          "User": "65532:65532",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        }
+      }
+    }
+  },
+  "source_sha256": {
+    "bench/docker/build.py": "2c16fc4cab8b7e6690b8cd632a50894248df09fb19569df1d576a47c44eda64c",
+    "bench/docker/Dockerfile.axon": "73d88a2a39797ca2e17017154fc1200dd50e5ce7f8cb19d27a878d9a1c145f38",
+    "bench/docker/direct.ts": "7df2b78c32e6d2f97e27bc6dee51ad5399910234eded2cb9bf0de3d7b98fac8b",
+    "bench/docker/Dockerfile.rust": "3c044ba7b97dea294a39b4ccf2782dc19b22333aa56732672752092db8519a51",
+    "bench/docker/Dockerfile.bun": "37916bcf894b0bfc489cd4e69251ef667accd716b61016112af651d79c8f56b2",
+    "bench/docker/bun.lock": "72a014b2053dd6b66d575bbf22c01e812d6c00ac984d944f2d0a14a9661ba401",
+    "bench/docker/README.md": "f784795cc4f146bf22bf9e756d457a850bd95ac721957c5e779c3c7d8237217d",
+    "bench/docker/Dockerfile.rust-gnu": "5d0b01c4a64529373774d924523ef21292ad954dd42fcb4fe68c70bd22dc83a1",
+    "bench/docker/package.json": "c2a59a1f0b179f14f7ab63294f0edae9486119dfe7205e98eadf6f45bb06ed31",
+    "bench/docker/server.ts": "4ec2b2ad40c8b34419c1caab1ba98277a5d0fd4cfd4603a2ba0afad08fe204cd",
+    "bench/docker/compare.py": "e713f8e92059418fdb25c07be1e1e631a8418079cbc7b959243dd5fd508939a6",
+    "bench/docker/profile_http.py": "7562e20ec2eaa484b5e68427bd4114b72e57fdf2dc3d1538372b545233267fc8",
+    "bench/rust/Cargo.toml": "4bfae498304c24ca2f5f22bc35a64a9372cc75f290178c5b016f10e4f33a2a96",
+    "bench/rust/Cargo.lock": "b552d6ada0c71853f904396f61ccf2a73802b70dd9b533014fcebe268ba4c335",
+    "bench/rust/src/ssr_container.rs": "bcf49b1173fc66363b62e9e35021f2c3186300dbe443b09af52147ead5a5329e",
+    "examples/jsx-ssr/page.tsx": "800c86dd747777a15061a62c3395875cbb718c71144bdab986155686f40db95d",
+    "examples/jsx-ssr/compile.ts": "1e9752a268f2a4372396aa1087776e01254e5087e1c1f93b1ea2b4e379b4324c",
+    "examples/jsx-ssr/html.ax": "b1ed2af9515a4742e43808f7c875d6dfc33f509626998ce45dbfe6737ab75ee2",
+    "examples/jsx-ssr/server.ax": "400e6c934cdf6455ca1862e5a4c76082cf7c2b6402d3fdb621b16bd00db831b7",
+    "examples/jsx-ssr/build.ts": "3f204db1ceb47120ed0383a922bd0de25c34c4f76b77fda58b8409f1464d3ccd",
+    "runtime/platform_macos.ax": "dc05bb8c199b375ec2275da988859b8f18fe3f3a4e6c37edc6745e64b55bcb9d",
+    "runtime/core.ax": "b6ab092fe6c165fcc298118c86e18906725b7c08f9a56ceb5abdf850cc46866e",
+    "runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "runtime/platform_linux.ax": "4d957d09248bd373b23437bf440c3e12ef3eddc997a544472c89dfabb65484a4",
+    "runtime/http_linux.ax": "c5afd8b7ea9665e34cd8a4f6c7e57b58188fb1e9deabb411eb2727d48e66adc2",
+    "axonc/check.py": "0e3ad1dd4fcc01ce49bace55600a6d2963ba4a128482a07d8428406c7459f752",
+    "axonc/linear.py": "3f6334bc3df2d545f305eff5464d82668ba704c49f1d5325faaa6d3af38d133c",
+    "axonc/graph.py": "29060cbef603fad29662f3a0da67c2413adbaa6c01214d637d4bbec6cfc3a3ba",
+    "axonc/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "axonc/llvm.py": "fbd597c009253ac126be237aac013d2da479c9ce18cb3d983aebad785174f907",
+    "axonc/ranges.py": "744200711fd2f2836d30043273b73b03f0d6b2876f1f2c9b92a078c0f4ebe097",
+    "axonc/cli.py": "eaaa40469fbbe1f0f7b7e89c536d337c48f15c7451e88e6d9ce93035655024d1",
+    "axonc/vectorize.py": "6d3d92deae3808e0314242e22eccbda43dae4cf8d5ba235f5e6d501fa1311033",
+    "axonc/syntax.py": "76673e9f0b97a62a088866bad07f3bd3c665f31d27a4dec31499f48ef5254076",
+    "axonc/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "axonc/fold.py": "a72ce4770208595d53c4ddd77abbd778c5ad502b5aa4f6467babd54dc94178fb",
+    "axonc/inline.py": "793d7f0675eb34ca5c631ecb553b2948f77e84e8d541d3f861eb053147580ad3"
+  },
+  "binary_sha256": {
+    "axon": "fa509c482f8cfbc629567ef4e2e585a862680918a20e1634efc3eb795f3ee6ba",
+    "rust": "6bc7124696a9ac93030bc99268f484a6aed3d9913ce7deec8d166a03a2cede22",
+    "rust-gnu": "90faff7823e435015b701d909372d13d3cd0f50259ff03cbea2b4584ce309c2a"
+  },
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "musl": "musl:arm64\t1.2.4-2\nmusl-dev:arm64\t1.2.4-2",
+  "bun_base": {
+    "Id": "sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349",
+    "RepoTags": [
+      "oven/bun:1.3.13-alpine"
+    ],
+    "RepoDigests": [
+      "oven/bun@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349"
+    ],
+    "Parent": "",
+    "Comment": "buildkit.dockerfile.v0",
+    "Created": "2026-04-20T08:10:07.511916248Z",
+    "DockerVersion": "",
+    "Author": "",
+    "Architecture": "arm64",
+    "Os": "linux",
+    "Size": 46229973,
+    "GraphDriver": {
+      "Data": null,
+      "Name": "overlayfs"
+    },
+    "RootFS": {
+      "Type": "layers",
+      "Layers": [
+        "sha256:eeaa73608b53c6a3dab2c5a85c971d005a4bddb14082a9b5c1d363c4847972ee",
+        "sha256:388bfcfe6504d1fb68e6414904f87dbef45ba3e1c91289ac569f759ef364b829",
+        "sha256:7bef0567d1611197b4576e88f31b08fc6bda46046c064308b971fb0a282c49c0",
+        "sha256:f7bf6367813e389d696d694fe7922ff00c8052b4694706b43b96f16109ee2755",
+        "sha256:88df9965f9ad161736ccce6a303f288218d24cd4f176f52008e55968c7fa7fe0",
+        "sha256:32abd0fbc59b1814f936296f64d85ec0ae6042a771570b1104124d954d319944"
+      ]
+    },
+    "Metadata": {
+      "LastTagTime": "2026-10-23T21:25:51.94005106Z"
+    },
+    "Descriptor": {
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "digest": "sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349",
+      "size": 1609
+    },
+    "Config": {
+      "ArgsEscaped": true,
+      "Cmd": [
+        "/usr/local/bin/bun"
+      ],
+      "Entrypoint": [
+        "/usr/local/bin/docker-entrypoint.sh"
+      ],
+      "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bun-node-fallback-bin",
+        "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0",
+        "BUN_INSTALL_BIN=/usr/local/bin"
+      ],
+      "Labels": {
+        "org.opencontainers.image.created": "2026-04-20T08:09:50.728Z",
+        "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+        "org.opencontainers.image.licenses": "NOASSERTION",
+        "org.opencontainers.image.revision": "bf2e2cecf27e800962b1e7f03d66278f9d5d2e79",
+        "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+        "org.opencontainers.image.title": "bun",
+        "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+        "org.opencontainers.image.version": "1.3.13-alpine"
+      },
+      "OnBuild": null,
+      "User": "",
+      "Volumes": null,
+      "WorkingDir": "/home/bun/app"
+    }
+  },
+  "build_commands": [
+    [
+      "docker",
+      "--context",
+      "colima-axon-bench",
+      "exec",
+      "axon-kernel-bench-tools",
+      "bun",
+      "run",
+      "/axon/examples/jsx-ssr/build.ts",
+      "/axon/.kernel-build/docker-ssr/axon"
+    ],
+    [
+      "docker",
+      "--context",
+      "colima-axon-bench",
+      "exec",
+      "-w",
+      "/axon/bench/rust",
+      "axon-kernel-bench-tools",
+      "env",
+      "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc",
+      "RUSTFLAGS=-C target-feature=+crt-static -C strip=symbols",
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--target",
+      "aarch64-unknown-linux-musl",
+      "--bin",
+      "ssr_container"
+    ],
+    [
+      "docker",
+      "--context",
+      "colima-axon-bench",
+      "exec",
+      "-w",
+      "/axon/bench/rust",
+      "axon-kernel-bench-tools",
+      "env",
+      "RUSTFLAGS=-C strip=symbols",
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--target",
+      "aarch64-unknown-linux-gnu",
+      "--bin",
+      "ssr_container"
+    ]
+  ]
+}

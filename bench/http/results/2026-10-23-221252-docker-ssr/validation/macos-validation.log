@@ -1,0 +1,15 @@
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=4
+Test server stopped.

@@ -1,0 +1,17 @@
+; Concrete, typed results and optional values. No exceptions or sentinel errno API.
+type Error = { code: i64, message: Arr u8 _, position: i64 }
+type BytesResult = { ok: bool, value: Arr u8 _, error: Error }
+type IntResult = { ok: bool, value: i64, error: Error }
+type OptionInt = { present: bool, value: i64 }
+type OptionBytes = { present: bool, value: Arr u8 _ }
+fn no_error () -> Error = Error { code = 0, message = "", position = 0 }
+fn bytes_ok (value: Arr u8 n) -> BytesResult = BytesResult { ok = true, value = value, error = no_error() }
+fn bytes_error (code: i64, message: Arr u8 n, position: i64) -> BytesResult
+  = BytesResult { ok = false, value = "", error = Error { code = code, message = message, position = position } }
+fn int_ok (value: i64) -> IntResult = IntResult { ok = true, value = value, error = no_error() }
+fn int_error (code: i64, message: Arr u8 n, position: i64) -> IntResult
+  = IntResult { ok = false, value = 0, error = Error { code = code, message = message, position = position } }
+fn some_int (value: i64) -> OptionInt = OptionInt { present = true, value = value }
+fn none_int () -> OptionInt = OptionInt { present = false, value = 0 }
+fn some_bytes (value: Arr u8 n) -> OptionBytes = OptionBytes { present = true, value = value }
+fn none_bytes () -> OptionBytes = OptionBytes { present = false, value = "" }

@@ -1,0 +1,14 @@
+import "std:io"
+effect(fs,env,time,process) fn main () -> unit
+  = let arg = cli_arg(1) in let missing = env_get("NEO_TEST_UNSET_20261024") in
+    let path = arg.value in
+    check arg.present && !missing.present in
+    let written = fs_write(path, "café 🚀\n") in check written.ok in
+    let appended = fs_append(path, "second\n") in check appended.ok in
+    let read = fs_read(path) in check read.ok && str_equal(read.value, "café 🚀\nsecond\n") in
+    let absent = fs_read(concat(path, ".missing")) in check !absent.ok && absent.error.code == 2 in
+    let invalid = file_write(-1, "bad") in check !invalid.ok in
+    let bad_path = fs_read("bad\0path") in check !bad_path.ok && bad_path.error.code == 22 in
+    let before = time_unix_ms() in let pause = sleep_ms(5) in let after = time_unix_ms() in
+    check before.ok && pause.ok && after.ok && after.value >= before.value in
+    let invalid_sleep = sleep_ms(-1) in check !invalid_sleep.ok in noop()

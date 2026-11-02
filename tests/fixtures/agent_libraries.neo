@@ -1,0 +1,41 @@
+import "std:json"
+import "std:url"
+import "std:sse"
+import "std:queue"
+import "std:task"
+import "std:callback"
+fn sum_capture(capture:Arr u8 n,x:i64) -> i64 = len(capture)+x
+effect(fs,net,env,time,process) fn task_step(state:i64,cancelled:bool,now:i64) -> TaskStep<i64>
+  = TaskStep::<i64> { state=state+1,done=cancelled || state>=2,wake_ms=now+10 }
+effect(fs,net,env,time,process) fn main() -> unit
+  = let callback=closure::<Arr u8 _,i64,i64>(function(sum_capture),"captured") in check closure_apply(callback,34)==42 in
+    let object=json_parse("{ \"a\":null, \"a\": true, \"caf\\u00e9\":-0.1e+1 }") in check object.ok in
+    let keys=json_object_keys(object.value) in check len(keys)==3 in
+    let key=check len(keys)>2 in keys[2] in check str_equal(key,"café") in
+    let number=json_get(object.value,"café") in check number.present && json_float(number.value).value== -1.0 in
+    let boolean=json_bool(json_get(object.value,"a").value) in check boolean.ok && boolean.value in
+    let values=arr(i in 0..3) if i==0 then json_value_null() else if i==1 then json_value_int(-42) else json_value_string("hello\n🚀").value in
+    let names=arr(i in 0..3) if i==0 then "nil" else if i==1 then "int" else "string" in
+    let built=json_value_object(names,values) in check built.ok in
+    let parsed=json_parse(json_encode(built.value)) in check parsed.ok && json_int(json_get(parsed.value,"int").value).value== -42 in
+    let encoded=url_encode("a b/é+",false) in check str_equal(encoded,"a%20b%2F%C3%A9%2B") && str_equal(url_decode(encoded,false).value,"a b/é+") in
+    check !url_decode("a%Q0",false).ok && str_equal(url_decode("a+b",true).value,"a b") in
+    let a=queue_push(queue_new::<Arr u8 _>(2),"one") in let b=queue_push(a.queue,"two") in let full=queue_push(b.queue,"three") in check a.accepted && b.accepted && !full.accepted in
+    let first=queue_take(full.queue) in check match first.value { None => false,Some(value) => str_equal(value,"one") } in
+    let third=queue_push(first.queue,"three") in let second=queue_take(third.queue) in let last=queue_take(second.queue) in
+    check match last.value { None => false,Some(value) => str_equal(value,"three") } in check queue_len(last.queue)==0 in
+    let wire="\xef\xbb\xbf: comment\r\nid: 7\rdata: first\ndata: second\nevent: tool\nretry: 250\n\n" in
+    let framed=loop(i=0,state=sse_new(),out=vec_empty::<SSEEvent>()) while i<len(wire)
+      next(i+1,sse_feed(state,str_slice(wire,i,i+1),4096).state,
+        let fed=sse_feed(state,str_slice(wire,i,i+1),4096) in check fed.ok in
+        match vec_get(fed.events,0) { None => out,Some(event) => vec_push(out,event) }) yield out in
+    check vec_len(framed)==1 in let event=match vec_get(framed,0) { None => SSEEvent { data="",id="",event="",retry=0 },Some(event) => event } in
+    check str_equal(event.data,"first\nsecond") && str_equal(event.id,"7") && str_equal(event.event,"tool") && event.retry==250 in
+    check !sse_feed(sse_new(),"data: too long",4).ok && vec_len(sse_feed(sse_new(),"data: incomplete",4096).events)==0 in
+    let spawned=tasks_spawn(tasks_new::<i64>(2),0,function(task_step)) in let other=tasks_spawn(spawned.tasks,0,function(task_step)) in
+    let refused=tasks_spawn(other.tasks,0,function(task_step)) in check !refused.accepted in
+    let tick=tasks_tick(refused.tasks,false,100) in check tick.active==2 && tick.next_wake==110 in
+    let asleep=tasks_tick(tick.tasks,false,105) in check asleep.active==2 && asleep.next_wake==110 in
+    let stopped=tasks_tick(asleep.tasks,true,106) in check stopped.active==0 in
+    let again=tasks_spawn(stopped.tasks,0,function(task_step)) in check !again.accepted in
+    let printed=print_out("agent libraries OK\n") in noop()

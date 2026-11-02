@@ -1,0 +1,31 @@
+import "std:tls"
+import "std:dns"
+import "std:io"
+
+; GET https://HOST:PORT/PATH over TLS 1.3. Prints the negotiated suite and group
+; and the response status line, or why the exchange failed.
+fn status_line(response:Arr u8 n) -> Arr u8 _
+  = let end=str_find(response,"\r\n") in if end.present then str_slice(response,0,end.value) else response
+effect(fs,net,time,process) fn fetch(host:Arr u8 n,port:i64,roots:Arr Certificate m,path:Arr u8 k) -> unit
+  = let deadline=deadline_after(8000) in
+    let address=dns_lookup(host,deadline.value) in if !address.ok then let failed=print_out(concat("dns failed: ",address.error.message,"\n")) in noop() else
+    using socket=tcp_connect_ipv4(dns_address(address.value),port,deadline.value) in
+    let connected=socket_status(socket) in if !connected.ok then let failed=print_out(concat("connect failed: ",connected.error.message,"\n")) in noop() else
+    using session=tls_connect(socket,host,roots,deadline.value) in
+      let status=tls_status(session) in if !status.ok then let failed=print_out(concat("rejected: ",status.error.message,"\n")) in noop() else
+        let request=concat("GET ",path," HTTP/1.1\r\nHost: ",host,"\r\nUser-Agent: neo-tls-test\r\nAccept: */*\r\nConnection: close\r\n\r\n") in
+        let sent=tls_write(socket,session,request,deadline.value) in if !sent.ok then let failed=print_out("write rejected\n") in noop() else
+        let received=loop(chunk=tls_read(socket,session,deadline.value),out="")
+            while chunk.ok && len(chunk.value)>0 && len(out)<65536 && !str_find(out,"\r\n").present
+            next(tls_read(socket,session,deadline.value),concat(out,chunk.value)) yield if chunk.ok then bytes_ok(concat(out,chunk.value)) else chunk in
+        let line=if received.ok then status_line(received.value) else concat("read rejected: ",received.error.message) in
+        let shown=print_out(concat("suite=",int_text(tls_suite(session))," group=",int_text(tls_group(session))," ",line,"\n")) in
+        let closed=tls_close(socket,session,deadline.value) in noop()
+effect(fs,net,time,process,env) fn main() -> unit
+  = let host=cli_arg(1) in let port_arg=cli_arg(2) in let trust=cli_arg(3) in let path=cli_arg(4) in
+    check host.present && port_arg.present && trust.present in
+    let port=int_parse(port_arg.value) in check port.ok && port.value>0 && port.value<65536 in
+    let roots=if str_equal(trust.value,"system") then tls_system_roots() else
+      let root=fs_read(trust.value) in arr(i in 0..1) x509_parse(if root.ok then root.value else "") in
+    let counted=print_out(concat("roots=",int_text(len(roots)),"\n")) in
+    fetch(host.value,port.value,roots,if path.present then path.value else "/")

@@ -1,0 +1,15 @@
+fn step (a : Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n) if i == 0 || i + 1 == n then a[i]
+    else (a[i-1] + 2 * a[i] + a[i+1]) % 1000003
+
+fn calculate (n : i64{n > 0}, seed : i64, passes : i64{passes >= 0}) -> i64
+  = let out = loop(a = arr(i in 0..n) wrapping_add(wrapping_mul(i, seed), seed) % 1000003, k = 0)
+                while k < passes next(step(a), k + 1) yield a in
+    sum(i in 0..n) out[i]
+
+fn wide (x : i64) -> i64 = ((x % 1000000000003) * 7) % 1000000000003
+fn small (x : i64) -> i64 = ((x % 17) * 7) % 17
+fn unknown (x : i64) -> i64 = wrapping_add(wrapping_mul(x, 3), 1) % 1000003
+
+fn main (n : i64{n > 0}, seed : i64, passes : i64{passes >= 0}) -> i64
+  = calculate(n, seed, passes) + wide(seed) + small(seed) + unknown(seed)

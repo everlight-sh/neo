@@ -1,0 +1,20 @@
+; Sieve of Eratosthenes with in-place updates.
+; `set(m, j, false)` returns "m with m[j] = false". The backend updates the
+; buffer in place because `m` is uniquely owned along every path (its only
+; whole-array use is that `set`), so the sieve runs with one allocation.
+; The return refinement is proven from the sum's non-negative body.
+
+fn mark (m : Arr bool n, step : i64{step >= 1}, start : i64{start >= 0}) -> Arr bool n
+  = loop (m2 = m, j : i64{j >= 0} = start)
+      while j < n
+      next (set(m2, j, false), j + step)
+      yield m2
+
+fn count_primes (n : i64{n >= 2}) -> i64 {result >= 0}
+  = let marks = loop (m = arr(k in 0..n + 1) k >= 2, i : i64{i >= 2} = 2)
+                  while i <= n && i * i <= n
+                  next (if m[i] then mark(m, i, i * i) else m, i + 1)
+                  yield m in
+    sum(k in 0..n + 1) if marks[k] then 1 else 0
+
+fn main (n : i64{n >= 2}) -> i64 = count_primes(n)

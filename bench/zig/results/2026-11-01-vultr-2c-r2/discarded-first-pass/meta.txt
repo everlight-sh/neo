@@ -1,0 +1,86 @@
+## versions
+6.8.0-146-generic
+CPU(s):                                  2
+Model name:                              AMD EPYC-Genoa Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+               total        used        free      shared  buff/cache   available
+Mem:            3909         596         637           1        2970        3312
+0.17.0
+Ubuntu clang version 18.1.3 (1ubuntu1)
+wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer
+Python 3.12.3
+always [madvise] never
+always defer defer+madvise [madvise] never
+## sizes (bytes: as built / stripped)
+/root/bin/vif-http 70176 68456 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-library_bench 96080 94704 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-mandel 19568 18488 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-nbody 24336 22880 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-orders_json 146888 145408 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-sieve 19752 18448 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-stencil 19952 18672 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-http 78344 76688 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-library_bench 108256 106904 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-mandel 19456 18400 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-nbody 24224 22792 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-orders_json 142680 141224 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-sieve 19680 18408 ELF 64-bit LSB executable, x86-64 | 
+/root/bin-before/vif-stencil 19832 18592 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/http_httpz 4769944 648632 ELF 64-bit LSB executable, x86-64 | [libc.so.6] [ld-linux-x86-64.so.2] 
+/root/zig-baseline/bin/http_std 4467136 608504 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/json 4476888 594392 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/mandel 4070552 507016 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/nbody 4161744 529672 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/sieve 4102464 511080 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/stencil 4122848 513512 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/http_httpz 4917488 723576 ELF 64-bit LSB executable, x86-64 | [libc.so.6] [ld-linux-x86-64.so.2] 
+/root/zig-native/bin/http_std 4618520 687400 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/json 4650080 678392 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/mandel 4190736 577368 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/nbody 4313032 613832 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/sieve 4240264 589736 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/stencil 4266880 595144 ELF 64-bit LSB executable, x86-64 | 
+## sha256
+52f29a7caf3328741f066ddfcaa0e3d516b9b46e46537fdc273157179c93ee4e  /root/bin/vif-http
+8051e1138ad256e7db21ac9afbae0934d09ad6514584696e8767f6b58b1d961d  /root/bin/vif-library_bench
+08f360d2da681878a93f8d0913d072e17de054b7100989badf920253bd229e3e  /root/bin/vif-mandel
+55aa9472ae8686bb487d26f001d56049bcd64236e133c086d02adbf1000ddf69  /root/bin/vif-nbody
+d4094790f77f6c0255659cf4536ab3c3eecf5bcb9fc88d1ad1065ba0832bba7b  /root/bin/vif-orders_json
+3e16da36ef61abb121b619b7520d8a7f85885b4158648833a98ac90b4123800d  /root/bin/vif-sieve
+7aa524381bd5d4e31dd895de143278b5399229e225dacc80d318f42999e669f8  /root/bin/vif-stencil
+d4d19d9e33157b95916cd368f11724e1973c4aa3b3b7f3f4882c17af6f89c4e3  /root/bin-before/vif-http
+73a6073bc8fb12aeb27420c567f9ececda1b9f10bdd12aef6e4e5de5c97035bd  /root/bin-before/vif-library_bench
+181a957d2ace27b630197d034d09c60e05f8266a27ba4c643f1177faf1b5186e  /root/bin-before/vif-mandel
+96371e872d34f8d4a9ca5e89ee2313dac167a116f29333f9e89f4f5e790bbbf0  /root/bin-before/vif-nbody
+fc9bdd1315bfb5208aa59b0adc12f8cb78c4d45f13734675a22908e5a87b907e  /root/bin-before/vif-orders_json
+9abdc77fdb1aa57409f9d11a750c8229e36d63910fd9968bc3b0e27bed725368  /root/bin-before/vif-sieve
+d214a118e6778e581402efcd71bc254be40825201e52bbe09c523093bd706efc  /root/bin-before/vif-stencil
+facc06b6b15f904bfaa6c6a0132a3a435c16f531c4771bd62f32d1a0f0d8d242  /root/zig-baseline/bin/http_httpz
+10e079c7d3294d8a16e83188606663798cde6a4703267b56f4e1d3aa6c6ba34c  /root/zig-baseline/bin/http_std
+6e81efe452fd9ff44154a10aa501dfd2de182079e76f3a6b9cddd4275c853989  /root/zig-baseline/bin/json
+166c34cbe39026ba81e024305d1596649b174d32e4c7f1ac6dd41c7c7c4c898a  /root/zig-baseline/bin/mandel
+e59a86e3a958607729dd01c266f9a6df28de98314fb47e16cef4cdb7552476c3  /root/zig-baseline/bin/nbody
+5b2e0d4b9338aa64984b0e0a721c0d58947f90e57c1bb8d445a2f4c4b3929a48  /root/zig-baseline/bin/sieve
+67030e69c3a2af52db901d3f73b1f110e66a3ffecfbe8c0fc8255ee80e6bafca  /root/zig-baseline/bin/stencil
+c11c811c22b576b8447360a475c1472b6c684cb48e580f1f56d8c1df0eebd9ab  /root/zig-native/bin/http_httpz
+d338a02c4f86485440d11eebcf0740d45fb879dbecf8242e03476d8fb09a0854  /root/zig-native/bin/http_std
+ead3dab57b86ffc846680f315868917f179d7a2234a31d5ead1e034aea8df84c  /root/zig-native/bin/json
+765be96294a30162a5eb35122ed376ffc625eeca3c47a8d7281011c9e67f2d13  /root/zig-native/bin/mandel
+e4e5ef5d02188e183b1435098ccb11fd7d8244a7acbb3bc38ecc2cdce7d8a33b  /root/zig-native/bin/nbody
+54867f83041a8230ab05b18f41ea671e55a2d1cc706f8c4358260487718036b1  /root/zig-native/bin/sieve
+7300980c3fb7e0cbb72c91b6d3c5870c3ce17f5e8128a8ac6eb8328b95c509b7  /root/zig-native/bin/stencil
+## nm -u vif
+/root/bin/vif-http: 0 undefined
+/root/bin/vif-library_bench: 0 undefined
+/root/bin/vif-mandel: 0 undefined
+/root/bin/vif-nbody: 0 undefined
+/root/bin/vif-orders_json: 0 undefined
+/root/bin/vif-sieve: 0 undefined
+/root/bin/vif-stencil: 0 undefined
+/root/bin-before/vif-http: 0 undefined
+/root/bin-before/vif-library_bench: 0 undefined
+/root/bin-before/vif-mandel: 0 undefined
+/root/bin-before/vif-nbody: 0 undefined
+/root/bin-before/vif-orders_json: 0 undefined
+/root/bin-before/vif-sieve: 0 undefined
+/root/bin-before/vif-stencil: 0 undefined

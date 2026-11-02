@@ -1,0 +1,39 @@
+import "std:strings"
+
+type DerNode = { ok:bool,tag:i64,start:i64,body:i64,end:i64 }
+fn der_node(bytes:Arr u8 n,at:i64,limit:i64) -> DerNode
+  = if at<0 || limit<0 || limit>n || at>limit-2 then DerNode { ok=false,tag=0,start=0,body=0,end=0 } else
+    let tag=str_byte(bytes,at) in let first=str_byte(bytes,at+1) in
+    let count=if first<128 then 0 else first-128 in
+    if count>4 || count>limit-at-2 || first==128 then DerNode { ok=false,tag=tag,start=at,body=at,end=at } else
+    let length=if first<128 then first else loop(i=0,value=0) while i<count && i<4
+      next(i+1,value*256+str_byte(bytes,at+2+i)) yield value in
+    let body=at+2+count in let end=if length<=limit-body then body+length else body in
+    DerNode { ok=at>=0 && at<=n-2 && limit<=n && limit>=0 && tag>=0 && bit_and(tag,31)!=31 && first>=0 && first!=128 && count<=4 &&
+      body<=limit && length>=0 && length<=limit-body && end>=body && end<=limit && (count==0 || length>=128 && str_byte(bytes,at+2)>0 && (count==1 || length>=shift_left(1,(count-1)*8))),
+      tag=tag,start=at,body=body,end=end }
+fn der_value(bytes:Arr u8 n,node:DerNode) -> Arr u8 _ = if node.ok then str_slice(bytes,node.body,node.end) else ""
+fn der_encoded(bytes:Arr u8 n,node:DerNode) -> Arr u8 _ = if node.ok then str_slice(bytes,node.start,node.end) else ""
+fn der_oid(bytes:Arr u8 n,node:DerNode,value:Arr u8 m) -> bool = node.ok && node.tag==6 && str_equal(der_value(bytes,node),value)
+fn der_integer(bytes:Arr u8 n,node:DerNode,maximum:i64) -> IntResult
+  = let size=node.end-node.body in
+    if !node.ok || node.tag!=2 || size<1 || size>8 || maximum<0 || str_byte(bytes,node.body)>=128 || size>1 && str_byte(bytes,node.body)==0 && str_byte(bytes,node.body+1)<128 then int_error(1,"invalid DER integer",node.start) else
+      loop(at=node.body,value=0,valid=true) while valid && at<node.end
+        next(at+1,if value>(maximum-str_byte(bytes,at))/256 then value else value*256+str_byte(bytes,at),
+          value<=(maximum-str_byte(bytes,at))/256 && str_byte(bytes,at)<=maximum)
+        yield if valid then int_ok(value) else int_error(1,"DER integer exceeds limit",node.start)
+fn der_tree(bytes:Arr u8 n,node:DerNode,depth:i64) -> bool
+  = if !node.ok || depth<0 || depth>32 then false else
+    if bit_and(node.tag,192)==0 && (node.tag==0 || bit_and(node.tag,32)!=0 && !(node.tag==48 || node.tag==49) || node.tag==16 || node.tag==17) then false else
+    if bit_and(node.tag,32)!=0 then
+      loop(at=node.body,valid=true) while valid && at<node.end
+        next(der_node(bytes,at,node.end).end,der_tree(bytes,der_node(bytes,at,node.end),depth+1)) yield valid else
+    if node.tag==1 then node.end-node.body==1 && (str_byte(bytes,node.body)==0 || str_byte(bytes,node.body)==255) else
+    if node.tag==2 then node.end>node.body && !(node.end-node.body>1 &&
+      (str_byte(bytes,node.body)==0 && str_byte(bytes,node.body+1)<128 || str_byte(bytes,node.body)==255 && str_byte(bytes,node.body+1)>=128)) else
+    if node.tag==3 then let unused=str_byte(bytes,node.body) in unused>=0 && unused<=7 && node.end>node.body &&
+      (if node.end-node.body==1 then unused==0 else bit_and(str_byte(bytes,node.end-1),shift_left(1,unused)-1)==0) else
+    if node.tag==5 then node.body==node.end else
+    if node.tag==6 then node.body<node.end && str_byte(bytes,node.end-1)<128 &&
+      loop(at=node.body,first=true,valid=true) while valid && at<node.end
+        next(at+1,str_byte(bytes,at)<128,!first || str_byte(bytes,at)!=128) yield valid else true

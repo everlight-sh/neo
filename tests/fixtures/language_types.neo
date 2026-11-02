@@ -1,0 +1,25 @@
+import "std:option"
+import "std:result"
+import "std:strings"
+import "std:io"
+
+type Envelope<T> = { value: T, label: Arr u8 _ }
+
+fn identity<T>(value: T) -> T = value
+
+fn checked_text(n: i64) -> Result<Arr u8 _,Error>
+  = if n < 0 then Err::<Arr u8 _,Error>(Error { code = 22, message = "negative", position = 0 })
+    else Ok::<Arr u8 _,Error>(concat("value=",int_text(n)))
+
+fn render(n: i64) -> Result<Arr u8 _,Error>
+  = let text = checked_text(n)? in
+    let option = Some::<Envelope<Arr u8 _>>(Envelope::<Arr u8 _> { value = text, label = "owned" }) in
+    match option {
+      None => Err::<Arr u8 _,Error>(no_error()),
+      Some(item) => Ok::<Arr u8 _,Error>(concat(item.label,":",identity::<Arr u8 _>(item.value)))
+    }
+
+effect(fs) fn main(n: i64) -> unit
+  = let rendered = render(n) in
+    let text = match rendered { Ok(value) => value, Err(error) => concat("error:",error.message) } in
+    let shown = print_out(concat(text,"\n")) in noop()

@@ -1,0 +1,247 @@
+; HTTP/1.x connection lifecycle and framing, written in Neo.
+; Each worker owns its connections (Linux epoll or macOS poll). No C HTTP implementation.
+; Each connection has a 64-byte state and a bounded 64 KiB input buffer:
+; fd@0, input@8, have@16, output@24, length@32, sent@40, close@48.
+
+fn rt_lower (c : u8) -> u8
+  = if c >= 'A' && c <= 'Z' then u8(i64(c) + 32) else c
+
+fn rt_match (a : Arr u8 n, at : i64{at >= 0}, b : Arr u8 m) -> bool
+  = at + m <= n && loop (i : i64{i >= 0} = 0, ok = true)
+      while ok && i < m next (i + 1, a[at + i] == b[i]) yield ok
+
+fn rt_match_ci (a : Arr u8 n, at : i64{at >= 0}, b : Arr u8 m) -> bool
+  = at + m <= n && loop (i : i64{i >= 0} = 0, ok = true)
+      while ok && i < m next (i + 1, rt_lower(a[at + i]) == rt_lower(b[i])) yield ok
+
+fn rt_find (a : Arr u8 n, b : Arr u8 m, start : i64{start >= 0}) -> i64 {result >= -1}
+  = loop (i : i64{i >= 0} = start, found : i64{found >= -1} = -1)
+      while found < 0 && i + m <= n
+      next (i + 1, if rt_match(a, i, b) then i else -1) yield found
+
+fn rt_header (a : Arr u8 n, key : Arr u8 m, start : i64{start >= 0}) -> i64 {result >= -1}
+  = loop (i : i64{i >= 0} = start, found : i64{found >= -1} = -1)
+      while found < 0 && i + m <= n
+      next (i + 1, if (i == 0 || a[i - 1] == '\n') && rt_match_ci(a, i, key) then i + m else -1)
+      yield found
+
+fn rt_skip_space (a : Arr u8 n, start : i64{start >= 0}) -> i64 {result >= 0}
+  = loop (i : i64{i >= 0} = start) while i < n && (a[i] == ' ' || a[i] == '\t')
+      next (i + 1) yield i
+
+fn rt_body_length (headers : Arr u8 n) -> i64
+  = let field = rt_header(headers, "content-length:", 0) in
+    if rt_header(headers, "transfer-encoding:", 0) >= 0 then -1
+    else if field < 0 then 0
+    else if rt_header(headers, "content-length:", field) >= 0 then -1
+    else let start = rt_skip_space(headers, field) in
+      let value = loop (i : i64{i >= 0} = start, acc = 0, digits = 0)
+        while i < n && headers[i] >= '0' && headers[i] <= '9' && acc <= 65536
+        next (i + 1, acc * 10 + i64(headers[i]) - 48, digits + 1)
+        yield if digits == 0 || acc > 65536 then -1
+          else let end = rt_skip_space(headers, i) in
+            if end + 1 < n && headers[end] == '\r' && headers[end + 1] == '\n' then acc else -1 in value
+
+fn rt_connection_token (headers : Arr u8 n, token : Arr u8 m) -> bool
+  = let field = rt_header(headers, "connection:", 0) in
+    if field < 0 then false else
+      loop (i : i64{i >= 0} = field, found = false)
+        while !found && i < n && headers[i] != '\r' && headers[i] != '\n'
+        next (i + 1, rt_match_ci(headers, i, token) &&
+          (i == field || (i > 0 && (headers[i - 1] == ' ' || headers[i - 1] == ',' || headers[i - 1] == '\t'))) &&
+          i + m < n && (headers[i + m] == '\r' || headers[i + m] == ' ' || headers[i + m] == ',' || headers[i + m] == '\t'))
+        yield found
+
+; Dense per-worker connection vector. Each state is 64 bytes:
+; fd@0, input@8, have@16, output@24, length@32, sent@40, close@48,
+; buffered-complete-work@56. Input and output buffers persist across requests.
+effect fn rt_drop (state : ptr) -> unit
+  = let fd = load_i64(state, 0) in
+    if fd < 0 then noop() else
+      let closed = rt_close(fd) in
+      let input = ax_release(load_ptr(state, 8)) in
+      let output = ax_release(load_ptr(state, 24)) in
+      let cleared = memset(state, i32(0), 64) in store_i64(state, 0, -1)
+
+effect fn rt_request (state : ptr, handler : ptr, input : ptr, n : i64, offset : i64) -> i64
+  = check offset >= 0 && offset <= n in
+    let bytes = view(ptr_add(input, offset), n - offset) in
+    let end = rt_find(bytes, "\r\n\r\n", 0) in
+    if end < 0 then
+      let dropped = if n - offset == 65536 then rt_drop(state) else noop() in 0
+    else let header_bytes = end + 4 in
+      check header_bytes >= 0 && header_bytes <= n - offset in
+      let headers = view(ptr_add(input, offset), header_bytes) in
+      let body_bytes = rt_body_length(headers) in
+      if body_bytes < 0 || header_bytes + body_bytes > 65536 then let dropped = rt_drop(state) in 0
+      else let total = header_bytes + body_bytes in
+        if total > n - offset then 0 else
+          let response = handler_call(handler, ptr_add(input, offset), total) in
+          if len(response) == 0 then let dropped = rt_drop(state) in 0 else
+            let closing = rt_connection_token(headers, "close") ||
+              (rt_find(headers, "HTTP/1.0", 0) >= 0 && !rt_connection_token(headers, "keep-alive")) in
+            let length = load_i64(state, 32) in
+            ; A large keep-alive response with nothing queued ahead of it goes straight
+            ; to the socket without waiting. Only what the kernel does not take now is
+            ; copied into the connection's buffer, which then stays small: one response
+            ; at a time is held, not one per connection.
+            let early = if !closing && length == 0 && len(response) >= 16384
+              then rt_send_now(load_i64(state, 0), data(response), len(response)) else 0 in
+            let skip = if early > 0 then early else 0 in
+            let rest = len(response) - skip in
+            let queued = if rest <= 0 then noop() else
+              let old = load_ptr(state, 24) in
+              let capacity = ax_allocation_capacity(old) in
+              let grown = if length + rest > capacity then
+                let bigger = ax_alloc(length + rest) in
+                let copied = memcpy(bigger, old, length) in
+                let released = ax_release(old) in store_ptr(state, 24, bigger)
+              else noop() in
+              let copied = memcpy(ptr_add(load_ptr(state, 24), length), ptr_add(data(response), skip), rest) in
+              store_i64(state, 32, length + rest) in
+            let closed = store_i64(state, 48, if closing then 1 else 0) in total
+
+type RuntimeBatch = { offset : i64, more : bool, count : i64 }
+effect fn rt_batch_next (state : ptr, handler : ptr, input : ptr, n : i64, batch : RuntimeBatch) -> RuntimeBatch
+  = let consumed = rt_request(state, handler, input, n, batch.offset) in
+    RuntimeBatch { offset = batch.offset + consumed,
+      more = consumed > 0 && load_i64(state, 0) >= 0 && load_i64(state, 48) == 0,
+      count = batch.count + 1 }
+
+effect fn rt_prepare (state : ptr, handler : ptr) -> unit
+  = let n = load_i64(state, 16) in
+    check n >= 0 && n <= 65536 in
+    let input = load_ptr(state, 8) in
+    let reset = store_i64(state, 56, 0) in
+    let batch = loop (b = RuntimeBatch { offset = 0, more = true, count = 0 })
+      while b.more && b.offset < n && b.count < 64 && load_i64(state, 32) < 262144
+      next (rt_batch_next(state, handler, input, n, b)) yield b in
+    if load_i64(state, 0) < 0 then noop() else
+      let shifted = memmove(input, ptr_add(input, batch.offset), n - batch.offset) in
+      let saved = store_i64(state, 16, n - batch.offset) in
+      store_i64(state, 56, if batch.more && batch.offset < n then 1 else 0)
+
+effect fn rt_flush (state : ptr) -> unit
+  = let length = load_i64(state, 32) in
+    let offset = load_i64(state, 40) in
+    let count = rt_send(load_i64(state, 0), ptr_add(load_ptr(state, 24), offset), length - offset) in
+    if count < 0 then if rt_retry() then noop() else rt_drop(state)
+    else if count == 0 then rt_drop(state)
+    else let sent = offset + count in
+      if sent < length then store_i64(state, 40, sent)
+      else let reset = store_i64(state, 32, 0) in
+        let sent = store_i64(state, 40, 0) in
+        if load_i64(state, 48) == 1 then rt_drop(state) else noop()
+
+effect fn rt_step (state : ptr, events : i64, handler : ptr) -> unit
+  = if events / 8 % 2 == 1 || events / 32 % 2 == 1 then rt_drop(state) else
+    let flushed = if load_i64(state, 32) > 0 && events / 4 % 2 == 1 then rt_flush(state) else noop() in
+    if load_i64(state, 0) < 0 then noop() else
+      let prepared = if load_i64(state, 32) == 0 && load_i64(state, 16) > 0 then rt_prepare(state, handler) else noop() in
+      if load_i64(state, 0) < 0 then noop() else
+        let received = if load_i64(state, 32) == 0 && (events % 2 == 1 || events / 16 % 2 == 1) then
+          let n = load_i64(state, 16) in
+          let count = rt_read(load_i64(state, 0), ptr_add(load_ptr(state, 8), n), 65536 - n) in
+          if count > 0 then
+            let saved = store_i64(state, 16, n + count) in rt_prepare(state, handler)
+          else if count == 0 then rt_drop(state)
+          else if rt_retry() then noop() else rt_drop(state)
+        else noop() in
+        if load_i64(state, 0) >= 0 && load_i64(state, 32) > 0 then rt_flush(state) else noop()
+
+; Only one worker accepts each connection. A shared turn and inherited
+; socketpairs wake the next worker, distributing connections round-robin.
+; The connection takes state `slot` (the count at local@0 grows when slot is
+; that count); readiness backends need a non-blocking socket, completion
+; backends (io_uring) a blocking one. Returns the slot, or -1.
+effect fn rt_accept_at (listener : i64, states : ptr, slot : i64, blocking : bool, local : ptr,
+                        control : ptr, worker : i64, workers : i64{workers >= 1}) -> i64
+  = if load_i64(control, 0) != worker then -1 else
+    let fd = rt_accept_fd(listener) in
+    if fd < 0 then -1 else
+      let placed = if slot < 0 || slot >= 1024 || (!blocking && rt_nonblock(fd) < 0) then let closed = rt_close(fd) in -1
+        else let state = ptr_add(states, slot * 64) in
+          let cleared = memset(state, i32(0), 64) in
+          let one = stack_alloc(8) in let value = store_i32(one, 0, i32(1)) in
+          let nodelay = rt_setsockopt(fd, 6, 1, one, 4) in
+          let input = store_ptr(state, 8, ax_alloc(65536)) in
+          let output = store_ptr(state, 24, ax_alloc(4096)) in
+          let descriptor = store_i64(state, 0, fd) in
+          let counted = if slot == load_i64(local, 0) then store_i64(local, 0, slot + 1) else noop() in slot in
+      let successor = (worker + 1) % workers in
+      let advanced = store_i64(control, 0, successor) in
+      let notified = if workers > 1 then
+        let byte = stack_alloc(8) in let ready = store_u8(byte, 0, u8(1)) in
+        let wrote = rt_write(load_i64(control, 264 + successor * 16), byte, 1) in noop()
+      else noop() in placed
+
+effect fn rt_accept (listener : i64, states : ptr, local : ptr, control : ptr, worker : i64, workers : i64{workers >= 1}) -> unit
+  = let slot = rt_accept_at(listener, states, load_i64(local, 0), false, local, control, worker, workers) in noop()
+
+effect fn rt_compact (states : ptr, n : i64) -> i64
+  = loop (i = 0, used = 0) while i < n
+      next (i + 1,
+            if load_i64(states, i * 64) < 0 then used
+            else let moved = if i != used then let copied = memcpy(ptr_add(states, used * 64), ptr_add(states, i * 64), 64) in noop()
+                             else noop() in used + 1)
+      yield used
+
+effect fn rt_events (polls : ptr, states : ptr, n : i64, listener : i64, control : ptr, worker : i64) -> unit
+  = let fd = store_i32(polls, 0, i32(if load_i64(control, 0) == worker then listener else -1)) in
+    let events = store_i32(polls, 4, i32(1)) in
+    let notify = store_i32(polls, 8, i32(load_i64(control, 256 + worker * 16))) in
+    let mask = store_i32(polls, 12, i32(1)) in
+    let built = loop (i = 0) while i < n
+      next (let state = ptr_add(states, i * 64) in
+            let fd = store_i32(polls, (i + 2) * 8, i32(load_i64(state, 0))) in
+            let events = store_i32(polls, (i + 2) * 8 + 4,
+              i32(if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1)) in i + 1)
+      yield i in noop()
+
+effect fn rt_http_worker (listener : i64, handler : ptr, control : ptr, worker : i64, workers : i64{workers >= 1}, parent : i64) -> i64
+  = let states = ax_alloc(1024 * 64) in
+    let local = stack_alloc(16) in let count = store_i64(local, 0, 0) in
+    let polls = ax_alloc(1026 * 8) in
+    let notification = stack_alloc(64) in
+    loop (running = true) while running
+      next (let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+            let n = rt_compact(states, load_i64(local, 0)) in
+            let saved = store_i64(local, 0, n) in
+            let built = rt_events(polls, states, n, listener, control, worker) in
+            let ready = rt_poll(polls, n + 2) in
+            if ready < 0 then if load_i32(rt_errno(), 0) == i32(4) then true
+              else let failed = ax_trap(data("poll syscall failed\0")) in false
+            else let notified = if i64(load_u8(polls, 14)) % 2 == 1 then
+              let drained = rt_read(load_i64(control, 256 + worker * 16), notification, 64) in noop()
+              else noop() in
+              let accepted = if i64(load_u8(polls, 6)) % 2 == 1 then rt_accept(listener, states, local, control, worker, workers) else noop() in
+              let served = loop (i = 0) while i < n
+                next (let state = ptr_add(states, i * 64) in
+                      let events = i64(load_u8(polls, (i + 2) * 8 + 6)) in
+                      let stepped = if load_i64(state, 0) >= 0 && events > 0 then rt_step(state, events, handler) else noop() in i + 1)
+                yield i in true)
+      yield 0
+
+export effect fn ax_serve (port : i64, handler : ptr) -> i64
+  = let listener = rt_listener(port) in
+    let workers = rt_threads() in
+    let parent = rt_getpid() in
+    let control = rt_map(65536) in
+    let descriptors = stack_alloc(8) in
+    let initialized = loop (i = 0) while i < workers
+      next (let pair = rt_socketpair(descriptors) in
+            let checked = if pair < 0 then ax_trap(data("worker notification socketpair failed\0")) else noop() in
+            let reader = i64(load_i32(descriptors, 0)) in let writer = i64(load_i32(descriptors, 4)) in
+            let r = store_i64(control, 256 + i * 16, reader) in let w = store_i64(control, 264 + i * 16, writer) in
+            let rn = rt_nonblock(reader) in let wn = rt_nonblock(writer) in i + 1)
+      yield i in
+    let worker = loop (i = 1, mine = 0) while mine == 0 && i < workers
+      next (i + 1, let pid = rt_fork() in
+            if pid < 0 then let failed = ax_trap(data("HTTP worker fork failed\0")) in 0 else if pid == 0 then i else 0)
+      yield mine in
+    let printed = if worker == 0 then
+      let prefix = rt_write_all(2, data("neo: serving, workers="), 22) in
+      let buffer = stack_alloc(64) in let start = rt_format_integer(buffer, 63, workers) in
+      let newline = store_u8(buffer, 63, '\n') in rt_write_all(2, ptr_add(buffer, start), 64 - start)
+      else noop() in
+    rt_serve_worker(listener, handler, control, worker, workers, parent)

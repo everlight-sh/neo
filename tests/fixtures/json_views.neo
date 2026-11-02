@@ -1,0 +1,26 @@
+import "std:json"
+import "std:io"
+fn view_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn view_walk(value:JsonView) -> Arr u8 _
+  = let materialized=json_view_json(value) in check materialized.kind==value.kind && str_equal(materialized.raw,value.raw) in
+    let atom=json_view_atom(value) in let converted=json_view_text(value) in
+    check atom.kind==value.kind && atom.present==(value.kind!=0) && converted.ok==(value.kind==4) in
+    let prefix=concat("{\"kind\":",int_text(value.kind),",\"value\":",if value.kind==0 then "null" else value.raw,",\"integer\":",if atom.integer then int_text(atom.value) else "null",",\"text\":",if converted.ok then json_quote(converted.value) else "null") in
+    let members=loop(step=json_object_next(json_object_cursor(value)),out="",count=0) while step.present next(json_object_next(step.cursor),concat(out,if count==0 then "" else ",","[",json_quote(step.key),",",view_walk(step.value),"]"),count+1) yield concat("[",out,"]") in
+    let elements=loop(step=json_array_next(json_array_cursor(value)),out="",count=0) while step.present next(json_array_next(step.cursor),concat(out,if count==0 then "" else ",",view_walk(step.value)),count+1) yield concat("[",out,"]") in
+    concat(prefix,",\"members\":",members,",\"elements\":",elements,"}")
+fn view_aliases() -> bool
+  = let source=concat("{\"a\":1}","") in let value=json_parse(source).value in let cursor=json_object_cursor(json_view(value)) in
+    let changed=byte_write_le(source,0,0,1) in let member=json_object_next(cursor) in let duplicate=json_object_next(cursor) in
+    member.present && str_equal(member.key,"a") && str_equal(member.value.raw,"1") && str_equal(duplicate.value.raw,"1") && str_byte(changed,0)==0 && !json_object_next(member.cursor).present
+    && !json_object_next(json_object_next(member.cursor).cursor).present && !json_array_next(json_array_cursor(json_view(value))).present
+    && !json_object_next(json_object_cursor(json_view(json_none().value))).present
+    && !json_array_next(json_array_cursor(json_view(json_none().value))).present
+    && json_view_json(json_view(json_none().value)).kind==0
+effect(fs) fn main() -> unit
+  = check view_aliases() in let read=file_read(0,4194304) in let text=read.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let source=json_parse(view_decode(str_slice(text,at,end))) in
+      let shown=print_out(concat(if source.ok then view_walk(json_view(source.value)) else "{\"invalid\":true}","\n")) in end+1) yield at in noop()

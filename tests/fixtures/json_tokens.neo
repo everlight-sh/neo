@@ -1,0 +1,28 @@
+import "std:json"
+import "std:io"
+fn tokens_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn token_row(borrow cursor:JsonTokens) -> Json
+  = let atom=json_token_atom(cursor) in let text=json_token_text(cursor) in
+    check !text.ok || json_token_text_equal(cursor,text.value) && !json_token_text_equal(cursor,concat(text.value,"x")) in
+    let skipped=json_tokens_skip(cursor) in let taken=json_tokens_take(cursor) in
+    check skipped.kind==taken.cursor.kind && skipped.depth==taken.cursor.depth && skipped.present==taken.cursor.present in
+    let view=json_view_json(taken.value) in
+    json_value_object(arr(i in 0..8) if i==0 then "kind" else if i==1 then "depth" else if i==2 then "raw" else if i==3 then "text" else if i==4 then "integer" else if i==5 then "skipKind" else if i==6 then "viewKind" else "viewCount",
+      arr(i in 0..8) if i==0 then json_value_int(cursor.kind) else if i==1 then json_value_int(cursor.depth) else if i==2 then json_value_string(byte_slice(cursor.raw,cursor.start,cursor.finish)).value else
+        if i==3 then (if text.ok then json_value_string(text.value).value else json_value_null()) else if i==4 then (if atom.integer then json_value_int(atom.value) else json_value_null()) else
+        if i==5 then json_value_int(skipped.kind) else if i==6 then json_value_int(view.kind) else json_value_int(view.count)).value
+fn tokens_case(value:Json) -> Json
+  = loop(out=json_array_builder(),cursor=json_tokens(value)) while cursor.present
+      next(json_array_builder_push(out,token_row(cursor)),json_tokens_next(cursor)) yield
+      check cursor.depth==0 && !json_tokens_next(cursor).present && !json_tokens_skip(cursor).present in json_array_builder_finish(out).value
+fn tokens_alias() -> bool
+  = let source=concat("{\"a\":1}","") in let cursor=json_tokens(json_parse(source).value) in let child=json_tokens_next(cursor) in
+    let changed=byte_write_le(source,0,0,1) in let none=json_tokens(json_none().value) in
+    cursor.kind==6 && child.kind==7 && json_token_text_equal(child,"a") && !json_tokens_skip(cursor).present && str_byte(changed,0)==0 &&
+      !none.present && !json_tokens_next(none).present && !json_token_atom(none).present && !json_token_text(none).ok && json_tokens_take(none).value.kind==0
+effect(fs) fn main() -> unit
+  = check tokens_alias() in let text=file_read(0,16777216).value in
+    let done=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in let parsed=json_parse(tokens_decode(str_slice(text,at,end))) in
+      let shown=print_out(concat(if parsed.ok then tokens_case(parsed.value).raw else "{\"invalid\":true}","\n")) in end+1) yield at in noop()

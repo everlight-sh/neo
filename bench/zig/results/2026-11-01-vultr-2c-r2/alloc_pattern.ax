@@ -1,0 +1,22 @@
+; Allocation pattern of a small document store (VifDB-like): an append-only
+; log grown in place with concat, an offset index rebuilt from the log every
+; round, small per-record strings, a compaction copy of the whole log every
+; fourth round, and an optional large temporary array per round (`big`
+; elements, 8 bytes each) that exercises blocks above the 64 MiB retention cap.
+import "std:strings"
+
+fn entry (i : i64) -> Arr u8 _ = concat("doc-", int_text(i), ":{\"v\":", int_text(i % 1000), "}\n")
+
+fn append_docs (log : Arr u8 n, start : i64, docs : i64{docs >= 0}) -> Arr u8 _
+  = loop (acc = log, i : i64{i >= 0} = 0) while i < docs next (concat(acc, entry(start + i)), i + 1) yield acc
+
+fn round_sum (log : Arr u8 n, r : i64, big : i64{big >= 0}) -> i64
+  = let index = arr(i in 0..n / 8) i64(log[i * 8]) in
+    let compacted = if r % 4 == 3 then arr(i in 0..n) log[i] else "" in
+    let temp = arr(i in 0..big) (i + r) % 1000 in
+    (sum(i in 0..len(index)) index[i]) + len(compacted) + (sum(i in 0..big) temp[i])
+
+fn main (docs : i64{docs >= 1}, rounds : i64{rounds >= 1}, big : i64{big >= 0}) -> i64
+  = let state = loop (log = "", r : i64{r >= 0} = 0, acc = 0) while r < rounds
+      next (append_docs(log, r * docs, docs), r + 1, acc + round_sum(append_docs(log, r * docs, 0), r, big))
+      yield acc in state

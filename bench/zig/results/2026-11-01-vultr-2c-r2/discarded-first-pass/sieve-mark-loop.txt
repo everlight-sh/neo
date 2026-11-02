@@ -1,0 +1,6 @@
+  403150:	cmp    %r15,%rax
+  403153:	jge    403060 <main+0x180>
+  403159:	movb   $0x0,(%r12,%rax,1)
+  40315e:	add    %r13,%rax
+  403161:	jno    403150 <main+0x270>
+  403163:	lea    0xe96(%rip),%rdi        # 404000 <ax_process_start+0xc10>

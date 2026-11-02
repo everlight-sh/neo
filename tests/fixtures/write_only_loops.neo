@@ -1,0 +1,55 @@
+; Loop states written only by set/byte_write_le/byte_copy (possibly chosen by
+; if/let) are made unique once at loop entry and then updated in place with no
+; per-write uniqueness test. Every source they could share must stay intact.
+fn write_all(a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i < len(out) next(i + 1, byte_write_le(out, i, 122, 1)) yield out
+fn write_moved(move a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i < len(out) next(i + 1, byte_write_le(out, i, 121, 1)) yield out
+fn copy_all(a : Arr u8 _, src : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i + len(src) <= len(out) next(i + len(src) + 1, byte_copy(out, i, src)) yield out
+; Overlapping forward copy: each word is read before the write that may overlap it.
+fn smear(a : Arr u8 _, distance : i64{distance >= 1}) -> Arr u8 _
+  = loop(k = distance, out = a) while k >= distance && k + 1 <= len(out)
+      next(k + 1, let b = byte_read_le(out, k - distance, 1) in byte_write_le(out, k, b, 1)) yield out
+; Writes selected by a condition; the other branch passes the state through.
+fn odd_only(a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i < len(out)
+      next(i + 1, if bit_and(i, 1) == 1 then byte_write_le(out, i, 45, 1) else if i == 0 then set(out, 0, u8(43)) else out) yield out
+; Chained writers: the second writes the first's fresh result.
+fn pairs(a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i + 2 <= len(out)
+      next(i + 2, byte_write_le(set(out, i, u8(60)), i + 1, 62, 1)) yield out
+; The yield may share the final state before writing it.
+fn yield_alias(a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i < len(out) next(i + 1, byte_write_le(out, i, 97 + i, 1))
+      yield if len(out) >= 2 then let s = byte_slice(out, 0, 2) in concat(s, byte_write_le(out, 0, 90, 1)) else out
+fn yield_alias_set(a : Arr u8 _) -> Arr u8 _
+  = loop(i = 0, out = a) while i >= 0 && i < len(out) next(i + 1, set(out, i, u8(97 + i)))
+      yield if len(out) >= 2 then let s = byte_slice(out, 0, 2) in concat(s, set(out, 0, u8(90))) else out
+fn copy_expect(p : i64, k : i64) -> i64
+  = let start = p - p % 3 in if p % 3 != 2 && start + 2 <= k then (if p % 3 == 0 then 120 else 121) else 48 + p
+fn at(a : Arr u8 _, i : i64) -> i64 = if i >= 0 && i < len(a) then i64(a[i]) else -1
+fn same(a : Arr u8 _, b : Arr u8 _) -> bool = byte_equal(a, b)
+fn case(k : i64{k >= 0, k <= 40}) -> bool
+  = let a = arr(i in 0..k) u8(48 + i) in
+    let written = write_all(a) in
+    let moved = write_moved(arr(i in 0..k) u8(i)) in
+    let copied = copy_all(a, "xy") in
+    let smeared = smear(a, 3) in
+    let odd = odd_only(a) in
+    let paired = pairs(a) in
+    let aliased = yield_alias(a) in let aliased_set = yield_alias_set(a) in
+    let none = loop(i = 0, out = a) while i < 0 && len(out) > 0 next(i + 1, byte_write_le(out, 0, 0, 1)) yield out in
+    let text = write_all("abc") in let again = "abc" in
+    len(written) == k && len(moved) == k && len(copied) == k && len(smeared) == k && len(odd) == k && len(none) == k &&
+    loop(i = 0, ok = true) while ok && i < k next(i + 1,
+      at(a, i) == 48 + i && at(written, i) == 122 && at(moved, i) == 121 && at(none, i) == 48 + i &&
+      at(copied, i) == copy_expect(i, k) &&
+      at(smeared, i) == 48 + (i % 3) &&
+      at(odd, i) == (if i % 2 == 1 then 45 else if i == 0 then 43 else 48 + i) &&
+      at(paired, i) == (if i + 1 == k && k % 2 == 1 then 48 + i else if i % 2 == 0 then 60 else 62)) yield ok &&
+    (k < 2 || len(aliased) == k + 2 && at(aliased, 0) == 97 && at(aliased, 1) == 98 && at(aliased, 2) == 90 && at(aliased, 3) == 98) &&
+    (k < 2 || len(aliased_set) == k + 2 && at(aliased_set, 0) == 97 && at(aliased_set, 1) == 98 && at(aliased_set, 2) == 90 && at(aliased_set, 3) == 98) &&
+    at(text, 0) == 122 && at(text, 2) == 122 && at(again, 0) == 97 && same(again, "abc")
+fn main () -> Arr u8 _
+  = if loop(k : i64{k >= 0} = 0, ok = true) while ok && k < 40 next(k + 1, case(k)) yield ok then "write-only loops OK\n" else "write-only loops FAILED\n"

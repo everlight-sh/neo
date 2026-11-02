@@ -1,0 +1,37 @@
+; Internal nonnegative integers, little-endian base 65536. No external arithmetic runtime.
+fn big_zero() -> Arr i64 _ = arr(i in 0..0) i
+fn big_trim(a:Arr i64 n) -> Arr i64 _
+  = let size=loop(k=n) while k>0 && (check k<=n in a[k-1]==0) next(k-1) yield k in
+    check size>=0 && size<=n in if size==n then a else arr(i in 0..size) check i>=0 && i<n in a[i]
+fn big_small(value:i64{value>=0}) -> Arr i64 _
+  = loop(v=value,out=big_zero()) while v>0 next(v/65536,push(out,v%65536)) yield out
+fn big_mul_small(a:Arr i64 n,value:i64{value>=0 && value<=65536}) -> Arr i64 _
+  = let result=loop(i=0,carry=0,out=arr(j in 0..n+1) 0) while i<n
+      next(i+1,check i>=0 && i<n in (a[i]*value+carry)/65536,
+        check i>=0 && i<n && i<len(out) in set(out,i,(a[i]*value+carry)%65536))
+      yield check n>=0 && n<len(out) in set(out,n,carry) in big_trim(result)
+fn big_decimal(text:Arr u8 n) -> Arr i64 _
+  = loop(i=0,value=big_zero()) while i<n
+      next(i+1,check i>=0 && i<n && text[i]>='0' && text[i]<='9' in
+        let product=big_mul_small(value,10) in
+        let digit=i64(text[i])-48 in
+        let initial=if len(product)==0 then arr(j in 0..1) 0 else product in
+        loop(j=0,carry=digit,out=initial) while carry>0 && j<len(out)
+          next(j+1,check j>=0 && j<len(out) in (out[j]+carry)/65536,
+            check j>=0 && j<len(out) in set(out,j,(out[j]+carry)%65536))
+          yield if carry==0 then big_trim(out) else push(out,carry)) yield value
+fn big_shift(a:Arr i64 n,bits:i64{bits>=0 && bits<=20000}) -> Arr i64 _
+  = let words=bits/16 in let amount=bits%16 in let factor=shift_left(1,amount) in
+    check factor>=0 && factor<=65536 in let product=big_mul_small(a,factor) in
+    if len(product)==0 then product else arr(i in 0..len(product)+words) if i<words then 0 else
+      check i-words>=0 && i-words<len(product) in product[i-words]
+fn big_compare(a:Arr i64 n,b:Arr i64 m) -> i64
+  = if n<m then -1 else if n>m then 1 else loop(i=n,result=0) while result==0 && i>0
+      next(i-1,check i>0 && i<=n && i<=m in if a[i-1]<b[i-1] then -1 else if a[i-1]>b[i-1] then 1 else 0) yield result
+fn big_mul(a:Arr i64 n,b:Arr i64 m) -> Arr i64 _
+  = big_trim(loop(i=0,out=arr(j in 0..n+m+1) 0) while i<n
+      next(i+1,check i>=0 && i<n in let held=a[i] in
+        loop(j=0,carry=0,row=out) while j<m
+          next(j+1,check j>=0 && j<m && i+j>=0 && i+j<len(row) in (row[i+j]+held*b[j]+carry)/65536,
+            check j>=0 && j<m && i+j>=0 && i+j<len(row) in set(row,i+j,(row[i+j]+held*b[j]+carry)%65536))
+          yield check i+m>=0 && i+m<len(row) in set(row,i+m,carry)) yield out)

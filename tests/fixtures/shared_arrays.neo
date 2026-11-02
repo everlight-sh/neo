@@ -1,0 +1,44 @@
+import "std:io"
+import "std:vec"
+type SharedRow = { key:Arr u8 _,values:Arr i64 _ }
+type SharedRows = { rows:Arr SharedRow _ }
+fn first_value(rows:SharedRows) -> i64
+  = let items=rows.rows in check len(items)>0 in let row=items[0] in let values=row.values in check len(values)>0 in values[0]
+fn keep(rows:SharedRows) -> SharedRows = rows
+fn modify(move rows:SharedRows) -> SharedRows
+  = check len(rows.rows)>0 in let row=rows.rows[0] in check len(row.values)>0 in
+    rows with {rows=set(rows.rows,0,row with {values=set(row.values,0,987)})}
+fn retained(n:i64{n>0}) -> SharedRows
+  = let original=SharedRows {rows=arr(i in 0..n) SharedRow {key=int_text(i),values=arr(j in 0..8) i+j}} in
+    let saved=keep(original) in let changed=modify(original) in
+    check first_value(saved)==0 in
+    check first_value(changed)==987 in saved
+fn tail_bytes() -> Arr u8 _
+  = let source=arr(i in 0..4096) u8(i%251) in str_slice(source,4000,4096)
+fn growing(move row:SharedRow) -> SharedRow = row with {key=concat(row.key," appended"),values=push(row.values,55)}
+effect fn main(n:i64{n>0 && n<=100000}) -> unit
+  = let rows=retained(n) in let before=load_i64(runtime_state(),64) in
+    let snapshots=arr(i in 0..100) keep(rows) in
+    let after=load_i64(runtime_state(),64) in check after-before==1 in
+    check len(snapshots)==100 && len(snapshots[99].rows)==n in
+    let changed=modify(snapshots[0]) in
+    check first_value(changed)==987 in
+    check first_value(snapshots[99])==0 in
+    let source=SharedRow {key=concat("original",int_text(n)),values=arr(i in 0..2) i+1} in let saved=source in let updated=growing(source) in
+    check len(saved.values)==2 && len(updated.values)==3 && updated.values[2]==55 && !str_equal(saved.key,updated.key) in
+    ; Repeated detach/release catches premature destruction and stale slab reuse.
+    let checksum=loop(i=0,total=0) while i<1000 next(i+1,let temporary=keep(rows) in let edited=modify(temporary) in
+      total+first_value(edited)) yield total in
+    check checksum==987000 in
+    let bytes=arr(i in 0..4096) u8(i%251) in let allocations=load_i64(runtime_state(),64) in
+    let slice=str_slice(bytes,10,20) in let sliced=load_i64(runtime_state(),64) in
+    check allocations==sliced && len(slice)==10 && slice[0]==u8(10) && slice[9]==u8(19) in
+    let tail=tail_bytes() in check len(tail)==96 && tail[0]==u8(4000%251) && tail[95]==u8(4095%251) in
+    let grown=concat(tail_bytes(),arr(i in 0..1000) u8(87)) in
+    check len(grown)==1096 && grown[0]==u8(4000%251) && grown[95]==u8(4095%251) && grown[1095]==u8(87) in
+    let unique_tail=tail_bytes() in check len(unique_tail)==96 in let modified=set(unique_tail,0,u8(99)) in check len(modified)==96 && modified[0]==u8(99) && modified[95]==u8(4095%251) in
+    let reserved=vec_with_capacity::<SharedRow>(3) in check vec_len(reserved)==0 && vec_capacity(reserved)==3 in
+    let full=loop(i=0,out=reserved) while i<3 next(i+1,vec_push(out,SharedRow {key=int_text(i),values=arr(j in 0..1) i})) yield out in
+    let saved=full in let extended=vec_push(full,SharedRow {key="last",values=arr(j in 0..1) 99}) in
+    check vec_len(saved)==3 && vec_len(extended)==4 && vec_capacity(extended)>=4 in
+    let printed=print_out("shared arrays OK\n") in noop()

@@ -1,0 +1,16 @@
+# GNU time for the stencil cases (one run each, taskset to CPU 0 or 0-1). The Zig lines print no result here: that build's stdout writer was positional and wrote it at offset 0 of this log; fixed in par.zig before the measured runs.
+== /root/bin/vif-stencil threads=1
+25000046624222
+wall 6.09 s user 2.25 s sys 3.83 s maxrss 781184 KiB minor faults 2050889
+== /root/bin/vif-stencil threads=2
+25000046624222
+wall 5.70 s user 2.25 s sys 7.58 s maxrss 781204 KiB minor faults 2050890
+== /root/zig-baseline/bin/stencil threads=1
+wall 1.66 s user 1.30 s sys 0.35 s maxrss 781952 KiB minor faults 195489
+== /root/zig-baseline/bin/stencil threads=2
+wall 1.04 s user 1.55 s sys 0.38 s maxrss 782092 KiB minor faults 196940
+== /root/bin/vif-stencil 1M
+499998359740
+wall 0.03 s user 0.02 s sys 0.00 s maxrss 15616 KiB minor faults 4002
+== /root/zig-baseline/bin/stencil 1M
+wall 0.03 s user 0.02 s sys 0.01 s maxrss 16256 KiB minor faults 4082

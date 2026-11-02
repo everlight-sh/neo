@@ -1,0 +1,152 @@
+import "std:hash"
+import "std:result"
+import "std:random"
+; Each bucket has two adjacent words (16 bytes), plus one control byte.
+; A negative word owns up to seven arbitrary bytes inline: sign bit, a
+; three-bit length at bit 56, then little-endian bytes. Longer byte strings
+; use nonnegative begin/end arena offsets; offsets are bounded to 31 bits.
+; Key word 0 is empty and 1 is a tombstone (neither encodes a live key).
+; Inline-key reads need no separate control/arena read. Generic probes and
+; long-key comparisons still use the SipHash fingerprint control plane.
+sealed type BytesMapSlot = { key:i64,value:i64,control:u8 }
+sealed type BytesMap = { table:Arr i64 _,control:Arr u8 _,bytes:Arr u8 _,count:i64,occupied:i64,dead:i64,seed0:i64,seed1:i64 }
+private type BytesMapStorage = { table:Arr i64 _,control:Arr u8 _ }
+private fn bytesmap_vacant() -> BytesMapSlot = BytesMapSlot { key=0,value=0,control=u8(128) }
+private fn bytesmap_pack(begin:i32,end:i32) -> i64 = bit_or(shift_left(i64(begin),32),i64(end))
+private fn bytesmap_begin(word:i64) -> i64 = shift_right(word,32)
+private fn bytesmap_end(word:i64) -> i64 = bit_and(word,4294967295)
+private fn bytesmap_inline(key:Arr u8 n) -> i64
+  = if n>7 then 0 else
+    let four=n>=4 in let at=if four then 4 else 0 in
+    let first=if four then bytes_le32(key,0) else 0 in
+    let two=n-at>=2 in let last=at+(if two then 2 else 0) in
+    let middle=if two then shift_left(bytes_le16(key,at),at*8) else 0 in
+    let final=if last<n then check last>=0 && last<n in shift_left(i64(key[last]),last*8) else 0 in
+    bit_or(shift_left(1,63),bit_or(shift_left(n,56),bit_or(first,bit_or(middle,final))))
+private fn bytesmap_key_hash(key:Arr u8 n,word:i64,seed0:i64,seed1:i64) -> i64
+  = if word<0 then sip_finish(sip_initial(seed0,seed1),bit_and(word,9223372036854775807)) else hash_bytes(key,seed0,seed1)
+private fn bytesmap_stored_hash(bytes:Arr u8 n,word:i64,seed0:i64,seed1:i64) -> i64
+  = if word<0 then sip_finish(sip_initial(seed0,seed1),bit_and(word,9223372036854775807)) else hash_bytes_range(bytes,bytesmap_begin(word),bytesmap_end(word),seed0,seed1)
+private fn bytesmap_entry(table:Arr i64 t,control:Arr u8 c,at:i64) -> BytesMapSlot
+  = check at>=0 && at<c && at*2+1<t in
+    let key=table[at*2] in let value=table[at*2+1] in
+    BytesMapSlot { key=key,value=value,control=control[at] }
+private fn bytesmap_storage(capacity:i64) -> BytesMapStorage
+  = check capacity>=8 && capacity<=134217728 in BytesMapStorage { table=arr(i in 0..capacity*2) 0,control=arr(i in 0..capacity) u8(128) }
+fn bytesmap_empty(seed0:i64,seed1:i64) -> BytesMap
+  = let storage=bytesmap_storage(8) in BytesMap { table=storage.table,control=storage.control,bytes="",count=0,occupied=0,dead=0,seed0=seed0,seed1=seed1 }
+effect(process) fn bytesmap_random() -> Result<BytesMap,Error>
+  = let first=random_i64() in if !first.ok then Err::<BytesMap,Error>(first.error) else let second=random_i64() in if !second.ok then Err::<BytesMap,Error>(second.error) else Ok::<BytesMap,Error>(bytesmap_empty(first.value,second.value))
+fn bytesmap_len(map:BytesMap) -> i64 = map.count
+fn bytesmap_capacity(map:BytesMap) -> i64 = len(map.control)
+fn bytesmap_storage_bytes(map:BytesMap) -> i64 = len(map.bytes)
+private fn bytesmap_equal(bytes:Arr u8 n,begin:i64,end:i64,key:Arr u8 m) -> bool
+  = if begin<0 || end<begin || end>n || end-begin!=m then false else
+    let prefix=loop(i=0,equal=true) while equal && i<=m-8 next(i+8,bytes_le64(bytes,begin+i)==bytes_le64(key,i)) yield
+      if !equal then -1 else i in
+    if prefix<0 then false else
+      let four=m-prefix>=4 in let at=prefix+(if four then 4 else 0) in
+      let first=!four || bytes_le32(bytes,begin+prefix)==bytes_le32(key,prefix) in
+      let two=m-at>=2 in let last=at+(if two then 2 else 0) in
+      first && (!two || bytes_le16(bytes,begin+at)==bytes_le16(key,at)) &&
+        (last==m || (check last>=0 && last<m && begin+last>=0 && begin+last<n in bytes[begin+last]==key[last]))
+private fn bytesmap_slot_long(map:BytesMap,key:Arr u8 _,word:i64,hash:i64) -> i64
+  = let control=map.control in let table=map.table in let bytes=map.bytes in let n=len(control) in check n>0 in
+    let fingerprint=u8(bit_and(shift_right(hash,56),127)) in
+    loop(step=0,at=bit_and(hash,n-1),tombstone= -1,found= -1) while found<0 && step<n
+      next(step+1,if at+1==n then 0 else at+1,
+        check at>=0 && at<n in if control[at]==u8(254) && tombstone<0 then at else tombstone,
+        check at>=0 && at<n in let state=control[at] in
+        if state==u8(128) then if tombstone>=0 then tombstone else at else
+        if state!=fingerprint then -1 else check at*2>=0 && at*2<len(table) in
+          let pair=table[at*2] in if (if pair<0 then pair==word else word==0 && bytesmap_equal(bytes,bytesmap_begin(pair),bytesmap_end(pair),key)) then at else -1)
+      yield if found>=0 then found else tombstone
+; A short key and empty/tombstone markers fit in a single word.
+private fn bytesmap_slot_inline(table:Arr i64 _,n:i64,word:i64,hash:i64) -> i64
+  = check n>0 in
+    loop(step=0,at=bit_and(hash,n-1),tombstone= -1,found= -1) while found<0 && step<n
+      next(step+1,if at+1==n then 0 else at+1,
+        check at>=0 && at<n && at*2<len(table) in
+          if table[at*2]==1 && tombstone<0 then at else tombstone,
+        check at>=0 && at<n && at*2<len(table) in let pair=table[at*2] in
+          if pair==word then at else if pair==0 then if tombstone>=0 then tombstone else at else -1)
+      yield if found>=0 then found else tombstone
+private fn bytesmap_slot(map:BytesMap,key:Arr u8 _,word:i64,hash:i64) -> i64
+  = if word<0 then bytesmap_slot_inline(map.table,len(map.control),word,hash)
+    else bytesmap_slot_long(map,key,word,hash)
+private fn bytesmap_find(map:BytesMap,key:Arr u8 _,word:i64,hash:i64) -> i64
+  = let control=map.control in let table=map.table in let n=len(control) in check n>0 in
+    if word>=0 then let at=bytesmap_slot(map,key,word,hash) in
+      if at<0 then -1 else check at<len(control) in if control[at]<u8(128) then at else -1 else
+    loop(step=0,at=bit_and(hash,n-1),found= -1,done=false) while !done && step<n
+      next(step+1,bit_and(at+1,n-1),
+        check at>=0 && at<n && at*2<len(table) in if table[at*2]==word then at else -1,
+        check at>=0 && at<n && at*2<len(table) in table[at*2]==word || table[at*2]==0) yield found
+fn bytesmap_get(map:BytesMap,key:Arr u8 _) -> OptionBytes
+  = let word=bytesmap_inline(key) in let hash=bytesmap_key_hash(key,word,map.seed0,map.seed1) in let at=bytesmap_find(map,key,word,hash) in
+    if at<0 then none_bytes() else
+      let table=map.table in check at*2+1>=0 && at*2+1<len(table) in let pair=table[at*2+1] in
+      if pair<0 then let size=bit_and(shift_right(pair,56),7) in check size>=0 in some_bytes(arr(i in 0..size) u8(shift_right(pair,i*8))) else
+      let begin=bytesmap_begin(pair) in let end=bytesmap_end(pair) in let bytes=map.bytes in check begin>=0 && end>=begin && end<=len(bytes) in
+      some_bytes(arr(i in begin..end) bytes[i])
+private fn bytesmap_place(move storage:BytesMapStorage,entry:BytesMapSlot,hash:i64) -> BytesMapStorage
+  = let control=storage.control in let n=len(control) in check n>0 in
+    let at=loop(step=0,at=bit_and(hash,n-1),found= -1) while found<0 && step<n next(step+1,bit_and(at+1,n-1),check at>=0 && at<n in if control[at]>=u8(128) then at else -1) yield found in
+    let table=storage.table in check at>=0 && at<n && at*2+1<len(table) in
+    BytesMapStorage { table=set(set(table,at*2,entry.key),at*2+1,entry.value),control=set(control,at,entry.control) }
+private fn bytesmap_rehash(move map:BytesMap,capacity:i64) -> BytesMap
+  = let count=map.count in let dead=map.dead in let seed0=map.seed0 in let seed1=map.seed1 in let table=map.table in let control=map.control in let bytes=map.bytes in
+    let storage=loop(i=0,out=bytesmap_storage(capacity)) while i<len(control) next(i+1,
+      check i>=0 && i<len(control) in if control[i]>=u8(128) then out else
+      let entry=bytesmap_entry(table,control,i) in bytesmap_place(out,entry,bytesmap_stored_hash(bytes,entry.key,seed0,seed1))) yield out in
+    BytesMap { table=storage.table,control=storage.control,bytes=bytes,count=count,occupied=count,dead=dead,seed0=seed0,seed1=seed1 }
+fn bytesmap_with_capacity(entries:i64,seed0:i64,seed1:i64) -> BytesMap
+  = check entries>=0 && entries<=100000000 in let slots=loop(capacity=8) while entries*8>=capacity*7 next(capacity*2) yield capacity in
+    bytesmap_rehash(bytesmap_empty(seed0,seed1),slots)
+fn bytesmap_compact(move map:BytesMap) -> BytesMap
+  = let count=map.count in let occupied=map.occupied in let seed0=map.seed0 in let seed1=map.seed1 in let control=map.control in let table=map.table in let bytes=map.bytes in
+    let rebuilt=loop(i=0,out=arr(k in 0..len(table)) 0,storage="") while i<len(control) next(i+1,
+      check i>=0 && i<len(control) && i*2<len(out) in if control[i]>=u8(128) then
+        if control[i]==u8(254) then set(out,i*2,1) else out else
+        let entry=bytesmap_entry(table,control,i) in let kb=if entry.key<0 then 0 else bytesmap_begin(entry.key) in let ke=if entry.key<0 then 0 else bytesmap_end(entry.key) in let vb=if entry.value<0 then 0 else bytesmap_begin(entry.value) in let ve=if entry.value<0 then 0 else bytesmap_end(entry.value) in
+        let begin=len(storage) in let key_end=begin+ke-kb in let value_end=key_end+ve-vb in check value_end<=2147483647 && i*2+1<len(out) in
+        set(set(out,i*2,if entry.key<0 then entry.key else bytesmap_pack(i32(begin),i32(key_end))),i*2+1,if entry.value<0 then entry.value else bytesmap_pack(i32(key_end),i32(value_end))),
+      check i>=0 && i<len(control) in if control[i]>=u8(128) then storage else
+        let entry=bytesmap_entry(table,control,i) in let kb=if entry.key<0 then 0 else bytesmap_begin(entry.key) in let ke=if entry.key<0 then 0 else bytesmap_end(entry.key) in let vb=if entry.value<0 then 0 else bytesmap_begin(entry.value) in let ve=if entry.value<0 then 0 else bytesmap_end(entry.value) in
+        check kb>=0 && ke>=kb && ke<=len(bytes) && vb>=0 && ve>=vb && ve<=len(bytes) in concat(storage,arr(k in kb..ke) bytes[k],arr(k in vb..ve) bytes[k])) yield
+      BytesMap { table=out,control=control,bytes=storage,count=count,occupied=occupied,dead=0,seed0=seed0,seed1=seed1 } in rebuilt
+fn bytesmap_put(move map:BytesMap,key:Arr u8 _,value:Arr u8 _) -> BytesMap
+  = let capacity=len(map.control) in let prepared=if map.occupied*8<capacity*7 then map else
+      bytesmap_rehash(map,if map.count*8<capacity*3 then capacity else capacity*2) in
+    let clean=if prepared.dead>65536 && prepared.dead>len(prepared.bytes)/2 then bytesmap_compact(prepared) else prepared in
+    let word=bytesmap_inline(key) in let hash=bytesmap_key_hash(key,word,clean.seed0,clean.seed1) in let at=bytesmap_slot(clean,key,word,hash) in
+    let entry=bytesmap_entry(clean.table,clean.control,at) in let present=entry.control<u8(128) in
+    let packed_value=bytesmap_inline(value) in let inline_value=packed_value<0 in
+    if present && entry.value<0 && inline_value then
+      check at>=0 && at*2+1<len(clean.table) in
+      clean with {table=set(clean.table,at*2+1,packed_value)} else
+    let count=clean.count in let occupied=clean.occupied in let dead=clean.dead in let seed0=clean.seed0 in let seed1=clean.seed1 in
+    let table=clean.table in let control=clean.control in
+    let bytes=clean.bytes in let start=len(bytes) in
+    let old_begin=if present && entry.value>=0 then bytesmap_begin(entry.value) else 0 in
+    let old_end=if present && entry.value>=0 then bytesmap_end(entry.value) else 0 in
+    let reuse=present && entry.value>=0 && !inline_value && len(value)<=old_end-old_begin in
+    let key_begin=if present && entry.key>=0 then bytesmap_begin(entry.key) else start in
+    let key_end=if present && entry.key>=0 then bytesmap_end(entry.key) else if word<0 then start else start+len(key) in
+    let value_begin=if reuse then old_begin else if present then start else key_end in
+    let value_end=if inline_value then value_begin else value_begin+len(value) in check key_end<=2147483647 && value_end<=2147483647 && at>=0 && at<len(control) && at*2+1<len(table) in
+    ; Replacing a value preserves its existing key and fingerprint. Avoid
+    ; touching those arrays (and their copy-on-write checks) on an update.
+    let replacement=if inline_value then packed_value else bytesmap_pack(i32(value_begin),i32(value_end)) in
+    BytesMap { table=if present then set(table,at*2+1,replacement) else set(set(table,at*2,if word<0 then word else bytesmap_pack(i32(key_begin),i32(key_end))),at*2+1,replacement),control=if present then control else set(control,at,u8(bit_and(shift_right(hash,56),127))),
+      bytes=if reuse then check old_begin>=0 && old_begin+len(value)<=len(bytes) in loop(i=0,storage=bytes) while i<len(value)
+        next(i+1,check i>=0 && i<len(value) && old_begin+i>=0 && old_begin+i<len(storage) in set(storage,old_begin+i,value[i])) yield storage else
+        if present || word<0 then if inline_value then bytes else concat(bytes,value) else if inline_value then concat(bytes,key) else concat(bytes,key,value),
+      count=count+(if present then 0 else 1),occupied=occupied+(if entry.control==u8(128) then 1 else 0),
+      dead=dead+(if !present || entry.value<0 then 0 else if reuse then old_end-value_end else old_end-old_begin),seed0=seed0,seed1=seed1 }
+fn bytesmap_delete(move map:BytesMap,key:Arr u8 _) -> BytesMap
+  = let word=bytesmap_inline(key) in let hash=bytesmap_key_hash(key,word,map.seed0,map.seed1) in let at=bytesmap_find(map,key,word,hash) in let table=map.table in let control=map.control in let bytes=map.bytes in
+    let present=if at<0 then false else check at<len(control) in control[at]<u8(128) in
+    let removed=if !present then 0 else let entry=bytesmap_entry(table,control,at) in (if entry.key<0 then 0 else bytesmap_end(entry.key)-bytesmap_begin(entry.key))+(if entry.value<0 then 0 else bytesmap_end(entry.value)-bytesmap_begin(entry.value)) in
+    BytesMap { table=if !present then table else check at>=0 && at*2<len(table) in set(table,at*2,1),control=if !present then control else check at>=0 && at<len(control) in set(control,at,u8(254)),bytes=bytes,
+      count=map.count-(if present then 1 else 0),occupied=map.occupied,dead=map.dead+removed,seed0=map.seed0,seed1=map.seed1 }

@@ -1,0 +1,15 @@
+{
+  "name": "neo-jsx-ssr-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "test": "bun test",
+    "react": "NODE_ENV=production bun run reference.tsx"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  }
+}

@@ -1,0 +1,44 @@
+import "std:hashmap"
+import "std:vec"
+import "std:collections"
+import "std:io"
+
+type CollectionCheck = { count: i64, checksum: i64 }
+fn model_work(n:i64) -> CollectionCheck
+  = loop(i = 0, map = hashmap_empty::<i64,i64>(123,456), checksum = 0) while i < n
+      next(i + 1,
+        if i % 5 == 0 then hashmap_delete(map,(i * 73) % 257) else hashmap_put(map,(i * 73) % 257,i * 11),
+        checksum + (match hashmap_get(map,(i * 31) % 257) { None => -1, Some(value) => value }))
+      yield CollectionCheck { count = hashmap_len(map), checksum = checksum }
+
+fn owned_work(n:i64) -> bool
+  = let initial = hashmap_put(hashmap_empty::<Arr u8 _,Arr u8 _>(7,9),"","empty") in
+    let changed = hashmap_put(initial,"","updated") in
+    let original = match hashmap_get(initial,"") { None => false, Some(v) => str_equal(v,"empty") } in
+    let updated = match hashmap_get(changed,"") { None => false, Some(v) => str_equal(v,"updated") } in
+    let rows = loop(i = 0, map = changed) while i < n
+      next(i + 1,hashmap_put(map,concat("\0key",int_text(i)),concat("value",int_text(i)))) yield map in
+    let deleted = loop(i = 0, map = rows) while i < n
+      next(i + 2,hashmap_delete(map,concat("\0key",int_text(i)))) yield map in
+    let valid = loop(i = 0, valid = true) while i < n
+      next(i + 1,valid && (match hashmap_get(deleted,concat("\0key",int_text(i))) {
+        None => i % 2 == 0, Some(v) => i % 2 == 1 && str_equal(v,concat("value",int_text(i))) })) yield valid in
+    original && updated && valid && hashmap_len(deleted) == 1 + n / 2
+
+fn vector_work(n:i64{n >= 0}) -> bool
+  = let values = loop(i = 0, v = vec_empty::<Arr u8 _>()) while i < n
+      next(i + 1,vec_push(v,int_text(i))) yield v in
+    let changed = if n > 0 then vec_set(values,0,"changed") else values in
+    let alias = if n == 0 then true else match vec_get(values,0) { None => false, Some(v) => str_equal(v,"0") } in
+    let popped = vec_pop(changed) in
+    let ordered = vector_sort(IntVector { values = arr(i in 0..n) (n - i) % 17 }) in
+    let sorted = loop(i = 1, valid = true) while i < n
+      next(i + 1,check i > 0 && i < len(ordered.values) in valid && ordered.values[i - 1] <= ordered.values[i]) yield valid in
+    alias && sorted && vec_len(popped) == (if n == 0 then 0 else n - 1) &&
+      vec_capacity(values) >= n && vec_len(vec_clear(popped)) == 0
+
+effect(fs) fn main(n:i64{n >= 0 && n <= 100000}) -> unit
+  = let result = model_work(n) in
+    let bounded = n % 1024 in check bounded >= 0 in
+    check owned_work(bounded) && vector_work(bounded) in
+    let output = print_out(concat(int_text(result.count)," ",int_text(result.checksum),"\n")) in noop()

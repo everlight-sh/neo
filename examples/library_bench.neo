@@ -1,0 +1,14 @@
+import "std:json"
+import "std:collections"
+fn library_document (i: i64) -> i64
+  = let document = concat("{\"id\":", int_text(i % 1000), ",\"name\":\"café 🚀\",\"active\":true,\"values\":[1,2,3]}") in
+    let parsed = json_parse(document) in let id = json_get(parsed.value, "id") in let number = json_int(id.value) in
+    let field = json_get(parsed.value, "name") in let name = json_text(field.value) in let values = json_get(parsed.value, "values") in
+    if parsed.ok && number.ok && name.ok then number.value + len(name.value) + json_array_len(values.value) + 1 else -999
+fn library_collections (i: i64) -> i64
+  = let value = i % 1000 in let text = concat("café 🚀 ", int_text(value)) in let parsed = int_parse(int_text(value)) in
+    let vector = vector_sort(vector_push(vector_push(vector_push(vector_empty(), value), 1), 0)) in
+    let first = vector_get(vector, 0) in let map = map_put(map_empty(), "key", text) in let found = map_get(map, "key") in
+    if !utf8_valid(text) || !parsed.ok || !first.present || !found.present then -999 else parsed.value + first.value + len(found.value)
+fn main (mode: i64, iterations: i64{iterations > 0, iterations <= 10000000}) -> i64
+  = sum(i in 0..iterations) if mode == 0 then library_document(i) else library_collections(i)

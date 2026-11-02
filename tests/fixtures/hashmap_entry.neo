@@ -1,0 +1,28 @@
+import "std:hashmap"
+import "std:json"
+import "std:io"
+fn entry_decode(text:Arr u8 n) -> Arr u8 _
+  = let count=n/2 in check count>=0 in arr(i in 0..count) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn entry_hex(bytes:Arr u8 n) -> Arr u8 _
+  = arr(i in 0..n*2) check i/2>=0 && i/2<n in json_hex_digit(if i%2==0 then i64(bytes[i/2])/16 else i64(bytes[i/2])%16)
+fn entry_result(value:Option<Arr u8 _>) -> Json
+  = match value {None=>json_value_null(),Some(bytes)=>json_value_string(entry_hex(bytes)).value}
+type EntryState = {map:HashMap<Arr u8 _,Arr u8 _>,rows:JsonArrayBuilder}
+fn entry_case(move state:EntryState,command:Json) -> EntryState
+  = let op=json_text(json_get(command,"op").value).value in let key=entry_decode(json_text(json_get(command,"key").value).value) in let value=entry_decode(json_text(json_get(command,"value").value).value) in
+    let before=state.map in let prior=hashmap_get(before,key) in
+    let result=hashmap_get_or_insert(state.map,key,value) in
+    let current=if str_equal(op,"put") then hashmap_put(result.map,key,value) else if str_equal(op,"delete") then hashmap_delete(result.map,key) else result.map in
+    let after=hashmap_get(current,key) in let retained=hashmap_get(before,key) in
+    let escaped=result.value in let changed=if len(escaped)==0 then escaped else set(escaped,0,u8(255)) in
+    let actual=hashmap_get(current,key) in
+    check len(changed)==len(escaped) && (len(changed)==0 || str_byte(changed,0)==255) in
+    check str_equal(entry_result(prior).raw,entry_result(retained).raw) && str_equal(entry_result(after).raw,entry_result(actual).raw) in
+    EntryState {map=current,rows=json_array_builder_push(state.rows,json_value_object(
+      arr(i in 0..4) if i==0 then "inserted" else if i==1 then "value" else if i==2 then "after" else "size",
+      arr(i in 0..4) if i==0 then json_value_bool(result.inserted) else if i==1 then json_value_string(entry_hex(result.value)).value else if i==2 then entry_result(actual) else json_value_int(hashmap_len(current))).value)}
+effect(fs) fn main() -> unit
+  = let source=file_read(0,4194304) in let commands=json_array_values(json_parse(source.value).value) in
+    let initial=EntryState {map=hashmap_empty::<Arr u8 _,Arr u8 _>(1203,5401),rows=json_array_builder()} in
+    let final=loop(i=0,state=initial) while i<len(commands) next(i+1,check i>=0 && i<len(commands) in entry_case(state,commands[i])) yield state in
+    let output=json_array_builder_finish(final.rows) in check output.ok in let shown=print_out(concat(output.value.raw,"\n")) in noop()

@@ -1,0 +1,9 @@
+import "std:channel"
+effect(fs,process,time,unsafe) fn main() -> unit
+  = using cancellation=new_cancellation() in using channel=new_channel(1) in
+    let forked=process_fork() in check forked.ok in
+    if forked.value==0 then
+      let deadline=deadline_after(5000) in let result=channel_receive(channel,deadline.value,cancellation) in
+      check !result.ok && result.error.code==125 in noop() else
+      let paused=sleep_ms(5) in let stopped=cancel(cancellation) in let waited=process_wait(forked.value) in
+      check waited.ok && waited.value==0 in let printed=print_out("fork cancellation OK\n") in noop()

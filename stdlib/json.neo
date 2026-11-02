@@ -1,0 +1,815 @@
+import "std:strings"
+import "std:numbers"
+
+; JSON values own their exact UTF-8 source slice. Accessors preserve arbitrary
+; number lexemes; json_int reports overflow instead of narrowing silently.
+; Sealed construction protects validated spans and cached member offsets.
+; UTF-8 is checked while scanning strings; all other JSON tokens are ASCII.
+sealed type Json = { kind: i64, raw: Arr u8 _, count: i64, offsets: Arr i64 _ }
+type JsonResult = { ok: bool, value: Json, error: Error }
+type JsonOption = { present: bool, value: Json }
+type JsonSpan = { ok: bool, end: i64 }
+type JsonStep = { ok: bool, end: i64, done: bool }
+fn json_none () -> JsonOption = JsonOption { present = false, value = Json { kind = 0, raw = "", count = 0, offsets = arr(i in 0..0) 0 } }
+fn json_space (s: Arr u8 n, start: i64) -> i64
+  = loop (i = start) while str_byte(s, i) == 32 || str_byte(s, i) == 9 || str_byte(s, i) == 10 || str_byte(s, i) == 13 next (i + 1) yield i
+fn json_digit (b: i64) -> bool = b >= 48 && b <= 57
+fn json_digits (s: Arr u8 n, start: i64) -> i64
+  = loop (i = start) while json_digit(str_byte(s, i)) next (i + 1) yield i
+fn json_hex (b: i64) -> i64
+  = if b >= 48 && b <= 57 then b - 48 else if b >= 65 && b <= 70 then b - 55 else if b >= 97 && b <= 102 then b - 87 else -1
+cold fn json_hex4 (s: Arr u8 n, i: i64) -> i64
+  = let a = json_hex(str_byte(s, i)) in let b = json_hex(str_byte(s, i + 1)) in
+    let c = json_hex(str_byte(s, i + 2)) in let d = json_hex(str_byte(s, i + 3)) in
+    if a < 0 || b < 0 || c < 0 || d < 0 then -1 else a * 4096 + b * 256 + c * 16 + d
+cold fn json_escape_width (s: Arr u8 n, i: i64) -> i64
+  = let c = str_byte(s, i + 1) in
+    if c == 34 || c == 92 || c == 47 || c == 98 || c == 102 || c == 110 || c == 114 || c == 116 then 2
+    else if c != 117 then 0 else
+      let code = json_hex4(s, i + 2) in
+      if code < 0 || (code >= 56320 && code <= 57343) then 0
+      else if code >= 55296 && code <= 56319 then
+        let low = json_hex4(s, i + 8) in
+        if str_byte(s, i + 6) == 92 && str_byte(s, i + 7) == 117 && low >= 56320 && low <= 57343 then 12 else 0
+      else 6
+fn json_utf8_width (s: Arr u8 n, i: i64) -> i64
+  = let a = str_byte(s, i) in let b = str_byte(s, i + 1) in let c = str_byte(s, i + 2) in let d = str_byte(s, i + 3) in
+    if a >= 194 && a <= 223 && utf8_cont(b) then 2
+    else if ((a == 224 && b >= 160 && b <= 191) || (a >= 225 && a <= 239 && utf8_cont(b) && (a != 237 || b <= 159))) && utf8_cont(c) then 3
+    else if ((a == 240 && b >= 144 && b <= 191) || (a >= 241 && a <= 244 && utf8_cont(b) && (a != 244 || b <= 143))) && utf8_cont(c) && utf8_cont(d) then 4 else 0
+type JsonStringUnit = { end: i64, ok: bool, done: bool }
+fn json_string_unit (s: Arr u8 n, i: i64) -> JsonStringUnit
+  = let c = str_byte(s, i) in
+    let width = if c == 92 then json_escape_width(s, i) else if c < 32 then 0 else if c < 128 then 1 else json_utf8_width(s, i) in
+    JsonStringUnit { end = i + width, ok = width > 0, done = c == 34 }
+private fn json_zero_bytes(word:i64) -> i64
+  = bit_and(bit_and(wrapping_sub(word,72340172838076673),bit_xor(word,-1)),-9187201950435737472)
+; On little-endian words, the first flagged byte is exact even when the
+; subtraction borrows into a later byte. Never load beyond the source span.
+private fn json_string_special(word:i64,validate:bool) -> i64
+  = let escaped=bit_or(json_zero_bytes(bit_xor(word,2459565876494606882)),json_zero_bytes(bit_xor(word,6655295901103053916))) in
+    if !validate then escaped else bit_or(escaped,bit_or(bit_and(word,-9187201950435737472),json_zero_bytes(bit_and(word,-2242545357980376864))))
+private fn json_string_plain(raw:Arr u8 n,start:i64,validate:bool) -> i64
+  = let end=loop(i=start,done=false) while !done && i>=0 && i<=n-8 next(
+      let mask=json_string_special(byte_read_le(raw,i,8),validate) in i+count_trailing_zeros(mask)/8,
+      json_string_special(byte_read_le(raw,i,8),validate)!=0) yield i in
+    if end<=n-8 then end else loop(i=end) while i<n && (check i>=0 && i<n in raw[i]!=u8(34) && raw[i]!=u8(92) && (!validate || raw[i]>=u8(32) && raw[i]<u8(128))) next(i+1) yield i
+fn json_string_end (s: Arr u8 n, start: i64) -> JsonSpan
+  = if str_byte(s,start)!=34 then JsonSpan {ok=false,end=start} else
+    loop(step=json_string_unit(s,json_string_plain(s,start+1,true))) while step.ok && !step.done
+      next(json_string_unit(s,json_string_plain(s,step.end,true))) yield JsonSpan {ok=step.ok && step.done,end=step.end}
+fn json_number_end (s: Arr u8 n, start: i64) -> JsonSpan
+  = let first = if str_byte(s, start) == 45 then start + 1 else start in
+    let c = str_byte(s, first) in
+    let integer = if c == 48 then first + 1 else if c >= 49 && c <= 57 then json_digits(s, first + 1) else first in
+    let fraction = if str_byte(s, integer) == 46 then json_digits(s, integer + 1) else integer in
+    let has_exp = str_byte(s, fraction) == 101 || str_byte(s, fraction) == 69 in
+    let exponent = fraction + 1 + (if str_byte(s, fraction + 1) == 43 || str_byte(s, fraction + 1) == 45 then 1 else 0) in
+    let end = if has_exp then json_digits(s, exponent) else fraction in
+    JsonSpan { ok = integer > first && (str_byte(s, integer) != 46 || fraction > integer + 1) && (!has_exp || end > exponent), end = end }
+fn json_literal_at (s: Arr u8 n, start: i64, literal: Arr u8 m) -> bool
+  = start >= 0 && start <= n && m <= n - start &&
+    loop (j = 0, equal = true) while equal && j < m
+      next (j + 1, str_byte(s, start + j) == str_byte(literal, j)) yield equal
+; First quote, backslash or control byte in a word; UTF-8 bytes are plain.
+private fn json_plain_special(word:i64) -> i64
+  = bit_or(bit_or(json_zero_bytes(bit_xor(word,2459565876494606882)),json_zero_bytes(bit_xor(word,6655295901103053916))),
+      json_zero_bytes(bit_and(word,-2242545357980376864)))
+fn json_plain_end (s: Arr u8 n, start: i64) -> i64
+  = let end=loop(i=start,done=false) while !done && i>=0 && i<=n-8 next(
+      let mask=json_plain_special(byte_read_le(s,i,8)) in i+count_trailing_zeros(mask)/8,
+      json_plain_special(byte_read_le(s,i,8))!=0) yield i in
+    loop (i = end) while str_byte(s, i) >= 32 && str_byte(s, i) != 34 && str_byte(s, i) != 92 next (i + 1) yield i
+fn json_scan (s: Arr u8 n, position: i64, depth: i64) -> JsonSpan
+  = let start = json_space(s, position) in let c = str_byte(s, start) in
+    if depth > 128 then JsonSpan { ok = false, end = start }
+    else if c == 34 then json_string_end(s, start)
+    else if c == 91 || c == 123 then
+      let object = c == 123 in let close = if object then 125 else 93 in
+      let first = json_space(s, start + 1) in
+      if str_byte(s, first) == close then JsonSpan { ok = true, end = first + 1 } else
+      loop (step = json_sequence_step(s, first, depth, object)) while step.ok && !step.done
+        next (json_sequence_step(s, step.end, depth, object)) yield JsonSpan { ok = step.ok && step.done, end = step.end }
+    ; Literals compare one little-endian word ("true", "fals", "null") instead of bytes.
+    else if c == 116 && start >= 0 && start + 4 <= n && bytes_le32(s, start) == 1702195828 then JsonSpan { ok = true, end = start + 4 }
+    else if c == 102 && start >= 0 && start + 5 <= n && bytes_le32(s, start) == 1936482662 && str_byte(s, start + 4) == 101 then JsonSpan { ok = true, end = start + 5 }
+    else if c == 110 && start >= 0 && start + 4 <= n && bytes_le32(s, start) == 1819047278 then JsonSpan { ok = true, end = start + 4 }
+    else json_number_end(s, start)
+fn json_sequence_step (s: Arr u8 n, i: i64, depth: i64, object: bool) -> JsonStep
+  = let item = json_scan_item(s, i, depth, object) in let after = json_space(s, item.end) in
+    let close = if object then 125 else 93 in let c = str_byte(s, after) in
+    JsonStep { ok = item.ok && (c == close || (c == 44 && str_byte(s, json_space(s, after + 1)) != close)),
+      end = if c == 44 then json_space(s, after + 1) else after + 1, done = c == close }
+fn json_scan_item (s: Arr u8 n, position: i64, depth: i64, object: bool) -> JsonSpan
+  = if !object then json_scan(s, position, depth + 1) else
+    let key = json_string_end(s, position) in let colon = json_space(s, key.end) in
+    if !key.ok || str_byte(s, colon) != 58 then JsonSpan { ok = false, end = colon }
+    else json_scan(s, colon + 1, depth + 1)
+fn json_kind (raw: Arr u8 n) -> i64
+  = let c = str_byte(raw, 0) in if c == 110 then 1 else if c == 116 || c == 102 then 2 else if c == 34 then 4 else if c == 91 then 5 else if c == 123 then 6 else 3
+type JsonArrayScan = {ok:bool,end:i64,count:i64}
+fn json_parse (borrow text: Arr u8 n) -> JsonResult
+  = let start = json_space(text, 0) in
+    if str_byte(text, start) == 123 then
+      let index = json_index(text, start) in
+      if !index.ok || json_space(text, index.end) != n then
+        JsonResult { ok = false, value = json_none().value, error = Error { code = 1, message = "invalid JSON", position = index.end } }
+      else JsonResult { ok = true, value = Json { kind = 6, raw = str_slice(text, start, index.end), count = index.count, offsets = index.entries }, error = no_error() }
+    else if str_byte(text,start)==91 then
+      let first=json_space(text,start+1) in
+      let scanned=if str_byte(text,first)==93 then JsonArrayScan {ok=true,end=first+1,count=0} else
+        loop(step=json_sequence_step(text,first,0,false),count=1) while step.ok && !step.done
+          next(json_sequence_step(text,step.end,0,false),count+1) yield JsonArrayScan {ok=step.ok && step.done,end=step.end,count=count} in
+      if !scanned.ok || json_space(text,scanned.end)!=n then JsonResult {ok=false,value=json_none().value,error=Error {code=1,message="invalid JSON",position=scanned.end}} else
+        JsonResult {ok=true,value=Json {kind=5,raw=str_slice(text,start,scanned.end),count=scanned.count,offsets=arr(i in 0..0) 0},error=no_error()}
+    else let span = json_scan(text, start, 0) in
+      if !span.ok || json_space(text, span.end) != n then
+        JsonResult { ok = false, value = json_none().value, error = Error { code = 1, message = "invalid JSON", position = span.end } }
+      else let raw = str_slice(text, start, span.end) in let kind = json_kind(raw) in
+        JsonResult { ok = true, value = Json { kind = kind, raw = raw, count = if kind == 5 then json_count(raw) else 0, offsets = arr(i in 0..0) 0 }, error = no_error() }
+fn json_text (value: Json) -> BytesResult
+  = if value.kind != 4 then bytes_error(1, "expected JSON string", 0) else
+    let source = value.raw in
+    if json_plain_end(source, 1) == len(source) - 1 then bytes_ok(str_slice(source, 1, len(source) - 1)) else json_text_decode(source)
+private cold fn json_text_decode (source: Arr u8 _) -> BytesResult
+  = loop (i = 1, out = "") while i < len(source) - 1
+      next (i + (if str_byte(source, i) == 92 then json_escape_width(source, i) else 1),
+        if str_byte(source, i) != 92 then concat(out, str_slice(source, i, i + 1)) else
+          let c = str_byte(source, i + 1) in
+          if c == 117 then let high = json_hex4(source, i + 2) in
+            let code = if high >= 55296 && high <= 56319 then 65536 + (high - 55296) * 1024 + json_hex4(source, i + 8) - 56320 else high in
+            let encoded = utf8_encode(code) in concat(out, encoded.value)
+          else concat(out, arr(k in 0..1) u8(if c == 98 then 8 else if c == 102 then 12 else if c == 110 then 10 else if c == 114 then 13 else if c == 116 then 9 else c)))
+      yield bytes_ok(out)
+fn json_int (value: Json) -> IntResult
+  = if value.kind != 3 then int_error(1, "expected JSON integer", 0) else int_parse(value.raw)
+fn json_array_len (value: Json) -> i64 {result >= 0}
+  = let count = value.count in if value.kind != 5 then 0 else if count >= 0 then count else 0
+fn json_count (raw: Arr u8 n) -> i64
+  = loop (i = json_space(raw, 1), count = 0) while i < n && str_byte(raw, i) != 93
+      next (json_space(raw, json_space(raw, json_skip(raw, i)) + 1), count + 1) yield count
+fn json_array_get (value: Json, index: i64) -> JsonOption
+  = if value.kind != 5 || index < 0 || index >= value.count then json_none() else let raw = value.raw in
+    let at=loop(i=0,position=json_space(raw,1)) while i<index
+      next(i+1,json_space(raw,json_space(raw,json_skip(raw,position))+1)) yield position in
+    JsonOption {present=true,value=json_valid_slice(raw,at,json_skip(raw,at))}
+type JsonArrayElements = {position:i64,values:Arr Json _}
+; A validated value at start and the position after it. Objects are indexed in
+; the same pass that finds their end instead of being skipped and walked again.
+type JsonValidTake = {value:Json,end:i64}
+private fn json_valid_take(borrow raw:Arr u8 _,start:i64) -> JsonValidTake
+  = if str_byte(raw,start)!=123 then let finish=json_skip(raw,start) in JsonValidTake {value=json_valid_slice(raw,start,finish),end=finish} else
+    let first=json_valid_member(raw,json_space(raw,start+1)) in
+    let indexed=loop(step=first,count=0,entries=arr(i in 0..if first.done then 0 else 16) 0) while !step.done
+      next(json_valid_member(raw,step.following),count+1,
+        let slot=count*4 in let room=json_index_room(entries,slot) in check slot>=0 && slot+3<len(room) in
+          set(set(set(set(room,slot,step.key_start-start),slot+1,step.key_end-start),slot+2,step.value_start-start),slot+3,step.value_end-start))
+      yield JsonIndex {ok=true,end=step.key_start+1,count=count,entries=entries} in
+    let finish=indexed.end in
+    JsonValidTake {value=Json {kind=6,raw=byte_slice(raw,start,finish),count=indexed.count,offsets=indexed.entries},end=finish}
+private fn json_array_element(move state:JsonArrayElements,borrow raw:Arr u8 _,index:i64) -> JsonArrayElements
+  = let taken=json_valid_take(raw,state.position) in let finish=taken.end in let value=taken.value in
+    let position=json_space(raw,json_space(raw,finish)+1) in
+    check index>=0 && index<len(state.values) in JsonArrayElements {position=position,values=set(state.values,index,value)}
+fn json_array_values (value: Json) -> Arr Json _
+  = let count=json_array_len(value) in
+    loop(i=0,state=JsonArrayElements {position=json_space(value.raw,1),values=arr(i in 0..count) json_none().value}) while i<count
+      next(i+1,json_array_element(state,value.raw,i)) yield state.values
+fn json_skip_string (raw: Arr u8 n, start: i64) -> i64
+  = let end=loop(i=json_string_plain(raw,start+1,false)) while i<n && str_byte(raw,i)!=34
+      next(json_string_plain(raw,i+2,false)) yield i in end+1
+; Quote, bracket or brace bytes: '[' and '{' (and ']' and '}') differ only in 0x20.
+private fn json_structural(word:i64) -> i64
+  = let folded=bit_or(word,2314885530818453536) in
+    bit_or(json_zero_bytes(bit_xor(word,2459565876494606882)),
+      bit_or(json_zero_bytes(bit_xor(folded,8897841259083430779)),json_zero_bytes(bit_xor(folded,9042521604759584125))))
+private fn json_structural_next(raw:Arr u8 n,from:i64) -> i64
+  = let end=loop(i=from,done=false) while !done && i>=0 && i<=n-8 next(
+      let mask=json_structural(bytes_le64(raw,i)) in i+count_trailing_zeros(mask)/8,
+      json_structural(bytes_le64(raw,i))!=0) yield i in
+    loop(i=end) while i<n && str_byte(raw,i)!=34 && str_byte(raw,i)!=91 && str_byte(raw,i)!=93 && str_byte(raw,i)!=123 && str_byte(raw,i)!=125 next(i+1) yield i
+type JsonSkipStep = {end:i64,depth:i64}
+private fn json_skip_step(raw:Arr u8 n,from:i64,depth:i64) -> JsonSkipStep
+  = let at=json_structural_next(raw,from) in let c=str_byte(raw,at) in
+    if at>=n then JsonSkipStep {end=n,depth=depth} else
+    JsonSkipStep {end=if c==34 then json_skip_string(raw,at) else at+1,depth=depth+(if c==91 || c==123 then 1 else if c==93 || c==125 then -1 else 0)}
+fn json_skip (raw: Arr u8 n, start: i64) -> i64
+  = let c = str_byte(raw, start) in
+    if c == 34 then json_skip_string(raw, start)
+    else if c == 91 || c == 123 then
+      loop (step = JsonSkipStep {end=start+1,depth=1}) while step.depth > 0 && step.end < n
+        next (json_skip_step(raw, step.end, step.depth)) yield step.end
+    else loop (i = start) while i < n && str_byte(raw, i) != 44 && str_byte(raw, i) != 93 && str_byte(raw, i) != 125 &&
+      str_byte(raw, i) != 32 && str_byte(raw, i) != 9 && str_byte(raw, i) != 10 && str_byte(raw, i) != 13 next (i + 1) yield i
+type JsonMember = { ok: bool, done: bool, key_start: i64, key_end: i64, value_start: i64, value_end: i64, following: i64 }
+fn json_member (raw: Arr u8 n, i: i64) -> JsonMember
+  = if str_byte(raw, i) == 125 then
+      JsonMember { ok = true, done = true, key_start = i, key_end = i, value_start = i, value_end = i, following = i }
+    else let key = json_string_end(raw, i) in let key_end = key.end in let colon = json_space(raw, key_end) in
+      let start = json_space(raw, colon + 1) in let value = json_scan(raw, start, 1) in let value_end = value.end in
+      let after = json_space(raw, value_end) in let c = str_byte(raw, after) in
+      let following = if c == 44 then json_space(raw, after + 1) else after in
+      JsonMember { ok = key.ok && value.ok && str_byte(raw, colon) == 58 &&
+          (c == 125 || (c == 44 && str_byte(raw, following) != 125)), done = false,
+        key_start = i, key_end = key_end, value_start = start, value_end = value_end, following = following }
+; A matching raw key still needs to exclude escape sequences. The byte-zero
+; test detects a backslash in a loaded word; unused high bytes of short loads
+; are zero, so XOR with the repeated backslash cannot flag those padding bytes.
+private fn json_key_word(word:i64,wanted:i64) -> bool
+  = word==wanted &&
+    (let difference=bit_xor(word,6655295901103053916) in
+      bit_and(bit_and(wrapping_sub(difference,72340172838076673),bit_xor(difference,-1)),-9187201950435737472)==0)
+private fn json_key_tail(raw:Arr u8 n,begin:i64,name:Arr u8 m,offset:i64) -> bool
+  = let four=m-offset>=4 in let at=offset+(if four then 4 else 0) in
+    let first=!four || json_key_word(bytes_le32(raw,begin+offset),bytes_le32(name,offset)) in
+    let two=m-at>=2 in let last=at+(if two then 2 else 0) in
+    first && (!two || json_key_word(bytes_le16(raw,begin+at),bytes_le16(name,at))) &&
+      (last==m || (check last>=0 && last<m && begin+last>=0 && begin+last<n in raw[begin+last]==name[last] && raw[begin+last]!=u8(92)))
+private fn json_key_bytes(raw:Arr u8 n,begin:i64,name:Arr u8 m) -> bool
+  = if begin<0 || begin>n || m>n-begin then false else
+    let prefix=loop(i=0,equal=true) while equal && i<=m-8
+      next(i+8,json_key_word(bytes_le64(raw,begin+i),bytes_le64(name,i))) yield if equal then i else -1 in
+    prefix>=0 && json_key_tail(raw,begin,name,prefix)
+fn json_key_equal (raw: Arr u8 n, start: i64, end: i64, name: Arr u8 m) -> bool
+  = let width = end - start - 2 in
+    if width < m then false else if width == m then
+      json_key_bytes(raw,start+1,name)
+    else if json_plain_end(raw, start + 1) == end - 1 then false else
+      let decoded = json_text(Json { kind = 4, raw = str_slice(raw, start, end), count = 0, offsets = arr(k in 0..0) 0 }) in
+      decoded.ok && str_equal(decoded.value, name)
+type JsonIndex = { ok: bool, end: i64, count: i64, entries: Arr i64 _ }
+fn json_index_room (entries: Arr i64 n, needed: i64) -> Arr i64 _
+  = if needed >= 0 && needed + 4 <= n then entries else
+    let size = if n < 16 then 16 else n * 2 in check size >= n && size >= needed + 4 in
+    arr(i in 0..size) if i < n then entries[i] else 0
+fn json_index (raw: Arr u8 n, start: i64) -> JsonIndex
+  = let first=json_space(raw,start+1) in
+    if str_byte(raw,first)==125 then JsonIndex {ok=true,end=first+1,count=0,entries=arr(i in 0..0) 0} else
+    let initial = arr(i in 0..16) 0 in
+    loop (step = json_member(raw, json_space(raw, start + 1)), count = 0, entries = initial) while step.ok && !step.done
+      next (json_member(raw, step.following), count + 1,
+        let slot = count * 4 in let room = json_index_room(entries, slot) in if slot >= 0 && slot + 3 < len(room) then
+          set(set(set(set(room, slot, step.key_start - start), slot + 1, step.key_end - start), slot + 2, step.value_start - start), slot + 3, step.value_end - start)
+        else room) yield JsonIndex { ok = step.ok && step.done, end = step.key_start + 1, count = count, entries = entries }
+; Only sealed, already validated Json values reach this helper. Index child
+; members without re-validating UTF-8, number syntax or nested containers.
+private fn json_valid_member(raw:Arr u8 n,at:i64) -> JsonMember
+  = if str_byte(raw,at)==125 then JsonMember {ok=true,done=true,key_start=at,key_end=at,value_start=at,value_end=at,following=at} else
+    let key_end=json_skip_string(raw,at) in let begin=json_space(raw,json_space(raw,key_end)+1) in let finish=json_skip(raw,begin) in
+    let following=json_space(raw,finish) in
+    JsonMember {ok=true,done=false,key_start=at,key_end=key_end,value_start=begin,value_end=finish,
+      following=if str_byte(raw,following)==44 then json_space(raw,following+1) else following}
+private fn json_valid_slice(borrow source:Arr u8 _,start:i64,end:i64) -> Json
+  = let raw=str_slice(source,start,end) in let kind=json_kind(raw) in
+    if kind!=6 then Json {kind=kind,raw=raw,count=if kind==5 then json_count(raw) else 0,offsets=arr(i in 0..0) 0} else
+      let first=json_valid_member(raw,json_space(raw,1)) in
+      if first.done then Json {kind=6,raw=raw,count=0,offsets=arr(i in 0..0) 0} else
+      loop(step=first,count=0,entries=arr(i in 0..16) 0) while !step.done
+        next(json_valid_member(raw,step.following),count+1,
+          let slot=count*4 in let room=json_index_room(entries,slot) in check slot>=0 && slot+3<len(room) in
+            set(set(set(set(room,slot,step.key_start),slot+1,step.key_end),slot+2,step.value_start),slot+3,step.value_end))
+        yield Json {kind=6,raw=raw,count=count,offsets=entries}
+fn json_get (borrow value: Json, borrow name: Arr u8 n) -> JsonOption
+  = if value.kind != 6 then json_none() else
+    let offsets = value.offsets in let raw = value.raw in
+    let found = loop (i = value.count - 1, at = -1) while i >= 0 && at < 0
+      next (i - 1, let slot = i * 4 in
+        if slot >= 0 && slot + 3 < len(offsets) && json_key_equal(raw, offsets[slot], offsets[slot + 1], name) then slot else -1) yield at in
+    if found < 0 || found + 3 >= len(offsets) then json_none() else
+      JsonOption {present=true,value=json_valid_slice(raw,offsets[found+2],offsets[found+3])}
+; Member lookup on an already validated object without re-validating or
+; re-counting the member value. Use when only a view/tokens are needed.
+fn json_get_view(borrow value:Json,borrow name:Arr u8 _) -> JsonView
+  = if value.kind!=6 then JsonView {kind=0,raw=""} else
+    let offsets=value.offsets in let raw=value.raw in
+    let found=loop(i=value.count-1,at= -1) while i>=0 && at<0
+      next(i-1,let slot=i*4 in if slot>=0 && slot+3<len(offsets) && json_key_equal(raw,offsets[slot],offsets[slot+1],name) then slot else -1) yield at in
+    if found<0 || found+3>=len(offsets) then JsonView {kind=0,raw=""} else check found>=0 && found+3<len(offsets) in
+      let bytes=str_slice(raw,offsets[found+2],offsets[found+3]) in JsonView {kind=json_kind(bytes),raw=bytes}
+; Typed member inspection does not allocate a temporary Json/string. Integer
+; overflow and decimal/exponent forms remain distinguishable from an exact i64.
+type JsonAtom = { present:bool,kind:i64,integer:bool,value:i64 }
+; Prepared field decoding, the reverse of json_object_encoder: names are given
+; once, then each object is validated in a single pass that records only the
+; wanted members' value spans, without a member index or copied values. Values
+; are read in place; plain strings share the source buffer. A repeated member
+; keeps its last value, as json_get does. Arrays of objects reuse one span buffer.
+; lengths/words hold each name's byte length and its first eight bytes as one
+; little-endian word, so most keys are rejected or matched without touching names.
+sealed type JsonFieldDecoder = {names:Arr Arr u8 _ _,lengths:Arr i64 _,words:Arr i64 _,count:i64,valid:bool}
+private fn json_name_word(borrow name:Arr u8 n) -> i64
+  = loop(j=0,word=0) while j<n && j<8 next(j+1,check j>=0 && j<n in bit_or(word,shift_left(i64(name[j]),8*j))) yield word
+fn json_field_decoder(borrow names:Arr Arr u8 _ n) -> JsonFieldDecoder
+  = let valid=n<=4096 && loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in utf8_valid(names[i])) yield ok in
+    JsonFieldDecoder {names=arr(i in 0..n) check i>=0 && i<n in names[i],lengths=arr(i in 0..n) check i>=0 && i<n in len(names[i]),
+      words=arr(i in 0..n) check i>=0 && i<n in json_name_word(names[i]),count=n,valid=valid}
+; spans holds four slots per decoder name: start (-1 when absent), end, kind
+; (1 escape-free string proven by the walk, 2 integer read during the walk,
+; 3 array whose element count the walk found, else 0) and the integer value
+; or element count. at is the position
+; after the decoded object; for arrays, after the last element read so far.
+sealed type JsonFields = {raw:Arr u8 _,spans:Arr i64 _,at:i64,count:i64,present:bool,done:bool,ok:bool,error:i64}
+private cold fn json_field_match(borrow decoder:JsonFieldDecoder,borrow raw:Arr u8 _,start:i64,end:i64) -> i64
+  = let names=decoder.names in let width=end-start-2 in
+    if json_plain_end(raw,start+1)==end-1 then
+      loop(i=0,found= -1) while found<0 && i<len(names) next(i+1,check i>=0 && i<len(names) in
+        if len(names[i])==width && bytes_match_at(raw,start+1,names[i]) then i else -1) yield found
+    else let decoded=json_text(Json {kind=4,raw=byte_slice(raw,start,end),count=0,offsets=arr(i in 0..0) 0}) in
+      if !decoded.ok then -1 else
+      loop(i=0,found= -1) while found<0 && i<len(names) next(i+1,check i>=0 && i<len(names) in if str_equal(names[i],decoded.value) then i else -1) yield found
+; state: 0 member with more to follow, 3 last member (following is after '}'), 2 error at following.
+type JsonFieldStep = {state:i64,index:i64,value_start:i64,value_end:i64,kind:i64,number:i64,following:i64}
+; A member value's end, kind and integer: decimal integers of at most 18 digits
+; are read while validated; others defer to the general scanners.
+type JsonFieldValue = {end:i64,kind:i64,number:i64}
+type JsonStringTail = {ok:bool,end:i64,done:bool,escaped:bool}
+private fn json_tail_step(borrow raw:Arr u8 _,at:i64,escaped:bool) -> JsonStringTail
+  = let piece=json_string_unit(raw,at) in JsonStringTail {ok=piece.ok,end=piece.end,done=piece.done,escaped=escaped || str_byte(raw,at)==92}
+private cold fn json_string_tail(borrow raw:Arr u8 _,quote:i64) -> JsonFieldValue
+  = let step=loop(step=json_tail_step(raw,quote,false)) while step.ok && !step.done
+      next(json_tail_step(raw,json_string_plain(raw,step.end,true),step.escaped)) yield step in
+    JsonFieldValue {end=if step.ok && step.done then step.end else -1-step.end,kind=if step.ok && step.done && !step.escaped then 1 else 0,number=0}
+private cold fn json_key_end(borrow raw:Arr u8 _,at:i64) -> i64
+  = let key=json_string_end(raw,at) in if key.ok then key.end else -1-key.end
+; Plain ASCII names were already proven escape-free by the word scan, so they
+; match by length and bytes; other names decode first.
+private fn json_field_name(borrow decoder:JsonFieldDecoder,borrow raw:Arr u8 _,start:i64,end:i64,plain:bool) -> i64
+  = if !plain then json_field_match(decoder,raw,start,end) else let width=end-start-2 in
+    let lengths=decoder.lengths in let words=decoder.words in
+    ; One masked word compares names of up to eight bytes when eight source bytes follow.
+    let direct=width<=8 && start>=0 && start+9<=len(raw) in
+    let key=if direct then bit_and(byte_read_le(raw,start+1,8),if width==8 then -1 else shift_left(1,8*width)-1) else 0 in
+    loop(i=0,found= -1) while found<0 && i<len(lengths) && i<len(words) next(i+1,check i>=0 && i<len(lengths) && i<len(words) in
+      if lengths[i]!=width then -1 else if direct then (if words[i]==key then i else -1) else
+        let names=decoder.names in check i<len(names) in if bytes_match_at(raw,start+1,names[i]) then i else -1) yield found
+; The end of a member value, or -1-position on error. Plain ASCII strings and
+; numbers take direct paths; everything else (escapes, UTF-8, containers,
+; literals) is validated by the general scanner.
+private fn json_field_integer(borrow raw:Arr u8 _,start:i64) -> JsonFieldValue
+  = let negative=str_byte(raw,start)==45 in let first=start+(if negative then 1 else 0) in let c=str_byte(raw,first) in
+    let digits_end=if c==48 then first+1 else loop(i=first) while i-first<19 && str_byte(raw,i)>=48 && str_byte(raw,i)<=57 next(i+1) yield i in
+    let after=str_byte(raw,digits_end) in
+    if c<48 || c>57 || digits_end-first>18 || after==46 || after==101 || after==69 then
+      let span=json_number_end(raw,start) in JsonFieldValue {end=if span.ok then span.end else -1-span.end,kind=0,number=0} else
+    let magnitude=loop(i=first,number=0) while i<digits_end next(i+1,number*10-(str_byte(raw,i)-48)) yield number in
+    JsonFieldValue {end=digits_end,kind=2,number=if negative then magnitude else 0-magnitude}
+; One array element's end, or -1-position: numbers and plain strings inline,
+; nested containers through the general scanner.
+private fn json_element_end(borrow raw:Arr u8 _,start:i64,depth:i64) -> i64
+  = let c=str_byte(raw,start) in
+    if c==45 || c>=48 && c<=57 then let span=json_number_end(raw,start) in if span.ok then span.end else -1-span.end else
+    if c==34 then let quote=json_string_plain(raw,start+1,true) in if str_byte(raw,quote)==34 then quote+1 else json_string_tail(raw,quote).end else
+    let span=json_scan(raw,start,depth) in if span.ok then span.end else -1-span.end
+; state: 0 another element follows at end, 1 closed (end is after ']'), 2 error at end.
+type JsonElementsStep = {end:i64,count:i64,state:i64}
+private fn json_array_step(borrow raw:Arr u8 _,at:i64,count:i64,depth:i64) -> JsonElementsStep
+  = let end=json_element_end(raw,at,depth) in
+    if end<0 then JsonElementsStep {end= -1-end,count=count,state=2} else
+    let after=json_space(raw,end) in let c=str_byte(raw,after) in
+    if c==93 then JsonElementsStep {end=after+1,count=count+1,state=1} else
+    if c==44 then JsonElementsStep {end=json_space(raw,after+1),count=count+1,state=0} else JsonElementsStep {end=after,count=count,state=2}
+; An array member in one flat loop (kind 3, number = element count), the same
+; grammar and depth limit as json_scan without a recursive call per element.
+private fn json_field_array(borrow raw:Arr u8 _,start:i64,depth:i64) -> JsonFieldValue
+  = let first=json_space(raw,start+1) in
+    if depth>128 then JsonFieldValue {end= -1-start,kind=0,number=0} else
+    if str_byte(raw,first)==93 then JsonFieldValue {end=first+1,kind=3,number=0} else
+    let step=loop(step=json_array_step(raw,first,0,depth+1)) while step.state==0 next(json_array_step(raw,step.end,step.count,depth+1)) yield step in
+    if step.state==1 then JsonFieldValue {end=step.end,kind=3,number=step.count} else JsonFieldValue {end= -1-step.end,kind=0,number=0}
+private fn json_field_value(borrow raw:Arr u8 _,start:i64,depth:i64) -> JsonFieldValue
+  = let c=str_byte(raw,start) in
+    if c==34 then let quote=json_string_plain(raw,start+1,true) in if str_byte(raw,quote)==34 then JsonFieldValue {end=quote+1,kind=1,number=0} else
+      ; Continue validation where the word scan stopped instead of rescanning.
+      json_string_tail(raw,quote) else
+    if c==45 || c>=48 && c<=57 then json_field_integer(raw,start) else
+    ; Literals compare one word ("true", "fals", "null"); what follows is checked by the caller.
+    if c==116 && start>=0 && start<=len(raw)-4 && byte_read_le(raw,start,4)==1702195828 then JsonFieldValue {end=start+4,kind=0,number=0} else
+    if c==102 && start>=0 && start<=len(raw)-5 && byte_read_le(raw,start,4)==1936482662 && str_byte(raw,start+4)==101 then JsonFieldValue {end=start+5,kind=0,number=0} else
+    if c==110 && start>=0 && start<=len(raw)-4 && byte_read_le(raw,start,4)==1819047278 then JsonFieldValue {end=start+4,kind=0,number=0} else
+    if c==91 then json_field_array(raw,start,depth) else
+    let span=json_scan(raw,start,depth) in JsonFieldValue {end=if span.ok then span.end else -1-span.end,kind=0,number=0}
+private fn json_field_step(borrow raw:Arr u8 _,borrow decoder:JsonFieldDecoder,at:i64,depth:i64) -> JsonFieldStep
+  = let quote=if str_byte(raw,at)==34 then json_string_plain(raw,at+1,true) else at in
+    let plain=quote>at && str_byte(raw,quote)==34 in
+    let key_end=if plain then quote+1 else json_key_end(raw,at) in
+    if key_end<0 then JsonFieldStep {state=2,index= -1,value_start=0,value_end=0,kind=0,number=0,following= -1-key_end} else
+    let colon=if str_byte(raw,key_end)==58 then key_end else json_space(raw,key_end) in
+    if str_byte(raw,colon)!=58 then JsonFieldStep {state=2,index= -1,value_start=0,value_end=0,kind=0,number=0,following=colon} else
+    let start=json_space(raw,colon+1) in let value=json_field_value(raw,start,depth) in let value_end=value.end in
+    if value_end<0 then JsonFieldStep {state=2,index= -1,value_start=0,value_end=0,kind=0,number=0,following= -1-value_end} else
+    let after=json_space(raw,value_end) in let c=str_byte(raw,after) in
+    if c!=44 && c!=125 then JsonFieldStep {state=2,index= -1,value_start=0,value_end=0,kind=0,number=0,following=after} else
+    JsonFieldStep {state=if c==44 then 0 else 3,index=json_field_name(decoder,raw,at,key_end,plain),value_start=start,value_end=value_end,kind=value.kind,number=value.number,
+      following=if c==44 then json_space(raw,after+1) else after+1}
+private fn json_field_apply(move spans:Arr i64 _,borrow step:JsonFieldStep) -> Arr i64 _
+  = let at=step.index*4 in if step.index<0 || at+3>=len(spans) then spans else check at>=0 && at+3<len(spans) in
+    set(set(set(set(spans,at,step.value_start),at+1,step.value_end),at+2,step.kind),at+3,step.number)
+type JsonFieldsWalk = {spans:Arr i64 _,end:i64,error:i64}
+private fn json_fields_object(borrow raw:Arr u8 _,borrow decoder:JsonFieldDecoder,move spans:Arr i64 _,at:i64,depth:i64) -> JsonFieldsWalk
+  = let cleared=loop(i=0,out=spans) while i<len(out) next(i+1,check i>=0 && i<len(out) in set(out,i,-1)) yield out in
+    let first=json_space(raw,at+1) in
+    if depth>127 then JsonFieldsWalk {spans=cleared,end=at,error=at} else
+    if str_byte(raw,first)==125 then JsonFieldsWalk {spans=cleared,end=first+1,error= -1} else
+    loop(step=json_field_step(raw,decoder,first,depth+1),out=cleared) while step.state==0
+      next(json_field_step(raw,decoder,step.following,depth+1),json_field_apply(out,step))
+      yield if step.state==3 then JsonFieldsWalk {spans=json_field_apply(out,step),end=step.following,error= -1} else JsonFieldsWalk {spans=out,end=step.following,error=step.following}
+private cold fn json_fields_error(borrow raw:Arr u8 _,count:i64,at:i64) -> JsonFields
+  = JsonFields {raw=raw,spans=arr(i in 0..0) -1,at=len(raw),count=count,present=false,done=true,ok=false,error=at}
+; One object: the whole text must be exactly one JSON object.
+fn json_decode_object(borrow text:Arr u8 _,borrow decoder:JsonFieldDecoder) -> JsonFields
+  = let start=json_space(text,0) in let width=decoder.count*4 in check width>=0 in
+    if !decoder.valid || str_byte(text,start)!=123 then json_fields_error(text,0,start) else
+    let walked=json_fields_object(text,decoder,arr(i in 0..width) -1,start,0) in
+    if walked.error>=0 then json_fields_error(text,0,walked.error) else
+    let rest=json_space(text,walked.end) in if rest!=len(text) then json_fields_error(text,0,rest) else
+    JsonFields {raw=text,spans=walked.spans,at=walked.end,count=1,present=true,done=true,ok=true,error= -1}
+; An array of objects: positions before the first element; json_decode_next
+; then validates and decodes one element per call until done.
+fn json_decode_array(borrow text:Arr u8 _,borrow decoder:JsonFieldDecoder) -> JsonFields
+  = let start=json_space(text,0) in let width=decoder.count*4 in check width>=0 in
+    if !decoder.valid || str_byte(text,start)!=91 then json_fields_error(text,0,start) else
+    JsonFields {raw=text,spans=arr(i in 0..width) -1,at=start+1,count=0,present=false,done=false,ok=true,error= -1}
+fn json_decode_next(move fields:JsonFields,borrow decoder:JsonFieldDecoder) -> JsonFields
+  = if !fields.ok || fields.done then fields with {present=false} else
+    let raw=fields.raw in let count=fields.count in let at=json_space(raw,fields.at) in let c=str_byte(raw,at) in
+    if c==93 then let rest=json_space(raw,at+1) in
+      if rest==len(raw) then JsonFields {raw=raw,spans=fields.spans,at=at+1,count=count,present=false,done=true,ok=true,error= -1} else json_fields_error(raw,count,rest) else
+    let element=if count==0 then at else if c==44 then json_space(raw,at+1) else -1 in
+    if element<0 || str_byte(raw,element)!=123 then json_fields_error(raw,count,if element<0 then at else element) else
+    let walked=json_fields_object(raw,decoder,fields.spans,element,1) in
+    if walked.error>=0 then json_fields_error(raw,count,walked.error) else
+    JsonFields {raw=raw,spans=walked.spans,at=walked.end,count=count+1,present=true,done=false,ok=true,error= -1}
+private fn json_field_span(borrow fields:JsonFields,index:i64) -> JsonSpan
+  = let at=index*4 in let spans=fields.spans in
+    if !fields.present || index<0 || at+3>=len(spans) then JsonSpan {ok=false,end=0} else
+    check at>=0 && at+3<len(spans) in if spans[at]<0 then JsonSpan {ok=false,end=0} else JsonSpan {ok=true,end=at}
+fn json_field_has(borrow fields:JsonFields,index:i64) -> bool = json_field_span(fields,index).ok
+fn json_field_view(borrow fields:JsonFields,index:i64) -> JsonView
+  = let slot=json_field_span(fields,index) in if !slot.ok then json_view_none() else let at=slot.end in let spans=fields.spans in
+    check at>=0 && at+1<len(spans) in let bytes=byte_slice(fields.raw,spans[at],spans[at+1]) in JsonView {kind=json_kind(bytes),raw=bytes}
+fn json_field_int(borrow fields:JsonFields,index:i64) -> IntResult
+  = let slot=json_field_span(fields,index) in if !slot.ok then int_error(1,"missing JSON field",index) else let at=slot.end in let spans=fields.spans in
+    check at>=0 && at+3<len(spans) in if spans[at+2]==2 then int_ok(spans[at+3]) else let start=spans[at] in let c=str_byte(fields.raw,start) in
+    let atom=json_atom_span(fields.raw,start,spans[at+1],if c==45 || c>=48 && c<=57 then 3 else 0) in
+    if atom.integer then int_ok(atom.value) else int_error(1,"expected JSON integer",start)
+fn json_field_text(borrow fields:JsonFields,index:i64) -> BytesResult
+  = let slot=json_field_span(fields,index) in if !slot.ok then bytes_error(1,"missing JSON field",index) else let at=slot.end in let spans=fields.spans in
+    check at>=0 && at+3<len(spans) in let start=spans[at] in let end=spans[at+1] in let raw=fields.raw in
+    if spans[at+2]==1 then bytes_ok(byte_slice(raw,start+1,end-1)) else
+    if str_byte(raw,start)!=34 then bytes_error(1,"expected JSON string",start) else
+    if json_plain_end(raw,start+1)==end-1 then bytes_ok(byte_slice(raw,start+1,end-1)) else
+      json_text(Json {kind=4,raw=byte_slice(raw,start,end),count=0,offsets=arr(i in 0..0) 0})
+; A member as a Json value; arrays carry the element count found by the walk.
+fn json_field_json(borrow fields:JsonFields,index:i64) -> Json
+  = let slot=json_field_span(fields,index) in if !slot.ok then json_none().value else let at=slot.end in let spans=fields.spans in
+    check at>=0 && at+3<len(spans) in let raw=fields.raw in
+    if spans[at+2]==3 then Json {kind=5,raw=byte_slice(raw,spans[at],spans[at+1]),count=spans[at+3],offsets=arr(i in 0..0) 0} else
+    json_valid_slice(raw,spans[at],spans[at+1])
+fn json_field_bool(borrow fields:JsonFields,index:i64) -> JsonBoolResult
+  = json_bool(json_view_json(json_field_view(fields,index)))
+private fn json_atom_span(raw:Arr u8 n,start:i64,end:i64,kind:i64) -> JsonAtom
+  = if kind!=3 then JsonAtom { present=kind!=0,kind=kind,integer=false,value=0 } else
+    let negative=str_byte(raw,start)==45 in let first=start+(if negative then 1 else 0) in
+    ; Up to 18 digits cannot overflow i64, so they skip the per-digit bound.
+    if end-first>=1 && end-first<=18 then
+      loop(i=first,number=0,valid=true) while valid && i<end next(i+1,
+        let digit=str_byte(raw,i)-48 in if digit<0 || digit>9 then number else number*10-digit,
+        let digit=str_byte(raw,i)-48 in digit>=0 && digit<=9)
+        yield JsonAtom { present=true,kind=3,integer=valid,value=if !valid then 0 else if negative then number else 0-number } else
+    let limit=if negative then -9223372036854775808 else -9223372036854775807 in
+    loop(i=first,number=0,valid=first<end) while valid && i<end next(i+1,
+      let digit=str_byte(raw,i)-48 in if digit<0 || digit>9 || number<(limit+digit)/10 then number else number*10-digit,
+      let digit=str_byte(raw,i)-48 in digit>=0 && digit<=9 && number>=(limit+digit)/10)
+      yield JsonAtom { present=true,kind=3,integer=valid,value=if !valid then 0 else if negative then number else 0-number }
+fn json_atom(value:Json) -> JsonAtom = json_atom_span(value.raw,0,len(value.raw),value.kind)
+fn json_get_atom(value:Json,name:Arr u8 n) -> JsonAtom
+  = if value.kind!=6 then JsonAtom { present=false,kind=0,integer=false,value=0 } else
+    let offsets=value.offsets in let raw=value.raw in
+    let found=loop(i=value.count-1,at= -1) while at<0 && i>=0 next(i-1,
+      let slot=i*4 in if slot>=0 && slot+3<len(offsets) && json_key_equal(raw,offsets[slot],offsets[slot+1],name) then slot else -1) yield at in
+    if found<0 then JsonAtom { present=false,kind=0,integer=false,value=0 } else check found>=0 && found+3<len(offsets) in
+      let start=offsets[found+2] in let end=offsets[found+3] in let c=str_byte(raw,start) in
+      let kind=if c==110 then 1 else if c==116 || c==102 then 2 else if c==34 then 4 else if c==91 then 5 else if c==123 then 6 else 3 in
+      json_atom_span(raw,start,end,kind)
+fn json_quote (borrow text: Arr u8 n) -> Arr u8 _
+  = let extra=sum(i in 0..n) if text[i]==u8(34) || text[i]==u8(92) then 1 else if text[i]<u8(32) then 5 else 0 in
+    let size=n+extra+2 in check size>=2 in let initial=arr(i in 0..size) if i==0 || i==size-1 then u8(34) else u8(0) in
+    loop(i=0,at=1,out=initial) while i<n next(i+1,
+      check i>=0 && i<n in let c=text[i] in at+(if c==u8(34) || c==u8(92) then 2 else if c<u8(32) then 6 else 1),
+      check i>=0 && i<n && at>=1 && at<len(out)-1 in let c=text[i] in
+      if c==u8(34) || c==u8(92) then check at+1<len(out) in set(set(out,at,u8(92)),at+1,c)
+      else if c<u8(32) then check at+5<len(out) in
+        set(set(set(set(set(set(out,at,u8(92)),at+1,u8(117)),at+2,u8(48)),at+3,u8(48)),at+4,json_hex_digit(i64(c)/16)),at+5,json_hex_digit(i64(c)%16))
+      else set(out,at,c)) yield out
+fn json_hex_digit (value: i64) -> u8
+  = let digits = "0123456789abcdef" in if value >= 0 && value < 16 then digits[value] else '0'
+fn json_compact (source: Arr u8 n) -> Arr u8 _
+  = let size=loop(i=0,quoted=false,escaped=false,count=0) while i<n next(i+1,
+      check i>=0 && i<n in if source[i]=='"' && !escaped then !quoted else quoted,
+      check i>=0 && i<n in quoted && !escaped && source[i]=='\\',
+      check i>=0 && i<n in count+(if !quoted && (source[i]==' ' || source[i]=='\n' || source[i]=='\r' || source[i]=='\t') then 0 else 1)) yield count in
+    if size==n then source else check size>=0 in let initial=arr(i in 0..size) u8(0) in
+    loop(i=0,quoted=false,escaped=false,at=0,out=initial) while i<n next(i+1,
+      check i>=0 && i<n in if source[i]=='"' && !escaped then !quoted else quoted,
+      check i>=0 && i<n in quoted && !escaped && source[i]=='\\',
+      check i>=0 && i<n in at+(if !quoted && (source[i]==' ' || source[i]=='\n' || source[i]=='\r' || source[i]=='\t') then 0 else 1),
+      check i>=0 && i<n in if !quoted && (source[i]==' ' || source[i]=='\n' || source[i]=='\r' || source[i]=='\t') then out else check at>=0 && at<len(out) in set(out,at,source[i])) yield out
+
+; Typed serialization constructors retain the same sealed, validated Json invariant.
+type JsonBoolResult = { ok:bool,value:bool,error:Error }
+fn json_bool(value:Json) -> JsonBoolResult
+  = if value.kind!=2 then JsonBoolResult { ok=false,value=false,error=Error { code=22,message="expected JSON boolean",position=0 } } else
+    JsonBoolResult { ok=true,value=str_equal(value.raw,"true"),error=no_error() }
+fn json_float(value:Json) -> FloatResult
+  = if value.kind!=3 then float_error("expected JSON number",0) else float_parse(value.raw)
+fn json_is_null(value:Json) -> bool = value.kind==1
+fn json_encode(value:Json) -> Arr u8 _ = value.raw
+fn json_value_null() -> Json = Json { kind=1,raw="null",count=0,offsets=arr(i in 0..0) 0 }
+fn json_value_bool(value:bool) -> Json = Json { kind=2,raw=if value then "true" else "false",count=0,offsets=arr(i in 0..0) 0 }
+fn json_value_int(value:i64) -> Json = Json { kind=3,raw=int_text(value),count=0,offsets=arr(i in 0..0) 0 }
+fn json_value_string(borrow value:Arr u8 n) -> JsonResult
+  = if !utf8_valid(value) then JsonResult { ok=false,value=json_none().value,error=Error { code=22,message="invalid UTF-8 string",position=0 } } else
+    JsonResult { ok=true,value=Json { kind=4,raw=json_quote(value),count=0,offsets=arr(i in 0..0) 0 },error=no_error() }
+fn json_value_float(value:f64) -> JsonResult
+  = let encoded=float_text(value) in if !encoded.ok then JsonResult { ok=false,value=json_none().value,error=encoded.error } else
+    JsonResult { ok=true,value=Json { kind=3,raw=encoded.value,count=0,offsets=arr(i in 0..0) 0 },error=no_error() }
+private fn json_constructor_depth(value:Json) -> i64
+  = if value.kind!=5 && value.kind!=6 then 0 else let raw=value.raw in
+    loop(i=0,quoted=false,escaped=false,depth=0,maximum=0) while i<len(raw) next(i+1,
+      check i>=0 && i<len(raw) in if raw[i]=='"' && !escaped then !quoted else quoted,
+      check i>=0 && i<len(raw) in quoted && !escaped && raw[i]=='\\',
+      check i>=0 && i<len(raw) in depth+(if quoted then 0 else if raw[i]=='[' || raw[i]=='{' then 1 else if raw[i]==']' || raw[i]=='}' then -1 else 0),
+      check i>=0 && i<len(raw) in let token= !quoted && raw[i]!=']' && raw[i]!='}' && raw[i]!=',' && raw[i]!=':' && raw[i]!=' ' && raw[i]!='\n' && raw[i]!='\r' && raw[i]!='\t' in if token && depth>maximum then depth else maximum) yield maximum
+fn json_value_array(borrow values:Arr Json n) -> JsonResult
+  = let valid=loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in values[i].kind>0 && json_constructor_depth(values[i])<=127) yield ok in
+    if !valid then JsonResult { ok=false,value=json_none().value,error=Error { code=22,message="missing or over-nested JSON value",position=0 } } else
+    let text=loop(i=0,out="[") while i<n next(i+1,check i>=0 && i<n in concat(out,if i==0 then "" else ",",values[i].raw)) yield concat(out,"]") in
+    JsonResult { ok=true,value=Json { kind=5,raw=text,count=n,offsets=arr(i in 0..0) 0 },error=no_error() }
+; Streaming construction retains only the encoded output, not every child Json
+; and its object-offset table. Snapshots of a builder retain immutable buffers.
+sealed type JsonArrayBuilder = {raw:Arr u8 _,count:i64,ok:bool}
+fn json_array_builder() -> JsonArrayBuilder = JsonArrayBuilder {raw="[",count=0,ok=true}
+fn json_array_builder_push(move builder:JsonArrayBuilder,value:Json) -> JsonArrayBuilder
+  = if !builder.ok then builder else if value.kind==0 || json_constructor_depth(value)>127 then builder with {ok=false} else
+    JsonArrayBuilder {raw=concat(builder.raw,if builder.count==0 then "" else ",",value.raw),count=builder.count+1,ok=true}
+fn json_array_builder_finish(move builder:JsonArrayBuilder) -> JsonResult
+  = if !builder.ok then JsonResult {ok=false,value=json_none().value,error=Error {code=22,message="missing or over-nested JSON value",position=0}} else
+    JsonResult {ok=true,value=Json {kind=5,raw=concat(builder.raw,"]"),count=builder.count,offsets=arr(i in 0..0) 0},error=no_error()}
+fn json_value_object(borrow keys:Arr Arr u8 _ n,borrow values:Arr Json m) -> JsonResult
+  = if n!=m then JsonResult { ok=false,value=json_none().value,error=Error { code=22,message="JSON key/value length mismatch",position=0 } } else
+    let valid=loop(i=0,valid=true) while valid && i<n next(i+1,check i>=0 && i<n && i<m in utf8_valid(keys[i]) && values[i].kind>0 && json_constructor_depth(values[i])<=127) yield valid in
+    if !valid then JsonResult { ok=false,value=json_none().value,error=Error { code=22,message="invalid UTF-8 object key",position=0 } } else
+      let encoded=arr(i in 0..n) json_quote(keys[i]) in let initial=arr(i in 0..n*4) 0 in
+      loop(i=0,out="{",entries=initial) while i<n next(i+1,
+        check i>=0 && i<n && i<m in concat(out,if i==0 then "" else ",",encoded[i],":",values[i].raw),
+        check i>=0 && i<n && i<m in let begin=len(out)+(if i==0 then 0 else 1) in let key_end=begin+len(encoded[i]) in
+        check i*4>=0 && i*4+3<len(entries) in set(set(set(set(entries,i*4,begin),i*4+1,key_end),i*4+2,key_end+1),i*4+3,key_end+1+len(values[i].raw)))
+        yield JsonResult { ok=true,value=Json { kind=6,raw=concat(out,"}"),count=n,offsets=entries },error=no_error() }
+; Preserve validated children and cached offsets when replacing/appending one
+; member. Unchanged nested values are neither decoded nor serialized again.
+; Duplicate keys retain JSON's last-occurrence lookup/update semantics.
+fn json_object_set(object:Json,key:Arr u8 _,replacement:Json) -> JsonResult
+  = if object.kind!=6 || replacement.kind==0 || !utf8_valid(key) || json_constructor_depth(replacement)>127 then
+      JsonResult { ok=false,value=json_none().value,error=Error { code=22,message="invalid JSON object update",position=0 } } else
+    let offsets=object.offsets in let raw=object.raw in
+    let found=loop(i=object.count-1,slot= -1) while slot<0 && i>=0 next(i-1,
+      let at=i*4 in if at>=0 && at+3<len(offsets) && json_key_equal(raw,offsets[at],offsets[at+1],key) then at else -1) yield slot in
+    if found>=0 then check found>=0 && found+3<len(offsets) in
+      let begin=offsets[found+2] in let end=offsets[found+3] in let delta=len(replacement.raw)-(end-begin) in
+      let entries=arr(i in 0..len(offsets)) if i==found+3 then begin+len(replacement.raw) else if offsets[i]>=end then offsets[i]+delta else offsets[i] in
+      JsonResult { ok=true,value=Json { kind=6,raw=concat(str_slice(raw,0,begin),replacement.raw,str_slice(raw,end,len(raw))),count=object.count,offsets=entries },error=no_error() }
+    else let count=object.count in check count>=0 in let encoded=json_quote(key) in let begin=len(raw)-1+(if count==0 then 0 else 1) in let key_end=begin+len(encoded) in
+      let entries=arr(i in 0..count*4+4) if i<count*4 then check i>=0 && i<len(offsets) in offsets[i]
+        else if i==count*4 then begin else if i==count*4+1 then key_end else if i==count*4+2 then key_end+1 else key_end+1+len(replacement.raw) in
+      JsonResult { ok=true,value=Json { kind=6,raw=concat(str_slice(raw,0,len(raw)-1),if count==0 then "" else ",",encoded,":",replacement.raw,"}"),count=count+1,offsets=entries },error=no_error() }
+private fn json_empty_keys() -> Arr Arr u8 _ _ = arr(i in 0..0) ""
+fn json_object_keys(value:Json) -> Arr Arr u8 _ _
+  = if value.kind!=6 then json_empty_keys() else
+    let count=value.count in let offsets=value.offsets in check count>=0 in
+    arr(i in 0..count) check i*4>=0 && i*4+1<len(offsets) in
+      let key=Json { kind=4,raw=str_slice(value.raw,offsets[i*4],offsets[i*4+1]),count=0,offsets=arr(j in 0..0) 0 } in json_text(key).value
+
+; Indexed iteration preserves source order and duplicate members. Accessors use
+; the sealed object's cached spans; callers need not allocate a keys array or
+; search for a member they are already visiting.
+fn json_object_key_at(value:Json,index:i64) -> BytesResult
+  = if value.kind!=6 || index<0 || index>=value.count then bytes_error(22,"JSON member index",index) else
+    let slot=index*4 in let offsets=value.offsets in check slot>=0 && slot+3<len(offsets) in
+    json_text(Json {kind=4,raw=byte_slice(value.raw,offsets[slot],offsets[slot+1]),count=0,offsets=arr(i in 0..0) 0})
+fn json_object_value_at(value:Json,index:i64) -> JsonOption
+  = if value.kind!=6 || index<0 || index>=value.count then json_none() else
+    let slot=index*4 in let offsets=value.offsets in check slot>=0 && slot+3<len(offsets) in
+    JsonOption {present=true,value=json_valid_slice(value.raw,offsets[slot+2],offsets[slot+3])}
+
+; Structured streaming construction. The stack enforces commas, key/value
+; transitions and the parser's nesting bound before a sealed Json is produced.
+sealed type JsonWriter = {raw:Arr u8 _,frames:Arr i64 _,depth:i64,root:bool,kind:i64,count:i64,maximum:i64,ok:bool}
+fn json_writer() -> JsonWriter
+  = JsonWriter {raw="",frames=arr(i in 0..0) 0,depth=0,root=false,kind=0,count=0,maximum=0,ok=true}
+private fn json_writer_prefix(move state:JsonWriter,kind:i64) -> JsonWriter
+  = if !state.ok || state.depth>128 then state with {ok=false} else
+    if state.depth==0 then if state.root then state with {ok=false} else state with {root=true,kind=kind,maximum=if state.depth>state.maximum then state.depth else state.maximum} else
+    let at=state.depth-1 in check at>=0 && at<len(state.frames) in let frame=state.frames[at] in
+    if frame!=1 && frame!=2 && frame!=5 then state with {ok=false} else
+    state with {raw=if frame==2 then concat(state.raw,",") else state.raw,frames=set(state.frames,at,if frame==5 then 4 else 2),count=state.count+(if state.depth==1 && state.kind==5 then 1 else 0),maximum=if state.depth>state.maximum then state.depth else state.maximum}
+private fn json_writer_open(move state:JsonWriter,kind:i64) -> JsonWriter
+  = let state=json_writer_prefix(state,kind) in if !state.ok then state else let at=state.depth in let frames=if at<len(state.frames) then state.frames else push(state.frames,0) in check at>=0 && at<len(frames) in
+    state with {raw=concat(state.raw,if kind==5 then "[" else "{"),frames=set(frames,at,if kind==5 then 1 else 3),depth=at+1}
+fn json_writer_begin_array(move state:JsonWriter) -> JsonWriter = json_writer_open(state,5)
+fn json_writer_begin_object(move state:JsonWriter) -> JsonWriter = json_writer_open(state,6)
+private fn json_writer_close(move state:JsonWriter,object:bool) -> JsonWriter
+  = if !state.ok || state.depth<1 then state with {ok=false} else let at=state.depth-1 in check at>=0 && at<len(state.frames) in let frame=state.frames[at] in
+    if (if object then frame!=3 && frame!=4 else frame!=1 && frame!=2) then state with {ok=false} else
+    state with {raw=concat(state.raw,if object then "}" else "]"),depth=at}
+fn json_writer_end_array(move state:JsonWriter) -> JsonWriter = json_writer_close(state,false)
+fn json_writer_end_object(move state:JsonWriter) -> JsonWriter = json_writer_close(state,true)
+private fn json_append_quote(move out:Arr u8 _,borrow text:Arr u8 _) -> Arr u8 _
+  = if json_plain_end(text,0)==len(text) then concat(out,"\"",text,"\"") else concat(out,json_quote(text))
+fn json_writer_key(move state:JsonWriter,borrow key:Arr u8 _) -> JsonWriter
+  = if !state.ok || state.depth<1 || !utf8_valid(key) then state with {ok=false} else let at=state.depth-1 in check at>=0 && at<len(state.frames) in let frame=state.frames[at] in
+    if frame!=3 && frame!=4 then state with {ok=false} else
+    state with {raw=concat(json_append_quote(if frame==4 then concat(state.raw,",") else state.raw,key),":"),frames=set(state.frames,at,5),count=state.count+(if state.depth==1 then 1 else 0)}
+fn json_writer_string(move state:JsonWriter,borrow text:Arr u8 _) -> JsonWriter
+  = if !utf8_valid(text) then state with {ok=false} else let state=json_writer_prefix(state,4) in if !state.ok then state else state with {raw=json_append_quote(state.raw,text)}
+private fn json_append_integer(move raw:Arr u8 _,value:i64) -> Arr u8 _
+  = let at=len(raw) in let size=json_encode_integer_size(value) in
+    json_encode_integer_write(concat(raw,byte_slice("00000000000000000000",0,size)),at,value).raw
+fn json_writer_int(move state:JsonWriter,value:i64) -> JsonWriter
+  = let state=json_writer_prefix(state,3) in if !state.ok then state else state with {raw=json_append_integer(state.raw,value)}
+fn json_writer_bool(move state:JsonWriter,value:bool) -> JsonWriter
+  = let state=json_writer_prefix(state,2) in if !state.ok then state else state with {raw=concat(state.raw,if value then "true" else "false")}
+fn json_writer_null(move state:JsonWriter) -> JsonWriter
+  = let state=json_writer_prefix(state,1) in if !state.ok then state else state with {raw=concat(state.raw,"null")}
+fn json_writer_value(move state:JsonWriter,borrow value:Json) -> JsonWriter
+  = if value.kind==0 || state.depth+json_constructor_depth(value)>128 then state with {ok=false} else
+    let root=state.depth==0 && !state.root in let maximum=state.depth+json_constructor_depth(value) in let state=json_writer_prefix(state,value.kind) in
+    if !state.ok then state else state with {raw=concat(state.raw,value.raw),count=if root && value.kind==5 then value.count else state.count,maximum=if maximum>state.maximum then maximum else state.maximum}
+fn json_writer_finish(move state:JsonWriter) -> JsonResult
+  = if !state.ok || !state.root || state.depth!=0 then JsonResult {ok=false,value=json_none().value,error=Error {code=22,message="incomplete or invalid JSON writer",position=len(state.raw)}} else
+    JsonResult {ok=true,value=if state.kind==6 then json_valid_slice(state.raw,0,len(state.raw)) else Json {kind=state.kind,raw=state.raw,count=if state.kind==5 then state.count else 0,offsets=arr(i in 0..0) 0},error=no_error()}
+
+; A validated encoded value with cached nesting depth, suitable for reuse in
+; larger responses. Object member indexes are created only when materialized.
+sealed type JsonFragment = {raw:Arr u8 _,kind:i64,count:i64,depth:i64}
+type JsonFragmentResult = {ok:bool,value:JsonFragment,error:Error}
+fn json_fragment(borrow value:Json) -> JsonFragment
+  = JsonFragment {raw=value.raw,kind=value.kind,count=value.count,depth=json_constructor_depth(value)}
+fn json_fragment_json(borrow value:JsonFragment) -> Json
+  = if value.kind==0 then json_none().value else if value.kind==6 then json_valid_slice(value.raw,0,len(value.raw)) else
+    Json {kind=value.kind,raw=value.raw,count=value.count,offsets=arr(i in 0..0) 0}
+fn json_writer_fragment(move state:JsonWriter,borrow value:JsonFragment) -> JsonWriter
+  = let maximum=state.depth+value.depth in
+    if value.kind==0 || maximum>128 then state with {ok=false} else
+    let root=state.depth==0 && !state.root in let state=json_writer_prefix(state,value.kind) in
+    if !state.ok then state else state with {raw=concat(state.raw,value.raw),count=if root && value.kind==5 then value.count else state.count,maximum=if maximum>state.maximum then maximum else state.maximum}
+fn json_writer_fragment_finish(move state:JsonWriter) -> JsonFragmentResult
+  = if !state.ok || !state.root || state.depth!=0 then JsonFragmentResult {ok=false,value=JsonFragment {raw="",kind=0,count=0,depth=0},error=Error {code=22,message="incomplete or invalid JSON writer",position=len(state.raw)}} else
+    JsonFragmentResult {ok=true,value=JsonFragment {raw=state.raw,kind=state.kind,count=state.count,depth=state.maximum},error=no_error()}
+
+; Prepared object encoding keeps validated, quoted member names and accepts
+; typed scalar values or already validated fragments. Integers need no
+; intermediate decimal allocation; indexes are built only on materialization.
+; members[i] is the prepared ',"name":' prefix (no comma first), so a member
+; name is written with one copy instead of separator, name and colon writes.
+sealed type JsonObjectEncoder = {keys:Arr Arr u8 _ _,members:Arr Arr u8 _ _,count:i64,bytes:i64,valid:bool}
+type JsonObjectEncoderResult = {ok:bool,value:JsonObjectEncoder,error:Error}
+sealed type JsonEncodeValue = {kind:i64,value:i64,raw:Arr u8 _,depth:i64}
+fn json_encode_null() -> JsonEncodeValue = JsonEncodeValue {kind=1,value=0,raw="",depth=0}
+fn json_encode_bool(value:bool) -> JsonEncodeValue = JsonEncodeValue {kind=2,value=if value then 1 else 0,raw="",depth=0}
+fn json_encode_int(value:i64) -> JsonEncodeValue = JsonEncodeValue {kind=3,value=value,raw="",depth=0}
+fn json_encode_string(borrow text:Arr u8 _) -> JsonEncodeValue
+  = JsonEncodeValue {kind=if utf8_valid(text) then 4 else 0,value=0,raw=text,depth=0}
+fn json_encode_fragment(borrow value:JsonFragment) -> JsonEncodeValue
+  = JsonEncodeValue {kind=if value.kind==0 then 0 else 5,value=0,raw=value.raw,depth=value.depth}
+fn json_object_encoder(borrow keys:Arr Arr u8 _ n) -> JsonObjectEncoderResult
+  = let valid=loop(i=0,valid=true) while valid && i<n next(i+1,check i>=0 && i<n in utf8_valid(keys[i])) yield valid in
+    if !valid then JsonObjectEncoderResult {ok=false,value=JsonObjectEncoder {keys=arr(i in 0..0) "",members=arr(i in 0..0) "",count=0,bytes=0,valid=false},error=Error {code=22,message="invalid JSON object key",position=0}} else
+    let encoded=arr(i in 0..n) json_quote(keys[i]) in
+    let members=arr(i in 0..n) check i>=0 && i<n in concat(if i==0 then "" else ",",encoded[i],":") in
+    JsonObjectEncoderResult {ok=true,value=JsonObjectEncoder {keys=encoded,members=members,count=n,bytes=(sum(i in 0..n) len(encoded[i])+1)+(if n==0 then 0 else n-1),valid=true},error=no_error()}
+private fn json_encode_integer_size(value:i64) -> i64
+  = loop(number=if value>0 then 0-value else value,size=1) while number<= -10 next(number/10,size+1) yield size+(if value<0 then 1 else 0)
+private fn json_encode_size(borrow value:JsonEncodeValue) -> i64
+  = if value.kind==1 then 4 else if value.kind==2 then if value.value==0 then 5 else 4 else if value.kind==3 then json_encode_integer_size(value.value) else
+    if value.kind==4 then 2+len(value.raw)+(if json_plain_end(value.raw,0)==len(value.raw) then 0 else
+      sum(i in 0..len(value.raw)) if value.raw[i]==u8(34) || value.raw[i]==u8(92) then 1 else if value.raw[i]<u8(32) then 5 else 0) else len(value.raw)
+type JsonEncodeWrite = {raw:Arr u8 _,at:i64}
+private fn json_encode_integer_write(move raw:Arr u8 _,at:i64,value:i64) -> JsonEncodeWrite
+  = let size=json_encode_integer_size(value) in let end=at+size in let raw=if value<0 then byte_write_le(raw,at,45,1) else raw in
+    let out=loop(i=end-1,number=if value>0 then 0-value else value,out=raw) while i>=at+(if value<0 then 1 else 0)
+      next(i-1,number/10,byte_write_le(out,i,48-number%10,1)) yield out in JsonEncodeWrite {raw=out,at=end}
+private fn json_encode_quote_write(move raw:Arr u8 _,at:i64,borrow text:Arr u8 n) -> JsonEncodeWrite
+  = if json_plain_end(text,0)==n then JsonEncodeWrite {raw=byte_write_le(byte_copy(byte_write_le(raw,at,34,1),at+1,text),at+n+1,34,1),at=at+n+2} else
+    let out=loop(i=0,position=at+1,out=byte_write_le(raw,at,34,1)) while i<n next(i+1,
+      check i>=0 && i<n in position+(if text[i]==u8(34) || text[i]==u8(92) then 2 else if text[i]<u8(32) then 6 else 1),
+      check i>=0 && i<n in let c=i64(text[i]) in
+      if c==34 || c==92 then byte_write_le(out,position,bit_or(92,shift_left(c,8)),2) else if c<32 then
+        let high=c/16 in let low=c%16 in
+        byte_write_le(byte_write_le(out,position,808482140,4),position+4,bit_or(if high<10 then high+48 else high+87,shift_left(if low<10 then low+48 else low+87,8)),2)
+      else byte_write_le(out,position,c,1)) yield JsonEncodeWrite {raw=out,at=position} in
+    let end=out.at in JsonEncodeWrite {raw=byte_write_le(out.raw,end,34,1),at=end+1}
+private fn json_encode_value_write(move raw:Arr u8 _,at:i64,borrow value:JsonEncodeValue) -> JsonEncodeWrite
+  = if value.kind==3 then json_encode_integer_write(raw,at,value.value) else if value.kind==4 then json_encode_quote_write(raw,at,value.raw) else
+    let text=if value.kind==1 then "null" else if value.kind==2 then if value.value==0 then "false" else "true" else value.raw in
+    JsonEncodeWrite {raw=byte_copy(raw,at,text),at=at+len(text)}
+private fn json_encode_member(move state:JsonEncodeWrite,borrow encoder:JsonObjectEncoder,borrow values:Arr JsonEncodeValue n,index:i64) -> JsonEncodeWrite
+  = check index>=0 && index<n && index<len(encoder.members) in let member=encoder.members[index] in let at=state.at in
+    json_encode_value_write(byte_copy(state.raw,at,member),at+len(member),values[index])
+fn json_encode_object(borrow encoder:JsonObjectEncoder,borrow values:Arr JsonEncodeValue n) -> JsonFragmentResult
+  = let valid=encoder.valid && encoder.count==n && (loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in values[i].kind>0 && values[i].depth<=127) yield ok) in
+    if !valid then JsonFragmentResult {ok=false,value=JsonFragment {raw="",kind=0,count=0,depth=0},error=Error {code=22,message="invalid prepared JSON object",position=0}} else
+    let maximum=loop(i=0,depth=0) while i<n next(i+1,check i>=0 && i<n in if values[i].depth+1>depth then values[i].depth+1 else depth) yield depth in
+    let size=2+encoder.bytes+(sum(i in 0..n) json_encode_size(values[i])) in check size>=2 in
+    let written=loop(i=0,state=JsonEncodeWrite {raw=byte_write_le(arr(i in 0..size) u8(0),0,123,1),at=1}) while i<n next(i+1,json_encode_member(state,encoder,values,i)) yield state in
+    let end=written.at in check end==size-1 in
+    JsonFragmentResult {ok=true,value=JsonFragment {raw=byte_write_le(written.raw,end,125,1),kind=6,count=n,depth=maximum},error=no_error()}
+
+; Views retain validated source bytes without allocating object-offset tables.
+; Sealed cursors can only advance along member/element boundaries established
+; by the JSON parser, so view conversion never trusts a caller-supplied offset.
+sealed type JsonView = {kind:i64,raw:Arr u8 _}
+sealed type JsonObjectCursor = {source:JsonView,at:i64}
+sealed type JsonArrayCursor = {source:JsonView,at:i64}
+type JsonObjectStep = {present:bool,key:Arr u8 _,value:JsonView,cursor:JsonObjectCursor}
+type JsonArrayStep = {present:bool,value:JsonView,cursor:JsonArrayCursor}
+fn json_view(borrow value:Json) -> JsonView = JsonView {kind=value.kind,raw=value.raw}
+private fn json_view_none() -> JsonView = JsonView {kind=0,raw=""}
+fn json_view_json(borrow value:JsonView) -> Json
+  = if value.kind==0 then json_none().value else json_valid_slice(value.raw,0,len(value.raw))
+fn json_view_text(borrow value:JsonView) -> BytesResult
+  = json_text(Json {kind=value.kind,raw=value.raw,count=0,offsets=arr(i in 0..0) 0})
+fn json_view_atom(borrow value:JsonView) -> JsonAtom = json_atom_span(value.raw,0,len(value.raw),value.kind)
+fn json_object_cursor(borrow value:JsonView) -> JsonObjectCursor
+  = JsonObjectCursor {source=value,at=if value.kind==6 then json_space(value.raw,1) else len(value.raw)}
+fn json_object_next(borrow cursor:JsonObjectCursor) -> JsonObjectStep
+  = let source=cursor.source in let raw=source.raw in let at=cursor.at in
+    if source.kind!=6 || at>=len(raw) || str_byte(raw,at)==125 then JsonObjectStep {present=false,key="",value=json_view_none(),cursor=cursor} else
+    let member=json_valid_member(raw,at) in
+    let key=json_text(Json {kind=4,raw=byte_slice(raw,member.key_start,member.key_end),count=0,offsets=arr(i in 0..0) 0}).value in
+    let bytes=byte_slice(raw,member.value_start,member.value_end) in
+    JsonObjectStep {present=true,key=key,value=JsonView {kind=json_kind(bytes),raw=bytes},cursor=JsonObjectCursor {source=source,at=member.following}}
+fn json_array_cursor(borrow value:JsonView) -> JsonArrayCursor
+  = JsonArrayCursor {source=value,at=if value.kind==5 then json_space(value.raw,1) else len(value.raw)}
+fn json_array_next(borrow cursor:JsonArrayCursor) -> JsonArrayStep
+  = let source=cursor.source in let raw=source.raw in let at=cursor.at in
+    if source.kind!=5 || at>=len(raw) || str_byte(raw,at)==93 then JsonArrayStep {present=false,value=json_view_none(),cursor=cursor} else
+    let end=json_skip(raw,at) in let following=json_space(raw,end) in
+    let bytes=byte_slice(raw,at,end) in
+    JsonArrayStep {present=true,value=JsonView {kind=json_kind(bytes),raw=bytes},cursor=JsonArrayCursor {source=source,at=if str_byte(raw,following)==44 then json_space(raw,following+1) else following}}
+
+; Forward token traversal over already validated JSON. Advancing transfers its
+; single source owner; container values are skipped only when requested.
+; Kinds 1..6 match JSON; 7 is a member name; -5/-6 close arrays/objects.
+sealed type JsonTokens = {raw:Arr u8 _,start:i64,finish:i64,kind:i64,depth:i64,present:bool}
+type JsonTokenInfo = {start:i64,finish:i64,kind:i64,depth:i64,present:bool}
+private fn json_token_seek(borrow raw:Arr u8 n,from:i64,depth:i64) -> JsonTokenInfo
+  = let first=json_space(raw,from) in let c=str_byte(raw,first) in let at=if c==44 || c==58 then json_space(raw,first+1) else first in
+    if at>=n then JsonTokenInfo {start=n,finish=n,kind=0,depth=depth,present=false} else
+    let c=str_byte(raw,at) in let finish=if c==123 || c==91 || c==125 || c==93 then at+1 else if c==34 then json_skip_string(raw,at) else json_skip(raw,at) in
+    let kind=if c==123 then 6 else if c==91 then 5 else if c==125 then -6 else if c==93 then -5 else
+      if c==34 then (if str_byte(raw,json_space(raw,finish))==58 then 7 else 4) else if c==110 then 1 else if c==116 || c==102 then 2 else 3 in
+    JsonTokenInfo {start=at,finish=finish,kind=kind,depth=depth,present=true}
+fn json_tokens(borrow value:Json) -> JsonTokens
+  = let raw=value.raw in let info=if value.kind==0 then JsonTokenInfo {start=0,finish=0,kind=0,depth=0,present=false} else json_token_seek(raw,0,0) in
+    JsonTokens {raw=raw,start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}
+fn json_view_tokens(borrow value:JsonView) -> JsonTokens
+  = let raw=value.raw in let info=if value.kind==0 then JsonTokenInfo {start=0,finish=0,kind=0,depth=0,present=false} else json_token_seek(raw,0,0) in
+    JsonTokens {raw=raw,start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}
+fn json_tokens_next(move cursor:JsonTokens) -> JsonTokens
+  = if !cursor.present then cursor else
+    let depth=cursor.depth+(if cursor.kind==5 || cursor.kind==6 then 1 else if cursor.kind== -5 || cursor.kind== -6 then -1 else 0) in
+    let info=json_token_seek(cursor.raw,cursor.finish,depth) in
+    cursor with {start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}
+fn json_tokens_skip(move cursor:JsonTokens) -> JsonTokens
+  = if cursor.kind!=5 && cursor.kind!=6 then json_tokens_next(cursor) else
+    let finish=json_skip(cursor.raw,cursor.start) in let info=json_token_seek(cursor.raw,finish,cursor.depth) in
+    cursor with {start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}
+fn json_token_text(borrow cursor:JsonTokens) -> BytesResult
+  = if cursor.kind!=4 && cursor.kind!=7 then bytes_error(1,"expected JSON string token",cursor.start) else
+    json_text(Json {kind=4,raw=byte_slice(cursor.raw,cursor.start,cursor.finish),count=0,offsets=arr(i in 0..0) 0})
+fn json_token_text_equal(borrow cursor:JsonTokens,borrow text:Arr u8 _) -> bool
+  = (cursor.kind==4 || cursor.kind==7) && json_key_equal(cursor.raw,cursor.start,cursor.finish,text)
+fn json_token_atom(borrow cursor:JsonTokens) -> JsonAtom
+  = if cursor.kind<1 || cursor.kind>4 then JsonAtom {present=false,kind=0,integer=false,value=0} else json_atom_span(cursor.raw,cursor.start,cursor.finish,cursor.kind)
+type JsonTokenValue = {value:JsonView,cursor:JsonTokens}
+; Take an object token as an indexed Json in the same pass that finds its end,
+; instead of skipping it and then indexing its members again. Other kinds use
+; the ordinary take; the source is already validated, as for views.
+type JsonTokenJson = {value:Json,cursor:JsonTokens}
+fn json_tokens_take_json(move cursor:JsonTokens) -> JsonTokenJson
+  = if cursor.kind!=6 then let taken=json_tokens_take(cursor) in JsonTokenJson {value=json_view_json(taken.value),cursor=taken.cursor} else
+    let raw=cursor.raw in let start=cursor.start in
+    let first=json_valid_member(raw,json_space(raw,start+1)) in
+    let indexed=loop(step=first,count=0,entries=arr(i in 0..if first.done then 0 else 16) 0) while !step.done
+      next(json_valid_member(raw,step.following),count+1,
+        let slot=count*4 in let room=json_index_room(entries,slot) in check slot>=0 && slot+3<len(room) in
+          set(set(set(set(room,slot,step.key_start-start),slot+1,step.key_end-start),slot+2,step.value_start-start),slot+3,step.value_end-start))
+      yield JsonIndex {ok=true,end=step.key_start+1,count=count,entries=entries} in
+    let finish=indexed.end in let info=json_token_seek(raw,finish,cursor.depth) in
+    JsonTokenJson {value=Json {kind=6,raw=byte_slice(raw,start,finish),count=indexed.count,offsets=indexed.entries},
+      cursor=cursor with {start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}}
+fn json_tokens_take(move cursor:JsonTokens) -> JsonTokenValue
+  = if cursor.kind<1 || cursor.kind>6 then JsonTokenValue {value=json_view_none(),cursor=json_tokens_next(cursor)} else
+    let finish=if cursor.kind==5 || cursor.kind==6 then json_skip(cursor.raw,cursor.start) else cursor.finish in
+    let value=JsonView {kind=cursor.kind,raw=byte_slice(cursor.raw,cursor.start,finish)} in let info=json_token_seek(cursor.raw,finish,cursor.depth) in
+    JsonTokenValue {value=value,cursor=cursor with {start=info.start,finish=info.finish,kind=info.kind,depth=info.depth,present=info.present}}

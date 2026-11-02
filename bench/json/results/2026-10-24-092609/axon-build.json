@@ -1,0 +1,6362 @@
+{
+  "ok": true,
+  "program": "2fc12f45f47510591d024caf432ee09365f2664f4d30992d9b0ee9d7a12ecc02",
+  "functions": {
+    "ax_runtime_init": "74a6c9bb4137d629f7ea463de838a2e963942b540bccf4bbd8e3f37e08f73ed6",
+    "rt_errno": "6f690fc95636d7d52b5969f2c2fdab70f99df516d0a45a2bb744eeffa5e267ef",
+    "rt_result": "a5836c12e556588e62b7866aaeb9f6283a52d379fa37e5ea5f78c86cf9e6ff8a",
+    "rt_cstrlen": "f3410de3ed0aadd16d5dce794cb8fc5e08d921616bb5e02698b36af5c7939c55",
+    "rt_write": "5191c9dcd57964c0ba8d11403f947bed2e9d27afa55f5352cbfc03518e8c1da8",
+    "rt_write_all": "861a6fe25a2699e93a6202a6f339784365fac22bab704df806d3eadeecf2ab92",
+    "rt_puts": "871fbe81e6225e49dd3c89605b463bfb2de6ea44533466a2c0561b13c702e1e4",
+    "ax_exit": "8ff237943d83f6283727fcd5f5bf36c83d05165122c1c9bd881c31e233655bc0",
+    "ax_trap": "adb26c764d45feedb1b60a10c456686b132bd44ee431819a7904c906c7376111",
+    "memcpy": "1ec7eae04fc67cd2fea82bfd156de745b464472b1eb9065e1431a884804e6586",
+    "memmove": "46116cc90891da8aa2ca6114c339b5d7ebceeae1afe22c5d1ee10d93ec6b19a5",
+    "memset": "2e043a144089c8fd421adfd8e22428b12fc37300ec5663b851b91b8cb1c080ed",
+    "bzero": "f5755c999e0d420eb4c1f548931b3f3b8280e2f3937ceca53337eb3cd1e9cbc0",
+    "ax_cap": "ab50ca90f9015acfb0a51b290efb101916480035ba7ade3d4fd698a8369fbd50",
+    "rt_allocation_class": "eb6f0bb1268de8854930771e4c2ed6a1c467528a726a28093e10277dd52fad23",
+    "rt_mmap": "6a5c1ad199f8bad8e5ba0044ae14ff3bf6195dd44d3c28d2bb6033a756ef64e3",
+    "rt_map": "f282e27ae07f19afce50cf120bdc346694355f9dc58d1a8f6fbc993b325a0030",
+    "ax_alloc": "34c0f9ab2466d7ee1dcedef17beee923a77818a16ad980c63974816a4fc3bf55",
+    "rt_munmap": "4fcd110e8a3fb0d81532a01488b135dd0578158afb1a52c0060257d7fade5af8",
+    "ax_release": "103deff31e36edf99d4ccc9fbf765dcd7ec51f7289a83dee30c53f826d8c6de0",
+    "ax_free": "5501c485e94ae9ca87f4998a7d483e2e154395c9dc9303c069931277a24789a6",
+    "calloc": "55dc22a00fe0d42abbca4450eb06cad6a79eef55c7cb279e86a8a77a2a2504f7",
+    "rt_fork": "f9d43e39c7b046e69efae9266dcd78c96b8b22e39957bb0112c7cc26678abe66",
+    "rt_env_match": "d62c7306a3490c42e490f73c33eb1baf8bcfcf5a77ce010a0dc9b8554e2928e5",
+    "rt_getenv": "03c84845afa383a68631e0d381311d710bfc9e61ab213d61990f0a20e3ceeff7",
+    "rt_digit_ok": "01ef19facbab700b8676b728e0e90292498b4089edfe35806cf5a61c7229037a",
+    "ax_parse_i64": "aae94e44a3c2e3a425e17cde57322d9a4ad1d9dd1ce9b24657b40e533343c693",
+    "rt_ncpu": "1e58802b54c332f39f29086c90b9399cd80d5f3233a00c79bf78df9cb9c52987",
+    "rt_threads": "b2e8ad48101d9c5a300d4d942bbdcd5337f5aacf0bc294a4d3fa2e85c4bf33f4",
+    "ax_chunks": "06ba8f92c07314ff1819d97b0a60643b212d6a710c4df5629098b2a748d14ce3",
+    "rt_wait": "0164b888effac40cabc2ecfbb71a9563400616ae4caf6f6fb09b628dcc21c568",
+    "ax_par_for": "0b26467b18964247ddcee5a007eb4de11832113d5c97e7bbeeefe2e967cddc10",
+    "ax_usage": "7dd046804a179582887eda837c7b37ad6a50b7b3dda71310400d4ed720f2790b",
+    "ax_precondition_failed": "08511977695e5ea4d04597595f3b60cfb1b017756ac295f80bdf0d8a52874987",
+    "rt_format_integer": "050e9777048a5cdc7da3f2ff84ad07dd0ede51b7534cc76f2231008dc678d7ef",
+    "ax_print_i64": "2d3b1216c59324de9d7378a98d5853146f57a7963e8e9cd3dda9943d7f4757d2",
+    "rt_normalize_float": "f82f5a9b854aa6785a887882430df1324426eccbba7d2308a4061ad4a70f87c9",
+    "ax_print_f64": "103131009d38976e1cbebc5b958c3a39ea73f9f57e3642d6fbb3b7f2a7b16eb2",
+    "ax_print_bytes": "d67fd7259993dd9ed289de9db994bcf0ed255069051d5cd3df60b9915a1f8da0",
+    "rt_again": "9163015d66ea28e25edba0d0ecab5f2d4ccfbcd3f05906c55f0db68c68b07419",
+    "rt_retry": "221e83363228ee18f4e496985d32824c9111cf084c04f0a4c49a55f6065faec4",
+    "rt_fcntl": "41cc16504a33b3d99b241b6794efa22876bb518ecfa2bbb5952698065d2ff534",
+    "rt_nonblock_flag": "5e443fd254ad9825644d3a49998db39d42346b57ea2b9960a560d32474a2bc32",
+    "rt_nonblock": "1d9b8b8624e43dd93c8b021a272304c30f5bdaee0ae8d7842186bab2c504ce29",
+    "rt_address": "82c718e10d48b51b6f54c6e00c9097c5b1a703a97f1b8bde4ee9327a8bd8808b",
+    "rt_bind": "0cb2b50a79e52d989ac3f9bea64f46cd6e4f31ff00c0863606978461e7d2688e",
+    "rt_close": "67396d428fa38ea24fb8c90c84613502f196661e6989987dbc0f2a8bb360525c",
+    "rt_listen": "7580db8cc6ec8a66c9915030c2b19187330dbdb1ade502e30692f3d1e0bbfa13",
+    "rt_reuseaddr": "8172014d9cae170906ced7d9630e65a57d34a061cdc3524bb56c53dbfdd63450",
+    "rt_setsockopt": "ecebf9bb4c281b4fe3742f59c5309b65d90bb801e9fc271b646e0b036f13e556",
+    "rt_socket": "a005d6f11688fb17fd2dc8171d5bfa1ed638f75cb3a67894e700b9169b9b7b34",
+    "rt_socket_level": "9f8c5953245c82df287b165e724ca4016d5f7bd8e717051f1b2777af505073eb",
+    "rt_listener": "e2e50ab90922165089e1166ee658882975b5714834b76d8cb228841ae653f2f0",
+    "rt_read": "8ac8d6d721d38af776bf1b05371c8683384cee5d0ab900d64f6a2522a5820db7",
+    "rt_getpid": "1d65cd8c130fcddd7fbfdb5bdc85bb64008fac14abd3b0306834cc3a2e9952bf",
+    "rt_getppid": "f3c5e9a78f633fbf7ed31c8c7d7bbb1f0d20e4adbdbbda4027476dc37c0a3909",
+    "rt_accept_fd": "8b911ff24cd47569869ed15e7f1d75906af9b329b5209227b0cbd487328803d1",
+    "rt_send": "92e1448751fb86d82a38f4fbc8d714df2708cbc2a5af29e62f42a66729249c44",
+    "rt_poll": "8251e4329adf6bf754401653a94a79a44b45db99da5abe2d6e72aaba0f608aea",
+    "rt_epoll_create": "4c47f62e14c05671db002a8f08136c86927c0a186cd6b640f484732b103f2c85",
+    "rt_epoll_ctl": "25603e6b9fb438f98676b6ae5c62ba4991bb4d634bb1de72cf0bbb756a605c73",
+    "rt_epoll_wait": "504b4154805df7337bd8d6081d56f638a075f38023c16115f9f71220cc73baf0",
+    "rt_socketpair": "b47e44006b2910ef618c57cc95aa9ba919bfe5770022b4f2b385b52f393bfb34",
+    "rt_epoll_event_bytes": "96e40b63b53368607a0499f3757f5dad9728577fe07256f54da12446b1c96853",
+    "rt_epoll_data_offset": "131ab7d7c5f34599c5b9a471d3791e2b5f7a33e11c0e0a519eb2e59367fdb63b",
+    "rt_open": "0ca3cd5e04decbb40c88d24629d15d617eadd02569e3e7c847c6701097378fe4",
+    "rt_flock": "533f4db3abe22170ba854f232bf137c0299c6917c56f0c391dd2dec42ffb175a",
+    "rt_fsync": "3f87223a01b5d68010d5a41b94926e20d543857e66d04022d42522d57ebb5a45",
+    "rt_truncate": "4b29b1154428ac9531a363f579b8c6e460ed40e2a004746cc0cbdb4185698f02",
+    "rt_connect": "7ae0b6bc16db84ac5ad112f209a9047e7dfb0da3999a4cbf3b727eeb74bc6935",
+    "rt_open_write": "435bfd0917e0c5984919d6abf791ede45bd263898fbe0f57d6469b808860cc0c",
+    "rt_open_append": "45f986aae647bed409c64e86458baa083f5d88b7e7a83eb703f34203bc64f2a0",
+    "rt_open_update": "44e52899dc4f4f34fe08db29686fb2acc88d58a5d0d258c55079051652b138aa",
+    "rt_now_ms": "2b1bbe86ebb881dcb9764798df1640dc45ff78d606b34bfa8a781e037712163b",
+    "rt_wait_ready": "2aeb559ecef00ccd7373776e70990332f77559cb0df1cfee8089a6ea9fd6d010",
+    "rt_seek": "74121998dc1466540a79feaec9e60c517aa608acae209c63320861afa5e5250b",
+    "rt_socket_error": "01bff57f054f48644f54bbadbdfc2a969989026d5ebfb46ea1f1017ea57c177f",
+    "rt_lower": "221a167c60faa7b329c0e88bd22669484a1d51ab28172a721f99a11c3e2d7c0f",
+    "rt_match": "ebd11855a7e207067fb7b29ac30ee9ee2a2a1eeae1c6944b4e05f82ce85f9b2e",
+    "rt_match_ci": "9e1e707f1e085e6d0d9e60dfad43ad413b5cae297e7fe96aec899587a271b590",
+    "rt_find": "eb5f2734a877d4733ac3f87a6cb361183c2e7049b5d857678f8c281e60907668",
+    "rt_header": "6e58388c674591677d13ca2e67b753d77398971c26e66f8d333cdbf7af115f21",
+    "rt_skip_space": "d3219cdc3a527cf202d6b5cb7ec710f76810265160eef5b869510ea5827e67ee",
+    "rt_body_length": "b5a8bfdc1897e5785f50d3baf22dcc4527f271aafd6b459516c85a330b7ef58b",
+    "rt_connection_token": "cc007414139e27c6a0c704bf688725c92dcada856bbb59cac87c447d71005ee0",
+    "rt_drop": "8aa689f034d53a072b9cf8a4cd4a18304073d12d8be3b831fc5170bc2bad72b3",
+    "rt_request": "f3d17315996937eba71c80c100824f745663a2baef4be0d855310b9a22265e91",
+    "rt_batch_next": "0fe0e49a7d4e041305b2f65eb3981d55fe3b4d86b7bf243900166aec106bec0e",
+    "rt_prepare": "a6c84e2391c6fa99b36b85db38e86e4821c6c098f51a0e05becee0d44a564c3d",
+    "rt_flush": "0db1a69951cde0591aa44e30d48dff1926d7203b63fe6f18445426b139df128f",
+    "rt_step": "858740c643180a1b92f549deab177c551741654d7d5a08cedd4497f6f02bced9",
+    "rt_accept": "d2d4e7731fa432143575dbf7de392bccdc459e0b3deaa3a0dbde7c7c2a17a646",
+    "rt_compact": "751e00848e8b970339a536e76475c199c7bdba6a6a469311612b1d847a3e1a5d",
+    "rt_events": "10cbacbecd86a4deac0a64f9259abdc10dc1af137021ea831a73a88748dec84b",
+    "rt_http_worker": "4df605da0886e35ecc455a9fd91434d355cfcfcc95d1bde60e33624fe0c40235",
+    "rt_epoll_apply": "2c0b02fbc121a31aa379b34ac8e672c7ed263de5d713d59bdc19b1eae3c0daea",
+    "rt_epoll_accept": "be08f5a6d4b41f37497da44680782f2ed1544bb3e721915f6460730a83858f26",
+    "rt_epoll_compact": "6725a65bcefab83f3803b405fa7d89b551d742bd20e462c3d96027277e3f42ae",
+    "rt_epoll_listener": "49f1093cd8227eb8a83cb9f7a4bcc1d67994bd7f2fc1c47a18e227e15eca52f4",
+    "rt_epoll_sync": "785336366b37e508fdea0085b9a31614306d23f703724f208c4eb888954b8392",
+    "rt_http_epoll_worker": "534679c985e489575121c530b1ca4323d20cc846da7bc7ff6b003c42c1b215a3",
+    "rt_serve_worker": "9433df406e95ef8068ee800ff2e0f1ef00b7982fc7f5f6406dea8336673d6e84",
+    "ax_serve": "c8d8ff6914473c8048d4de686f9d5a533be32994a11d5460b1be50c08f6df6c7",
+    "no_error": "0a113298737705fb1a317a705eed5247b7e7b3ec120cfd2beb1df15c7d5a1dea",
+    "bytes_ok": "e1eb7b8b44427b10c9830bf5dd31e28591ed03c357448a8fb39939eb59d2c19b",
+    "bytes_error": "16e9ede7c408dbdef103fc2b18651ca57a70ad960f648171e9d3ed98628328df",
+    "int_ok": "dbc3605db50ecc351494b5855d2161449fa5a10ba13607a2bb9ac9c48a6ed32a",
+    "int_error": "2ede3976facd1a9d4e8b301dbb11a58004f85a401bd01b2489d18b73339c7c08",
+    "some_int": "1474103f3a7938dc27367a5c4f84f6a84a0cc2b99c18e3ce5263411d06cd469f",
+    "none_int": "dca614e2fd0f118057d8c6540a67d058dd7c4d84c23ad4c9dda6c0bedddca74e",
+    "some_bytes": "dc9a49cd7d596cbc78af0dbe8bd0a83101f6e05385d75919a6a706638d1fb95f",
+    "none_bytes": "ee517cbb7f4ff2b092d703d653079b78a5488fe34588996c55eb20d6eb00d1d4",
+    "str_byte": "16cd36d32d220fbe0722b4fa2f894fb35ed2704b6b12765b5ccf743482ce31e5",
+    "str_equal": "000bb48e08f0373c85a4db737a951c56db94c1763426fe88fedc46c22640613c",
+    "str_slice": "2430547c047b3ea579fd0145563c94097478fc6932b2c98d2a2de874dfffadf1",
+    "str_starts": "16dd944fe6613e9f0969f6c1371202e99e15cbcc52f666e6437d19f0c6ab60a5",
+    "str_find": "87a899d9972b42ada9f07aea9d325e51b35a5451827dfa80437ca6b391e63765",
+    "str_trim": "24c45bb0e7bc989a3ea4a79c63d234e0f6af3a4a0ddf1d1452840ce2376794a8",
+    "int_shift10": "fd5f174a17cb3e0ca536b36edc2515568614463d8baa8cef6e83d4a2d3c57760",
+    "int_text": "c406a8f25fba385399e5c1e5d2662694918adc5a1213a3c24744f975f74836c7",
+    "int_parse": "647d69afa2852998fcae24f2524313ec40a9e872eca15b6c45b6ee74b5fa73aa",
+    "utf8_cont": "de7e531f5a49e1b95b93d57e9fbc8edded0e671de3c049117fb6f9c7348144cd",
+    "utf8_valid": "cd068d1319fe906f17e0738b43512eba36de4633df43652ac61c8e85e92bbf80",
+    "utf8_encode": "0b27e8ce9479c88b37cbb7da33d58cfb8b7c51c31e4ce54b2d82c2320a8b146b",
+    "json_none": "a0a867be298d761142b6a21deae3147a95b10c9a2ae48092c8cda2fa4fbd14ff",
+    "json_space": "4e3b8ea500e2741e74e6717da1ecddfc38fc61cc20af6b0537719cd146b11058",
+    "json_digit": "61fbebe4e1a4833ee3a27a10fb703862afe55301b57f2240056345a12dd74039",
+    "json_digits": "05170b914c63891c33a6720c47739f3887d9fd02415de0ebeeee77d2461dae04",
+    "json_hex": "f823b2f3544fad752c57266726530e89271cb39f667eb922699adf6f3c93c15e",
+    "json_hex4": "3c8b8ee92d8cf7b1206313069d876f92e6a99b49e2371c8bbfcb18db673573ff",
+    "json_escape_width": "df3e8f37d135d58f42f2f10ae4810097e82f980d5102bb66ad042496f59d40de",
+    "json_utf8_width": "fee343eb36f8abc644d1b43cb89709f5f712264661da9a593ce34be403dc45a6",
+    "json_string_unit": "5b90c06bf7a406b5ed5a059ee973871d5d4dca1b8a614b41c56bcfb5af5e0489",
+    "json_string_end": "7458c4166d2653aecb854658fed9bfef16dd0c3384ea73296fd5b0bfc0a921bf",
+    "json_number_end": "cac3d9701bed0c386c8c15e49ae77bad0706706ab67245da5f7aec322d541fb8",
+    "json_literal_at": "46eaef37b16e474d86add32c4c1d93c442141bb835da42e0ba760e9735afce12",
+    "json_plain_end": "8834d035d0380b1833a2dee8c9557fc596f63af76bc6b9fb023e2acab80db197",
+    "json_scan_item": "af356572ccc9d9d2b518c3ea5a856d2be9849ce29faf1675701f218ffdb62b29",
+    "json_sequence_step": "789fd6245645b199239ecfa3e4e2f2bbc04543e3b001840750297f5f47e86ee8",
+    "json_scan": "734e7d549fbc3cc046a849eeed422a248bc6937745279c9eede3adc78d74851d",
+    "json_kind": "15b4f055b23e6d8d04d07917198609dc7deb5c512cfb96d8cb6868ec817907c4",
+    "json_skip_string": "b509ae98934643d418d6e06293f8971f17cb65cea4064209d197fea718c23d17",
+    "json_skip": "293ce9f4efe730842cfa2c72d3bb63d31127e6cbe68d998de727df24ab7061d3",
+    "json_count": "7412751821b80e2096e57a9e627cd5ca0402482211a9e480cf20a4b34047b103",
+    "json_index_room": "c793005507825bcb050680cd6521814c5f5b2ba1660cd18f70b5b6112e68edf4",
+    "json_member": "97e5e8925ec1f12a5990ec39d6b6144f5bb04ee37466ff823f1ec0f9f638277d",
+    "json_index": "3a1840d8ab55a258152a8438bfbf4cfc0dda816cfbe1caf29ca4bb83462d471a",
+    "json_parse": "fb0df36ac61e0aa4cc2815f71b8f330371dcefc68d026921ad02bde579d4e73e",
+    "json_text": "733dcf3e16ad4b8ab3e1d33668154221c8caf841de270d88e19fd871525da6e6",
+    "json_int": "396ed1764750f612d50605c9dfbab3028911eca9f1612e459004257f9ce9d9f7",
+    "json_array_len": "682217ed47ab1cbe12f1712e5c776e0b3341bf8f6c965c7c532bc6b6829e858f",
+    "json_array_get": "382e9057498b9b48ac8f4cda9a082330cfa514a9c0ec070e950626ab58f76c0b",
+    "json_array_values": "a009fae7fc0e529f9c84911e988a7add2b48aba05c91fbcca952c63ec8e1a1ab",
+    "json_key_equal": "144d22110f2d73b6ae94e95aa80cd437c4a4b576574f4381779052826d572881",
+    "json_get": "b9f1ea354a3e33bda4a26ab181f2ace838253068d5b39f8f4d702a1f9b54cf69",
+    "json_hex_digit": "244e06b47649a82bfb41260e643c1441ec2b13d86b72bcf96df658b25baabac4",
+    "json_quote": "f1757d873230097a755f9340bf3ab47dd83ba2267b6df6c1032783045561d2bc",
+    "json_compact": "12a31428e4f3b17e1d1e93da9f97ab0c603df8c72c66b75d5013e017168d22c0",
+    "vector_empty": "c14c49f6b3445b173ca80a62bbca4460007723eb8496ffa1af8f9d7de8b09b90",
+    "vector_push": "fc88da3bf8bf348ff6fcfa9453a356842679defb765d5af1f1c849618e0a09d4",
+    "vector_get": "92b1671c20407b3c222488c6047f33a97229770032f817f6aad4701c1e4bf845",
+    "vector_sort": "d818cb7b429ebb512db5a70cf308cab08daa62ddd6a90c7a137902305fb8aa59",
+    "map_empty": "e9726ce15ae1b09041defcee48e2ad0481064a5880a7baf0831415f25dff37a5",
+    "map_get": "db16e6c90e1a786326a9d5b20389431b0145ccc699dc4c4e7c5aa2c5f13c9d6a",
+    "map_put": "d37b46a76fd9933c0a9c26c801815ede0c6ae72008fc5782c12e6e09a0b03510",
+    "library_document": "49b9a63ef4413583203fe684ad6f5e512f08c602d4a18845f0feb3149951ef77",
+    "library_collections": "ab9593adb1c492e38f97cd3c30cb5ae65425782979230f6b9c1488f983efde9a",
+    "main": "37552d79983de49a3f6556772cc5aecf1863648718ffd2075d3164e150c16768"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "memset",
+      "node": "b87bb98e71c9",
+      "pos": [
+        45,
+        24
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "memset",
+      "node": "5b23a84ac5d0",
+      "pos": [
+        45,
+        37
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "ax_release",
+      "node": "05dcadd53586",
+      "pos": [
+        92,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "ax_release",
+      "node": "8ce2e4777990",
+      "pos": [
+        95,
+        17
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "calloc",
+      "node": "03e46f23d988",
+      "pos": [
+        103,
+        66
+      ],
+      "kind": "division",
+      "goal": "size != 0",
+      "normalised": "(size + 1 <= 0 || -size + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "rt_threads",
+      "node": "58945588a82b",
+      "pos": [
+        147,
+        40
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨if#81⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "rt_threads",
+      "node": "522a751178e7",
+      "pos": [
+        147,
+        53
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= 256)",
+      "normalised": "⟨if#81⟩ - 256 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "ax_par_for",
+      "node": "9500ed5c5550",
+      "pos": [
+        164,
+        52
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#87⟩ + 1 <= 0 || -⟨if#87⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "ax_par_for",
+      "node": "c394eab878a8",
+      "pos": [
+        164,
+        95
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#87⟩ + 1 <= 0 || -⟨if#87⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "ax_par_for",
+      "node": "1cebc2ee517d",
+      "pos": [
+        169,
+        54
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#87⟩ + 1 <= 0 || -⟨if#87⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "ax_par_for",
+      "node": "4e580e499368",
+      "pos": [
+        169,
+        97
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#87⟩ + 1 <= 0 || -⟨if#87⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "ax_par_for",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        173,
+        49
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#87⟩ + 1 <= 0 || -⟨if#87⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "rt_format_integer",
+      "node": "b16c1af29647",
+      "pos": [
+        193,
+        15
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "rt_format_integer",
+      "node": "951a0d54584f",
+      "pos": [
+        193,
+        69
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        217,
+        68
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "ax_print_f64",
+      "node": "73b2435b2fd1",
+      "pos": [
+        222,
+        66
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) initially (divisor := 10000000000000000)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "ax_print_f64",
+      "node": "e15713ba9a40",
+      "pos": [
+        223,
+        99
+      ],
+      "kind": "division",
+      "goal": "divisor != 0",
+      "normalised": "(⟨state#152⟩ + 1 <= 0 || -⟨state#152⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "ax_print_f64",
+      "node": "24b343a9eea7",
+      "pos": [
+        223,
+        109
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        224,
+        47
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "ax_print_f64",
+      "node": "1c3d3e93c877",
+      "pos": [
+        224,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) preserved (divisor := if (divisor >= 10) then … else …)",
+      "normalised": "-⟨if#162⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "rt_nonblock",
+      "node": "23facd4e815f",
+      "pos": [
+        238,
+        35
+      ],
+      "kind": "division",
+      "goal": "rt_nonblock_flag() != 0",
+      "normalised": "(⟨call#168⟩ + 1 <= 0 || -⟨call#168⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "rt_nonblock",
+      "node": "31d54fd04e79",
+      "pos": [
+        238,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "rt_listener",
+      "node": "fa66432d526b",
+      "pos": [
+        246,
+        45
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "rt_listener",
+      "node": "29891c0eca04",
+      "pos": [
+        247,
+        44
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "rt_ncpu",
+      "node": "19600b8938d3",
+      "pos": [
+        43,
+        97
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "rt_ncpu",
+      "node": "9ff5d8fb93b8",
+      "pos": [
+        43,
+        111
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "rt_nonblock_flag",
+      "node": "af3e2245ebfe",
+      "pos": [
+        48,
+        39
+      ],
+      "kind": "postcondition",
+      "goal": "(result > 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "rt_now_ms",
+      "node": "e16ab6c4bdac",
+      "pos": [
+        69,
+        81
+      ],
+      "kind": "division",
+      "goal": "1000000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "rt_wait_ready",
+      "node": "d42bd859971d",
+      "pos": [
+        72,
+        87
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "rt_wait_ready",
+      "node": "62ab929a2408",
+      "pos": [
+        72,
+        145
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "rt_match",
+      "node": "f772792f6442",
+      "pos": [
+        10,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "rt_match",
+      "node": "5d7d099a06e4",
+      "pos": [
+        11,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#304⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "rt_match",
+      "node": "7949e64dc59b",
+      "pos": [
+        11,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#304⟩ <= 0 && at - n + ⟨state#304⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "rt_match",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        11,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#304⟩ <= 0 && -m + ⟨state#304⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "rt_match_ci",
+      "node": "f772792f6442",
+      "pos": [
+        14,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "rt_match_ci",
+      "node": "5d7d099a06e4",
+      "pos": [
+        15,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#306⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "rt_match_ci",
+      "node": "7949e64dc59b",
+      "pos": [
+        15,
+        48
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#306⟩ <= 0 && at - n + ⟨state#306⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "rt_match_ci",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        15,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#306⟩ <= 0 && -m + ⟨state#306⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "rt_find",
+      "node": "1af212fd43bb",
+      "pos": [
+        18,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "rt_find",
+      "node": "849fcf625186",
+      "pos": [
+        18,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "rt_find",
+      "node": "5d7d099a06e4",
+      "pos": [
+        20,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#308⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 42,
+      "fn": "rt_find",
+      "node": "f51863d53b48",
+      "pos": [
+        20,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#308⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 43,
+      "fn": "rt_find",
+      "node": "b2325436c811",
+      "pos": [
+        20,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if rt_match(a, i, b) then … else …)",
+      "normalised": "-⟨if#311⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 44,
+      "fn": "rt_find",
+      "node": "61b3a6475209",
+      "pos": [
+        17,
+        81
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#312⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 45,
+      "fn": "rt_header",
+      "node": "1af212fd43bb",
+      "pos": [
+        23,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 46,
+      "fn": "rt_header",
+      "node": "849fcf625186",
+      "pos": [
+        23,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 47,
+      "fn": "rt_header",
+      "node": "5d7d099a06e4",
+      "pos": [
+        25,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#313⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 48,
+      "fn": "rt_header",
+      "node": "cf559b9108e5",
+      "pos": [
+        25,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(a)",
+      "normalised": "(-⟨state#313⟩ + 1 <= 0 && -n + ⟨state#313⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 49,
+      "fn": "rt_header",
+      "node": "f51863d53b48",
+      "pos": [
+        25,
+        70
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#313⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 50,
+      "fn": "rt_header",
+      "node": "6c00bd01ea41",
+      "pos": [
+        25,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if (((i == 0) || (a[(i - 1)] == '\\n')) && rt_match_ci(a, i, key)) then … else …)",
+      "normalised": "-⟨if#316⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 51,
+      "fn": "rt_header",
+      "node": "61b3a6475209",
+      "pos": [
+        22,
+        85
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#317⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 52,
+      "fn": "rt_skip_space",
+      "node": "f51863d53b48",
+      "pos": [
+        29,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 53,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        53
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#318⟩ <= 0 && -n + ⟨state#318⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 54,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        68
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#318⟩ <= 0 && -n + ⟨state#318⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 55,
+      "fn": "rt_skip_space",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        30,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#318⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 56,
+      "fn": "rt_skip_space",
+      "node": "4c51f7d67584",
+      "pos": [
+        28,
+        73
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨loop#319⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 57,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        33,
+        55
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 58,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        34,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 59,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        36,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#320⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 60,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        37,
+        45
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#320⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 61,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        38,
+        43
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-⟨call#323⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 62,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        31
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#324⟩ <= 0 && -n + ⟨state#324⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 63,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#324⟩ <= 0 && -n + ⟨state#324⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 64,
+      "fn": "rt_body_length",
+      "node": "f6296da08327",
+      "pos": [
+        40,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#324⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 65,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        40,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#324⟩ <= 0 && -n + ⟨state#324⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 66,
+      "fn": "rt_body_length",
+      "node": "1af212fd43bb",
+      "pos": [
+        42,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := i",
+      "normalised": "-⟨state#324⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 67,
+      "fn": "rt_body_length",
+      "node": "94f8d85a88ce",
+      "pos": [
+        43,
+        38
+      ],
+      "kind": "bounds",
+      "goal": "0 <= end && end < len(headers)",
+      "normalised": "(-⟨call#329⟩ <= 0 && -n + ⟨call#329⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 68,
+      "fn": "rt_body_length",
+      "node": "a3eada33dae0",
+      "pos": [
+        43,
+        62
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (end + 1) && (end + 1) < len(headers)",
+      "normalised": "(-⟨call#329⟩ - 1 <= 0 && -n + ⟨call#329⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 69,
+      "fn": "rt_connection_token",
+      "node": "f772792f6442",
+      "pos": [
+        46,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 70,
+      "fn": "rt_connection_token",
+      "node": "3e6586a70b8d",
+      "pos": [
+        48,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := field)",
+      "normalised": "-⟨call#336⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 71,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#337⟩ <= 0 && -n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 72,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        63
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#337⟩ <= 0 && -n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 73,
+      "fn": "rt_connection_token",
+      "node": "5d7d099a06e4",
+      "pos": [
+        50,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#337⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 74,
+      "fn": "rt_connection_token",
+      "node": "f51863d53b48",
+      "pos": [
+        50,
+        43
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#337⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 75,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#337⟩ + 1 <= 0 && -n + ⟨state#337⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 76,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        69
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#337⟩ + 1 <= 0 && -n + ⟨state#337⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 77,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#337⟩ + 1 <= 0 && -n + ⟨state#337⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 78,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        32
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#337⟩ <= 0 && m - n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 79,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        58
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#337⟩ <= 0 && m - n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 80,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        83
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#337⟩ <= 0 && m - n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 81,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        108
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#337⟩ <= 0 && m - n + ⟨state#337⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 82,
+      "fn": "rt_request",
+      "node": "3fc00d5b15a0",
+      "pos": [
+        67,
+        5
+      ],
+      "kind": "check",
+      "goal": "((offset >= 0) && (offset <= n))",
+      "status": "checked"
+    },
+    {
+      "id": 83,
+      "fn": "rt_request",
+      "node": "742fa090ffa6",
+      "pos": [
+        68,
+        17
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-n + offset <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 84,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        69,
+        42
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 85,
+      "fn": "rt_request",
+      "node": "0df540b0581c",
+      "pos": [
+        73,
+        7
+      ],
+      "kind": "check",
+      "goal": "((header_bytes >= 0) && (header_bytes <= (n - offset)))",
+      "status": "checked"
+    },
+    {
+      "id": 86,
+      "fn": "rt_request",
+      "node": "a43c757175f3",
+      "pos": [
+        74,
+        21
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#341⟩ - 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 87,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        93,
+        47
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 88,
+      "fn": "rt_prepare",
+      "node": "03311d0b4d20",
+      "pos": [
+        104,
+        5
+      ],
+      "kind": "check",
+      "goal": "((n >= 0) && (n <= 65536))",
+      "status": "checked"
+    },
+    {
+      "id": 89,
+      "fn": "rt_step",
+      "node": "8f30d0fd39f4",
+      "pos": [
+        128,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 90,
+      "fn": "rt_step",
+      "node": "34e7487a6e9f",
+      "pos": [
+        128,
+        19
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 91,
+      "fn": "rt_step",
+      "node": "92b5b3bf7cd3",
+      "pos": [
+        128,
+        38
+      ],
+      "kind": "division",
+      "goal": "32 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 92,
+      "fn": "rt_step",
+      "node": "fec7f2b87569",
+      "pos": [
+        128,
+        43
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 93,
+      "fn": "rt_step",
+      "node": "f2fa58b5a3b9",
+      "pos": [
+        129,
+        56
+      ],
+      "kind": "division",
+      "goal": "4 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 94,
+      "fn": "rt_step",
+      "node": "3ee6b2a6d451",
+      "pos": [
+        129,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 95,
+      "fn": "rt_step",
+      "node": "8ce2e4777990",
+      "pos": [
+        133,
+        63
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 96,
+      "fn": "rt_step",
+      "node": "92aded101155",
+      "pos": [
+        133,
+        82
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 97,
+      "fn": "rt_step",
+      "node": "c78e4a7c9741",
+      "pos": [
+        133,
+        87
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 98,
+      "fn": "rt_accept",
+      "node": "26d5a3b4dc64",
+      "pos": [
+        158,
+        36
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(workers + 1 <= 0 || -workers + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 99,
+      "fn": "rt_http_worker",
+      "node": "17c345ade511",
+      "pos": [
+        198,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 100,
+      "fn": "rt_http_worker",
+      "node": "303fca13fad3",
+      "pos": [
+        201,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 101,
+      "fn": "rt_http_worker",
+      "node": "fd12beb8cd8b",
+      "pos": [
+        201,
+        122
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 102,
+      "fn": "ax_serve",
+      "node": "2f3157c831f4",
+      "pos": [
+        231,
+        57
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-⟨call#459⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 103,
+      "fn": "rt_epoll_accept",
+      "node": "f51863d53b48",
+      "pos": [
+        42,
+        72
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 104,
+      "fn": "rt_http_epoll_worker",
+      "node": "3867463d0ee2",
+      "pos": [
+        83,
+        92
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 105,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        90,
+        58
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 106,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        91,
+        67
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 107,
+      "fn": "str_byte",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        4,
+        45
+      ],
+      "kind": "bounds",
+      "goal": "0 <= index && index < len(text)",
+      "normalised": "(-index <= 0 && index - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 108,
+      "fn": "str_equal",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        38
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 109,
+      "fn": "str_equal",
+      "node": "5d7d099a06e4",
+      "pos": [
+        7,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#578⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 110,
+      "fn": "str_equal",
+      "node": "10bc4e1f6401",
+      "pos": [
+        7,
+        21
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#578⟩ <= 0 && -n + ⟨state#578⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 111,
+      "fn": "str_equal",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        7,
+        29
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#578⟩ <= 0 && -m + ⟨state#578⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 112,
+      "fn": "str_slice",
+      "node": "7144270d3198",
+      "pos": [
+        10,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 113,
+      "fn": "str_slice",
+      "node": "ef188ba35a93",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "range",
+      "goal": "start <= end",
+      "normalised": "-end + start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 114,
+      "fn": "str_starts",
+      "node": "f772792f6442",
+      "pos": [
+        12,
+        38
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 115,
+      "fn": "str_starts",
+      "node": "5d7d099a06e4",
+      "pos": [
+        13,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#581⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 116,
+      "fn": "str_starts",
+      "node": "10bc4e1f6401",
+      "pos": [
+        13,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-⟨state#581⟩ <= 0 && -n + ⟨state#581⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 117,
+      "fn": "str_starts",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        13,
+        37
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(prefix)",
+      "normalised": "(-⟨state#581⟩ <= 0 && -m + ⟨state#581⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 118,
+      "fn": "int_shift10",
+      "node": "4d1300cfd04d",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 119,
+      "fn": "int_text",
+      "node": "325f376ca292",
+      "pos": [
+        27,
+        64
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) initially (count := 1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 120,
+      "fn": "int_text",
+      "node": "4d1300cfd04d",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 121,
+      "fn": "int_text",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) preserved (count := (count + 1))",
+      "normalised": "-⟨state#610⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 122,
+      "fn": "int_text",
+      "node": "19916df7af3b",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 123,
+      "fn": "int_text",
+      "node": "b6ee975e3e45",
+      "pos": [
+        28,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= digits",
+      "normalised": "-⟨loop#613⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 124,
+      "fn": "utf8_encode",
+      "node": "a88b70e61b6f",
+      "pos": [
+        55,
+        38
+      ],
+      "kind": "range",
+      "goal": "0 <= 1",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 125,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 126,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 127,
+      "fn": "utf8_encode",
+      "node": "206e20396124",
+      "pos": [
+        56,
+        39
+      ],
+      "kind": "range",
+      "goal": "0 <= 2",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 128,
+      "fn": "utf8_encode",
+      "node": "41fc5ee015b7",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 129,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 130,
+      "fn": "utf8_encode",
+      "node": "d9dcf6df20da",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 131,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 132,
+      "fn": "utf8_encode",
+      "node": "cac9a51b7ad3",
+      "pos": [
+        57,
+        40
+      ],
+      "kind": "range",
+      "goal": "0 <= 3",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 133,
+      "fn": "utf8_encode",
+      "node": "51164e0610e2",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "division",
+      "goal": "262144 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 134,
+      "fn": "utf8_encode",
+      "node": "41fc5ee015b7",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 135,
+      "fn": "utf8_encode",
+      "node": "1e60b813960d",
+      "pos": [
+        58,
+        110
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 136,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 137,
+      "fn": "utf8_encode",
+      "node": "d9dcf6df20da",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 138,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 139,
+      "fn": "utf8_encode",
+      "node": "d5340859efb4",
+      "pos": [
+        58,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= 4",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 140,
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 141,
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 142,
+      "fn": "json_text",
+      "node": "9db286186ac3",
+      "pos": [
+        112,
+        28
+      ],
+      "kind": "range",
+      "goal": "0 <= 1",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 143,
+      "fn": "json_array_len",
+      "node": "4c51f7d67584",
+      "pos": [
+        116,
+        48
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨if#840⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 144,
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 145,
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        130,
+        86
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 146,
+      "fn": "json_array_values",
+      "node": "679fd55c4665",
+      "pos": [
+        130,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= count",
+      "normalised": "-⟨call#880⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 147,
+      "fn": "json_array_values",
+      "node": "f772792f6442",
+      "pos": [
+        131,
+        28
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 148,
+      "fn": "json_array_values",
+      "node": "f6296da08327",
+      "pos": [
+        132,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#884⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 149,
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 150,
+      "fn": "json_array_values",
+      "node": "3833269fb853",
+      "pos": [
+        134,
+        9
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(values)",
+      "normalised": "(-⟨state#884⟩ <= 0 && -⟨call#880⟩ + ⟨state#884⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 151,
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 152,
+      "fn": "json_index_room",
+      "node": "1dfeb70febfb",
+      "pos": [
+        169,
+        48
+      ],
+      "kind": "check",
+      "goal": "((size >= n) && (size >= (needed + 4)))",
+      "status": "checked"
+    },
+    {
+      "id": 153,
+      "fn": "json_index_room",
+      "node": "7144270d3198",
+      "pos": [
+        170,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 154,
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "kind": "range",
+      "goal": "0 <= size",
+      "normalised": "-⟨if#970⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 155,
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 156,
+      "fn": "json_index",
+      "node": "8ab7553debeb",
+      "pos": [
+        176,
+        23
+      ],
+      "kind": "bounds",
+      "goal": "0 <= slot && slot < len(room)",
+      "normalised": "(-4*⟨state#976⟩ <= 0 && -⟨json_index_room#987⟩ + 4*⟨state#976⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 157,
+      "fn": "json_index",
+      "node": "415b15883f74",
+      "pos": [
+        176,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 1) && (slot + 1) < len(set(room, slot, (step.key_start - start)))",
+      "normalised": "(-4*⟨state#976⟩ - 1 <= 0 && -⟨json_index_room#987⟩ + 4*⟨state#976⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 158,
+      "fn": "json_index",
+      "node": "80fbd9a33a8d",
+      "pos": [
+        176,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 2) && (slot + 2) < len(set(set(room, slot, (step.key_start - start)), (slot + 1), (step.key_end - start)))",
+      "normalised": "(-4*⟨state#976⟩ - 2 <= 0 && -⟨json_index_room#987⟩ + 4*⟨state#976⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 159,
+      "fn": "json_index",
+      "node": "dfcdcb950b61",
+      "pos": [
+        176,
+        11
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 3) && (slot + 3) < len(set(set(set(room, slot, (step.key_start - start)), (slot + 1), (step.key_end - start)), (slot + 2), (step.value_start - start)))",
+      "normalised": "(-4*⟨state#976⟩ - 3 <= 0 && -⟨json_index_room#987⟩ + 4*⟨state#976⟩ + 4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 160,
+      "fn": "json_get",
+      "node": "7144270d3198",
+      "pos": [
+        183,
+        79
+      ],
+      "kind": "bounds",
+      "goal": "0 <= slot && slot < len(offsets)",
+      "normalised": "(-4*⟨state#997⟩ <= 0 && -⟨fieldlen#994⟩ + 4*⟨state#997⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 161,
+      "fn": "json_get",
+      "node": "ace96d797a32",
+      "pos": [
+        183,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 1) && (slot + 1) < len(offsets)",
+      "normalised": "(-4*⟨state#997⟩ - 1 <= 0 && -⟨fieldlen#994⟩ + 4*⟨state#997⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 162,
+      "fn": "json_get",
+      "node": "c5d4f4f39294",
+      "pos": [
+        185,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (found + 2) && (found + 2) < len(offsets)",
+      "normalised": "(-⟨loop#1005⟩ - 2 <= 0 && -⟨fieldlen#994⟩ + ⟨loop#1005⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 163,
+      "fn": "json_get",
+      "node": "8267f3b527f9",
+      "pos": [
+        185,
+        61
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (found + 3) && (found + 3) < len(offsets)",
+      "normalised": "(-⟨loop#1005⟩ - 3 <= 0 && -⟨fieldlen#994⟩ + ⟨loop#1005⟩ + 4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 164,
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 165,
+      "fn": "json_quote",
+      "node": "f772792f6442",
+      "pos": [
+        190,
+        39
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 166,
+      "fn": "json_quote",
+      "node": "5d7d099a06e4",
+      "pos": [
+        191,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#1012⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 167,
+      "fn": "json_quote",
+      "node": "6d4e16185e20",
+      "pos": [
+        191,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-⟨state#1012⟩ <= 0 && -n + ⟨state#1012⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 168,
+      "fn": "json_quote",
+      "node": "31618cecb9cf",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 169,
+      "fn": "json_quote",
+      "node": "ae7ddd6c93b8",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 170,
+      "fn": "json_quote",
+      "node": "a5e9f1f754eb",
+      "pos": [
+        193,
+        50
+      ],
+      "kind": "range",
+      "goal": "0 <= 2",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 171,
+      "fn": "json_hex_digit",
+      "node": "c848331c5948",
+      "pos": [
+        196,
+        79
+      ],
+      "kind": "bounds",
+      "goal": "0 <= value && value < len(digits)",
+      "normalised": "(-value <= 0 && value - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 172,
+      "fn": "json_compact",
+      "node": "f772792f6442",
+      "pos": [
+        198,
+        28
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 173,
+      "fn": "json_compact",
+      "node": "9a5440b933aa",
+      "pos": [
+        199,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#1035⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 174,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        199,
+        29
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 175,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        200,
+        37
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 176,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        30
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 177,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        50
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 178,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 179,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        92
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1035⟩ <= 0 && -n + ⟨state#1035⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 180,
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        7,
+        56
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 181,
+      "fn": "vector_push",
+      "node": "237c474541a9",
+      "pos": [
+        10,
+        62
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(old)",
+      "normalised": "(-i <= 0 && i - ⟨fieldlen#1043⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 182,
+      "fn": "vector_push",
+      "node": "68dea71590e0",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "range",
+      "goal": "0 <= (n + 1)",
+      "normalised": "-⟨fieldlen#1043⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 183,
+      "fn": "vector_get",
+      "node": "c848331c5948",
+      "pos": [
+        12,
+        77
+      ],
+      "kind": "bounds",
+      "goal": "0 <= index && index < len(a)",
+      "normalised": "(-index <= 0 && index - ⟨fieldlen#1046⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 184,
+      "fn": "vector_sort",
+      "node": "f772792f6442",
+      "pos": [
+        16,
+        43
+      ],
+      "kind": "invariant",
+      "goal": "(j >= 0) initially (j := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 185,
+      "fn": "vector_sort",
+      "node": "5d7d099a06e4",
+      "pos": [
+        17,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(j >= 0) preserved (j := (j + 1))",
+      "normalised": "-⟨state#1051⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 186,
+      "fn": "vector_sort",
+      "node": "c848331c5948",
+      "pos": [
+        17,
+        28
+      ],
+      "kind": "bounds",
+      "goal": "0 <= j && j < len(row)",
+      "normalised": "(-⟨state#1051⟩ <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 187,
+      "fn": "vector_sort",
+      "node": "9cab5f3aeba4",
+      "pos": [
+        17,
+        38
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (j + 1) && (j + 1) < len(row)",
+      "normalised": "(-⟨state#1051⟩ - 1 <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 188,
+      "fn": "vector_sort",
+      "node": "c848331c5948",
+      "pos": [
+        18,
+        22
+      ],
+      "kind": "bounds",
+      "goal": "0 <= j && j < len(row)",
+      "normalised": "(-⟨state#1051⟩ <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 189,
+      "fn": "vector_sort",
+      "node": "3466ebf065ea",
+      "pos": [
+        18,
+        40
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (j + 1) && (j + 1) < len(row)",
+      "normalised": "(-⟨state#1051⟩ - 1 <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 190,
+      "fn": "vector_sort",
+      "node": "1d9f93214554",
+      "pos": [
+        18,
+        55
+      ],
+      "kind": "bounds",
+      "goal": "0 <= j && j < len(row)",
+      "normalised": "(-⟨state#1051⟩ <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 191,
+      "fn": "vector_sort",
+      "node": "af6187c56311",
+      "pos": [
+        18,
+        51
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (j + 1) && (j + 1) < len(set(row, j, b))",
+      "normalised": "(-⟨state#1051⟩ - 1 <= 0 && -⟨fieldlen#1048⟩ + ⟨state#1051⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 192,
+      "fn": "map_empty",
+      "node": "23c8f50c7d46",
+      "pos": [
+        19,
+        54
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 193,
+      "fn": "map_get",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        23,
+        70
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-⟨state#1070⟩ <= 0 && -⟨fieldlen#1069⟩ + ⟨state#1070⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 194,
+      "fn": "map_get",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        23,
+        107
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-⟨state#1070⟩ <= 0 && -⟨fieldlen#1069⟩ + ⟨state#1070⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 195,
+      "fn": "map_put",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        27,
+        70
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-⟨state#1075⟩ <= 0 && -⟨fieldlen#1074⟩ + ⟨state#1075⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 196,
+      "fn": "map_put",
+      "node": "ccb5828a5d60",
+      "pos": [
+        31,
+        54
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-i <= 0 && i - ⟨fieldlen#1074⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 197,
+      "fn": "map_put",
+      "node": "9ffa2872b6ef",
+      "pos": [
+        29,
+        27
+      ],
+      "kind": "range",
+      "goal": "0 <= count",
+      "normalised": "-⟨fieldlen#1074⟩ - ⟨if#1081⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 198,
+      "fn": "library_document",
+      "node": "b298d1f5a3a3",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 199,
+      "fn": "library_collections",
+      "node": "b298d1f5a3a3",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 200,
+      "fn": "main",
+      "node": "af3e2245ebfe",
+      "pos": [
+        13,
+        48
+      ],
+      "kind": "precondition",
+      "goal": "(iterations > 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 201,
+      "fn": "main",
+      "node": "cfc5d437d830",
+      "pos": [
+        13,
+        64
+      ],
+      "kind": "precondition",
+      "goal": "(iterations <= 10000000)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    }
+  ],
+  "summary": {
+    "obligations": 201,
+    "proven": 195,
+    "runtime_checks": 6,
+    "unproven": 0
+  },
+  "folded_calls": 0,
+  "inlined_calls": 0,
+  "parallel_regions": [
+    {
+      "fn": "str_slice",
+      "node": "ef188ba35a93",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "int_text",
+      "node": "b6ee975e3e45",
+      "pos": [
+        28,
+        15
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "a88b70e61b6f",
+      "pos": [
+        55,
+        38
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "206e20396124",
+      "pos": [
+        56,
+        39
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "cac9a51b7ad3",
+      "pos": [
+        57,
+        40
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "d5340859efb4",
+      "pos": [
+        58,
+        19
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_text",
+      "node": "9db286186ac3",
+      "pos": [
+        112,
+        28
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "json_quote",
+      "node": "a5e9f1f754eb",
+      "pos": [
+        193,
+        50
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        7,
+        56
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "vector_push",
+      "node": "68dea71590e0",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "arr"
+    },
+    {
+      "fn": "main",
+      "node": "648ae1362977",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "sum"
+    }
+  ],
+  "vector_sums": [],
+  "bounded_remainders": [
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        110
+      ],
+      "divisor": 64,
+      "bounds": [
+        16,
+        271
+      ],
+      "width": 32
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        110
+      ],
+      "divisor": 64,
+      "bounds": [
+        16,
+        271
+      ],
+      "width": 32
+    }
+  ],
+  "overflow_checks": [
+    {
+      "fn": "ax_print_f64",
+      "pos": [
+        216,
+        23
+      ],
+      "kind": "float to integer out of range"
+    },
+    {
+      "fn": "bytes_ok",
+      "pos": [
+        8,
+        48
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_ok",
+      "pos": [
+        8,
+        48
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_error",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_error",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_error",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_error",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "some_bytes",
+      "pos": [
+        16,
+        50
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "some_bytes",
+      "pos": [
+        16,
+        50
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        15,
+        69
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        15,
+        69
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_shift10",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_shift10",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        29,
+        22
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        29,
+        22
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        89
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        40,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        89
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        40,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        44,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        44,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_space",
+      "pos": [
+        14,
+        128
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_space",
+      "pos": [
+        14,
+        128
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_digits",
+      "pos": [
+        17,
+        63
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_digits",
+      "pos": [
+        17,
+        63
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        21,
+        72
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        21,
+        72
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        25,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        28,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        31,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        25,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        28,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        31,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        83
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        113
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        83
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        113
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_unit",
+      "pos": [
+        43,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_unit",
+      "pos": [
+        43,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_end",
+      "pos": [
+        46,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_end",
+      "pos": [
+        46,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        49,
+        56
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        52,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        95
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        56,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        49,
+        56
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        52,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        95
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        56,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_plain_end",
+      "pos": [
+        62,
+        105
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_plain_end",
+      "pos": [
+        62,
+        105
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        69,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        70,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        73,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        74,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        75,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        69,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        70,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        73,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        74,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        75,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        80,
+        91
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        49
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        65
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        80,
+        91
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        49
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        65
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        83,
+        50
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        83,
+        50
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        106,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        107,
+        43
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        110,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        111,
+        48
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        112,
+        16
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        106,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        107,
+        43
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        110,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        111,
+        48
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        112,
+        16
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        64
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        64
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        132,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        132,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        136,
+        31
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        136,
+        31
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        142,
+        23
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        144,
+        17
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        146,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        142,
+        23
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        144,
+        17
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        146,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        152,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        154,
+        61
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        152,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        154,
+        61
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        84
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        84
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        82
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        82
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        173,
+        57
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        174,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        124
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        159
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        173,
+        57
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        174,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        124
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        159
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        181,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        182,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        183,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        184,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        181,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        182,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        183,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        184,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        66
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        14
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        66
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        14
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        201,
+        119
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        198,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        201,
+        119
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        198,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        7,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        7,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        7,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        7,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        16,
+        68
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        16,
+        68
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_empty",
+      "pos": [
+        19,
+        32
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_get",
+      "pos": [
+        21,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        28,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        28,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "map_put",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        109
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_document",
+      "pos": [
+        7,
+        109
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        12,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        12,
+        118
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        12,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "library_collections",
+      "pos": [
+        12,
+        118
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    }
+  ],
+  "literal_inlined_functions": [
+    "bytes_error",
+    "int_error",
+    "json_get",
+    "json_literal_at",
+    "map_get",
+    "map_put",
+    "rt_connection_token",
+    "rt_find",
+    "rt_header"
+  ],
+  "backend": "llvm-ir",
+  "ir": "/axon/examples/.axon-build/5635d8e101235b7d.ll",
+  "build": {
+    "cache": "miss",
+    "graph": "2fc12f45f4751059",
+    "llvm_seconds": 0.68,
+    "warnings": "clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]",
+    "total_seconds": 3.1783
+  },
+  "binary": "/axon/bench/json/results/2026-10-24-092609/axon-json",
+  "runtime": "Axon kernel syscalls; no libc function imports",
+  "loader_dependency": "none (static ELF)",
+  "undefined_symbols": [],
+  "binary_sha256": "6279d6a32ffcdd6be98ba35b322afd7b4ead31161e526dd0b67a28e2c0989fe1",
+  "cache_key": "5635d8e101235b7d915f709353fab7938ff379fecb0c3cecb02702a677584a00",
+  "sources": {
+    "/axon/runtime/core.ax": "b3e65ff31fcddd14416b3cf71a4af46e3cacdcc97ea16a8aa1fa33473faf0cbc",
+    "/axon/runtime/platform_linux.ax": "1dd50c79c857cac6ac6be8935841f85f3cd4b9d3e66f38e1e316439b28e7c28d",
+    "/axon/runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "/axon/runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1",
+    "/axon/stdlib/errors.ax": "f32e6108eea42558ee1c758bbd548a101c63fa6ec7f37e772c783bbdebb12e06",
+    "/axon/stdlib/strings.ax": "3502786f86db4941c18e946846b39b9e39750446de728248719cd043f9dab75b",
+    "/axon/stdlib/json.ax": "c52358bff623196fb8b7a40d43e173f9d1c173fba6650a86921967f47f2bdec8",
+    "/axon/stdlib/collections.ax": "d90fe116f7792ef717434c9227e65571aea6aef9aeb4fb5ad7dc14cf427a806b",
+    "/axon/examples/library_bench.ax": "20e49c67461fbd00e635d0299d76fd79a4e8d59630259a0886181ef4d51f50b9"
+  }
+}

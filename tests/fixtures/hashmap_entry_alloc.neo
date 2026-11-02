@@ -1,0 +1,8 @@
+import "std:hashmap"
+import "std:io"
+effect(fs,unsafe) fn main(n:i64{n>=0 && n<=100000}) -> unit
+  = let count=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let map=loop(i=0,map=hashmap_empty::<i64,i64>(7911,3219)) while i<n next(i+1,hashmap_get_or_insert(map,i,i*7).map) yield map in
+    let requests=load_i64(runtime_state(),64)-count in let requested=load_i64(runtime_state(),80)-bytes in
+    let checksum=loop(i=0,total=0) while i<n next(i+1,total+match hashmap_get(map,i) {Some(value)=>value,None=> -1}) yield total in
+    check hashmap_len(map)==n in let shown=print_out(concat(int_text(checksum)," ",int_text(requests)," ",int_text(requested),"\n")) in noop()

@@ -1,0 +1,17 @@
+import "std:buffer"
+import "std:arena"
+import "std:debug"
+import "std:io"
+private effect(fs,net,process) fn exercise() -> Arr u8 _
+  = using arena=new_arena(4) in using buffer=buffer_new(64) in let status=buffer_status(buffer) in check status.ok && status.value==64 in
+    let initialized=buffer_write(buffer,0,"data") in check initialized.ok in
+    let before=buffer_read(buffer,0,4) in check before.ok in
+    let written=buffer_write(buffer,0,"next") in check written.ok && str_equal(before.value,"data") in
+    let stored=buffer_store_i64(buffer,9, -9223372036854775808) in let read=buffer_load_i64(buffer,9) in check stored.ok && read.ok && read.value== -9223372036854775808 in
+    let bad=buffer_write(buffer,63,"bad") in check !bad.ok in let bad=buffer_read(buffer, -1,1) in check !bad.ok in
+    let bad=buffer_load_i64(buffer,57) in check !bad.ok in let bad=buffer_read(buffer,9223372036854775807,1) in check !bad.ok in
+    let ref=adopt(buffer,arena) in let clear=buffer_clear(borrow_ref(ref)) in check clear.ok in
+    let after=buffer_read(borrow_ref(ref),0,4) in check after.ok && str_equal(after.value,"\0\0\0\0") && str_equal(before.value,"data") in
+    let released=ref_release(ref) in let live=ref_live(ref) in check !live in before.value
+effect(fs,net,process) fn main() -> unit
+  = let baseline=live_resources() in let value=exercise() in let live=live_resources() in check live==baseline && str_equal(value,"data") in let out=print_out("buffer OK\n") in noop()

@@ -1,0 +1,98 @@
+import "std:strings"
+
+fn http_method (request: Arr u8 n) -> Arr u8 _
+  = let at = str_find(request, " ") in if at.present then str_slice(request, 0, at.value) else ""
+fn http_path (request: Arr u8 n) -> Arr u8 _
+  = let first = str_find(request, " ") in if !first.present then "" else
+    let rest = str_slice(request, first.value + 1, n) in let end = str_find(rest, " ") in
+    if !end.present then "" else let path = str_slice(rest, 0, end.value) in
+      let query = str_find(path, "?") in if query.present then str_slice(path, 0, query.value) else path
+fn http_body (request: Arr u8 n) -> Arr u8 _
+  = let boundary = str_find(request, "\r\n\r\n") in if !boundary.present then "" else str_slice(request, boundary.value + 4, n)
+fn http_response (status: i64, body: Arr u8 n, content_type: Arr u8 m) -> Arr u8 _
+  = let reason = if status == 200 then "OK" else if status == 201 then "Created" else if status == 202 then "Accepted" else if status == 204 then "No Content"
+      else if status == 400 then "Bad Request" else if status == 404 then "Not Found" else if status == 405 then "Method Not Allowed"
+      else if status == 409 then "Conflict" else if status == 413 then "Content Too Large" else if status == 503 then "Service Unavailable" else "Error" in
+    concat("HTTP/1.1 ", int_text(status), " ", reason, "\r\nContent-Length: ", int_text(n), "\r\nContent-Type: ", content_type,
+      "\r\nConnection: keep-alive\r\n\r\n", body)
+fn http_json (status: i64, body: Arr u8 n) -> Arr u8 _ = http_response(status, body, "application/json; charset=utf-8")
+fn html_entity (c: u8) -> Arr u8 _
+  = if c == '&' then "&amp;" else if c == '<' then "&lt;" else if c == '>' then "&gt;" else if c == '"' then "&quot;" else "&#x27;"
+fn html_special (c: u8) -> bool = c == '&' || c == '<' || c == '>' || c == '"' || c == '\''
+; True when any byte of the little-endian word is & < > " or ': a byte equals b
+; exactly when (word xor b repeated) has a zero byte.
+private fn html_zero_byte (v: i64) -> bool
+  = bit_and(bit_and(wrapping_sub(v, 72340172838076673), bit_xor(v, -1)), -9187201950435737472) != 0
+private fn html_word_special (w: i64) -> bool
+  = html_zero_byte(bit_xor(w, 2748926567846913574)) || html_zero_byte(bit_xor(w, 4340410370284600380))
+    || html_zero_byte(bit_xor(w, 4485090715960753726)) || html_zero_byte(bit_xor(w, 2459565876494606882))
+    || html_zero_byte(bit_xor(w, 2821266740684990247))
+; Index of the first byte at or after `from` that escaping changes, or n.
+fn html_scan (text: Arr u8 n, from: i64{from >= 0, from <= n}) -> i64 {result >= from, result <= n}
+  = let word = loop (i: i64{i >= from, i <= n} = from) while i <= n - 8 && !html_word_special(byte_read_le(text, i, 8))
+      next (i + 8) yield i in
+    loop (i: i64{i >= from, i <= n} = word, found = false) while !found && i < n
+      next (if html_special(text[i]) then i else i + 1, html_special(text[i])) yield i
+; Escapes & < > " ' for HTML text and attribute values. Text without them is
+; returned as is; otherwise unchanged runs between special bytes are appended whole.
+fn html_escape (text: Arr u8 n) -> Arr u8 _
+  = let first = html_scan(text, 0) in
+    if first == n then text else
+    loop (run: i64{run >= 0, run <= n} = 0, at: i64{at >= run, at <= n} = first, out = "") while at < n
+      next (at + 1, html_scan(text, at + 1), concat(out, byte_slice(text, run, at), html_entity(text[at])))
+      yield concat(out, byte_slice(text, run, n))
+
+type HttpHeaderState = { valid: bool, length: i64, has_length: bool, chunked: bool, has_encoding: bool }
+type HttpChunk = { valid: bool, done: bool, offset: i64, body: Arr u8 _ }
+fn http_token(text:Arr u8 n) -> bool
+  = n>0 && loop(i=0,valid=true) while valid && i<n
+      next(i+1,let byte=str_byte(text,i) in byte>=48 && byte<=57 || byte>=65 && byte<=90 || byte>=97 && byte<=122 || str_find("!#$%&'*+-.^_`|~",str_slice(text,i,i+1)).present) yield valid
+fn http_field_value(text:Arr u8 n) -> bool
+  = loop(i=0,valid=true) while valid && i<n next(i+1,let byte=str_byte(text,i) in byte==9 || byte>=32 && byte!=127) yield valid
+fn http_lower (text: Arr u8 n) -> Arr u8 _
+  = arr(i in 0..n) if text[i] >= 'A' && text[i] <= 'Z' then u8(i64(text[i]) + 32) else text[i]
+fn http_line_end (bytes: Arr u8 n, start: i64) -> i64
+  = let found = str_find(str_slice(bytes, start, n), "\r\n") in if found.present then start + found.value else -1
+fn http_header_apply (state: HttpHeaderState, line: Arr u8 n) -> HttpHeaderState
+  = let colon = str_find(line, ":") in if !colon.present || colon.value < 1 || !http_token(str_slice(line,0,colon.value)) || !http_field_value(str_slice(line,colon.value+1,n)) then state with { valid = false } else
+    let key = http_lower(str_slice(line, 0, colon.value)) in let value = str_trim(str_slice(line, colon.value + 1, n)) in
+    if str_equal(key, "content-length") then
+      let parsed = int_parse(value) in
+      let decimal = loop (i: i64{i >= 0} = 0, valid = len(value) > 0) while valid && i < len(value)
+        next (i + 1, value[i] >= '0' && value[i] <= '9') yield valid in
+      state with { valid = state.valid && !state.has_length && !state.has_encoding && parsed.ok && parsed.value >= 0 && decimal, has_length = true, length = parsed.value }
+    else if str_equal(key, "transfer-encoding") then
+      state with { valid = state.valid && !state.has_encoding && !state.has_length && str_equal(http_lower(value), "chunked"), has_encoding = true, chunked = true }
+    else state
+fn http_chunk_length (text: Arr u8 n) -> IntResult
+  = let extension = str_find(text, ";") in let digits = if extension.present then str_slice(text, 0, extension.value) else text in
+    loop (i = 0, value = 0, valid = len(digits) > 0 && len(digits) <= 8) while valid && i < len(digits)
+      next (i + 1, if value <= 65536 then value * 16 + http_hex(str_byte(digits, i)) else value,
+        http_hex(str_byte(digits, i)) >= 0 && value <= 65536)
+      yield if valid && value <= 1048576 then int_ok(value) else int_error(1, "invalid HTTP chunk length", 0)
+fn http_hex (byte: i64) -> i64
+  = if byte >= 48 && byte <= 57 then byte - 48 else if byte >= 65 && byte <= 70 then byte - 55 else if byte >= 97 && byte <= 102 then byte - 87 else -1
+fn http_chunk_step (raw: Arr u8 n, position: i64, body: Arr u8 m) -> HttpChunk
+  = let end = http_line_end(raw, position) in let size = http_chunk_length(str_slice(raw, position, end)) in
+    let start = end + 2 in let stop = start + size.value in
+    if end < position || !size.ok || stop > n || m + size.value > 1048576 then HttpChunk { valid = false, done = true, offset = position, body = body }
+    else if size.value == 0 then
+      let empty = str_equal(str_slice(raw, start, n), "\r\n") in
+      let trailers = str_find(str_slice(raw, start, n), "\r\n\r\n") in
+      HttpChunk { valid = empty || (trailers.present && start + trailers.value + 4 == n), done = true, offset = n, body = body }
+    else if !str_equal(str_slice(raw, stop, stop + 2), "\r\n") then HttpChunk { valid = false, done = true, offset = stop, body = body }
+    else HttpChunk { valid = true, done = false, offset = stop + 2, body = concat(body, str_slice(raw, start, stop)) }
+fn http_decode_response (wire: Arr u8 n) -> BytesResult
+  = let boundary = str_find(wire, "\r\n\r\n") in let first = http_line_end(wire, 0) in
+    if !boundary.present || boundary.value > 16384 || first < 0 then bytes_error(1, "incomplete HTTP headers", 0) else
+    let state = loop (position = first + 2, headers = HttpHeaderState { valid = true, length = 0, has_length = false, chunked = false, has_encoding = false })
+      while headers.valid && position < boundary.value
+      next (let end = http_line_end(wire, position) in if end < 0 then n else end + 2,
+        http_header_apply(headers, str_slice(wire, position, http_line_end(wire, position)))) yield headers in
+    if !state.valid then bytes_error(1, "invalid or ambiguous HTTP framing", 0) else
+    let raw = str_slice(wire, boundary.value + 4, n) in
+    if state.has_length then if state.length != len(raw) then bytes_error(1, "truncated or excess HTTP body", 0) else bytes_ok(raw)
+    else if !state.chunked then bytes_ok(raw) else
+      loop (step = HttpChunk { valid = true, done = false, offset = 0, body = "" }) while step.valid && !step.done
+        next (http_chunk_step(raw, step.offset, step.body))
+        yield if step.valid then bytes_ok(step.body) else bytes_error(1, "invalid chunked HTTP body", step.offset)

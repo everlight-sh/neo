@@ -1,0 +1,30 @@
+import "std:json"
+import "std:io"
+type ByteReadPair = {bytes:Arr u8 _,at:i64}
+fn read_offset(move pair:ByteReadPair) -> i64 = pair.at
+fn read_field(move pair:ByteReadPair,width:i64) -> i64 = byte_read_le(pair.bytes,read_offset(pair),width)
+fn read_array_offset(move rows:Arr ByteReadPair n,index:i64) -> i64 = check index>=0 && index<n in rows[index].at
+fn read_index(move rows:Arr ByteReadPair n,index:i64,width:i64) -> i64
+  = check index>=0 && index<n in byte_read_le(rows[index].bytes,read_array_offset(rows,index),width)
+fn read_temporary(value:Arr u8 _,at:i64,width:i64) -> i64 = byte_read_le(ByteReadPair {bytes=value,at=at}.bytes,at,width)
+fn read_sum(bytes:Arr u8 n) -> i64 = sum(i in 0..n) byte_read_le(bytes,i,1)
+fn reads_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn read_case(input:Json) -> Arr u8 _
+  = let n=json_get_atom(input,"n").value in let seed=json_get_atom(input,"seed").value in let at=json_get_atom(input,"at").value in let width=json_get_atom(input,"width").value in
+    check n>=8 && n<=8192 && seed>=0 && seed<=255 in
+    let backing=arr(i in 0..n+32) u8((i*37+seed)%256) in
+    let original=if json_get_atom(input,"slice").value==0 then arr(i in 0..n) u8((i*37+seed)%256) else byte_slice(backing,3,n+3) in
+    let word=json_get_atom(input,"word") in let source=if word.present then byte_write_le(original,at,word.value,width) else original in
+    let direct=byte_read_le(source,at,width) in
+    let standard=if width==2 then bytes_le16(source,at) else if width==4 then bytes_le32(source,at) else if width==8 then bytes_le64(source,at) else byte_read_le(source,at,1) in
+    let pair=ByteReadPair {bytes=source,at=at} in let fields=read_field(pair,width) in
+    let indexed=read_index(arr(i in 0..3) pair,1,width) in let temporary=read_temporary(source,at,width) in
+    let changed=byte_write_le(source,0,1,1) in let again=byte_read_le(source,at,width) in let mutation=byte_read_le(changed,at,width) in
+    check direct==standard && direct==fields && direct==indexed && direct==temporary && direct==again in
+    concat("[",int_text(direct),",",int_text(mutation),",",int_text(read_sum(source)),"]")
+effect(fs) fn main() -> unit
+  = let text=file_read(0,16777216).value in
+    let done=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let input=json_parse(reads_decode(str_slice(text,at,end))) in let shown=print_out(concat(read_case(input.value),"\n")) in end+1) yield at in noop()

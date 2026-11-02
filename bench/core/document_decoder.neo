@@ -1,0 +1,11 @@
+; examples/library_bench.neo mode 0 through the prepared field decoder: the same
+; document is built per iteration, then validated and read in one pass.
+import "std:json"
+fn decoded_document(borrow decoder:JsonFieldDecoder,i:i64) -> i64
+  = let document=concat("{\"id\":",int_text(i%1000),",\"name\":\"café 🚀\",\"active\":true,\"values\":[1,2,3]}") in
+    let fields=json_decode_object(document,decoder) in let id=json_field_int(fields,0) in let name=json_field_text(fields,1) in
+    let values=json_field_json(fields,2) in
+    if fields.ok && id.ok && name.ok then id.value+len(name.value)+json_array_len(values)+1 else -999
+fn main(iterations:i64{iterations > 0, iterations <= 10000000}) -> i64
+  = let decoder=json_field_decoder(arr(i in 0..3) if i==0 then "id" else if i==1 then "name" else "values") in
+    sum(i in 0..iterations) decoded_document(decoder,i)

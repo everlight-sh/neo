@@ -1,0 +1,38 @@
+.neo-build/
+.axon-build/
+runtime/.build/
+__pycache__/
+bench/axon_*
+bench/rust/target/
+bench/go/*_bin
+*.bin
+bench/http/results/*/bin/
+.kernel-build/
+examples/ssr-react/node_modules/
+examples/jsx-ssr/node_modules/
+bench/docker/node_modules/
+# Core dumps.
+/core
+# Executables compiled for a benchmark run and kept beside its results; the
+# sources and measurements stay tracked.
+bench/*/results/**/axon
+bench/*/results/**/axon-json
+bench/*/results/**/axon-mandel
+bench/*/results/**/axon-nbody
+bench/*/results/**/axon-stencil
+bench/*/results/**/go-mandel
+bench/*/results/**/go-nbody
+bench/*/results/**/go-stencil
+bench/usability/results/**/hello
+bench/usability/results/**/json-cli
+bench/usability/results/**/library
+bench/usability/results/**/notes
+bench/usability/results/**/webhook
+# Experiment build outputs, named after their directory.
+experiments/agent-loop/*/bsearch
+experiments/agent-loop/*/dot
+experiments/agent-loop/*/hist
+experiments/agent-loop/*/runs
+
+# Agent worktrees of this repository.
+.claude/worktrees/

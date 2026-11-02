@@ -1,0 +1,3 @@
+import "std:hash"
+fn main(n:i64{n>=0 && n<64}) -> i64
+  = hash_bytes(arr(i in 0..n) u8(i),506097522914230528,1084818905618843912)

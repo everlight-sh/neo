@@ -1,0 +1,135 @@
+import "std:errors"
+
+fn str_byte (text: Arr u8 n, index: i64) -> i64
+  = if index >= 0 && index < n then i64(text[index]) else -1
+fn str_equal (a:Arr u8 n,b:Arr u8 m) -> bool = byte_equal(a,b)
+fn str_slice (borrow text: Arr u8 n, start: i64, end: i64) -> Arr u8 _
+  = if start < 0 || end < start || end > n then ""
+    else byte_slice(text,start,end)
+fn str_starts (text: Arr u8 n, prefix: Arr u8 m) -> bool
+  = m <= n && loop (i: i64{i >= 0} = 0, equal = true) while equal && i < m
+      next (i + 1, text[i] == prefix[i]) yield equal
+fn str_find (text: Arr u8 n, needle: Arr u8 m) -> OptionInt
+  = let found = loop (i = 0, position = -1) while position < 0 && i + m <= n
+      next (i + 1, let equal=loop(j=0,same=true) while same && j<m
+        next(j+1,check j>=0 && j<m && i+j>=0 && i+j<n in text[i+j]==needle[j]) yield same in if equal then i else -1) yield position in
+    if found < 0 then none_int() else some_int(found)
+fn str_trim (text: Arr u8 n) -> Arr u8 _
+  = let start = loop (i = 0) while i < n && (str_byte(text, i) == 32 || str_byte(text, i) == 9 || str_byte(text, i) == 10 || str_byte(text, i) == 13) next (i + 1) yield i in
+    let end = loop (i = n) while i > start && (str_byte(text, i - 1) == 32 || str_byte(text, i - 1) == 9 || str_byte(text, i - 1) == 10 || str_byte(text, i - 1) == 13) next (i - 1) yield i in
+    str_slice(text, start, end)
+fn int_shift10 (value: i64, places: i64) -> i64
+  = loop (v = value, i = 0) while i < places next (v / 10, i + 1) yield v
+private fn int_text_general (value: i64) -> Arr u8 _
+  = let negative=value<0 in let magnitude=if value>0 then 0-value else value in
+    let digits=loop(v=magnitude,count=1) while v<= -10 next(v/10,count+1) yield count in
+    check digits>=1 && digits<=19 in let prefix=if negative then 1 else 0 in let size=digits+prefix in
+    let initial=arr(i in 0..size) if negative && i==0 then '-' else '0' in
+    loop(i=digits,v=magnitude,out=initial) while i>0
+      next(i-1,v/10,let at=i-1+prefix in check at>=0 && at<len(out) in set(out,at,u8(48-v%10))) yield out
+private fn decimal_pair(value:i64) -> i64
+  = check value>=0 && value<100 in bytes_le16("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899",value*2)
+private fn int_text_tiny(value:i64) -> Arr u8 _
+  = check value>=0 && value<1000 in
+    let length=if value<10 then 1 else if value<100 then 2 else 3 in
+    let packed=if value<10 then value+48 else if value<100 then decimal_pair(value) else
+      bit_or(value/100+48,shift_left(decimal_pair(value%100),8)) in
+    check length>=1 && length<=3 in arr(i in 0..length) u8(shift_right(packed,i*8))
+; Pack short positive integers in two bounded four-digit groups. No decimal
+; loop or repeated length discovery is needed before allocating the bytes.
+fn int_text(value:i64) -> Arr u8 _
+  = if value<0 || value>99999999 then int_text_general(value) else
+    if value<1000 then int_text_tiny(value) else
+    let high=value/10000 in let low=value%10000 in
+    let low_word=bit_or(decimal_pair(low/100),shift_left(decimal_pair(low%100),16)) in
+    let prefix=if high<10 then high+48 else if high<100 then decimal_pair(high) else if high<1000 then
+      bit_or(high/100+48,shift_left(decimal_pair(high%100),8)) else
+      bit_or(decimal_pair(high/100),shift_left(decimal_pair(high%100),16)) in
+    let digits=if high<10 then 1 else if high<100 then 2 else if high<1000 then 3 else 4 in
+    let length=if high==0 then 4 else digits+4 in
+    let packed=if high==0 then low_word else bit_or(prefix,shift_left(low_word,digits*8)) in
+      check length>=1 && length<=8 in arr(i in 0..length) u8(shift_right(packed,i*8))
+private fn int_parse_checked (text: Arr u8 n) -> IntResult
+  = let negative = str_byte(text, 0) == 45 in
+    let start = if negative || str_byte(text, 0) == 43 then 1 else 0 in
+    loop (i = start, acc = 0, valid = true) while valid && i < n
+      next (i + 1,
+        let digit = str_byte(text, i) - 48 in if digit >= 0 && digit <= 9 && acc >= -922337203685477580 &&
+          (acc != -922337203685477580 || digit <= (if negative then 8 else 7)) then wrapping_sub(wrapping_mul(acc,10),digit) else acc,
+        let digit = str_byte(text, i) - 48 in digit >= 0 && digit <= 9 && acc >= -922337203685477580 &&
+          (acc != -922337203685477580 || digit <= (if negative then 8 else 7)))
+      yield if !valid || n <= start then int_error(1, "invalid or overflowing integer", i)
+            else int_ok(if negative then acc else 0 - acc)
+; Short signed/invalid inputs still use the general parser, preserving signs
+; and exact diagnostics. Unsigned one-to-three-digit inputs need no wide
+; packing, padding or loop-carried accumulator.
+private fn int_parse_short(text:Arr u8 n) -> IntResult
+  = check n>=1 && n<=3 in let a=i64(text[0])-48 in
+    let b=if n>=2 then i64(text[1])-48 else 0 in
+    let c=if n==3 then i64(text[2])-48 else 0 in
+    if a>=0 && a<=9 && b>=0 && b<=9 && c>=0 && c<=9 then
+      int_ok(if n==1 then a else if n==2 then a*10+b else a*100+b*10+c)
+    else int_parse_checked(text)
+; Parse four to eight unsigned ASCII digits in parallel. Loads never extend
+; past the array. Invalid bytes and signs use the checked general parser so
+; diagnostics (including the first invalid byte) stay identical.
+fn int_parse (text: Arr u8 n) -> IntResult
+  = if n<1 || n>8 then int_parse_checked(text) else
+    if n<=3 then int_parse_short(text) else
+    let four=n>=4 in let at=if four then 4 else 0 in
+    let first=if four then bytes_le32(text,0) else 0 in
+    let two=n-at>=2 in let last=at+(if two then 2 else 0) in
+    let middle=if two then shift_left(bytes_le16(text,at),at*8) else 0 in
+    let final=if last<n then check last>=0 && last<n in shift_left(i64(text[last]),last*8) else 0 in
+    let raw=bit_or(first,bit_or(middle,final)) in
+    let padding=if n==8 then 0 else shift_right(3472328296227680304,n*8) in
+    let digits=bit_xor(bit_or(shift_left(raw,(8-n)*8),padding),3472328296227680304) in
+    let valid=bit_and(bit_or(digits,wrapping_add(digits,8536140394893047414)),-9187201950435737472)==0 in
+    if !valid then int_parse_checked(text) else
+      let pairs=bit_and(digits,4222189076152335)*10+bit_and(shift_right(digits,8),4222189076152335) in
+      let quads=bit_and(pairs,1095216660735)*100+bit_and(shift_right(pairs,16),1095216660735) in
+      int_ok(bit_and(quads,4294967295)*10000+shift_right(quads,32))
+fn utf8_cont (byte: i64) -> bool = byte >= 128 && byte <= 191
+type Utf8Validation = {at:i64,ok:bool}
+private fn utf8_valid_step(borrow text:Arr u8 n,start:i64,end:i64) -> Utf8Validation
+  = let i=loop(i=start) while i<=end-8 && bit_and(bytes_le64(text,i),-9187201950435737472)==0 next(i+8) yield i in
+    let four=if i<=end-4 && bit_and(bytes_le32(text,i),2155905152)==0 then i+4 else i in
+    let two=if four<=end-2 && bit_and(bytes_le16(text,four),32896)==0 then four+2 else four in
+    let i=if two<end && str_byte(text,two)<128 then two+1 else two in
+    if i==end then Utf8Validation {at=end,ok=true} else
+    let a=str_byte(text,i) in let width=if a<128 then 1 else if a<224 then 2 else if a<240 then 3 else 4 in
+    if width>end-i then Utf8Validation {at=end,ok=false} else
+    let b=str_byte(text,i+1) in let c=str_byte(text,i+2) in let d=str_byte(text,i+3) in
+    Utf8Validation {at=i+width,ok=if a<128 then a>=0 else if a>=194 && a<=223 then utf8_cont(b) else
+      if a==224 then b>=160 && b<=191 && utf8_cont(c) else
+      if a>=225 && a<=239 then utf8_cont(b) && utf8_cont(c) && (a!=237 || b<=159) else
+      if a==240 then b>=144 && b<=191 && utf8_cont(c) && utf8_cont(d) else
+      a>=241 && a<=244 && utf8_cont(b) && utf8_cont(c) && utf8_cont(d) && (a!=244 || b<=143)}
+; Validate a borrowed range without allocating an owning slice. Invalid bounds
+; and truncated code points fail even when following backing bytes are valid.
+fn utf8_valid_range(borrow text:Arr u8 n,start:i64,end:i64) -> bool
+  = if start<0 || end<start || end>n then false else
+    loop(step=Utf8Validation {at=start,ok=true}) while step.ok && step.at<end next(utf8_valid_step(text,step.at,end)) yield step.ok
+fn utf8_valid (borrow text:Arr u8 n) -> bool = utf8_valid_range(text,0,n)
+fn utf8_encode (code: i64) -> BytesResult
+  = if code < 0 || code > 1114111 || (code >= 55296 && code <= 57343) then bytes_error(1, "invalid Unicode scalar", 0)
+    else if code < 128 then bytes_ok(arr(i in 0..1) u8(code))
+    else if code < 2048 then bytes_ok(arr(i in 0..2) u8(if i == 0 then 192 + code / 64 else 128 + code % 64))
+    else if code < 65536 then bytes_ok(arr(i in 0..3) u8(if i == 0 then 224 + code / 4096 else if i == 1 then 128 + code / 64 % 64 else 128 + code % 64))
+    else bytes_ok(arr(i in 0..4) u8(if i == 0 then 240 + code / 262144 else if i == 1 then 128 + code / 4096 % 64 else if i == 2 then 128 + code / 64 % 64 else 128 + code % 64))
+
+; Safe little-endian byte loads. A single checked unaligned read preserves
+; logical slice bounds and needs no raw pointer or external library.
+fn bytes_le16(text:Arr u8 n,at:i64) -> i64 = byte_read_le(text,at,2)
+fn bytes_le32(text:Arr u8 n,at:i64) -> i64 = byte_read_le(text,at,4)
+fn bytes_le64(text:Arr u8 n,at:i64) -> i64 = byte_read_le(text,at,8)
+
+; Compare a pattern at an offset without allocating a slice. Invalid bounds
+; fail, and every word/tail load remains inside both validated ranges.
+fn bytes_match_at(borrow text:Arr u8 n,at:i64,borrow pattern:Arr u8 m) -> bool
+  = if at<0 || at>n || m>n-at then false else
+    let end=loop(i:i64{i>=0}=0,same=true) while same && i<=m-8 next(i+8,byte_read_le(text,at+i,8)==byte_read_le(pattern,i,8)) yield if same then i else -1 in
+    if end<0 then false else
+    let four=m-end>=4 in let first=!four || bytes_le32(text,at+end)==bytes_le32(pattern,end) in let middle_at=end+(if four then 4 else 0) in
+    let two=m-middle_at>=2 in let middle=!two || bytes_le16(text,at+middle_at)==bytes_le16(pattern,middle_at) in let last=middle_at+(if two then 2 else 0) in
+    first && middle && (last==m || (check last>=0 && last<m && at+last>=0 && at+last<n in text[at+last]==pattern[last]))

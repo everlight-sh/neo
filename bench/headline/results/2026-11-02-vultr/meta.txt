@@ -1,0 +1,111 @@
+## machine
+Linux axon-headline-x86 6.8.0-146-generic #146-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep  3 16:12:30 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+CPU(s):                                  4
+Model name:                              AMD EPYC-Milan Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      2
+Socket(s):                               1
+L1d cache:                               64 KiB (2 instances)
+L2 cache:                                1 MiB (2 instances)
+L3 cache:                                32 MiB (1 instance)
+               total        used        free      shared  buff/cache   available
+Mem:            7935         540        4724           1        2982        7395
+## topology
+CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE
+  0    0      0    0 0:0:0:0          yes
+  1    0      0    0 0:0:0:0          yes
+  2    0      0    1 1:1:1:0          yes
+  3    0      0    1 1:1:1:0          yes
+cpu0 thread_siblings_list=0-1
+cpu1 thread_siblings_list=0-1
+cpu2 thread_siblings_list=2-3
+cpu3 thread_siblings_list=2-3
+## THP
+always [madvise] never
+always defer defer+madvise [madvise] never
+## io_uring_disabled
+0
+## versions
+0.17.0
+go version go1.25.14 linux/amd64
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+bun 1.4.4 1.4.4+38afee6c8
+Ubuntu clang version 18.1.3 (1ubuntu1)
+wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer
+Python 3.12.3
+http.zig: http.zig#1bb71ff128a044b1645df91046473c38abbf965c
+## build
+Vif: ./axon build examples/{http,nbody,library_bench}.ax --no-cache
+Rust: cargo build --release --locked (profile.release: [profile.release] opt-level = 3 codegen-units = 1 lto = "fat"  )
+RUSTFLAGS=''
+Go: GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0 go build (bench/go/http, bench/go/nbody, bench/core/json.go)
+Zig: zig build -Doptimize=ReleaseFast -Dcpu=baseline and zig build -Doptimize=ReleaseFast (native)
+## sha256
+c3e89b901f06e8f6930d9917e482cef447e1e08c7f4e979463edaeba1aa116dd  /root/head.tgz
+524f1c371bab5efef051e8f58178f672249b16a25fc6b6946af24a6eff8da776  /root/bin/vif-http
+019059ede595e3a37c1aca9512470890113db4758fe18c1ab6e743f70bd6020b  /root/bin/vif-library_bench
+63e1032b85dbdab7225326e1b247a272efe25057cbcf5cfaca59e76c0036f43f  /root/bin/vif-nbody
+595bc2f4247f9b8d4757134fb3e7befc4e10857a47318eb1ccdeb41280ac9c9f  /root/rust/http_hyper
+e9a82642055cbe3d3c565de072c1e38ad3fa4cbd4310767658a12346147da54b  /root/rust/nbody
+6f11d4bf2f8cbd518cb37aff3c8591313900f05edb2afa9ef294abc3d591a0b9  /root/rust/usability
+8deaf691dc86773627d220de726a829fb4da9b1b8dbdcdffe8ddc5cbfe80a82a  /root/go-bin/http
+e0e324539fb68270db3d41ed0b1c35166444afcd67b7628c8dcc2437d0e62d56  /root/go-bin/json
+eddc027acba32395de4375937b83ca591c5ffb637c498787a4dfaa53a5b48d36  /root/go-bin/nbody
+8971774e63c54ca8e2db9cfc92432f9189d942119c89d39695188e5c6b394b6d  /root/zig-baseline/bin/http_httpz
+54ea2c479f37421f522a3ddb503567d377a00e5b50067633448073684ed651b2  /root/zig-baseline/bin/http_std
+6035840f27486d4b807f3e8c9fc0090281c257a4248a6241bb7f8318e9d9beb7  /root/zig-baseline/bin/json
+ea1fa34df901ee842677ee8810129b3acdea1b2067e902a9b30ec07adba4657e  /root/zig-baseline/bin/nbody
+4581eb746809a8736b5fea3f6b2b56b72fb5c57239662fdf6847d12d592a7934  /root/zig-native/bin/json
+8987fb0c9dcd4dffb5d80f174a78ca67f0385675ebe31b98a4f75016d746b694  /root/zig-native/bin/nbody
+10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235  /root/.bun/bin/bun
+fde89fe944db962f3f90ff97f1596b8a7a9bfb77aa2925a7c0c6c4219b12325b  /root/axon/bench/bun/server.ts
+0101d3468970b91bd4814223d765a035923ceb7bbdf7185b1611eb580a42ebd5  /root/axon/bench/usability/bun.ts
+90dcb7ddce0cbd81221ffc6b73c29586dd134fbe3d75b0062d613188b9368ee3  /root/axon/bench/core/compute.ts
+7c20d0155a26d4e9b57e6df68fc3f4be3a38d7ec2ada8c14460302bf8017176a  /root/axon/bench/headline/run_headline.py
+## sizes
+/root/bin:
+total 220
+-rwxr-xr-x 1 root root  78512 Nov  2 11:11 vif-http
+-rwxr-xr-x 1 root root 112752 Nov  2 11:11 vif-library_bench
+-rwxr-xr-x 1 root root  28600 Nov  2 11:11 vif-nbody
+
+/root/go-bin:
+total 13240
+-rwxr-xr-x 1 root root 8467839 Nov  2 11:12 http
+-rwxr-xr-x 1 root root 2778738 Nov  2 11:12 json
+-rwxr-xr-x 1 root root 2303294 Nov  2 11:12 nbody
+
+/root/rust:
+total 2040
+-rwxr-xr-x 1 root root 1042256 Nov  2 11:11 http_hyper
+-rwxr-xr-x 1 root root  546408 Nov  2 11:11 nbody
+-rwxr-xr-x 1 root root  491872 Nov  2 11:11 usability
+
+/root/zig-baseline/bin:
+total 29476
+-rwxr-xr-x 1 root root 4769952 Nov  2 11:13 http_httpz
+-rwxr-xr-x 1 root root 4467144 Nov  2 11:13 http_std
+-rwxr-xr-x 1 root root 4476904 Nov  2 11:13 json
+-rwxr-xr-x 1 root root 4070544 Nov  2 11:13 mandel
+-rwxr-xr-x 1 root root 4161736 Nov  2 11:13 nbody
+-rwxr-xr-x 1 root root 4102456 Nov  2 11:13 sieve
+-rwxr-xr-x 1 root root 4122840 Nov  2 11:13 stencil
+
+/root/zig-native/bin:
+total 30208
+-rwxr-xr-x 1 root root 4880424 Nov  2 11:14 http_httpz
+-rwxr-xr-x 1 root root 4578792 Nov  2 11:14 http_std
+-rwxr-xr-x 1 root root 4605264 Nov  2 11:14 json
+-rwxr-xr-x 1 root root 4163712 Nov  2 11:14 mandel
+-rwxr-xr-x 1 root root 4268816 Nov  2 11:14 nbody
+-rwxr-xr-x 1 root root 4196776 Nov  2 11:14 sieve
+-rwxr-xr-x 1 root root 4224128 Nov  2 11:14 stencil

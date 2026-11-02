@@ -1,0 +1,388 @@
+.............................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 173 tests in 6.558s
+
+OK
+Created /tmp/tmp0l7pajrg/sample
+PASS language-generics-results
+PASS language-result-errors
+PASS language-collections
+PASS language-resources
+PASS language-kernel
+PASS language-fork-cancellation
+PASS language-file-fork-isolation
+PASS language-unit-and-empty-values
+PASS borrowed-record-lifetimes
+PASS owned-records
+PASS stdlib
+PASS http-client
+PASS documented-greeting
+PASS custom-resource-exactly-once
+PASS compact-byte-map
+PASS inline-byte-map-words
+PASS owned-word-byte-arrays
+PASS disjoint-record-field-moves
+PASS bounded-large-buffer-reuse
+PASS typed-callbacks
+PASS typed-resource-arena
+PASS agent-core-libraries
+PASS child-process-streams
+PASS non-escaping-array-borrows
+PASS push-capacity-boundaries
+PASS push-record-planes
+PASS reactor-and-process-halfclose
+PASS scoped-datagram-transport
+PASS bounded-private-buffers
+PASS factory-resource-cleanup
+PASS utf16-code-unit-arrays
+PASS doc-getting-started-0
+PASS doc-getting-started-1
+PASS doc-language-v01-0
+PASS doc-language-v01-1
+PASS doc-language-v01-2
+PASS doc-language-v01-3
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS heap: 3072 live blocks do not overlap; aligned allocations, full rounded payloads, private/shared pools and reuse across 16 B–32 MiB class boundaries
+PASS observer lifetime proofs: 10k cases per worker mode, live aliases, copied outputs, escaping boxes/nested set children/loop states/indirect callbacks and heavy allocator reuse
+
+RUN index_lifetimes.py
+PASS 140 independent indexed-parent lifetimes: consuming/recycling callbacks, scalar/array/record fields, nested holders, temporaries, observers, retained aliases and heap children; 1/4 workers
+
+RUN loop_record_fields.py
+PASS 160 independent loop record states: zero/body/exit lifetimes, field and whole-record yields, retained snapshots, overlapping call borrows, 1/4 workers and constant allocation bounds
+
+RUN data_sync.py
+PASS data sync: new/grown/overwritten file contents, EBADF and dependency audit; native barrier EIO
+
+RUN elf_runtime_layout.py
+PASS x86 freestanding ELF: page-aligned BSS state, no imports/interpreter; data-sync execution passed natively
+
+RUN byte_reads.py
+PASS 871 independent little-endian word reads and scalar reductions, unaligned/sliced boundaries, signed 64-bit values, retained/mutated aliases, record/index/temporary source lifetimes and 16 invalid offset/width traps; 1/4 workers
+
+RUN json_tokens.py
+PASS 425 independent complete token streams and 6 rejected sources: depths, scalar inspection, member names, skip/take spans, duplicate/escaped keys and retained cursor aliases, 1/4 workers
+
+RUN json_token_growth.py
+PASS complete 1k/10k/100k object token traversal, independent token/key/integer totals and constant allocation bounds, 1/4 workers
+
+RUN native_sections.py
+PASS unused explicit ABI exports and native cached-library entry points survive section collection; complete output and no runtime imports
+
+RUN bitset_growth.py
+PASS complete dense/sparse bitmap growth through 1M positions, exact independent ordered membership, bounded word storage and logarithmic allocation counts, 1/4 workers
+
+RUN bitset.py
+PASS 628 complete independent bitmap states: repeats, boundaries, sparse high bits, removal to empty, ordered iteration and retained aliases, 1/4 workers
+
+RUN json_views.py
+PASS 569 independent full cursor trees and 7 invalid inputs: duplicates, escaped keys, integer limits, nested materialization, repeated/end cursors and retained aliases, 1/4 workers
+
+RUN json_writer.py
+PASS 1002 independent structured JSON writer cases: scalars, nested trees, raw values, duplicate keys, invalid transitions/UTF-8, parser depth boundaries and retained aliases, 1/4 workers
+
+RUN json_writer_growth.py
+PASS structured JSON/fragment growth at 1k/10k/100k, complete Python results, linear bytes and logarithmic reused-fragment allocation requests, 1/4 workers
+
+RUN json_object_encoder.py
+PASS 737 independent prepared-object encodings: exact integers, scalar/nested fragments, escaped Unicode/control keys and values, duplicate names and length mismatch, 1/4 workers
+
+RUN json_field_decoder.py
+PASS 1212 prepared field decodes match json_parse/json_get: objects and arrays of objects, escaped/duplicate/Unicode keys, nested and non-object values, integer limits and invalid inputs
+
+RUN set_only_loops.py
+PASS set-only loop states: shared, borrowed, moved, aliased-state, zero-iteration and literal sources stay intact
+
+RUN write_only_loops.py
+PASS write-only loop states: shared, borrowed, moved, literal, overlapping, conditional, chained and yield-aliased sources stay intact
+
+RUN unique_flags.py
+PASS unique flags: trusted moves write in place; slices, copies, borrows, second states and stored records still copy (flags on and off)
+
+RUN opcode_vm.py
+PASS 40-opcode VM: native results match the Python model; dispatch is one 40-case switch
+
+RUN deep_dispatch.py
+PASS 300-arm dispatch: parsed, every handler bound proven, one 300-case switch, results match the model
+
+RUN byte_equal.py
+PASS 1075 complete byte equality cases, word/tail boundaries, every differing position, temporary/slice aliases and consuming array/record-field updates, 1/4 workers
+
+RUN hashmap_entry.py
+PASS map-entry growth at 1k/10k/100k: logarithmic allocation requests and linear bytes, 1/4 workers
+PASS 1,400 independent map-entry/overwrite/delete results, binary keys, growth/tombstones, held snapshots and returned-value aliases, 1/4 workers
+
+RUN utf8_ranges.py
+PASS 7985 bounded UTF-8 cases: independent decoder, invalid bounds, ASCII words, every scalar-boundary split and invalid encodings
+
+RUN vector_sort_cases.py
+PASS 88 complete sort results and preserved input aliases: empty/single/odd sizes, duplicates, reversed/sorted and signed extremes, 1/4 workers
+
+RUN bit_counts.py
+PASS native trailing-zero counts: zero, sign bits, every power of two and random words, 1/4 workers
+
+RUN json_scan_words.py
+PASS 6644 independent JSON word/tail/UTF-8/escape/array-count cases
+
+RUN write_parts.py
+PASS multipart file writes: empty spans, exact content/count, real short write and cumulative error offset
+
+RUN byte_writes.py
+PASS byte writes: shared/static/sliced/overlapping buffers, source-field lifetime, signed little endian, empty spans, bounds/width traps; 1/4 workers
+
+RUN shared_arrays.py
+PASS shared arrays: 100 snapshots use one descriptor allocation; nested writes isolate aliases; retained snapshots survive owner destruction; offset slices, append and repeated detach/release
+
+RUN borrow_parameters.py
+PASS effect borrows: zero-allocation record inspection, overlapping moves/updates, generic escapes and temporary cleanup
+
+RUN branch_ownership.py
+PASS branch-local ownership, alias isolation, field mutation, nested scalar reads and linear allocation traffic: [(1000, 3029, 291048), (10000, 30037, 3697128), (100000, 300043, 32777192)]
+
+RUN json_serialization.py
+PASS 428 JSON serialization/update/escaping/alias/depth differential cases
+
+RUN reactor_language.py
+PASS scoped UDP zero-length datagrams, bounds, address/port, readiness and cancellation
+PASS multi-descriptor reactor, subprocess EOF, stale generations, deadline/cancellation and resource cleanup
+
+RUN push_boundaries.py
+PASS native push: i64/i32/u8/bool, nested arrays and SoA records; retained aliases and exact growth allocations/bytes through 1M elements
+
+RUN json_key_words.py
+PASS JSON key words: 13172 binary/tail/alignment/Unicode/escaped/duplicate/missing-key cases
+
+RUN word_bytes.py
+PASS owned word-byte arrays: zero/short/large lengths, signed words, repeated shifts and alias isolation
+
+RUN int_parse_vectors.py
+PASS short decimal parser: 12433 binary/sign/overflow/error-position vectors
+PASS owned integer formatting: 1519 signed/short/boundary/random vectors
+
+RUN map_optimizations.py
+PASS array scalar-result borrows: retained aliases, mutation isolation and linear allocation traffic through 100k elements
+PASS native map against Python bytes model: empty/NUL/long keys, every word-tail alignment, missing keys, aliases, deletion and compaction
+PASS inline map words: binary keys/values, hash compatibility, all encoding boundaries, retained aliases and compacted collision chains
+
+RUN agent_readiness.py
+PASS exact decimal conversion and binary64 round trips (independent Python oracle)
+PASS strict Base64 and unpadded Base64url binary/malformed vectors
+PASS RFC3339 against datetime: years 1..9999, negative epochs, leap days, fractions, offsets and invalid dates
+PASS Unicode 16 case folding, scalar iteration, word categories, whitespace splitting and malformed UTF-8
+PASS finite log1p/exp numerical oracle (2e-12 relative tolerance; not correctly-rounded libm)
+PASS exclusive private atomic replacement, complete contents and temporary cleanup
+PASS first-read preservation and cross-process cancellation of stalled socket
+PASS authorization/custom headers, bounded HTTP chunk decoding and fragmented SSE over TCP and authenticated TLS 1.3
+
+RUN bytesmap_smoke.py
+PASS bytesmap: independent model, aliases, empty/binary keys, repeated growth/overwrite/delete/compaction
+PASS field moves: aliases/conditional/whole-record reuse and geometric traffic for two growing buffers
+
+RUN nbody_worker_smoke.py
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS record worker kernel EAGAIN fallback
+PASS N-body: independent Python model, 1/4 workers, odd sizes and 1024 dispatch threshold; static dependency audit
+
+RUN language_smoke.py
+PASS native collections: independent map model, tombstones, binary/empty keys, owned values, aliases and sorting
+PASS all 64 independent SipHash-2-4 vectors in native machine code
+PASS scoped cleanup, error propagation, moves, cancellation, deadlines, exact channel bounds and 10,000 cross-process messages
+PASS generic owned data, checked matches and typed error short circuit
+
+RUN language_perf_checks.py
+PASS allocation complexity at 1k/10k/100k: geometric append, one sort buffer, linear hash-map traffic
+
+RUN network_language.py
+PASS DNS: UDP, compressed CNAME, ID/question validation, pointer cycles, fragmented TCP fallback, truncation and monotonic deadlines
+PASS HTTP: seven methods, HEAD, fixed/chunked/EOF framing, 1xx, malicious framing, early chunks and 4 MiB streamed through a bounded buffer
+
+RUN crypto_language.py
+PASS legacy SHA-1/HMAC-SHA1 native boundary vectors for WebSocket/STUN interoperability
+PASS native SHA-256/HMAC boundaries through 1 MiB, HKDF vector, and 16 ChaCha/Poly1305/AEAD cases against OpenSSL including tamper rejection
+PASS 16 X25519 exchanges against independent OpenSSL keys and low-order point rejection
+PASS RSA 2048-bit PKCS#1 SHA-256 and PSS SHA-256 signatures, tampering and noncanonical rejection
+PASS RSA 2048-bit PKCS#1 SHA-256 and PSS SHA-256 signatures, tampering and noncanonical rejection
+PASS RSA 2050-bit PKCS#1 SHA-256 and PSS SHA-256 signatures, tampering and noncanonical rejection
+PASS RSA 4096-bit PKCS#1 SHA-256 and PSS SHA-256 signatures, tampering and noncanonical rejection
+
+RUN aes_language.py
+PASS AES-128 NIST block/GCM vectors; 32 Go-oracle GCM cases, boundary sizes, round trips and no plaintext after tag/nonce corruption
+
+RUN p256_language.py
+PASS P-256 field/order Montgomery add/sub/multiply/inverse vs Python integer oracle
+
+RUN p256_protocols.py
+PASS P-256 ECDH/public keys against Go; ECDSA RFC6979 exact vectors and bidirectional Go interop; invalid keys/DER/range/tampering rejected
+
+RUN tls_language.py
+PASS X.509: trusted RSA certificates, DNS/IP SAN, wildcard boundaries, times, critical extensions, EKU, CA rules, bad signatures and 180+ malformed/truncated inputs
+PASS TLS 1.3: RSA/ECDSA and mixed issuer chains, independent encrypted peer, byte fragmentation, tickets, close-notify, hostname/chain rejection, corrupt tags, truncation, deadlines and KeyUpdate; a TLS 1.2-only peer over TLS 1.2
+
+RUN tooling_smoke.py
+PASS identical native Linux binaries across project relocation
+PASS project cache: warm hit, imported edits, tamper detection, concurrent atomic publication and structured diagnostics
+
+RUN usability_smoke.py
+PASS JSON CLI: schema, stable sort/filter, Unicode, malformed data and recoverable file errors
+PASS notes: CRUD, escaped SSR, 30 concurrent writes, SIGKILL/restart, torn-tail repair, corruption and storage failure
+PASS webhook: durable enqueue, concurrent deduplication, retries, deadlines, failure limits and restart recovery
+PASS JSON differential fuzz: 627 valid/malformed byte inputs against independent Python JSON
+PASS file append/read/errors, environment/argv, embedded-NUL rejection, clocks and sleep
+
+RUN json_accessors.py
+PASS JSON accessor differential: 737 Unicode/escaped-key/duplicate/nested/wide-object/ownership cases
+
+RUN compiler_confidence.py
+PASS checked integer arithmetic, explicit wrapping, division, reduction, SIMD masks, folding and float-cast boundaries
+PASS 80 generated programs × 5 inputs × 2 optimization modes against an independent evaluator
+PASS 2000 deterministic malformed-source parser fuzz inputs without internal crashes
+
+RUN compute_smoke.py
+axonc: /tmp/axon-compute-test-5w4z68m3/hello  graph e9a3b7fbbc27c14c  obligations 125/128 proven, 3 runtime checks, 0 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+hello: PASS (1 and 4 workers)
+axonc: /tmp/axon-compute-test-5w4z68m3/greet  graph d3ca16410fe174f0  obligations 135/139 proven, 4 runtime checks, 2 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+greet: PASS (1 and 4 workers)
+axonc: /tmp/axon-compute-test-5w4z68m3/mandel  graph 3ecee013ced1ee5c  obligations 125/131 proven, 6 runtime checks, 1 parallel regions, 2 vectorised sums, 0 calls folded, 0 inlined, build miss
+mandel: PASS (1 and 4 workers)
+axonc: /tmp/axon-compute-test-5w4z68m3/stencil  graph f3660c5f4e40e0d7  obligations 134/139 proven, 5 runtime checks, 3 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+stencil: PASS (1 and 4 workers)
+axonc: /tmp/axon-compute-test-5w4z68m3/sieve  graph d6ad9a9784704dec  obligations 137/141 proven, 4 runtime checks, 2 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+sieve: PASS (1 and 4 workers)
+axonc: /tmp/axon-compute-test-5w4z68m3/nbody  graph 58cdaa3a4e1c245c  obligations 148/153 proven, 5 runtime checks, 5 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+nbody: PASS (1 and 4 workers)
+argv parsing and refinement boundaries: PASS
+
+RUN kernel_runtime_smoke.py
+axonc: /tmp/axon-kernel-test-tpig1kqq/kernel_runtime  graph 1638d72075e6b433  obligations 126/135 proven, 9 runtime checks, 0 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+kernel_runtime: PASS (1 and 4 workers)
+axonc: /tmp/axon-kernel-test-tpig1kqq/parallel_runtime  graph 936afa2bca23c065  obligations 127/132 proven, 5 runtime checks, 2 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+parallel_runtime: PASS (1 and 4 workers)
+axonc: /tmp/axon-kernel-test-tpig1kqq/memory_blocks  graph f507adc889938d8e  obligations 127/130 proven, 3 runtime checks, 0 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+memory_blocks: PASS (1 and 4 workers)
+
+RUN http_smoke.py
+axonc: /tmp/axon-http-test-6daw3thn/http  graph b6b17151a31a8007  obligations 254/260 proven, 6 runtime checks, 13 parallel regions, 2 vectorised sums, 1 calls folded, 1 inlined, build miss
+== io_uring backend (default), 4 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=4
+Test server stopped.
+== epoll backend, 4 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=4
+Test server stopped.
+== io_uring backend (default), 1 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=1
+Test server stopped.
+
+RUN bounded_stencil_smoke.py
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+AXON_RANGE=0: 1040 signed/overflow/tail/iteration cases PASS
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+AXON_RANGE=1: 1040 signed/overflow/tail/iteration cases PASS
+
+RUN vector_arrays_smoke.py
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+AXON_VEC=0: 210 affine-load/negative-origin/empty-interior/float cases; masked overflow, near-i64-limit induction, allocating fallback PASS
+Injected clone EAGAIN: sequential fallback PASS
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+AXON_VEC=1: 210 affine-load/negative-origin/empty-interior/float cases; masked overflow, near-i64-limit induction, allocating fallback PASS
+Injected clone EAGAIN: sequential fallback PASS
+axonc: /tmp/axon-vector-arrays-iqikct1i/worker-abi  graph 6b7cde9039db2f43  obligations 125/128 proven, 3 runtime checks, 0 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build miss
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Native raw-clone worker creation, callback ABI, shared writes and join: 20 runs PASS
+
+RUN bitwise_smoke.py
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS bitwise folding=0: 250 high-bit/negative/random patterns
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS bitwise folding=1: 250 high-bit/negative/random patterns
+bun test v1.4.4 (38afee6c8)
+
+examples/jsx-ssr/compile.test.ts:
+(pass) shared React source generates ordinary Axon functions and escaped props [11.58ms]
+(pass) fragments, comments, entities, numeric props, null and ternaries [0.95ms]
+(pass) reject: runtime imports [0.50ms]
+(pass) reject: one return expression [0.74ms]
+(pass) reject: Unsupported CallExpression [0.44ms]
+(pass) reject: Unsupported HTML attribute onClick [0.25ms]
+(pass) reject: Unsupported HTML attribute [0.25ms]
+(pass) reject: Unsupported HTML attribute style [0.19ms]
+(pass) reject: Unsupported HTML tag [0.22ms]
+(pass) reject: Spread attributes [0.26ms]
+(pass) reject: Duplicate prop [0.20ms]
+(pass) reject: Unknown prop missing [0.17ms]
+(pass) reject: Only integer comparisons [0.23ms]
+(pass) reject: Reserved React props [0.15ms]
+(pass) reject: Declare children as ReactNode [0.14ms]
+(pass) reject: must be boolean [0.25ms]
+(pass) reject: Unsupported PrefixUnaryExpression [0.33ms]
+(pass) reject: safe integer [0.34ms]
+(pass) reject: Unsupported JSX entity [0.14ms]
+(pass) reject: unknown component [0.22ms]
+(pass) reject: Recursive component cycles [0.14ms]
+(pass) reject: Recursive component cycles [0.25ms]
+(pass) reject: Missing required prop [0.21ms]
+(pass) reject: expects text [0.23ms]
+(pass) reject: does not accept children [0.26ms]
+(pass) diagnostics include the source location [0.33ms]
+(pass) JavaScript control characters become valid Axon byte escapes [0.48ms]
+(pass) literal attribute spacing is preserved [0.28ms]
+(pass) optimizations have an explicit baseline mode [1.60ms]
+(pass) static markup is coalesced, dynamic text escaped once, numbers formatted once [2.29ms]
+(pass) sharing never hoists conditional escaping out of its branch [0.80ms]
+
+ 31 pass
+ 0 fail
+ 46 expect() calls
+Ran 31 tests across 1 file. [374.00ms]
+axonc: /root/suite-tree/.kernel-build/usability/ssr-linux-x86_64.building-69242  graph d0bdde02f49e3a01  obligations 177/182 proven, 5 runtime checks, 3 parallel regions, 0 vectorised sums, 0 calls folded, 1 inlined, build miss
+Generated Axon: /root/suite-tree/.kernel-build/jsx-ssr/components.ax
+Run: AXON_THREADS=1 /root/suite-tree/.kernel-build/usability/ssr-linux-x86_64 8092
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+axon: serving, workers=1
+PASS: TSX->Axon vs React, all 1000 inputs, 1 worker(s); concurrent + pipelined HTTP
+axon: serving, workers=4
+PASS: TSX->Axon vs React, all 1000 inputs, 4 worker(s); concurrent + pipelined HTTP
+React reference: http://localhost:59509
+PASS: Bun/React reference HTTP routes
+axon test: 37 native cases, 0 failed

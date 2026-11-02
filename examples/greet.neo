@@ -1,0 +1,15 @@
+; Greets the number you pass in: `./greet 7` prints "Hello, 7!".
+; Decimal formatting is Neo code (see utoa); every index is proven in range.
+
+fn shift10 (v : i64, k : i64) -> i64
+  = loop (x = v, j = 0) while j < k next (x / 10, j + 1) yield x
+
+fn utoa (v : i64{v >= 0}) -> Arr u8 _
+  = let d = loop (x = v, d : i64{d >= 1} = 1) while x >= 10 next (x / 10, d + 1) yield d in
+    arr(i in 0..d) u8(48 + shift10(v, d - 1 - i) % 10)
+
+fn cat (a : Arr u8 n, b : Arr u8 m) -> Arr u8 (n + m)
+  = arr(i in 0..n + m) if i < n then a[i] else b[i - n]
+
+fn main (who : i64{who >= 0}) -> Arr u8 _
+  = cat(cat("Hello, ", utoa(who)), "!\n")

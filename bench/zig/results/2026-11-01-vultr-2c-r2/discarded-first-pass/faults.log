@@ -1,0 +1,55 @@
+== /root/bin/vif-stencil 50000000 20 threads=1
+25000046624222
+wall 1.82 s user 1.39 s sys 0.42 s maxrss 781160 KiB minor faults 77876
+== /root/bin-before/vif-stencil 50000000 20 threads=1
+25000046624222
+wall 6.23 s user 2.31 s sys 3.91 s maxrss 781184 KiB minor faults 2050888
+== /root/zig-baseline/bin/stencil 50000000 20 threads=1
+25000046624222
+wall 1.69 s user 1.33 s sys 0.35 s maxrss 781952 KiB minor faults 195491
+== /root/bin/vif-stencil 50000000 20 threads=2
+25000046624222
+wall 0.82 s user 1.43 s sys 0.10 s maxrss 781188 KiB minor faults 5323
+== /root/bin-before/vif-stencil 50000000 20 threads=2
+25000046624222
+wall 5.69 s user 2.23 s sys 7.57 s maxrss 781248 KiB minor faults 2050892
+== /root/zig-baseline/bin/stencil 50000000 20 threads=2
+25000046624222
+wall 1.04 s user 1.54 s sys 0.39 s maxrss 782112 KiB minor faults 196943
+== /root/bin/vif-stencil 1000000 20 threads=1
+499998359740
+wall 0.03 s user 0.02 s sys 0.00 s maxrss 15584 KiB minor faults 1956
+== /root/bin-before/vif-stencil 1000000 20 threads=1
+499998359740
+wall 0.03 s user 0.02 s sys 0.00 s maxrss 15616 KiB minor faults 4000
+== /root/zig-baseline/bin/stencil 1000000 20 threads=1
+499998359740
+wall 0.03 s user 0.02 s sys 0.00 s maxrss 16256 KiB minor faults 4083
+== /root/bin/vif-stencil 1000000 20 threads=2
+499998359740
+wall 0.02 s user 0.04 s sys 0.00 s maxrss 15584 KiB minor faults 941
+== /root/bin-before/vif-stencil 1000000 20 threads=2
+499998359740
+wall 0.02 s user 0.03 s sys 0.01 s maxrss 15616 KiB minor faults 4003
+== /root/zig-baseline/bin/stencil 1000000 20 threads=2
+499998359740
+wall 0.03 s user 0.03 s sys 0.01 s maxrss 16580 KiB minor faults 5537
+== /root/bin/vif-sieve 100000000 threads=1
+5761455
+wall 0.42 s user 0.41 s sys 0.00 s maxrss 97648 KiB minor faults 488
+== /root/bin-before/vif-sieve 100000000 threads=1
+5761455
+wall 0.52 s user 0.47 s sys 0.04 s maxrss 97664 KiB minor faults 24506
+== /root/zig-baseline/bin/sieve 100000000 threads=1
+5761455
+wall 0.48 s user 0.43 s sys 0.05 s maxrss 98304 KiB minor faults 24591
+== /root/bin/vif-sieve 100000000 threads=2
+5761455
+wall 0.40 s user 0.42 s sys 0.00 s maxrss 97548 KiB minor faults 494
+== /root/bin-before/vif-sieve 100000000 threads=2
+5761455
+wall 0.48 s user 0.46 s sys 0.07 s maxrss 97536 KiB minor faults 24511
+== /root/zig-baseline/bin/sieve 100000000 threads=2
+5761455
+wall 0.46 s user 0.46 s sys 0.04 s maxrss 98560 KiB minor faults 24721
+thp_fault_alloc thp_fault_alloc 32292

@@ -1,0 +1,5 @@
+FROM scratch
+COPY axon /server
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/server", "8080"]

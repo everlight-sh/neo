@@ -1,0 +1,42 @@
+; Darwin ARM64 kernel ABI. The OS loader still requires libSystem, but this
+; runtime imports no library functions. Raw syscall ABI is platform-specific.
+effect fn rt_read (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(3, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_write (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(4, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_close (fd : i64) -> i64 = rt_result(syscall6(6, fd, 0, 0, 0, 0, 0))
+export effect fn ax_exit (status : i64) -> unit = let result = syscall6(1, status, 0, 0, 0, 0, 0) in noop()
+effect fn rt_mmap (n : i64) -> i64 = syscall6(197, 0, n, 3, 4097, -1, 0)
+effect fn rt_munmap (p : ptr, n : i64) -> i64 = syscall6(73, ptr_to_i64(p), n, 0, 0, 0, 0)
+effect fn rt_getpid () -> i64 = syscall6(20, 0, 0, 0, 0, 0, 0)
+effect fn rt_getppid () -> i64 = syscall6(39, 0, 0, 0, 0, 0, 0)
+effect fn rt_socket (domain : i64, kind : i64, protocol : i64) -> i64 = rt_result(syscall6(97, domain, kind, protocol, 0, 0, 0))
+effect fn rt_setsockopt (fd : i64, level : i64, option : i64, value : ptr, n : i64) -> i64
+  = rt_result(syscall6(105, fd, level, option, ptr_to_i64(value), n, 0))
+effect fn rt_bind (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(104, fd, ptr_to_i64(p), n, 0, 0, 0))
+effect fn rt_listen (fd : i64, backlog : i64) -> i64 = rt_result(syscall6(106, fd, backlog, 0, 0, 0, 0))
+effect fn rt_accept_fd (fd : i64) -> i64 = rt_result(syscall6(30, fd, 0, 0, 0, 0, 0))
+effect fn rt_fcntl (fd : i64, command : i64, arg : i64) -> i64 = rt_result(syscall6(92, fd, command, arg, 0, 0, 0))
+effect fn rt_send (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(133, fd, ptr_to_i64(p), n, 524288, 0, 0))
+effect fn rt_poll (fds : ptr, count : i64) -> i64 = rt_result(syscall6(230, ptr_to_i64(fds), count, 1000, 0, 0, 0))
+effect fn rt_socketpair (p : ptr) -> i64 = rt_result(syscall6(135, 1, 1, 0, ptr_to_i64(p), 0, 0))
+effect fn rt_wait (pid : i64) -> i64
+  = let status = stack_alloc(24) in
+    let cleared = store_i64(status, 0, 0) in
+    let result = loop (r = -1, again = true) while again
+      next (let waited = rt_result(syscall6(7, pid, ptr_to_i64(status), 0, 0, 0, 0)) in let saved = store_i64(status, 16, waited) in waited,
+            load_i32(rt_errno(), 0) == i32(4) && load_i64(status, 16) < 0) yield r in
+    if result < 0 then 1 else i64(load_i32(status, 0))
+effect fn rt_ncpu () -> i64
+  = let cache = load_i64(runtime_state(), 16) in
+    if cache > 0 then cache else
+      let p = stack_alloc(32) in
+      let first = store_i32(p, 0, i32(6)) in let second = store_i32(p, 4, i32(3)) in
+      let length = store_i64(p, 16, 4) in
+      let result = syscall6(202, ptr_to_i64(p), 2, ptr_to_i64(ptr_add(p, 8)), ptr_to_i64(ptr_add(p, 16)), 0, 0) in
+      let n = if result < 0 then 1 else i64(load_i32(p, 8)) in
+      let saved = store_i64(runtime_state(), 16, n) in n
+fn rt_again () -> i64 = 35
+fn rt_nonblock_flag () -> i64 {result > 0} = 4
+fn rt_socket_level () -> i64 = 65535
+fn rt_reuseaddr () -> i64 = 4
+effect fn rt_address (p : ptr) -> unit
+  = let length = store_u8(p, 0, u8(16)) in store_u8(p, 1, u8(2))

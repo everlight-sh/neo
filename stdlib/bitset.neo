@@ -1,0 +1,27 @@
+import "std:option"
+
+; Sparse, growable membership over nonnegative 31-bit positions. Copies retain
+; immutable value semantics; repeated writes reuse uniquely owned word storage.
+sealed type BitSet = {words:Arr i64 _,count:i64}
+fn bitset_empty() -> BitSet = BitSet {words=arr(i in 0..0) 0,count=0}
+fn bitset_len(borrow bits:BitSet) -> i64 = bits.count
+fn bitset_storage_words(borrow bits:BitSet) -> i64 = len(bits.words)
+fn bitset_has(borrow bits:BitSet,index:i64) -> bool
+  = let words=bits.words in let slot=index/64 in
+    if index<0 || slot>=len(words) then false else check slot>=0 && slot<len(words) in bit_and(words[slot],shift_left(1,index%64))!=0
+fn bitset_insert(move bits:BitSet,index:i64) -> BitSet
+  = check index>=0 && index<=2147483647 in let slot=index/64 in
+    let words=loop(words=bits.words) while len(words)<=slot next(push(words,0)) yield words in check slot>=0 && slot<len(words) in
+    let prior=words[slot] in let updated=bit_or(prior,shift_left(1,index%64)) in
+    BitSet {words=if updated==prior then words else set(words,slot,updated),count=bits.count+(if updated==prior then 0 else 1)}
+fn bitset_remove(move bits:BitSet,index:i64) -> BitSet
+  = let words=bits.words in let slot=index/64 in if index<0 || slot>=len(words) then BitSet {words=words,count=bits.count} else check slot>=0 && slot<len(words) in
+    let prior=words[slot] in let updated=bit_and(prior,bit_xor(shift_left(1,index%64),-1)) in
+    BitSet {words=if updated==prior then words else set(words,slot,updated),count=bits.count-(if updated==prior then 0 else 1)}
+fn bitset_next(borrow bits:BitSet,start:i64) -> Option<i64>
+  = let words=bits.words in let first=start/64 in
+    if start<0 || first>=len(words) then None::<i64>() else check first>=0 && first<len(words) in
+    let masked=bit_and(words[first],shift_left(-1,start%64)) in
+    loop(at=first,word=masked) while word==0 && at+1<len(words)
+      next(at+1,check at+1>=0 && at+1<len(words) in words[at+1]) yield
+      if word==0 then None::<i64>() else Some::<i64>(at*64+count_trailing_zeros(word))

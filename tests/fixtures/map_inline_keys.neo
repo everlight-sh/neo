@@ -1,0 +1,52 @@
+import "std:bytesmap"
+import "std:io"
+fn inline_key(i:i64) -> Arr u8 _
+  = let n=i%16 in check n>=0 in arr(j in 0..n) u8(bit_and(i*73+j*151,255))
+fn inline_check(i:i64) -> bool
+  = let key=inline_key(i) in let seed0=i*13+7 in let seed1=i*17+9 in
+    let hash=hash_bytes(key,seed0,seed1) in let map=bytesmap_put(bytesmap_empty(seed0,seed1),key,"original") in
+    let at=bit_and(hash,bytesmap_capacity(map)-1) in let control=map.control in let table=map.table in
+    check at>=0 && at<len(control) && at*2>=0 && at*2<len(table) in
+    let same_hash=control[at]==u8(bit_and(shift_right(hash,56),127)) in
+    let encoded=table[at*2] in let storage=bytesmap_storage_bytes(map) in
+    let updated=bytesmap_put(map,key,"longer replacement value") in let compacted=bytesmap_compact(updated) in
+    let a=bytesmap_get(map,key) in let b=bytesmap_get(compacted,key) in let deleted=bytesmap_delete(compacted,key) in
+    let missing=if len(key)==0 then "x" else check len(key)>0 in set(key,len(key)-1,u8(bit_xor(i64(key[len(key)-1]),1))) in
+    same_hash && (encoded<0)==(len(key)<=7) && storage==8+(if len(key)<=7 then 0 else len(key)) &&
+      a.present && str_equal(a.value,"original") && b.present && str_equal(b.value,"longer replacement value") &&
+      !bytesmap_get(deleted,key).present && !bytesmap_get(map,missing).present && bytesmap_len(deleted)==0
+; Different lengths with zero payload bytes must not share an inline identity.
+fn zero_lengths() -> bool
+  = let map=loop(i=0,out=bytesmap_empty(31,47)) while i<17
+      next(i+1,bytesmap_put(out,(check i>=0 in arr(j in 0..i) u8(0)),int_text(i))) yield out in
+    bytesmap_len(map)==17 && loop(i=0,ok=true) while ok && i<17
+      next(i+1,let got=bytesmap_get(map,(check i>=0 in arr(j in 0..i) u8(0))) in got.present && str_equal(got.value,int_text(i))) yield ok
+fn inline_values(i:i64) -> bool
+  = let n=i%11 in check n>=0 in let value=arr(j in 0..n) u8(bit_and(i*73+j*151,255)) in
+    let map=bytesmap_put(bytesmap_empty(13,23),"key",value) in
+    let got=bytesmap_get(map,"key") in
+    let changed=bytesmap_put(map,"key","1234567") in
+    let external=bytesmap_put(changed,"key","123456789") in
+    let empty=bytesmap_put(external,"key","") in
+    let compacted=bytesmap_compact(empty) in
+    let owned=if len(got.value)==0 then got.value else check len(got.value)>0 in set(got.value,0,u8(255)) in
+    got.present && str_equal(got.value,value) && str_equal(bytesmap_get(map,"key").value,value) &&
+      str_equal(bytesmap_get(changed,"key").value,"1234567") && str_equal(bytesmap_get(external,"key").value,"123456789") &&
+      bytesmap_get(compacted,"key").present && len(bytesmap_get(compacted,"key").value)==0 && len(owned)==n
+; Force a six-entry probe chain into eight buckets, then compact tombstones.
+fn tombstones() -> bool
+  = let map=loop(i=0,found=0,out=bytesmap_empty(5,7)) while found<6
+      next(i+1,found+(if bit_and(hash_bytes(int_text(i),5,7),7)==0 then 1 else 0),
+        if bit_and(hash_bytes(int_text(i),5,7),7)==0 then bytesmap_put(out,int_text(i),int_text(i)) else out) yield out in
+    let removed=loop(i=0,found=0,out=map) while found<3
+      next(i+1,found+(if bit_and(hash_bytes(int_text(i),5,7),7)==0 then 1 else 0),
+        if bit_and(hash_bytes(int_text(i),5,7),7)==0 then bytesmap_delete(out,int_text(i)) else out) yield bytesmap_compact(out) in
+    let verified=loop(i=0,found=0,ok=true) while ok && found<6
+      next(i+1,found+(if bit_and(hash_bytes(int_text(i),5,7),7)==0 then 1 else 0),
+        if bit_and(hash_bytes(int_text(i),5,7),7)!=0 then true else
+          let got=bytesmap_get(removed,int_text(i)) in if found<3 then !got.present else got.present && str_equal(got.value,int_text(i))) yield ok in
+    verified && bytesmap_len(map)==6 && bytesmap_len(removed)==3
+effect(fs) fn main(n:i64{n>=0 && n<=8192}) -> unit
+  = check zero_lengths() && tombstones() in
+    let correct=loop(i=0,ok=true) while ok && i<n next(i+1,inline_check(i) && inline_values(i)) yield ok in
+    check correct in let printed=print_out("inline maps OK\n") in noop()

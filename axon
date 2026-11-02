@@ -1,0 +1,3 @@
+#!/bin/sh
+# The driver's legacy name, kept for the sibling projects (see neoc/legacy.py).
+exec "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/neo" "$@"

@@ -1,0 +1,51 @@
+; A buffer produced by an in-place writer carries a UNIQUE flag through moves
+; (records, helpers, loop states), and later writers skip the reference-count
+; test. Every way of sharing it must clear the flag first, so writes copy.
+type Run = { out : Arr u8 _, n : i64 }
+type Pair = { left : Run, right : Arr u8 _ }
+
+fn fresh(size : i64{size >= 0}) -> Run = Run { out = arr(i in 0..size) u8(97 + i % 26), n = 0 }
+; dfl_codes_step's shape: move the record, write its buffer, rebuild it.
+fn step(move r : Run) -> Run
+  = let n = r.n in let out = r.out in
+    if n >= 0 && n < len(out) then Run { out = byte_write_le(out, n, 65 + n % 26, 1), n = n + 1 } else Run { out = out, n = n + 1 }
+fn run(size : i64{size >= 0}) -> Run = loop(s = fresh(size)) while s.n < size next(step(s)) yield s
+; Marks byte 0 with '#'.
+fn mark(move r : Run) -> Run = let n = r.n in let out = r.out in Run { out = if len(out) > 0 then byte_write_le(out, 0, 35, 1) else out, n = n }
+fn head(borrow r : Run) -> Arr u8 _ = byte_slice(r.out, 0, if len(r.out) >= 2 then 2 else 0)
+fn at(a : Arr u8 _, i : i64) -> i64 = if i >= 0 && i < len(a) then i64(a[i]) else -1
+fn first(r : Run) -> i64 = at(r.out, 0)
+
+; 1. Sharing by slicing a field, then moving and writing it.
+fn sliced() -> bool
+  = let r = run(4) in let s = byte_slice(r.out, 0, 2) in let out = r.out in let w = byte_write_le(out, 0, 122, 1) in
+    at(s, 0) == 65 && at(w, 0) == 122 && at(w, 1) == 66
+; 2. A whole-record copy kept while the original is written.
+fn copied() -> bool
+  = let r = run(4) in let keep = r in let w = mark(r) in
+    first(keep) == 65 && first(w) == 35 && at(keep.out, 1) == 66
+; 3. A borrowing helper returns a slice of the field.
+fn borrowed() -> bool
+  = let r = run(4) in let h = head(r) in let w = mark(r) in
+    at(h, 0) == 65 && first(w) == 35 && w.n == 4
+; 4. Two loop states start from one record; only one is written.
+fn two_states() -> bool
+  = let r = run(3) in
+    let pair = loop(a = r, b = r, k = 0) while k < 2 next(mark(a), b, k + 1) yield Pair { left = a, right = b.out } in
+    at(pair.right, 0) == 65 && at(pair.left.out, 0) == 35
+; 5. Records stored in an array share their buffers.
+fn stored() -> bool
+  = let r = run(3) in let many = arr(i in 0..2) r in let w = mark(r) in
+    first(many[0]) == 65 && first(w) == 35 && len(many) == 2
+; 6. A written buffer returned, aliased by the caller, then written again.
+fn returned() -> bool
+  = let r = step(fresh(3)) in let alias = r.out in let again = mark(r) in
+    at(alias, 0) == 65 && first(again) == 35
+; 7. The flag kept by moves still lets a fresh pass write in place correctly.
+fn rewritten(size : i64{size >= 0}) -> bool
+  = let r = run(size) in let back = loop(s = r with { n = 0 }) while s.n < size next(step(s)) yield s in
+    loop(i = 0, ok = len(back.out) == size) while ok && i < size next(i + 1, at(back.out, i) == 65 + i % 26) yield ok
+
+fn main () -> Arr u8 _
+  = if sliced() && copied() && borrowed() && two_states() && stored() && returned() && rewritten(100000) && rewritten(0)
+    then "unique flags OK\n" else "unique flags FAILED\n"

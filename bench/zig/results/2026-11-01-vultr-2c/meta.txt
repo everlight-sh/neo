@@ -1,0 +1,63 @@
+## versions
+6.8.0-146-generic
+CPU(s):                                  2
+Model name:                              AMD EPYC-Genoa Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+               total        used        free      shared  buff/cache   available
+Mem:            3909         632        1122           1        2544        3276
+0.17.0
+Ubuntu clang version 18.1.3 (1ubuntu1)
+wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer
+Python 3.12.3
+## sizes (bytes: as built / stripped)
+/root/bin/vif-http 78344 76688 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-library_bench 129440 128016 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-mandel 19456 18400 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-nbody 24224 22792 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-orders_json 140024 138568 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-sieve 19680 18408 ELF 64-bit LSB executable, x86-64 | 
+/root/bin/vif-stencil 19832 18592 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/http_httpz 4769936 648632 ELF 64-bit LSB executable, x86-64 | [libc.so.6] [ld-linux-x86-64.so.2] 
+/root/zig-baseline/bin/http_std 4467128 608504 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/json 4476888 594392 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/mandel 4070544 507016 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/nbody 4161736 529672 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/sieve 4102456 511080 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-baseline/bin/stencil 4122840 513512 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/http_httpz 4917480 723576 ELF 64-bit LSB executable, x86-64 | [libc.so.6] [ld-linux-x86-64.so.2] 
+/root/zig-native/bin/http_std 4618512 687400 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/json 4650072 678392 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/mandel 4190728 577368 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/nbody 4313032 613832 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/sieve 4240256 589736 ELF 64-bit LSB executable, x86-64 | 
+/root/zig-native/bin/stencil 4266872 595144 ELF 64-bit LSB executable, x86-64 | 
+## sha256
+d4d19d9e33157b95916cd368f11724e1973c4aa3b3b7f3f4882c17af6f89c4e3  /root/bin/vif-http
+e1f14d4fa898eb1e145006da226d6d4395513294f2654607b44be3171db1958c  /root/bin/vif-library_bench
+181a957d2ace27b630197d034d09c60e05f8266a27ba4c643f1177faf1b5186e  /root/bin/vif-mandel
+96371e872d34f8d4a9ca5e89ee2313dac167a116f29333f9e89f4f5e790bbbf0  /root/bin/vif-nbody
+a88242f55af92d62e18a3965b00443ea38af16d2530c2053f06c257e4818bbdb  /root/bin/vif-orders_json
+34c82c69d7473211486b8839bc5c43d8ec714ffafde13da6d5a08f391facf0a1  /root/bin/vif-sieve
+d214a118e6778e581402efcd71bc254be40825201e52bbe09c523093bd706efc  /root/bin/vif-stencil
+4086462bf1982c2b365732da72527ee1489a75928ee35adebf8d8669b76c802f  /root/zig-baseline/bin/http_httpz
+61bc0cf9b04a0d66555ae358385434b8671125363429e596dd562e6059e7d0fe  /root/zig-baseline/bin/http_std
+204f755d9a7e2329678541f033f4a8c6e136339dee0b088093b4e42a6c2579ac  /root/zig-baseline/bin/json
+ab4c6cc8a0bf22b104d7132b33c02c3ce5d29238962e178fd0181fe44cabd3d7  /root/zig-baseline/bin/mandel
+104d2ee2fcfeb5e2cecbc150ea9a1aff10feff8ecf192bf8476d15df0b291b4c  /root/zig-baseline/bin/nbody
+207d7af228839366b3cc287999287fad948a004ca0b60839065b5a150e0cfd67  /root/zig-baseline/bin/sieve
+5b80ad3d8457518018c3abdd0eb9954a3d90353aaffdbd484f2328b4cdb397a4  /root/zig-baseline/bin/stencil
+dc94be74b475f7d293614448d5eae0f844afd819a867e3e2c9ef2bcf76697a85  /root/zig-native/bin/http_httpz
+7c2b5a1544e728722bbae0ed8679fd9abfb82e0d7e6959ac73847f1859d7367a  /root/zig-native/bin/http_std
+68cb29b3f1707a52e34ede7c799ce03b73fdda3885c51457eb44cb9dc83bf626  /root/zig-native/bin/json
+abe958d82c37af67253a8d3e430cf8a0f4751693aeedd79fc7facf136765e1e6  /root/zig-native/bin/mandel
+f10ce08b75be690ef635681484f778430b1271cf99096ead8e67993fe0757db6  /root/zig-native/bin/nbody
+af65c0ef395ed6f6e477b507c2dc94bd58d65411064a9b6bbb6396fd32567a00  /root/zig-native/bin/sieve
+0ba31e9aeb9947b2d1ba5a8ce8107b9e96969459455e604ca6d0014766cdcb49  /root/zig-native/bin/stencil
+## nm -u vif
+/root/bin/vif-http: 0 undefined
+/root/bin/vif-library_bench: 0 undefined
+/root/bin/vif-mandel: 0 undefined
+/root/bin/vif-nbody: 0 undefined
+/root/bin/vif-orders_json: 0 undefined
+/root/bin/vif-sieve: 0 undefined
+/root/bin/vif-stencil: 0 undefined

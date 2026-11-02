@@ -1,0 +1,31 @@
+import "std:numbers"
+fn math_abs(value:f64) -> f64 = bits_float(bit_and(float_bits(value),9223372036854775807))
+fn math_log(value:f64) -> FloatResult
+  = if !float_finite(value) || value<=0.0 then float_error("log requires a finite positive value",0) else
+    let normalized=loop(x=value,k=0) while x>=2.0 next(x/2.0,k+1) yield
+      loop(y=x,e=k) while y<1.0 next(y*2.0,e-1) yield
+        let z=(y-1.0)/(y+1.0) in let z2=z*z in
+        let total=loop(i=1,term=z,total=0.0) while i<=49
+          next(i+2,term*z2,total+term/f64(i)) yield total in
+        2.0*total+f64(e)*0.693147180559945309417232121458176568 in float_ok(normalized)
+fn math_log1p(value:f64) -> FloatResult
+  = if !float_finite(value) || value<= -1.0 then float_error("log1p requires a finite value greater than -1",0) else
+    if value==0.0 then float_ok(value) else if math_abs(value)>=0.125 then math_log(1.0+value) else
+      float_ok(loop(i=1,term=value,total=0.0) while i<=32
+        next(i+1,term*(0.0-value),total+term/f64(i)) yield total)
+fn math_exp(value:f64) -> FloatResult
+  = if !float_finite(value) then float_error("exp requires a finite value",0) else
+    if value>709.782712893384 then float_error("exponential overflow",0) else
+    if value< -745.1332191019412 then float_ok(0.0) else
+      let power=i64(value/0.693147180559945309417232121458176568) in
+      let residual=value-f64(power)*0.6931471805599453-f64(power)*2.3190468138462996e-17 in
+      let result=loop(i=1,term=1.0,total=1.0) while i<=24
+        next(i+1,term*residual/f64(i),total+term*residual/f64(i)) yield total in
+      let scaled=if power>=0 then loop(i=0,out=result) while i<power next(i+1,out*2.0) yield out else
+        loop(i=0,out=result) while i<0-power next(i+1,out/2.0) yield out in
+      if float_finite(scaled) then float_ok(scaled) else float_error("exponential overflow",0)
+fn math_pow(base:f64,exponent:f64) -> FloatResult
+  = if !float_finite(base) || !float_finite(exponent) then float_error("pow requires finite values",0) else
+    if exponent==0.0 then float_ok(1.0) else if base==0.0 then if exponent>0.0 then float_ok(0.0) else float_error("zero to a negative power",0) else
+    if base<0.0 then float_error("real pow requires a nonnegative base",0) else
+    let logarithm=math_log(base) in if !logarithm.ok then logarithm else math_exp(logarithm.value*exponent)

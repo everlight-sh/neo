@@ -1,0 +1,21 @@
+import "std:sha512"
+import "std:io"
+; mode 0 SHA-512, 1 SHA-384, 2/3 HMAC-SHA-512/384 over [u16 key length][key][message],
+; 4 batch of [u32 length][message] records answered with SHA-512 || SHA-384 each.
+type Sha512Batch = { at:i64,out:Arr u8 _ }
+fn sha512_batch_step(move state:Sha512Batch,input:Arr u8 n) -> Sha512Batch
+  = let at=state.at in let count=loop(i=0,value=0) while i<4 next(i+1,value*256+str_byte(input,at+i)) yield value in
+    if count<0 || count>n-at-4 then Sha512Batch { at=n+1,out=state.out } else
+    let message=str_slice(input,at+4,at+4+count) in
+    Sha512Batch { at=at+4+count,out=concat(state.out,sha512(message),sha384(message)) }
+effect(fs,process) fn main(mode:i64) -> unit
+  = let raw=file_read(0,4194304) in check raw.ok in let input=raw.value in let size=len(input) in
+    let result=if mode==0 then bytes_ok(sha512(input)) else if mode==1 then bytes_ok(sha384(input)) else
+      if mode==2 || mode==3 then
+        let count=str_byte(input,0)*256+str_byte(input,1) in
+        if size<2 || count<0 || count>size-2 then bytes_error(22,"key header",0) else
+        let key=str_slice(input,2,2+count) in let message=str_slice(input,2+count,size) in
+        bytes_ok(if mode==2 then hmac_sha512(key,message) else hmac_sha384(key,message)) else
+      let batch=loop(state=Sha512Batch { at=0,out="" }) while state.at<size next(sha512_batch_step(state,input)) yield state in
+      if batch.at!=size then bytes_error(22,"batch framing",0) else bytes_ok(batch.out) in
+    if !result.ok then process_exit(2) else let output=file_write(1,result.value) in check output.ok in noop()

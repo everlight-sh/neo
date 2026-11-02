@@ -1,0 +1,37 @@
+import "std:strings"
+; UTC millisecond timestamps, Gregorian years 0001..9999. Leap seconds and
+; timezone databases are deliberately outside this numeric RFC3339 codec.
+private fn date_leap(year:i64) -> bool = year%4==0 && (year%100!=0 || year%400==0)
+private fn date_month_days(year:i64,month:i64) -> i64
+  = if month==2 then if date_leap(year) then 29 else 28 else if month==4 || month==6 || month==9 || month==11 then 30 else 31
+private fn date_days_before_year(year:i64) -> i64 = (year-1)*365+(year-1)/4-(year-1)/100+(year-1)/400
+private fn date_part(text:Arr u8 n,start:i64,count:i64) -> i64
+  = loop(i=0,value=0,valid=true) while valid && i<count next(i+1,value*10+str_byte(text,start+i)-48,str_byte(text,start+i)>=48 && str_byte(text,start+i)<=57) yield if valid then value else -1
+fn rfc3339_parse(text:Arr u8 n) -> IntResult
+  = let year=date_part(text,0,4) in let month=date_part(text,5,2) in let day=date_part(text,8,2) in
+    let hour=date_part(text,11,2) in let minute=date_part(text,14,2) in let second=date_part(text,17,2) in
+    if n<20 || str_byte(text,4)!=45 || str_byte(text,7)!=45 || (str_byte(text,10)!=84 && str_byte(text,10)!=116) || str_byte(text,13)!=58 || str_byte(text,16)!=58 ||
+      year<1 || year>9999 || month<1 || month>12 || day<1 || day>date_month_days(year,month) || hour<0 || hour>23 || minute<0 || minute>59 || second<0 || second>59 then int_error(22,"invalid RFC3339 date",0) else
+    let fraction=if str_byte(text,19)==46 then loop(i=20,ms=0,digits=0) while str_byte(text,i)>=48 && str_byte(text,i)<=57
+      next(i+1,if digits<3 then ms*10+str_byte(text,i)-48 else ms,digits+1) yield
+        WriteDateFraction { end=i,millis=if digits==1 then ms*100 else if digits==2 then ms*10 else ms,valid=digits>0 } else WriteDateFraction { end=19,millis=0,valid=true } in
+    let at=fraction.end in let z=str_byte(text,at) in let oh=date_part(text,at+1,2) in let om=date_part(text,at+4,2) in
+    let offset=if z==90 || z==122 then 0 else (oh*60+om)*(if z==45 then -1 else 1) in
+    let valid=if z==90 || z==122 then at+1==n else (z==43 || z==45) && at+6==n && str_byte(text,at+3)==58 && oh>=0 && oh<=23 && om>=0 && om<=59 in
+    if !fraction.valid || !valid then int_error(22,"invalid RFC3339 offset or fraction",at) else
+      let days=date_days_before_year(year)-719162+loop(m=1,total=0) while m<month next(m+1,total+date_month_days(year,m)) yield total in
+      int_ok(((days+day-1)*86400+hour*3600+minute*60+second-offset*60)*1000+fraction.millis)
+private type WriteDateFraction = { end:i64,millis:i64,valid:bool }
+private fn date_pad(value:i64,width:i64) -> Arr u8 _
+  = let text=int_text(value) in check width>=0 in arr(i in 0..width) u8(if i<width-len(text) then 48 else str_byte(text,i-width+len(text)))
+fn rfc3339_format(milliseconds:i64) -> BytesResult
+  = if milliseconds< -62135596800000 || milliseconds>253402300799999 then bytes_error(22,"timestamp outside years 0001..9999",0) else
+    let days=milliseconds/86400000-(if milliseconds<0 && milliseconds%86400000!=0 then 1 else 0) in
+    let absolute=days+719162 in
+    let year=loop(lo=1,hi=10000) while lo+1<hi next(let mid=(lo+hi)/2 in if date_days_before_year(mid)<=absolute then mid else lo,
+      let mid=(lo+hi)/2 in if date_days_before_year(mid)>absolute then mid else hi) yield lo in
+    let day_of_year=absolute-date_days_before_year(year) in
+    let date=loop(month=1,rest=day_of_year) while rest>=date_month_days(year,month) next(month+1,rest-date_month_days(year,month)) yield
+      concat(date_pad(year,4),"-",date_pad(month,2),"-",date_pad(rest+1,2)) in
+    let clock=milliseconds-days*86400000 in
+    bytes_ok(concat(date,"T",date_pad(clock/3600000,2),":",date_pad(clock/60000%60,2),":",date_pad(clock/1000%60,2),".",date_pad(clock%1000,3),"Z"))

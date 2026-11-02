@@ -1,0 +1,65 @@
+import "std:cancel"
+
+; Bounded SPSC messages across fork. One producer process and one consumer
+; process are claimed atomically. At most capacity messages of <=4096 bytes.
+; Linux uses kernel futex wakes; macOS checks at 1 ms intervals. Cancellation
+; and deadlines are checked at least every 1 ms, without runtime threads.
+resource type Channel = { token:i64 } drop channel_release
+effect(process) fn new_channel(capacity:i64) -> Channel
+  = if capacity<1 || capacity>1024 then Channel { token=-22 } else
+    let size=64+capacity*4104 in let address=rt_mmap(size) in
+    if address<0 then Channel { token=address } else
+      let p=ptr_from_i64(address) in let length=store_i64(p,0,size) in
+      let clear=memset(ptr_add(p,8),i32(0),56) in Channel { token=rt_handle_new(address,6) }
+effect(process) fn channel_status(channel:Channel) -> IntResult
+  = let address=rt_handle_fd(channel.token,6) in if address<0 then int_error(9,"invalid channel owner",0) else int_ok(0)
+private effect(process) fn channel_release(channel:Channel) -> unit
+  = let address=rt_handle_fd(channel.token,6) in
+    if address<0 then noop() else let p=ptr_from_i64(address) in
+      let closed=if atomic_load_i64(p,32)==rt_getpid() then atomic_store_i64(p,48,1) else noop() in
+      rt_handle_drop(channel.token,6)
+effect(process) fn channel_close_sender(channel:Channel) -> unit
+  = let address=rt_handle_fd(channel.token,6) in if address<0 then noop() else
+    let p=ptr_from_i64(address) in
+    let pid=rt_getpid() in let producer=atomic_compare_exchange_i64(p,32,0,pid) in
+    if producer==0 || producer==pid then atomic_store_i64(p,48,1) else noop()
+effect(process) fn channel_try_send(channel:Channel,message:Arr u8 n) -> IntResult
+  = let address=rt_handle_fd(channel.token,6) in
+    if address<0 then int_error(9,"invalid channel owner",0) else if n>4096 then int_error(90,"channel message exceeds 4096 bytes",0) else
+      let p=ptr_from_i64(address) in let pid=rt_getpid() in let producer=atomic_compare_exchange_i64(p,32,0,pid) in
+      if producer!=0 && producer!=pid then int_error(16,"channel already has a producer process",0) else
+      if atomic_load_i64(p,48)!=0 then int_error(32,"channel sender is closed",0) else
+      let head=atomic_load_i64(p,8) in let tail=atomic_load_i64(p,16) in let capacity=(load_i64(p,0)-64)/4104 in
+      check capacity>=1 && capacity<=1024 && tail>=0 && head>=tail in
+      if head==9223372036854775807 then int_error(75,"channel sequence exhausted",0) else
+      if head-tail>=capacity then int_error(11,"channel is full",0) else
+        let slot=ptr_add(p,64+(head%capacity)*4104) in let length=store_i64(slot,0,n) in
+        let copied=memcpy(ptr_add(slot,8),data(message),n) in let published=atomic_store_i64(p,8,head+1) in
+        let wake=rt_word_wake(ptr_add(p,8)) in int_ok(n)
+effect(process) fn channel_try_receive(channel:Channel) -> BytesResult
+  = let address=rt_handle_fd(channel.token,6) in if address<0 then bytes_error(9,"invalid channel owner",0) else
+    let p=ptr_from_i64(address) in let pid=rt_getpid() in let consumer=atomic_compare_exchange_i64(p,40,0,pid) in
+    if consumer!=0 && consumer!=pid then bytes_error(16,"channel already has a consumer process",0) else
+    let tail=atomic_load_i64(p,16) in let closed=atomic_load_i64(p,48) in let head=atomic_load_i64(p,8) in
+    if tail==head then if closed!=0 then bytes_error(32,"channel sender is closed",0) else bytes_error(11,"channel is empty",0) else
+      let capacity=(load_i64(p,0)-64)/4104 in check capacity>=1 && capacity<=1024 && tail>=0 && head>tail in
+      let slot=ptr_add(p,64+(tail%capacity)*4104) in let n=load_i64(slot,0) in
+      check n>=0 && n<=4096 in let result=bytes_ok(view(ptr_add(slot,8),n)) in
+      let consumed=atomic_store_i64(p,16,tail+1) in let wake=rt_word_wake(ptr_add(p,16)) in result
+private effect(process,time) fn channel_pause(channel:Channel,sending:bool,deadline:i64) -> unit
+  = let address=rt_handle_fd(channel.token,6) in if address<0 then noop() else
+    let p=ptr_from_i64(address) in let expected=atomic_load_i64(p,if sending then 16 else 8) in
+    let other=atomic_load_i64(p,if sending then 8 else 16) in let capacity=(load_i64(p,0)-64)/4104 in
+    let blocked=if sending then other-expected>=capacity else expected==other && atomic_load_i64(p,48)==0 in
+    let remaining=deadline_remaining(deadline) in
+    if !blocked || remaining==0 then noop() else let waited=rt_word_wait(ptr_add(p,if sending then 16 else 8),expected,1) in noop()
+effect(process,time) fn channel_send(channel:Channel,message:Arr u8 n,deadline:i64,cancellation:Cancellation) -> IntResult
+  = loop(result=int_error(11,"channel is full",0)) while !result.ok && result.error.code==11
+      next(if is_cancelled(cancellation) then int_error(125,"channel send cancelled",0) else
+        if deadline_remaining(deadline)==0 then int_error(110,"channel send timed out",0) else
+        let sent=channel_try_send(channel,message) in let pause=if !sent.ok && sent.error.code==11 then channel_pause(channel,true,deadline) else noop() in sent) yield result
+effect(process,time) fn channel_receive(channel:Channel,deadline:i64,cancellation:Cancellation) -> BytesResult
+  = loop(result=bytes_error(11,"channel is empty",0)) while !result.ok && result.error.code==11
+      next(if is_cancelled(cancellation) then bytes_error(125,"channel receive cancelled",0) else
+        if deadline_remaining(deadline)==0 then bytes_error(110,"channel receive timed out",0) else
+        let received=channel_try_receive(channel) in let pause=if !received.ok && received.error.code==11 then channel_pause(channel,false,deadline) else noop() in received) yield result

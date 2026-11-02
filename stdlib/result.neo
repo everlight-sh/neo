@@ -1,0 +1,9 @@
+import "std:errors"
+
+enum Result<T,E> { Ok(T), Err(E) }
+
+fn result_is_ok<T,E>(value: Result<T,E>) -> bool
+  = match value { Ok(_) => true, Err(_) => false }
+
+fn result_or<T,E>(value: Result<T,E>, fallback: T) -> T
+  = match value { Ok(item) => item, Err(_) => fallback }

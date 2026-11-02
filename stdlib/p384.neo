@@ -1,0 +1,178 @@
+import "std:sha256"
+import "std:sha512"
+import "std:der"
+import "std:p256"
+
+; Experimental ECDSA signature verification on NIST short-Weierstrass curves
+; with a=-3: P-384 with SHA-256/384/512 digests, and P-256 with digests other
+; than the SHA-256 path already provided by std:p256. Field and order values are
+; little-endian arrays of 30-bit limbs in Montgomery form. A fused operand
+; scanning product keeps every partial sum below 2^62 in exact i64 arithmetic.
+; Verification works only on public data, so it uses ordinary branches and is
+; not constant time. It has not been independently audited.
+type EcwMod = { modulus:Arr i64 _,r2:Arr i64 _,one:Arr i64 _,inverse:i64 }
+type EcwCurve = { field:EcwMod,order:EcwMod,b:Arr i64 _,gx:Arr i64 _,gy:Arr i64 _,size:i64 }
+type EcwPoint = { x:Arr i64 _,y:Arr i64 _,z:Arr i64 _ }
+type EcwCarry = { words:Arr i64 _,carry:i64 }
+
+private fn ecw_zero(count:i64) -> Arr i64 _ = check count>=0 && count<=32 in arr(i in 0..count) 0
+private fn ecw_limbs(bytes:Arr u8 n,count:i64) -> Arr i64 _
+  = check count>=0 && count<=32 in arr(i in 0..count) let low=i*30 in
+      bit_and(loop(q=low/8,value=0) while q<=(low+29)/8 next(q+1,
+        let byte=if q<n then str_byte(bytes,n-1-q) else 0 in
+        bit_or(value,if q*8>=low then shift_left(byte,q*8-low) else shift_right(byte,low-q*8))) yield value,1073741823)
+private fn ecw_bytes(words:Arr i64 n,count:i64) -> Arr u8 _
+  = check count>=0 && count<=128 in arr(i in 0..count) let bit=(count-1-i)*8 in let index=bit/30 in let offset=bit%30 in
+      let low=if index>=0 && index<n then words[index] else 0 in let high=if index+1>=0 && index+1<n then words[index+1] else 0 in
+      u8(bit_and(bit_or(shift_right(low,offset),shift_left(high,30-offset)),255))
+private fn ecw_is_zero(a:Arr i64 n) -> bool = loop(i=0,value=0) while i<n next(i+1,check i>=0 && i<n in bit_or(value,a[i])) yield value==0
+private fn ecw_equal(a:Arr i64 n,b:Arr i64 m) -> bool
+  = n==m && loop(i=0,same=true) while same && i<n next(i+1,check i>=0 && i<n && i<m in a[i]==b[i]) yield same
+private fn ecw_subtract(a:Arr i64 n,b:Arr i64 m) -> EcwCarry
+  = check n==m in loop(i=0,borrow=0,out=ecw_zero(n)) while i<n next(i+1,
+      check i>=0 && i<n in bit_and(arithmetic_shift_right(a[i]-b[i]-borrow,63),1),
+      check i>=0 && i<n && len(out)==n in set(out,i,bit_and(a[i]-b[i]-borrow,1073741823))) yield EcwCarry { words=out,carry=borrow }
+private fn ecw_sum(a:Arr i64 n,b:Arr i64 m) -> Arr i64 _
+  = check n==m in loop(i=0,carry=0,out=ecw_zero(n)) while i<n next(i+1,
+      check i>=0 && i<n in shift_right(a[i]+b[i]+carry,30),
+      check i>=0 && i<n && len(out)==n in set(out,i,bit_and(a[i]+b[i]+carry,1073741823))) yield out
+private fn ecw_reduce(a:Arr i64 n,modulus:Arr i64 m) -> Arr i64 _
+  = let difference=ecw_subtract(a,modulus) in if difference.carry==0 then difference.words else a
+private fn ecw_add(a:Arr i64 n,b:Arr i64 m,modulus:Arr i64 k) -> Arr i64 _ = ecw_reduce(ecw_sum(a,b),modulus)
+private fn ecw_sub(a:Arr i64 n,b:Arr i64 m,modulus:Arr i64 k) -> Arr i64 _
+  = let difference=ecw_subtract(a,b) in if difference.carry==0 then difference.words else
+    let words=difference.words in check len(words)==k in
+    loop(i=0,carry=0,out=ecw_zero(k)) while i<k next(i+1,
+      check i>=0 && i<k in shift_right(words[i]+modulus[i]+carry,30),
+      check i>=0 && i<k && len(out)==k in set(out,i,bit_and(words[i]+modulus[i]+carry,1073741823))) yield out
+; Montgomery product a*b/R mod m for a<R and b<m; the running value stays below 2m.
+private fn ecw_mul(a:Arr i64 n,b:Arr i64 m,mod:EcwMod) -> Arr i64 _
+  = let p=mod.modulus in let k=len(p) in check n==k && m==k && k>=2 && k<=32 && len(p)==k in
+    let t=loop(i=0,t=ecw_zero(k)) while i<k next(i+1,
+      check i>=0 && i<k && len(t)==k in
+      let ai=a[i] in let first=t[0]+ai*b[0] in
+      let factor=bit_and(bit_and(first,1073741823)*mod.inverse,1073741823) in
+      let row=loop(j=1,carry=shift_right(first+factor*p[0],30),row=t) while j<k next(j+1,
+          check j>=1 && j<k && len(row)==k in shift_right(row[j]+ai*b[j]+factor*p[j]+carry,30),
+          check j>=1 && j<k && len(row)==k in set(row,j-1,bit_and(row[j]+ai*b[j]+factor*p[j]+carry,1073741823))) yield EcwCarry { words=row,carry=carry } in
+      let words=row.words in check len(words)==k in set(words,k-1,row.carry)) yield t in
+    ecw_reduce(t,p)
+private fn ecw_power(value:Arr i64 _,exponent:Arr i64 n,mod:EcwMod) -> Arr i64 _
+  = loop(i=n*30-1,out=mod.one) while i>=0 next(i-1,
+      check i>=0 && i/30<n in let square=ecw_mul(out,out,mod) in
+      if bit_and(shift_right(exponent[i/30],i%30),1)==1 then ecw_mul(square,value,mod) else square) yield out
+private fn ecw_inverse(value:Arr i64 _,mod:EcwMod) -> Arr i64 _
+  = let count=len(mod.modulus) in check count>=1 && count<=32 in
+    ecw_power(value,ecw_subtract(mod.modulus,arr(i in 0..count) if i==0 then 2 else 0).words,mod)
+private fn ecw_mod(modulus:Arr u8 a,r2:Arr u8 b,one:Arr u8 c,inverse:i64,count:i64) -> EcwMod
+  = EcwMod { modulus=ecw_limbs(modulus,count),r2=ecw_limbs(r2,count),one=ecw_limbs(one,count),inverse=inverse }
+private fn ecw_curve(field:EcwMod,order:EcwMod,b:Arr u8 n,gx:Arr u8 m,gy:Arr u8 k) -> EcwCurve
+  = let count=len(field.modulus) in
+    EcwCurve { field=field,order=order,b=ecw_mul(ecw_limbs(b,count),field.r2,field),gx=ecw_mul(ecw_limbs(gx,count),field.r2,field),
+      gy=ecw_mul(ecw_limbs(gy,count),field.r2,field),size=n }
+private fn ecw_p384() -> EcwCurve
+  = ecw_curve(
+      ecw_mod("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff",
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x20\x00\x00\x00\x0f\xff\xff\xff\xe0\x00\x00\x00\x00\x00\x00\x00\x20\x00\x00\x00\x0f\xff\xff\xff\xe0\x00\x00\x00\x10\x00",
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x3f\xff\xff\xff\xff\xff\xff\xff\xc0\x00\x00\x00\x40",1,13),
+      ecw_mod("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc7\x63\x4d\x81\xf4\x37\x2d\xdf\x58\x1a\x0d\xb2\x48\xb0\xa7\x7a\xec\xec\x19\x6a\xcc\xc5\x29\x73",
+        "\x4e\xe0\x12\xb3\x9b\xf2\x13\xfb\x05\xb7\xa2\x82\x66\x89\x5d\x40\xd4\x91\x74\xaa\xb1\xcc\x5b\xf0\x1e\xef\x22\x44\xb7\x78\xa9\x77\x03\xc3\xaa\xa8\xe0\x3e\xba\xca\x01\x3e\x66\x2b\x46\x92\x2e\x28",
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0e\x27\x2c\x9f\x82\xf2\x34\x88\x29\xf9\x7c\x93\x6d\xd3\xd6\x21\x44\xc4\xf9\xa5\x4c\xce\xb5\xa3\x40",680516677,13),
+      "\xb3\x31\x2f\xa7\xe2\x3e\xe7\xe4\x98\x8e\x05\x6b\xe3\xf8\x2d\x19\x18\x1d\x9c\x6e\xfe\x81\x41\x12\x03\x14\x08\x8f\x50\x13\x87\x5a\xc6\x56\x39\x8d\x8a\x2e\xd1\x9d\x2a\x85\xc8\xed\xd3\xec\x2a\xef",
+      "\xaa\x87\xca\x22\xbe\x8b\x05\x37\x8e\xb1\xc7\x1e\xf3\x20\xad\x74\x6e\x1d\x3b\x62\x8b\xa7\x9b\x98\x59\xf7\x41\xe0\x82\x54\x2a\x38\x55\x02\xf2\x5d\xbf\x55\x29\x6c\x3a\x54\x5e\x38\x72\x76\x0a\xb7",
+      "\x36\x17\xde\x4a\x96\x26\x2c\x6f\x5d\x9e\x98\xbf\x92\x92\xdc\x29\xf8\xf4\x1d\xbd\x28\x9a\x14\x7c\xe9\xda\x31\x13\xb5\xf0\xb8\xc0\x0a\x60\xb1\xce\x1d\x7e\x81\x9d\x7a\x43\x1d\x7c\x90\xea\x0e\x5f")
+private fn ecw_p256() -> EcwCurve
+  = ecw_curve(
+      ecw_mod("\xff\xff\xff\xff\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff",
+        "\x4f\xff\xff\xff\xdf\xff\xff\xff\xff\xff\xff\xff\xef\xff\xff\xff\xbf\xff\xff\xff\xf0\x00\x00\x00\x00\x00\x00\x00\x30\x00\x00\x00",
+        "\x00\x00\x3f\xff\xff\xff\xbf\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00",1,9),
+      ecw_mod("\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xbc\xe6\xfa\xad\xa7\x17\x9e\x84\xf3\xb9\xca\xc2\xfc\x63\x25\x51",
+        "\x55\xab\xa8\x3a\xfc\x16\x48\x4a\x92\xb6\xbe\xc5\x96\x19\x07\x6a\x9e\xa8\xca\x2a\xe1\x30\x78\x5e\x01\x76\x44\x69\x48\x87\xac\x57",
+        "\x00\x00\x3f\xff\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x10\xc6\x41\x54\x96\x3a\x18\x5e\xc3\x11\x8d\x4f\x40\xe7\x36\xab\xc0\x00",771800143,9),
+      "\x5a\xc6\x35\xd8\xaa\x3a\x93\xe7\xb3\xeb\xbd\x55\x76\x98\x86\xbc\x65\x1d\x06\xb0\xcc\x53\xb0\xf6\x3b\xce\x3c\x3e\x27\xd2\x60\x4b",
+      "\x6b\x17\xd1\xf2\xe1\x2c\x42\x47\xf8\xbc\xe6\xe5\x63\xa4\x40\xf2\x77\x03\x7d\x81\x2d\xeb\x33\xa0\xf4\xa1\x39\x45\xd8\x98\xc2\x96",
+      "\x4f\xe3\x42\xe2\xfe\x1a\x7f\x9b\x8e\xe7\xeb\x4a\x7c\x0f\x9e\x16\x2b\xce\x33\x57\x6b\x31\x5e\xce\xcb\xb6\x40\x68\x37\xbf\x51\xf5")
+
+private fn ecw_infinity(mod:EcwMod) -> EcwPoint = EcwPoint { x=mod.one,y=mod.one,z=ecw_zero(len(mod.modulus)) }
+; Jacobian doubling for a=-3 (dbl-2001-b); the point at infinity (z=0) stays at infinity.
+private fn ecw_double(a:EcwPoint,mod:EcwMod) -> EcwPoint
+  = let p=mod.modulus in
+    let delta=ecw_mul(a.z,a.z,mod) in let gamma=ecw_mul(a.y,a.y,mod) in let beta=ecw_mul(a.x,gamma,mod) in
+    let alpha=ecw_mul(ecw_sub(a.x,delta,p),ecw_add(a.x,delta,p),mod) in let alpha=ecw_add(ecw_add(alpha,alpha,p),alpha,p) in
+    let beta2=ecw_add(beta,beta,p) in let beta4=ecw_add(beta2,beta2,p) in let beta8=ecw_add(beta4,beta4,p) in
+    let x=ecw_sub(ecw_mul(alpha,alpha,mod),beta8,p) in
+    let yz=ecw_add(a.y,a.z,p) in let z=ecw_sub(ecw_sub(ecw_mul(yz,yz,mod),gamma,p),delta,p) in
+    let gamma2=ecw_mul(gamma,gamma,mod) in let gamma2=ecw_add(gamma2,gamma2,p) in let gamma4=ecw_add(gamma2,gamma2,p) in let gamma8=ecw_add(gamma4,gamma4,p) in
+    let y=ecw_sub(ecw_mul(alpha,ecw_sub(beta4,x,p),mod),gamma8,p) in EcwPoint { x=x,y=y,z=z }
+; Jacobian addition, with the cheaper mixed form when b is affine (z=1).
+private fn ecw_point_add(a:EcwPoint,b:EcwPoint,mod:EcwMod) -> EcwPoint
+  = if ecw_is_zero(a.z) then b else if ecw_is_zero(b.z) then a else
+    let p=mod.modulus in let affine=ecw_equal(b.z,mod.one) in
+    let zz1=ecw_mul(a.z,a.z,mod) in let zz2=if affine then mod.one else ecw_mul(b.z,b.z,mod) in
+    let u1=if affine then a.x else ecw_mul(a.x,zz2,mod) in let u2=ecw_mul(b.x,zz1,mod) in
+    let s1=if affine then a.y else ecw_mul(ecw_mul(a.y,b.z,mod),zz2,mod) in let s2=ecw_mul(ecw_mul(b.y,a.z,mod),zz1,mod) in
+    let h=ecw_sub(u2,u1,p) in let r=ecw_sub(s2,s1,p) in
+    if ecw_is_zero(h) then (if ecw_is_zero(r) then ecw_double(a,mod) else ecw_infinity(mod)) else
+    let hh=ecw_mul(h,h,mod) in let hhh=ecw_mul(h,hh,mod) in let v=ecw_mul(u1,hh,mod) in
+    let x=ecw_sub(ecw_sub(ecw_mul(r,r,mod),hhh,p),ecw_add(v,v,p),p) in
+    let y=ecw_sub(ecw_mul(r,ecw_sub(v,x,p),mod),ecw_mul(s1,hhh,mod),p) in
+    let z=if affine then ecw_mul(h,a.z,mod) else ecw_mul(ecw_mul(h,a.z,mod),b.z,mod) in EcwPoint { x=x,y=y,z=z }
+private fn ecw_bit(words:Arr i64 n,index:i64) -> i64
+  = let at=index/30 in if index<0 || at>=n then 0 else check at>=0 && at<n in bit_and(shift_right(words[at],index%30),1)
+; u1*G + u2*Q by simultaneous double-and-add (Shamir's trick) over a four-entry table.
+private fn ecw_combine(g:EcwPoint,q:EcwPoint,u1:Arr i64 _,u2:Arr i64 _,mod:EcwMod,bits:i64) -> EcwPoint
+  = let both=ecw_point_add(g,q,mod) in
+    loop(i=bits-1,out=ecw_infinity(mod)) while i>=0 next(i-1,
+      let doubled=if ecw_is_zero(out.z) then out else ecw_double(out,mod) in let pick=ecw_bit(u1,i)+2*ecw_bit(u2,i) in
+      if pick==0 then doubled else ecw_point_add(doubled,if pick==1 then g else if pick==2 then q else both,mod)) yield out
+private fn ecw_point_valid(public:Arr u8 n,curve:EcwCurve) -> bool
+  = let size=curve.size in let mod=curve.field in let p=mod.modulus in let count=len(p) in
+    if size<1 || n!=1+2*size || str_byte(public,0)!=4 then false else
+    let x=ecw_limbs(str_slice(public,1,1+size),count) in let y=ecw_limbs(str_slice(public,1+size,n),count) in
+    if ecw_subtract(x,p).carry!=1 || ecw_subtract(y,p).carry!=1 then false else
+    let mx=ecw_mul(x,mod.r2,mod) in let my=ecw_mul(y,mod.r2,mod) in
+    let x3=ecw_mul(ecw_mul(mx,mx,mod),mx,mod) in let triple=ecw_add(ecw_add(mx,mx,p),mx,p) in
+    ecw_equal(ecw_mul(my,my,mod),ecw_add(ecw_sub(x3,triple,p),curve.b,p))
+private fn ecw_point_decode(public:Arr u8 n,curve:EcwCurve) -> EcwPoint
+  = let size=curve.size in let mod=curve.field in let count=len(mod.modulus) in
+    EcwPoint { x=ecw_mul(ecw_limbs(str_slice(public,1,1+size),count),mod.r2,mod),y=ecw_mul(ecw_limbs(str_slice(public,1+size,n),count),mod.r2,mod),z=mod.one }
+private fn ecw_scalar(signature:Arr u8 n,node:DerNode,size:i64) -> BytesResult
+  = let bytes=der_value(signature,node) in let count=len(bytes) in
+    if !node.ok || node.tag!=2 || size<1 || size>66 || count<1 || count>size+1 || str_byte(bytes,0)>=128 || count>1 && str_byte(bytes,0)==0 && str_byte(bytes,1)<128 ||
+      count==size+1 && str_byte(bytes,0)!=0 then bytes_error(74,"invalid ECDSA DER integer",0) else
+    check size>=1 && size<=66 in bytes_ok(arr(i in 0..size) u8(if i+count<size then 0 else str_byte(bytes,i+count-size)))
+; ECDSA verification (FIPS 186-5 6.4.2) of a DER signature over a precomputed digest.
+; The digest is truncated to the order length; the curves here have whole-byte orders.
+private fn ecw_verify(curve:EcwCurve,public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool
+  = let size=curve.size in let field=curve.field in let order=curve.order in let count=len(field.modulus) in
+    if m<1 || m>64 || k<8 || k>2*size+8 || !ecw_point_valid(public,curve) then false else
+    let seq=der_node(signature,0,k) in let first=der_node(signature,seq.body,seq.end) in let second=der_node(signature,first.end,seq.end) in
+    if !seq.ok || seq.tag!=48 || seq.end!=k || !first.ok || !second.ok || second.end!=seq.end then false else
+    let raw_r=ecw_scalar(signature,first,size) in let raw_s=ecw_scalar(signature,second,size) in
+    if !raw_r.ok || !raw_s.ok then false else
+    let r=ecw_limbs(raw_r.value,count) in let s=ecw_limbs(raw_s.value,count) in
+    if ecw_is_zero(r) || ecw_is_zero(s) || ecw_subtract(r,order.modulus).carry!=1 || ecw_subtract(s,order.modulus).carry!=1 then false else
+    let z=ecw_reduce(ecw_limbs(str_slice(digest,0,if m<size then m else size),count),order.modulus) in
+    ; w is s^-1 in Montgomery form, so a product with a plain value yields a plain value.
+    let w=ecw_inverse(ecw_mul(s,order.r2,order),order) in
+    let u1=ecw_mul(z,w,order) in let u2=ecw_mul(r,w,order) in
+    let point=ecw_combine(EcwPoint { x=curve.gx,y=curve.gy,z=field.one },ecw_point_decode(public,curve),u1,u2,field,size*8) in
+    if ecw_is_zero(point.z) then false else
+    ; Compare x/z^2 mod n with r without an inversion: x == r*z^2, or x == (r+n)*z^2 when r+n < p.
+    let zz=ecw_mul(point.z,point.z,field) in
+    ecw_equal(point.x,ecw_mul(ecw_mul(r,field.r2,field),zz,field)) ||
+      (let wide=ecw_sum(r,order.modulus) in ecw_subtract(wide,field.modulus).carry==1 && ecw_equal(point.x,ecw_mul(ecw_mul(wide,field.r2,field),zz,field)))
+
+; Uncompressed SEC1 point (0x04 || X || Y, 97 bytes) on P-384, coordinates below p.
+fn p384_public_valid(public:Arr u8 n) -> bool = ecw_point_valid(public,ecw_p384())
+fn ecdsa_p384_verify_digest(public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool = ecw_verify(ecw_p384(),public,digest,signature)
+fn ecdsa_p384_verify_sha384(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha384(message),signature)
+fn ecdsa_p384_verify_sha256(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha256(message),signature)
+fn ecdsa_p384_verify_sha512(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha512(message),signature)
+; P-256 (65-byte uncompressed key) with a digest other than SHA-256, e.g. ecdsa-with-SHA384 certificates.
+; P-256 digests of 32 bytes or more use their leftmost 256 bits (FIPS 186-5
+; 6.4.2) and the dedicated std:p256 verifier.
+fn ecdsa_p256_verify_digest(public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool
+  = if m>=32 then ecdsa_p256_verify_digest32(public,str_slice(digest,0,32),signature) else ecw_verify(ecw_p256(),public,digest,signature)
+fn ecdsa_p256_verify_sha384(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p256_verify_digest(public,sha384(message),signature)
+fn ecdsa_p256_verify_sha512(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p256_verify_digest(public,sha512(message),signature)

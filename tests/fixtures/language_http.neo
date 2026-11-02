@@ -1,0 +1,16 @@
+import "std:http_client"
+effect(net,time,process,fs,env) fn main() -> unit
+  = let port_arg=cli_arg(1) in let mode_arg=cli_arg(2) in let parsed=int_parse(port_arg.value) in let mode=int_parse(mode_arg.value).value in
+    check parsed.ok && parsed.value>0 && parsed.value<65536 in let port=parsed.value in
+    let method_arg=cli_arg(3) in let method=if method_arg.present then method_arg.value else "GET" in
+    if mode==0 then
+      let response=http_request("127.0.0.1",port,method,"/test","payload",300,1048576) in
+      let output=print_out(if response.ok then concat(int_text(response.status)," ",response.body,"\n") else concat("error:",int_text(response.error.code),"\n")) in noop() else
+      let deadline=deadline_after(5000) in using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+      let connected=socket_status(socket) in check connected.ok in
+      let start=http_start(socket,method,"/test","localhost","payload",deadline.value,33554432) in
+      loop(reader=start,count=0,checksum=0,notified=false) while reader.ok && !reader.done
+        next(let printed=if mode==2 && !notified && len(reader.chunk)>0 then print_out("chunk\n") else int_ok(0) in http_read_next(socket,reader,deadline.value),
+          count+len(reader.chunk),checksum+sum(i in 0..len(reader.chunk)) i64(reader.chunk[i]),notified || len(reader.chunk)>0)
+        yield let printed=print_out(if reader.ok then concat(int_text(reader.status)," ",int_text(count+len(reader.chunk))," ",
+          int_text(checksum+sum(i in 0..len(reader.chunk)) i64(reader.chunk[i])),"\n") else concat("error:",int_text(reader.error.code),"\n")) in noop()

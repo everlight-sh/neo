@@ -1,0 +1,35 @@
+import "std:strings"
+import "std:vec"
+import "std:unicode_data"
+type Rune = { ok:bool,code:i64,end:i64,error:Error }
+fn unicode_next(text:Arr u8 n,index:i64) -> Rune
+  = let first=str_byte(text,index) in let width=if first<128 then 1 else if first<224 then 2 else if first<240 then 3 else 4 in
+    if index<0 || index>=n || !utf8_valid(str_slice(text,index,index+width)) || index+width>n then
+      Rune { ok=false,code=0,end=index,error=Error { code=22,message="invalid UTF-8 scalar",position=index } } else
+      let initial=if width==1 then first else if width==2 then first-192 else if width==3 then first-224 else first-240 in
+      let code=loop(i=1,code=initial) while i<width next(i+1,code*64+str_byte(text,index+i)-128) yield code in
+      Rune { ok=true,code=code,end=index+width,error=no_error() }
+fn unicode_space(code:i64) -> bool
+  = code>=9 && code<=13 || code==32 || code==133 || code==160 || code==5760 || code>=8192 && code<=8202 || code==8232 || code==8233 || code==8239 || code==8287 || code==12288
+private fn unicode_u24(bytes:Arr u8 n,at:i64) -> i64
+  = str_byte(bytes,at)+str_byte(bytes,at+1)*256+str_byte(bytes,at+2)*65536
+fn unicode_word(code:i64) -> bool
+  = let table=unicode_word_table() in
+    let found=loop(lo=0,hi=len(table)/6) while lo<hi next(let mid=(lo+hi)/2 in if unicode_u24(table,mid*6+3)<code then mid+1 else lo,
+      let mid=(lo+hi)/2 in if unicode_u24(table,mid*6+3)>=code then mid else hi) yield lo in
+    found<len(table)/6 && unicode_u24(table,found*6)<=code && unicode_u24(table,found*6+3)>=code
+private fn unicode_fold_scalar(code:i64) -> Arr u8 _
+  = let table=unicode_fold_table() in
+    let found=loop(lo=0,hi=len(table)/16) while lo<hi next(let mid=(lo+hi)/2 in if unicode_u24(table,mid*16)<code then mid+1 else lo,
+      let mid=(lo+hi)/2 in if unicode_u24(table,mid*16)>=code then mid else hi) yield lo in
+    if found<len(table)/16 && unicode_u24(table,found*16)==code then str_slice(table,found*16+4,found*16+4+str_byte(table,found*16+3)) else utf8_encode(code).value
+fn unicode_casefold(text:Arr u8 n) -> BytesResult
+  = loop(i=0,out="",valid=true) while valid && i<n next(unicode_next(text,i).end,
+      let rune=unicode_next(text,i) in if !rune.ok then out else concat(out,unicode_fold_scalar(rune.code)),unicode_next(text,i).ok)
+      yield if valid then bytes_ok(out) else bytes_error(22,"invalid UTF-8 text",i)
+fn unicode_fields(text:Arr u8 n) -> Vec<Arr u8 _>
+  = check utf8_valid(text) in
+    loop(i=0,start= -1,out=vec_empty::<Arr u8 _>()) while i<n next(unicode_next(text,i).end,
+      let rune=unicode_next(text,i) in if unicode_space(rune.code) then -1 else if start<0 then i else start,
+      let rune=unicode_next(text,i) in if unicode_space(rune.code) && start>=0 then vec_push(out,str_slice(text,start,i)) else out)
+      yield if start>=0 then vec_push(out,str_slice(text,start,n)) else out

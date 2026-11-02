@@ -1,0 +1,9 @@
+Vif GET /: b'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n' 65 header bytes + 13 body
+Vif GET /page/50: b'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 5379\r\n\r\n' 81 header bytes + 5379 body
+Vif GET /smooth/1000: b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 43\r\n\r\n' 71 header bytes + 43 body
+Zig std.http GET /: b'HTTP/1.1 200 OK\r\ncontent-length: 13\r\ncontent-type: text/plain\r\n\r\n' 65 header bytes + 13 body
+Zig std.http GET /page/50: b'HTTP/1.1 200 OK\r\ncontent-length: 5379\r\ncontent-type: text/html; charset=utf-8\r\n\r\n' 81 header bytes + 5379 body
+Zig std.http GET /smooth/1000: b'HTTP/1.1 200 OK\r\ncontent-length: 43\r\ncontent-type: application/json\r\n\r\n' 71 header bytes + 43 body
+Zig http.zig GET /: b'HTTP/1.1 200 \r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Length: 13\r\n\r\n' 78 header bytes + 13 body
+Zig http.zig GET /page/50: b'HTTP/1.1 200 \r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: 5379\r\n\r\n' 79 header bytes + 5379 body
+Zig http.zig GET /smooth/1000: b'HTTP/1.1 200 \r\nContent-Type: application/json; charset=UTF-8\r\nContent-Length: 43\r\n\r\n' 84 header bytes + 43 body

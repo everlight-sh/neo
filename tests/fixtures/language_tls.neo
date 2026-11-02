@@ -1,0 +1,21 @@
+import "std:tls"
+import "std:io"
+import "std:debug"
+effect(fs,net,time,process) fn tls_test(port:i64,roots:Arr Certificate n,host:Arr u8 m,drain:bool) -> unit
+  = let deadline=deadline_after(2000) in using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let connected=socket_status(socket) in if !connected.ok then let failed=print_out("connection failed\n") in noop() else
+    using session=tls_connect(socket,host,roots,deadline.value) in
+      let status=tls_status(session) in if !status.ok then let failed=print_out(concat("rejected:",status.error.message,"\n")) in noop() else
+        let sent=tls_write(socket,session,"Neo TLS\n",deadline.value) in if !sent.ok then let failed=print_out("write rejected\n") in noop() else
+        let received=if !drain then tls_read(socket,session,deadline.value) else
+          loop(chunk=tls_read(socket,session,deadline.value),out="") while chunk.ok && len(chunk.value)>0 && len(out)<1048576
+            next(tls_read(socket,session,deadline.value),concat(out,chunk.value)) yield if chunk.ok then bytes_ok(out) else chunk in
+        let output=print_out(if received.ok then received.value else concat("read rejected:",received.error.message,"\n")) in
+        let closed=tls_close(socket,session,deadline.value) in noop()
+effect(fs,net,time,process,env) fn main() -> unit
+  = let port_arg=cli_arg(1) in let root_arg=cli_arg(2) in let host_arg=cli_arg(3) in
+    let port=int_parse(port_arg.value) in check port.ok && port.value>0 && port.value<65536 in
+    let root=fs_read(root_arg.value) in check root.ok in let roots=arr(i in 0..1) x509_parse(root.value) in
+    let option=cli_arg(4) in let baseline=live_resources() in
+    let exchange=tls_test(port.value,roots,if host_arg.present then host_arg.value else "localhost",option.present && str_equal(option.value,"drain")) in
+    let live=live_resources() in check live==baseline in noop()

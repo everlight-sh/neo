@@ -1,0 +1,74 @@
+{
+  "iterations": 1000,
+  "repeats": 1,
+  "commands": {
+    "Axon baseline": [
+      ".kernel-build/jsx-ssr/render-bench",
+      "1000",
+      "0"
+    ],
+    "Axon optimized": [
+      ".kernel-build/jsx-ssr/render-bench",
+      "1000",
+      "1"
+    ],
+    "Bun + React": [
+      "/opt/homebrew/bin/bun",
+      "run",
+      "examples/jsx-ssr/render-bench.ts",
+      "1000"
+    ]
+  },
+  "results": {
+    "Axon baseline": [
+      {
+        "wall_s": 0.2621621252037585,
+        "cpu_s": 0.004510999999999987,
+        "cpu_us_per_render": 4.510999999999988,
+        "renders_per_s": 3814.4335274318396,
+        "checksum": 47321693
+      }
+    ],
+    "Axon optimized": [
+      {
+        "wall_s": 0.0045640841126441956,
+        "cpu_s": 0.002498000000000014,
+        "cpu_us_per_render": 2.498000000000014,
+        "renders_per_s": 219102.00936692453,
+        "checksum": 47321693
+      }
+    ],
+    "Bun + React": [
+      {
+        "wall_s": 0.054297416005283594,
+        "cpu_s": 0.12117399999999998,
+        "cpu_us_per_render": 121.17399999999996,
+        "renders_per_s": 18417.082682216253,
+        "checksum": 47321693
+      }
+    ]
+  },
+  "summary": {
+    "Axon baseline": {
+      "median_renders_per_s": 3814.4335274318396,
+      "min_renders_per_s": 3814.4335274318396,
+      "max_renders_per_s": 3814.4335274318396,
+      "median_cpu_us_per_render": 4.510999999999988
+    },
+    "Axon optimized": {
+      "median_renders_per_s": 219102.00936692453,
+      "min_renders_per_s": 219102.00936692453,
+      "max_renders_per_s": 219102.00936692453,
+      "median_cpu_us_per_render": 2.498000000000014
+    },
+    "Bun + React": {
+      "median_renders_per_s": 18417.082682216253,
+      "min_renders_per_s": 18417.082682216253,
+      "max_renders_per_s": 18417.082682216253,
+      "median_cpu_us_per_render": 121.17399999999996
+    }
+  },
+  "binary_sha256": "78d8e892634d4acb2adcb25c08ce0918a21f0f3bd7b29e34964838ff8b03cd89",
+  "directory": "bench/http/results/2026-10-23-224118-jsx-render",
+  "note": "Every iteration varies count 1..1000, renders the full document and checksums every UTF-8 byte. Wall/CPU include process startup and checksum work. One native binary contains both variants; mode chooses the renderer. Bun uses production React and includes UTF-8 encoding. This is not isolated render-call timing."
+}

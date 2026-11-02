@@ -1,0 +1,35 @@
+#!/bin/sh
+# The neo command. It runs the compiler (neoc/) that sits beside the real file,
+# following symlinks such as ~/.neo/bin/neo, with the first Python 3.11 or newer
+# it finds: $NEO_PYTHON, then python3, then python3.14 down to python3.11.
+self=$0
+while [ -h "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname -- "$self")/$link ;;
+  esac
+done
+NEO_ROOT=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd) || exit 1
+
+recent() { "$1" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; }
+if [ -n "${NEO_PYTHON:-}" ]; then
+  python=$NEO_PYTHON
+  recent "$python" || { echo "neo: NEO_PYTHON=$python is not Python 3.11 or newer" >&2; exit 1; }
+else
+  python=
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11; do
+    if command -v "$candidate" >/dev/null 2>&1 && recent "$candidate"; then python=$candidate; break; fi
+  done
+  if [ -z "$python" ]; then
+    found=$(python3 --version 2>&1) || found='no python3 found'
+    echo "neo: needs Python 3.11 or newer ($found)" >&2
+    case $(uname -s) in
+      Darwin) echo "neo: install it with: brew install python@3.13" >&2 ;;
+      *) echo "neo: install it with your package manager, e.g. sudo apt install python3" >&2 ;;
+    esac
+    exit 1
+  fi
+fi
+export PYTHONPATH="$NEO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec "$python" -m neoc "$@"

@@ -1,0 +1,20 @@
+import "std:io"
+
+; Kernel CSPRNG. No /dev device, userspace entropy pool or shared library.
+private effect(process) fn random_step(buffer:ptr,n:i64,offset:i64) -> WriteStep
+  = let count=rt_random(ptr_add(buffer,offset),if n-offset>256 then 256 else n-offset) in
+    if count>0 then WriteStep { offset=offset+count,error=0 } else
+    if count==0 then WriteStep { offset=offset,error=5 } else
+      let code=i64(load_i32(rt_errno(),0)) in WriteStep { offset=offset,error=if code==4 then 0 else code }
+effect(process) fn random_bytes(n:i64) -> BytesResult
+  = if n<0 || n>1048576 then bytes_error(22,"invalid random byte count",0) else
+    let buffer=ax_alloc(n) in
+    let done=loop(step=WriteStep { offset=0,error=0 }) while step.offset<n && step.error==0
+      next(random_step(buffer,n,step.offset))
+      yield IntResult { ok=step.offset==n, value=step.offset, error=Error { code=step.error, message="kernel randomness failed", position=step.offset } } in
+    let result=if !done.ok then bytes_error(done.error.code,done.error.message,done.value) else check n>=0 in bytes_ok(view(buffer,n)) in
+    let release=ax_release(buffer) in result
+effect(process) fn random_i64() -> IntResult
+  = let bytes=random_bytes(8) in if !bytes.ok then int_error(bytes.error.code,bytes.error.message,0) else
+    let word=loop(i=0,value=0) while i<8
+      next(i+1,check i>=0 && i<len(bytes.value) in bit_or(value,shift_left(i64(bytes.value[i]),i*8))) yield value in int_ok(word)

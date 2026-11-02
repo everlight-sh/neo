@@ -1,0 +1,764 @@
+{
+  "note": "strace changes scheduling and timings; use syscall counts, not these rates as benchmark results",
+  "profiles": [
+    {
+      "server": "axon",
+      "image": "axon-compare-axon-poll:20261023",
+      "container": {
+        "Id": "0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa",
+        "Created": "2026-10-23T22:02:53.943854521Z",
+        "Path": "/server",
+        "Args": [
+          "8080"
+        ],
+        "State": {
+          "Status": "running",
+          "Running": true,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 3803,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-10-23T22:02:53.964508659Z",
+          "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:6f80c23aac5b84bcde724a37d923674bf398207c01ad514b346c8943b5249e38",
+        "ResolvConfPath": "/var/lib/docker/containers/0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa/hostname",
+        "HostsPath": "/var/lib/docker/containers/0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa/hosts",
+        "LogPath": "/var/lib/docker/containers/0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa/0403569c6f5459bc43c23421b74614e273bd578d1554e802109453047ad172aa-json.log",
+        "Name": "/great_mendeleev",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "json-file",
+            "Config": {}
+          },
+          "NetworkMode": "axon-http-profile",
+          "PortBindings": null,
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": [
+            "ALL"
+          ],
+          "CgroupnsMode": "private",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": [
+            "no-new-privileges"
+          ],
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 67108864,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 1073741824,
+          "NanoCpus": 1000000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "0",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 1073741824,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": [
+            "/proc/asound",
+            "/proc/acpi",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/sys/firmware",
+            "/sys/devices/virtual/powercap"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "Mounts": [],
+        "Config": {
+          "Hostname": "0403569c6f54",
+          "Domainname": "",
+          "User": "65532:65532",
+          "AttachStdin": false,
+          "AttachStdout": false,
+          "AttachStderr": false,
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Tty": false,
+          "OpenStdin": false,
+          "StdinOnce": false,
+          "Env": [
+            "AXON_THREADS=1",
+            "BENCH_WORKERS=1",
+            "NODE_ENV=production",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "Cmd": null,
+          "Image": "axon-compare-axon-poll:20261023",
+          "Volumes": null,
+          "WorkingDir": "/",
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "OnBuild": null,
+          "Labels": {}
+        },
+        "NetworkSettings": {
+          "Bridge": "",
+          "SandboxID": "083ad259676c9f92c462fe9eff6819e6638015cd8156f37831e6b60f5f39b419",
+          "SandboxKey": "/var/run/docker/netns/083ad259676c",
+          "Ports": {
+            "8080/tcp": null
+          },
+          "HairpinMode": false,
+          "LinkLocalIPv6Address": "",
+          "LinkLocalIPv6PrefixLen": 0,
+          "SecondaryIPAddresses": null,
+          "SecondaryIPv6Addresses": null,
+          "EndpointID": "",
+          "Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "MacAddress": "",
+          "Networks": {
+            "axon-http-profile": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": null,
+              "MacAddress": "8a:35:2c:d0:5e:cc",
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "835cb3e24e7c6c267a1f08e6b5d2e517293f0859688f5800306b17e51c052851",
+              "EndpointID": "5c5de8d6b4d9b5f1af92dc0aaa160f433d36e9c809c57db9b4810102e64daeb3",
+              "Gateway": "172.18.0.1",
+              "IPAddress": "172.18.0.3",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": [
+                "great_mendeleev",
+                "0403569c6f54"
+              ]
+            }
+          }
+        },
+        "ImageManifestDescriptor": {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:eb01572626b014b01d9077687ba4acd0d2adb2b82cc98a460f9c33f295e25eca",
+          "size": 478,
+          "platform": {
+            "architecture": "arm64",
+            "os": "linux"
+          }
+        }
+      },
+      "trace_command": [
+        "strace",
+        "-f",
+        "-c",
+        "-e",
+        "trace=network,read,write,ppoll,epoll_pwait,epoll_ctl,fcntl,getppid",
+        "-p",
+        "3803",
+        "-o",
+        "/axon/.kernel-build/http-epoll/baseline/axon-strace.txt"
+      ],
+      "load": {
+        "rps": 7124.43,
+        "requests": 35876,
+        "errors": 0,
+        "non2xx": 0,
+        "p50_us": 8940.0,
+        "p99_us": 78120.0,
+        "client_cpu_cores": 0.11178153324474555,
+        "command": [
+          "wrk",
+          "-t4",
+          "-c64",
+          "-d5s",
+          "--latency",
+          "--timeout",
+          "5s",
+          "http://172.18.0.3:8080/page/3"
+        ],
+        "log": "/axon/.kernel-build/http-epoll/baseline/axon-traced-wrk.txt"
+      }
+    },
+    {
+      "server": "rust-musl",
+      "image": "axon-compare-rust:20261023",
+      "container": {
+        "Id": "448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc",
+        "Created": "2026-10-23T22:03:01.419121026Z",
+        "Path": "/server",
+        "Args": [
+          "8080"
+        ],
+        "State": {
+          "Status": "running",
+          "Running": true,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 3966,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-10-23T22:03:01.438042123Z",
+          "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:e8a8778bcd120df5b282b22ac1c79037711eaf26d4a650874325892910cb8fa5",
+        "ResolvConfPath": "/var/lib/docker/containers/448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc/hostname",
+        "HostsPath": "/var/lib/docker/containers/448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc/hosts",
+        "LogPath": "/var/lib/docker/containers/448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc/448fc19aabfb7c2d8eb8aff0e68317cce1916e59bfedee58fa9b668f818842cc-json.log",
+        "Name": "/unruffled_grothendieck",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "json-file",
+            "Config": {}
+          },
+          "NetworkMode": "axon-http-profile",
+          "PortBindings": null,
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": [
+            "ALL"
+          ],
+          "CgroupnsMode": "private",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": [
+            "no-new-privileges"
+          ],
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 67108864,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 1073741824,
+          "NanoCpus": 1000000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "0",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 1073741824,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": [
+            "/proc/asound",
+            "/proc/acpi",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/sys/firmware",
+            "/sys/devices/virtual/powercap"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "Mounts": [],
+        "Config": {
+          "Hostname": "448fc19aabfb",
+          "Domainname": "",
+          "User": "65532:65532",
+          "AttachStdin": false,
+          "AttachStdout": false,
+          "AttachStderr": false,
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Tty": false,
+          "OpenStdin": false,
+          "StdinOnce": false,
+          "Env": [
+            "AXON_THREADS=1",
+            "BENCH_WORKERS=1",
+            "NODE_ENV=production",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "Cmd": null,
+          "Image": "axon-compare-rust:20261023",
+          "Volumes": null,
+          "WorkingDir": "/",
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "OnBuild": null,
+          "Labels": {}
+        },
+        "NetworkSettings": {
+          "Bridge": "",
+          "SandboxID": "4a04f6dff9ee66eda2835ef24fc99da8dcf0743a3340822ebd996b0b0fd8efb1",
+          "SandboxKey": "/var/run/docker/netns/4a04f6dff9ee",
+          "Ports": {
+            "8080/tcp": null
+          },
+          "HairpinMode": false,
+          "LinkLocalIPv6Address": "",
+          "LinkLocalIPv6PrefixLen": 0,
+          "SecondaryIPAddresses": null,
+          "SecondaryIPv6Addresses": null,
+          "EndpointID": "",
+          "Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "MacAddress": "",
+          "Networks": {
+            "axon-http-profile": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": null,
+              "MacAddress": "02:99:2c:cb:b7:2a",
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "835cb3e24e7c6c267a1f08e6b5d2e517293f0859688f5800306b17e51c052851",
+              "EndpointID": "04c5b18f8d6331f61984b89dd4ce1b98035249a47aa5c972e3decdff703fa424",
+              "Gateway": "172.18.0.1",
+              "IPAddress": "172.18.0.3",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": [
+                "unruffled_grothendieck",
+                "448fc19aabfb"
+              ]
+            }
+          }
+        },
+        "ImageManifestDescriptor": {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:a5b68e35442949d4594b5331ec1f337786a51075440992e040fb2e371105bca4",
+          "size": 479,
+          "platform": {
+            "architecture": "arm64",
+            "os": "linux"
+          }
+        }
+      },
+      "trace_command": [
+        "strace",
+        "-f",
+        "-c",
+        "-e",
+        "trace=network,read,write,ppoll,epoll_pwait,epoll_ctl,fcntl,getppid",
+        "-p",
+        "3966",
+        "-o",
+        "/axon/.kernel-build/http-epoll/baseline/rust-musl-strace.txt"
+      ],
+      "load": {
+        "rps": 7040.56,
+        "requests": 35906,
+        "errors": 0,
+        "non2xx": 0,
+        "p50_us": 9300.0,
+        "p99_us": 10140.0,
+        "client_cpu_cores": 0.11216709294090443,
+        "command": [
+          "wrk",
+          "-t4",
+          "-c64",
+          "-d5s",
+          "--latency",
+          "--timeout",
+          "5s",
+          "http://172.18.0.3:8080/page/3"
+        ],
+        "log": "/axon/.kernel-build/http-epoll/baseline/rust-musl-traced-wrk.txt"
+      }
+    },
+    {
+      "server": "rust-glibc",
+      "image": "axon-compare-rust-gnu:20261023",
+      "container": {
+        "Id": "84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957",
+        "Created": "2026-10-23T22:03:09.012027016Z",
+        "Path": "/server",
+        "Args": [
+          "8080"
+        ],
+        "State": {
+          "Status": "running",
+          "Running": true,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 4162,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-10-23T22:03:09.028590124Z",
+          "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:074d53ebc4ecac6025e6caedcec884631a85b17d9931f1c74ea151f31301bfc7",
+        "ResolvConfPath": "/var/lib/docker/containers/84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957/hostname",
+        "HostsPath": "/var/lib/docker/containers/84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957/hosts",
+        "LogPath": "/var/lib/docker/containers/84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957/84e5af4a3875eb7c135b64f103fabde700e87938515f672a3b801ce973b3f957-json.log",
+        "Name": "/infallible_khayyam",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "json-file",
+            "Config": {}
+          },
+          "NetworkMode": "axon-http-profile",
+          "PortBindings": null,
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": [
+            "ALL"
+          ],
+          "CgroupnsMode": "private",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": [
+            "no-new-privileges"
+          ],
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 67108864,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 1073741824,
+          "NanoCpus": 1000000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "0",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 1073741824,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": [
+            "/proc/asound",
+            "/proc/acpi",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/sys/firmware",
+            "/sys/devices/virtual/powercap"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "GraphDriver": {
+          "Data": null,
+          "Name": "overlayfs"
+        },
+        "Mounts": [],
+        "Config": {
+          "Hostname": "84e5af4a3875",
+          "Domainname": "",
+          "User": "65532:65532",
+          "AttachStdin": false,
+          "AttachStdout": false,
+          "AttachStderr": false,
+          "ExposedPorts": {
+            "8080/tcp": {}
+          },
+          "Tty": false,
+          "OpenStdin": false,
+          "StdinOnce": false,
+          "Env": [
+            "AXON_THREADS=1",
+            "BENCH_WORKERS=1",
+            "NODE_ENV=production",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ],
+          "Cmd": null,
+          "Image": "axon-compare-rust-gnu:20261023",
+          "Volumes": null,
+          "WorkingDir": "/",
+          "Entrypoint": [
+            "/server",
+            "8080"
+          ],
+          "OnBuild": null,
+          "Labels": {}
+        },
+        "NetworkSettings": {
+          "Bridge": "",
+          "SandboxID": "50c30dc420c92ce4c5eca66050c7bc4d00bcdb93d9d47eb043e7aa4b370a11c0",
+          "SandboxKey": "/var/run/docker/netns/50c30dc420c9",
+          "Ports": {
+            "8080/tcp": null
+          },
+          "HairpinMode": false,
+          "LinkLocalIPv6Address": "",
+          "LinkLocalIPv6PrefixLen": 0,
+          "SecondaryIPAddresses": null,
+          "SecondaryIPv6Addresses": null,
+          "EndpointID": "",
+          "Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "MacAddress": "",
+          "Networks": {
+            "axon-http-profile": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": null,
+              "MacAddress": "52:88:a7:b8:97:26",
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "835cb3e24e7c6c267a1f08e6b5d2e517293f0859688f5800306b17e51c052851",
+              "EndpointID": "bfdb6e10ab7f6f17dc0b1c7f161086868b182964fa882820da645c7b35eff362",
+              "Gateway": "172.18.0.1",
+              "IPAddress": "172.18.0.3",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": [
+                "infallible_khayyam",
+                "84e5af4a3875"
+              ]
+            }
+          }
+        },
+        "ImageManifestDescriptor": {
+          "mediaType": "application/vnd.oci.image.manifest.v1+json",
+          "digest": "sha256:df5d0f35bebf658535a5e7312aeda7cf7dd0f3dd66d04a8a904bc566a3769b68",
+          "size": 480,
+          "platform": {
+            "architecture": "arm64",
+            "os": "linux"
+          }
+        }
+      },
+      "trace_command": [
+        "strace",
+        "-f",
+        "-c",
+        "-e",
+        "trace=network,read,write,ppoll,epoll_pwait,epoll_ctl,fcntl,getppid",
+        "-p",
+        "4162",
+        "-o",
+        "/axon/.kernel-build/http-epoll/baseline/rust-glibc-strace.txt"
+      ],
+      "load": {
+        "rps": 6988.98,
+        "requests": 35025,
+        "errors": 0,
+        "non2xx": 0,
+        "p50_us": 9330.0,
+        "p99_us": 10120.0,
+        "client_cpu_cores": 0.1098129092590714,
+        "command": [
+          "wrk",
+          "-t4",
+          "-c64",
+          "-d5s",
+          "--latency",
+          "--timeout",
+          "5s",
+          "http://172.18.0.3:8080/page/3"
+        ],
+        "log": "/axon/.kernel-build/http-epoll/baseline/rust-glibc-traced-wrk.txt"
+      }
+    }
+  ]
+}

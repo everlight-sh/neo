@@ -1,0 +1,22 @@
+import "std:process"
+effect(fs,env,time,process) fn main() -> unit
+  = let command=cli_arg(1) in check command.present in
+    let args=arr(i in 0..2) if i==0 then "-c" else "read line; printf 'OUT:%s:%s' \"$line\" \"$NEO_TEST\"; printf ERR >&2; exit 7" in
+    let environment=arr(i in 0..1) "NEO_TEST=present" in
+    using process=process_start(command.value,args,environment) in
+    let initial=process_status(process) in check initial.ok in
+    let written=loop(offset=0,tries=0) while offset<6 && tries<100 next(
+      let result=process_try_write(process,"hello\n",offset) in if result.ok then offset+result.value else let slept=sleep_ms(1) in offset,tries+1) yield offset in check written==6 in
+    let result=loop(out="",err="",running=true,tries=0) while running && tries<1000 next(
+      let read=process_try_read(process,1,4096) in if read.ok then concat(out,read.value) else out,
+      let read=process_try_read(process,2,4096) in if read.ok then concat(err,read.value) else err,
+      let slept=sleep_ms(1) in process_status(process).running,tries+1) yield
+        let read=process_try_read(process,1,4096) in let errors=process_try_read(process,2,4096) in
+        let output=concat(out,if read.ok then read.value else "") in let error=concat(err,if errors.ok then errors.value else "") in
+        check str_equal(output,"OUT:hello:present") && str_equal(error,"ERR") in process_status(process) in
+    check result.ok && !result.running && result.exit_code==7 && result.signal==0 in
+    let empty=arr(i in 0..0) "" in
+    using missing=process_start("/no/such/neo-program",empty,empty) in
+    let done=loop(status=process_status(missing),tries=0) while status.running && tries<1000 next(let paused=sleep_ms(1) in process_status(missing),tries+1) yield status in
+    check done.ok && !done.running && done.exit_code==127 in
+    let printed=print_out("child process OK\n") in noop()

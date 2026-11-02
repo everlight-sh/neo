@@ -1,0 +1,47 @@
+import "std:io"
+import "std:random"
+private fn fs_parent(path:Arr u8 n) -> Arr u8 _
+  = let slash=loop(i=0,last= -1) while i<n next(i+1,if str_byte(path,i)==47 then i else last) yield last in
+    if slash<0 then "." else if slash==0 then "/" else str_slice(path,0,slash)
+; The target of a symbolic link. Anything else is an error: EINVAL for a
+; file that is not a link, ENOENT for a missing one.
+effect(fs) fn fs_readlink(path:Arr u8 n) -> BytesResult
+  = if !io_path_valid(path) then bytes_error(22,"invalid path",0) else let text=concat(path,"\0") in
+    let buffer=ax_alloc(4096) in let count=rt_readlink(data(text),buffer,4096) in
+    let result=if count<0 then bytes_error(i64(load_i32(rt_errno(),0)),"readlink failed",0)
+      else if count>=4096 then bytes_error(36,"link target too long",0) else check count>=0 in bytes_ok(view(buffer,count)) in
+    let released=ax_release(buffer) in result
+; The absolute path of the working directory.
+effect(fs) fn fs_cwd() -> BytesResult
+  = let buffer=ax_alloc(4096) in let count=rt_getcwd(buffer,4096) in
+    let size=if count>0 then rt_cstrlen(buffer) else 0 in
+    let result=if count<=0 then bytes_error(i64(load_i32(rt_errno(),0)),"getcwd failed",0)
+      else check size>=0 in bytes_ok(view(buffer,size)) in
+    let released=ax_release(buffer) in result
+effect(fs) fn fs_remove(path:Arr u8 n) -> IntResult
+  = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
+    let result=rt_unlink(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"unlink failed",0) else int_ok(0)
+effect(fs) fn fs_mkdir(path:Arr u8 n) -> IntResult
+  = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
+    let result=rt_mkdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"mkdir failed",0) else int_ok(0)
+effect(fs) fn fs_rename(old:Arr u8 n,new:Arr u8 m) -> IntResult
+  = if !io_path_valid(old) || !io_path_valid(new) then int_error(22,"invalid path",0) else
+    let from=concat(old,"\0") in let to=concat(new,"\0") in let result=rt_rename(data(from),data(to)) in
+    if result<0 then int_error(i64(load_i32(rt_errno(),0)),"rename failed",0) else int_ok(0)
+; Exclusive 0600 temporary file in the destination directory, file sync, rename,
+; then parent directory sync. A directory-sync failure can follow a committed
+; rename; callers must treat that error as an uncertain durability outcome.
+effect(fs,process) fn fs_atomic_replace(path:Arr u8 n,bytes:Arr u8 m) -> IntResult
+  = if !io_path_valid(path) then int_error(22,"invalid path",0) else
+    let entropy=random_bytes(16) in if !entropy.ok then int_error(entropy.error.code,entropy.error.message,0) else
+      let hex="0123456789abcdef" in let tag=arr(i in 0..32) let at=i/2 in
+        check at>=0 && at<len(entropy.value) in let digit=if i%2==0 then i64(entropy.value[at])/16 else i64(entropy.value[at])%16 in
+        check digit>=0 && digit<16 in hex[digit] in
+      let temporary=concat(path,".tmp.",tag) in let terminated=concat(temporary,"\0") in
+      let fd=rt_open(data(terminated),rt_open_exclusive()) in
+      if fd<0 then int_error(i64(load_i32(rt_errno(),0)),"exclusive temporary open failed",0) else
+        let written=file_write(fd,bytes) in let synced=if written.ok then file_sync(fd) else written in let closed=file_close(fd) in
+        let moved=if synced.ok && closed.ok then fs_rename(temporary,path) else if !synced.ok then synced else closed in
+        if !moved.ok then let removed=fs_remove(temporary) in moved else
+          let parent=file_open(fs_parent(path),0) in if !parent.ok then parent else
+            let synced=file_sync(parent.value) in let closed=file_close(parent.value) in if !synced.ok then synced else if !closed.ok then closed else int_ok(m)

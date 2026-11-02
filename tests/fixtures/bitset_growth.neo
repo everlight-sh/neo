@@ -1,0 +1,11 @@
+import "std:bitset"
+import "std:json"
+import "std:io"
+effect(fs,unsafe) fn main(mode:i64,n:i64{n>=0 && n<=1000000}) -> unit
+  = let first=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let bits=loop(i=0,bits=bitset_empty()) while i<n next(i+1,bitset_insert(bits,i*(if mode==0 then 1 else 67))) yield bits in
+    let allocations=load_i64(runtime_state(),64)-first in let allocated=load_i64(runtime_state(),80)-bytes in
+    let result=loop(at=bitset_next(bits,0),out=json_array_builder()) while option_is_some::<i64>(at)
+      next(match at {None=>None::<i64>(),Some(i)=>bitset_next(bits,i+1)},match at {None=>out,Some(i)=>json_array_builder_push(out,json_value_int(i))}) yield json_array_builder_finish(out) in
+    check result.ok && result.value.count==n && bitset_len(bits)==n && !bitset_has(bits,-1) && !option_is_some::<i64>(bitset_next(bits,-1)) in
+    let shown=print_out(concat(int_text(allocations)," ",int_text(allocated)," ",int_text(bitset_storage_words(bits)),"\n",result.value.raw,"\n")) in noop()

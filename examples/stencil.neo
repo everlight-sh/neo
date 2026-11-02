@@ -1,0 +1,16 @@
+; 3-point integer stencil, `iters` passes, then a checksum.
+; xs[i-1] and xs[i+1] carry proof obligations; they are discharged from the
+; range facts (0 <= i < n) plus the negated branch condition (i != 0, i+1 != n).
+; No bounds check survives into the binary.
+
+fn stencil (xs : Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n)
+      if i == 0 || i + 1 == n then xs[i]
+      else (xs[i-1] + 2 * xs[i] + xs[i+1]) % 1000003
+
+fn main (n : i64{n > 0}, iters : i64{iters >= 0}) -> i64
+  = let ys = loop (a = arr(i in 0..n) (i * 2654435761) % 1000003, k = 0)
+               while k < iters
+               next (stencil(a), k + 1)
+               yield a in
+    sum(i in 0..n) ys[i]

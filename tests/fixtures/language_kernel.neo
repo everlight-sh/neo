@@ -1,0 +1,14 @@
+import "std:channel"
+import "std:hashmap"
+import "std:debug"
+
+effect(process,time) fn kernel_work() -> bool
+  = let entropy=random_bytes(32) in let deadline=deadline_after(1000) in
+    let random_map=hashmap_random::<i64,i64>() in
+    let map_ok=match random_map { Err(error) => false,Ok(map) => hashmap_len(hashmap_put(map,7,42))==1 } in
+    using cancellation=new_cancellation() in using channel=new_channel(1) in
+      let sent=channel_send(channel,"kernel",deadline.value,cancellation) in let received=channel_receive(channel,deadline.value,cancellation) in
+      entropy.ok && len(entropy.value)==32 && map_ok && sent.ok && received.ok && str_equal(received.value,"kernel")
+effect(fs,process,time) fn main() -> unit
+  = let before=live_resources() in let valid=kernel_work() in let after=live_resources() in check valid && before==after in
+    let output=print_out("language kernel OK\n") in noop()

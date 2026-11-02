@@ -1,0 +1,173 @@
+; Canonical text of a parsed file. compiler/tests/ast_dump.py prints the same
+; text from neoc's parser; the two are compared byte for byte.
+import "std:strings"
+import "text.neo"
+import "lex.neo"
+import "ast.neo"
+import "parse.neo"
+
+fn dp_pos(move out:Arr u8 _, n:Node) -> Arr u8 _ = tx_int(push(tx_int(push(out,' '),n.line),':'),n.col)
+; "(word line:col"
+fn dp_head(move out:Arr u8 _, borrow word:Arr u8 _, n:Node) -> Arr u8 _ = dp_pos(concat(push(out,'('),word),n)
+fn dp_str(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = if id>=0 && id<len(ast.strs) then concat(out,ast.strs[id]) else out
+fn dp_sp(move out:Arr u8 _) -> Arr u8 _ = push(out,' ')
+fn dp_close(move out:Arr u8 _) -> Arr u8 _ = push(out,')')
+fn dp_opt_str(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _ = if id<0 then push(out,'-') else dp_str(out,ast,id)
+
+; A list as "(item item ...)". what: 0 expressions, 1 types, 2 names.
+fn dp_item(move out:Arr u8 _, borrow ast:Ast, what:i64, id:i64) -> Arr u8 _
+  = if what==0 then dp_expr(out,ast,id) else if what==1 then dp_type(out,ast,id) else dp_str(out,ast,id)
+fn dp_list(move out:Arr u8 _, borrow ast:Ast, list:i64, what:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n next (dp_item(if k>0 then dp_sp(o) else o,ast,what,ast_list_at(ast,list,k)), k+1) yield o in
+    dp_close(o)
+
+fn dp_scalar(kind:i64) -> Arr u8 _
+  = if kind==n_t_i64() then "i64" else if kind==n_t_f64() then "f64" else if kind==n_t_bool() then "bool"
+    else if kind==n_t_u8() then "u8" else if kind==n_t_u16() then "u16" else if kind==n_t_i32() then "i32"
+    else if kind==n_t_ptr() then "ptr" else if kind==n_t_unit() then "unit" else "?"
+
+fn dp_type(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = let n=ast_node(ast,id) in let k=n.kind in
+    if k==n_t_rec() then
+      let o=dp_str(concat(out,"(rec "),ast,n.a) in
+      let o=loop (o=o, i=0) while i<ast_list_len(ast,n.b) next (dp_type(dp_sp(o),ast,ast_list_at(ast,n.b,i)), i+1) yield o in
+      dp_close(o)
+    else if k==n_t_ref() then dp_close(dp_type(concat(out,"(ref "),ast,n.a))
+    else if k==n_t_fn() then
+      let o=dp_type(dp_sp(dp_list(concat(out,"(fn "),ast,n.a,1)),ast,n.b) in
+      dp_close(if n.c<0 then concat(o," -") else dp_list(dp_sp(o),ast,n.c,2))
+    else if k==n_t_arr() then
+      let o=dp_sp(dp_type(concat(out,"(arr "),ast,n.a)) in
+      dp_close(if n.c==0 then dp_str(o,ast,n.b) else dp_expr(o,ast,n.b))
+    else concat(out,dp_scalar(k))
+
+; "((name expr) ...)"
+fn dp_inits(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let init=ast_node(ast,ast_list_at(ast,list,k)) in
+            dp_close(dp_expr(dp_sp(dp_str(push(if k>0 then dp_sp(o) else o,'('),ast,init.a)),ast,init.b)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_annot(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = if id<0 then push(out,'-') else let n=ast_node(ast,id) in
+    dp_close(dp_list(dp_sp(dp_type(concat(out,"(ann "),ast,n.a)),ast,n.b,0))
+
+fn dp_states(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let s=ast_node(ast,ast_list_at(ast,list,k)) in
+            dp_close(dp_expr(dp_sp(dp_annot(dp_sp(dp_str(push(if k>0 then dp_sp(o) else o,'('),ast,s.a)),ast,s.b)),ast,s.c)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_arms(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let arm=ast_node(ast,ast_list_at(ast,list,k)) in
+            dp_close(dp_expr(dp_sp(dp_list(dp_sp(dp_str(push(if k>0 then dp_sp(o) else o,'('),ast,arm.a)),ast,arm.b,2)),ast,arm.c)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_expr(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = let n=ast_node(ast,id) in let k=n.kind in
+    if k==n_num() then dp_close(if n.b==0 then tx_int(dp_sp(dp_head(out,"num",n)),n.a) else dp_str(dp_sp(dp_head(out,"num",n)),ast,n.c))
+    else if k==n_flt() then dp_close(tx_hex(dp_sp(dp_head(out,"flt",n)),n.a,16))
+    else if k==n_bool() then dp_close(concat(dp_head(out,"bool",n),if n.a==1 then " true" else " false"))
+    else if k==n_str() then dp_close(tx_hex_bytes(concat(dp_head(out,"str",n)," x"),ast_str(ast,n.a)))
+    else if k==n_byte() then dp_close(tx_int(dp_sp(dp_head(out,"byte",n)),n.a))
+    else if k==n_var() then dp_close(dp_str(dp_sp(dp_head(out,"var",n)),ast,n.a))
+    else if k==n_bin() then
+      dp_close(dp_expr(dp_sp(dp_expr(dp_sp(concat(dp_sp(dp_head(out,"bin",n)),lx_sym_text(n.a))),ast,n.b)),ast,n.c))
+    else if k==n_un() then dp_close(dp_expr(dp_sp(concat(dp_sp(dp_head(out,"un",n)),lx_sym_text(n.a))),ast,n.b))
+    else if k==n_index() then dp_close(dp_expr(dp_sp(dp_expr(dp_sp(dp_head(out,"index",n)),ast,n.a)),ast,n.b))
+    else if k==n_call() then
+      dp_close(dp_list(dp_sp(dp_list(dp_sp(dp_str(dp_sp(dp_head(out,"call",n)),ast,n.a)),ast,n.c,1)),ast,n.b,0))
+    else if k==n_let() || k==n_using() then
+      dp_close(dp_expr(dp_sp(dp_expr(dp_sp(dp_str(dp_sp(dp_head(out,if k==n_let() then "let" else "using",n)),ast,n.a)),ast,n.b)),ast,n.c))
+    else if k==n_if() then
+      dp_close(dp_expr(dp_sp(dp_expr(dp_sp(dp_expr(dp_sp(dp_head(out,"if",n)),ast,n.a)),ast,n.b)),ast,n.c))
+    else if k==n_sum() || k==n_arrc() then
+      let o=dp_str(dp_sp(dp_head(out,if k==n_sum() then "sum" else "arrc",n)),ast,n.a) in
+      dp_close(dp_expr(dp_sp(dp_expr(dp_sp(dp_expr(dp_sp(o),ast,n.b)),ast,n.c)),ast,n.d))
+    else if k==n_loop() then
+      let o=dp_expr(dp_sp(dp_states(dp_sp(dp_head(out,"loop",n)),ast,n.a)),ast,n.b) in
+      dp_close(dp_expr(dp_sp(dp_list(dp_sp(o),ast,n.c,0)),ast,n.d))
+    else if k==n_check() then dp_close(dp_expr(dp_sp(dp_expr(dp_sp(dp_head(out,"check",n)),ast,n.a)),ast,n.b))
+    else if k==n_len() then dp_close(dp_expr(dp_sp(dp_head(out,"len",n)),ast,n.a))
+    else if k==n_cast() then dp_close(dp_expr(dp_sp(dp_type(dp_sp(dp_head(out,"cast",n)),ast,n.a)),ast,n.b))
+    else if k==n_reclit() then
+      dp_close(dp_inits(dp_sp(dp_list(dp_sp(dp_str(dp_sp(dp_head(out,"reclit",n)),ast,n.a)),ast,n.c,1)),ast,n.b))
+    else if k==n_field() then dp_close(dp_str(dp_sp(dp_expr(dp_sp(dp_head(out,"field",n)),ast,n.a)),ast,n.b))
+    else if k==n_with() then dp_close(dp_inits(dp_sp(dp_expr(dp_sp(dp_head(out,"with",n)),ast,n.a)),ast,n.b))
+    else if k==n_match() then dp_close(dp_arms(dp_sp(dp_expr(dp_sp(dp_head(out,"match",n)),ast,n.a)),ast,n.b))
+    else if k==n_try() then dp_close(dp_expr(dp_sp(dp_head(out,"try",n)),ast,n.a))
+    else concat(out,"(?)")
+
+fn dp_bit(move out:Arr u8 _, flags:i64, bit:i64) -> Arr u8 _ = push(out,if bit_and(flags,bit)!=0 then '1' else '0')
+
+fn dp_import(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = let n=ast_node(ast,id) in
+    concat(dp_close(dp_opt_str(dp_sp(dp_pos(tx_hex_bytes(concat(out,"(import x"),ast_str(ast,n.a)),n)),ast,n.b)),"\n")
+
+fn dp_variants(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = if list<0 then push(out,'-') else
+    let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let v=ast_node(ast,ast_list_at(ast,list,k)) in
+            dp_close(dp_list(dp_sp(dp_str(push(if k>0 then dp_sp(o) else o,'('),ast,v.a)),ast,v.b,1)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_fields(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let f=ast_node(ast,ast_list_at(ast,list,k)) in
+            dp_close(dp_type(dp_sp(dp_str(push(if k>0 then dp_sp(o) else o,'('),ast,f.a)),ast,f.b)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_type_decl(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = let n=ast_node(ast,id) in
+    let o=dp_pos(dp_str(concat(out,"(type "),ast,n.a),n) in
+    let o=dp_bit(dp_sp(dp_bit(dp_sp(o),n.f,fl_sealed())),n.f,fl_type_visible()) in
+    let o=dp_variants(dp_sp(dp_fields(dp_sp(dp_list(dp_sp(o),ast,n.c,2)),ast,n.b)),ast,n.d) in
+    concat(dp_close(dp_opt_str(dp_sp(o),ast,n.e)),"\n")
+
+fn dp_params(move out:Arr u8 _, borrow ast:Ast, list:i64) -> Arr u8 _
+  = let n=ast_list_len(ast,list) in
+    let o=loop (o=push(out,'('), k=0) while k<n
+      next (let q=ast_node(ast,ast_list_at(ast,list,k)) in
+            let o=dp_pos(dp_str(concat(if k>0 then dp_sp(o) else o,"(param "),ast,q.a),q) in
+            let o=dp_bit(dp_sp(dp_bit(dp_sp(o),q.f,1)),q.f,2) in
+            dp_close(dp_list(dp_sp(dp_type(dp_sp(o),ast,q.b)),ast,q.c,0)), k+1)
+      yield o in
+    dp_close(o)
+
+fn dp_fn(move out:Arr u8 _, borrow ast:Ast, id:i64) -> Arr u8 _
+  = let n=ast_node(ast,id) in
+    let o=dp_sp(dp_pos(dp_str(concat(out,"(fn "),ast,n.a),n)) in
+    let o=dp_bit(dp_bit(dp_bit(dp_bit(dp_bit(dp_bit(dp_bit(o,n.f,fl_effect()),n.f,fl_external()),n.f,fl_exported()),
+                 n.f,fl_variadic()),n.f,fl_cold()),n.f,fl_inline()),n.f,fl_visible()) in
+    let o=if n.g<0 then concat(o," -") else dp_list(dp_sp(o),ast,n.g,2) in
+    let o=dp_type(dp_sp(dp_params(dp_sp(dp_list(dp_sp(o),ast,n.h,2)),ast,n.b)),ast,n.c) in
+    concat(dp_close(dp_expr(dp_sp(dp_list(dp_sp(o),ast,n.e,0)),ast,n.d)),"\n")
+
+fn dp_error(borrow msg:Arr u8 _, line:i64, col:i64) -> Arr u8 _
+  = concat(tx_int(push(tx_int(concat(tx_empty(),"(error "),line),':'),col)," ",msg,")\n")
+
+fn dp_decls(move out:Arr u8 _, borrow ast:Ast, borrow ids:Arr i64 _, what:i64) -> Arr u8 _
+  = loop (o=out, k:i64{k>=0}=0) while k<len(ids)
+      next (if what==0 then dp_import(o,ast,ids[k]) else if what==1 then dp_type_decl(o,ast,ids[k]) else dp_fn(o,ast,ids[k]), k+1)
+      yield o
+
+fn dp_source(move src:Arr u8 _) -> Arr u8 _
+  = let lx=lx_lex(src) in
+    if !lx.ok then dp_error(lx.err,lx.eline,lx.ecol) else
+    let p=ps_parse(lx) in
+    if !p.ok then dp_error(p.err,p.eline,p.ecol) else
+    let imports=p.imports in let types=p.types in let fns=p.fns in let ast=ps_ast(p) in
+    dp_decls(dp_decls(dp_decls(tx_empty(),ast,imports,0),ast,types,1),ast,fns,2)

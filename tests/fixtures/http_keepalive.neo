@@ -1,0 +1,33 @@
+import "std:https_client"
+
+; A fixed sequence of requests over one keep-alive HttpClient to localhost at
+; 127.0.0.1: http_keepalive PORT [CA.der], TLS when given a root. Prints, per
+; request, the status and body (or error:CODE) and how many connections the
+; client has opened so far.
+type Step = { client:HttpClient, out:Arr u8 _ }
+
+effect(fs,net,time,process) fn step(arena:Arena, move s:Step, method:Arr u8 m, path:Arr u8 k, body:Arr u8 q) -> Step
+  = let sent=http_send(arena,s.client,method,path,body,3000,1024) in
+    let line=if sent.response.ok then concat(int_text(sent.response.status)," ",sent.response.body) else concat("error:",int_text(sent.response.error.code)) in
+    Step { client=sent.client, out=concat(s.out,line," ",int_text(sent.client.connections),"\n") }
+
+effect(fs,net,time,process,env) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let ca=cli_arg(2) in check port.ok in
+    using arena=new_arena(8) in
+    let client=if ca.present then let der=fs_read(ca.value) in check der.ok in https_client("localhost",port.value,arr(i in 0..1) x509_parse(der.value))
+      else http_client("localhost",port.value) in
+    let s=Step { client=http_client_at(client,"127.0.0.1"), out="" } in
+    let s=step(arena,s,"GET","/a","") in
+    let s=step(arena,s,"GET","/b","") in
+    let s=step(arena,s,"GET","/chunked","") in
+    let s=step(arena,s,"GET","/close","") in
+    let s=step(arena,s,"GET","/a","") in
+    let s=step(arena,s,"GET","/drop","") in
+    let s=step(arena,s,"GET","/b","") in
+    let s=step(arena,s,"GET","/drop","") in
+    let s=step(arena,s,"POST","/post","xyz") in
+    let s=step(arena,s,"POST","/post","xyz") in
+    let s=step(arena,s,"GET","/big","") in
+    let s=step(arena,s,"GET","/a","") in
+    let closed=http_client_close(s.client) in
+    let shown=print_out(s.out) in noop()

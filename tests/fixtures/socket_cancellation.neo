@@ -1,0 +1,10 @@
+import "std:socket_cancel"
+effect(fs,net,env,time,process) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let mode=cli_arg(2) in check port.ok in
+    let timer=deadline_after(1500) in using socket=tcp_connect_ipv4("127.0.0.1",port.value,timer.value) in
+    let status=socket_status(socket) in check status.ok in using cancellation=new_cancellation() in
+    let worker=if mode.present && str_equal(mode.value,"cancel") then process_fork() else int_ok(1) in
+    if worker.ok && worker.value==0 then let slept=sleep_ms(25) in let stopped=cancel(cancellation) in process_exit(0) else
+      let input=socket_read_cancel(socket,cancellation,timer.value) in
+      let waited=if mode.present && str_equal(mode.value,"cancel") then process_wait(worker.value) else int_ok(0) in
+      let printed=print_out(if input.ok then input.value else concat("error:",int_text(input.error.code))) in noop()

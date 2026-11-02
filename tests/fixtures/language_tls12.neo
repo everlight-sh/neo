@@ -1,0 +1,45 @@
+import "std:tls"
+import "std:dns"
+import "std:io"
+import "std:time"
+
+; tls12 HOST PORT TRUST [PATH] [ADDRESS]: GET https://HOST:PORT/PATH over TLS 1.3 or 1.2,
+; connecting to ADDRESS (an IPv4 literal) when given, else to HOST's DNS address. TRUST is a
+; DER root or "system". Prints the negotiated version, suite and group, the handshake time,
+; the response status line, the body length and a checksum, or why the exchange failed.
+fn status_line(response:Arr u8 n) -> Arr u8 _
+  = let end=str_find(response,"\r\n") in if end.present then str_slice(response,0,end.value) else response
+fn body_sum(response:Arr u8 n) -> Arr u8 _
+  = let start=str_find(response,"\r\n\r\n") in let at=if start.present then start.value+4 else n in
+    let total=loop(i=at,h=0) while i<n next(i+1,(h*31+str_byte(response,i))%1000000007) yield h in
+    concat("body=",int_text(n-at)," sum=",int_text(total))
+effect(fs,net,time,process) fn exchange(host:Arr u8 n,address:Arr u8 a,port:i64,roots:Arr Certificate m,path:Arr u8 k,deadline:i64) -> unit
+  = using socket=tcp_connect_ipv4(address,port,deadline) in
+    let connected=socket_status(socket) in if !connected.ok then let failed=print_out(concat("connect failed: ",connected.error.message,"\n")) in noop() else
+    let started=monotonic_ns() in
+    using session=tls_connect(socket,host,roots,deadline) in
+      let finished=monotonic_ns() in
+      let status=tls_status(session) in if !status.ok then let failed=print_out(concat("rejected: ",status.error.message,"\n")) in noop() else
+        let micros=(finished.value-started.value)/1000 in
+        let request=concat("GET ",path," HTTP/1.1\r\nHost: ",host,"\r\nUser-Agent: neo-tls12-test\r\nAccept: */*\r\nConnection: close\r\n\r\n") in
+        let sent=tls_write(socket,session,request,deadline) in if !sent.ok then let failed=print_out("write rejected\n") in noop() else
+        let received=loop(chunk=tls_read(socket,session,deadline),out="")
+            while chunk.ok && len(chunk.value)>0 && len(out)<4194304
+            next(tls_read(socket,session,deadline),concat(out,chunk.value)) yield if chunk.ok then bytes_ok(concat(out,chunk.value)) else
+              if len(out)>0 then bytes_error(chunk.error.code,concat(chunk.error.message," after ",status_line(out)),0) else chunk in
+        let line=if received.ok then concat(status_line(received.value)," ",body_sum(received.value)) else concat("read rejected: ",received.error.message) in
+        let shown=print_out(concat("version=",int_text(tls_version(session))," suite=",int_text(tls_suite(session))," group=",int_text(tls_group(session)),
+          " handshake_us=",int_text(micros)," ",line,"\n")) in
+        let closed=tls_close(socket,session,deadline) in noop()
+effect(fs,net,time,process) fn fetch(host:Arr u8 n,address:Arr u8 a,port:i64,roots:Arr Certificate m,path:Arr u8 k) -> unit
+  = let deadline=deadline_after(10000) in
+    if a>0 then exchange(host,address,port,roots,path,deadline.value) else
+    let resolved=dns_lookup(host,deadline.value) in if !resolved.ok then let failed=print_out(concat("dns failed: ",resolved.error.message,"\n")) in noop() else
+      exchange(host,dns_address(resolved.value),port,roots,path,deadline.value)
+effect(fs,net,time,process,env) fn main() -> unit
+  = let host=cli_arg(1) in let port_arg=cli_arg(2) in let trust=cli_arg(3) in let path=cli_arg(4) in let address=cli_arg(5) in
+    check host.present && port_arg.present && trust.present in
+    let port=int_parse(port_arg.value) in check port.ok && port.value>0 && port.value<65536 in
+    let roots=if str_equal(trust.value,"system") then tls_system_roots() else
+      let root=fs_read(trust.value) in arr(i in 0..1) x509_parse(if root.ok then root.value else "") in
+    fetch(host.value,if address.present then address.value else "",port.value,roots,if path.present && len(path.value)>0 then path.value else "/")

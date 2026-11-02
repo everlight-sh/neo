@@ -1,0 +1,8 @@
+import "std:io"
+fn word_bytes(word:i64,n:i64{n>=0 && n<=1024}) -> Arr u8 n
+  = arr(i in 0..n) u8(shift_right(word,i*8))
+effect(fs) fn main(word:i64,n:i64{n>=0 && n<=1024}) -> unit
+  = let original=word_bytes(word,n) in
+    let changed=if n==0 then original else check len(original)>0 in set(original,0,u8(0)) in
+    let printed=print_out(concat(int_text(len(original))," ",int_text(sum(i in 0..n) i64(original[i]))," ",
+      int_text(sum(i in 0..n) i64(changed[i])),"\n")) in noop()

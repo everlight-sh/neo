@@ -1,0 +1,10 @@
+import "std:json"
+import "std:io"
+effect(fs) fn main(mode:i64,size:i64{size>=0 && size<=4096},offset:i64{offset>=0 && offset<=15}) -> unit
+  = let input=file_read(0,65536) in check input.ok && len(input.value)>=size in
+    let name=arr(i in 0..size) input.value[i] in let document=arr(i in size..len(input.value)) input.value[i] in
+    let output=if mode==1 then if json_key_equal(document,offset,len(document),name) then "equal" else "different" else
+      let parsed=json_parse(document) in if !parsed.ok then "invalid" else
+      let got=json_get(parsed.value,name) in if !got.present then "missing" else
+      let number=json_int(got.value) in if !number.ok then "not-integer" else int_text(number.value) in
+    let printed=print_out(output) in noop()

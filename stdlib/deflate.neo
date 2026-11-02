@@ -1,0 +1,544 @@
+import "std:strings"
+
+; Inflate (decompression only) for raw DEFLATE (RFC 1951), zlib (RFC 1950) and
+; gzip (RFC 1952), plus the HTTP Content-Encoding values gzip, x-gzip, deflate
+; and identity. Every decoder takes an output limit: producing more than
+; `limit` bytes fails with error 27 instead of allocating further.
+;
+; Errors: 5 truncated input, 22 malformed input, 27 output limit exceeded,
+; 74 checksum mismatch, 95 unsupported feature (zlib preset dictionary,
+; unknown content coding). The position is a byte offset into the input.
+;
+; Huffman codes decode through a lookup table indexed by the next 10 (literal/
+; length) or 9 (distance) bits; longer codes fall back to a canonical walk.
+; The output buffer grows geometrically and keeps 16 bytes of slack, so
+; back-references copy eight bytes at a time. Compression and preset
+; dictionaries are not implemented.
+
+; ---- Bit input --------------------------------------------------------------
+
+; At least 57 bits starting at bit `pos`; bits past the end read as zero.
+private fn dfl_window(borrow input: Arr u8 n, pos: i64) -> i64
+  = let at = shift_right(pos, 3) in
+    if pos >= 0 && at <= n - 8 then shift_right(byte_read_le(input, at, 8), bit_and(pos, 7))
+    else dfl_window_tail(input, at, bit_and(pos, 7))
+private cold fn dfl_window_tail(borrow input: Arr u8 n, at: i64, shift: i64) -> i64
+  = shift_right(loop(i = 0, word = 0) while i < 8
+      next(i + 1, let k = at + i in if k >= 0 && k < n then bit_or(word, shift_left(i64(input[k]), i * 8)) else word)
+      yield word, shift)
+private fn dfl_low(value: i64, bits: i64) -> i64 = bit_and(value, shift_left(1, bits) - 1)
+
+; ---- Huffman tables ---------------------------------------------------------
+
+; Entries: bits 0-4 code length, 5-8 extra bits, 9-11 kind, 12+ value.
+; Kinds: 1 literal, 2 length, 3 end of block, 4 invalid symbol, 5 distance,
+; 6 code-length symbol. A zero fast entry means "walk the canonical code".
+private type DflHuff = { fast: Arr i64 _, counts: Arr i64 _, symbols: Arr i64 _ }
+private type DflBuilt = { ok: bool, huff: DflHuff }
+private type DflFill = { i: i64, fast: Arr i64 _, symbols: Arr i64 _, offsets: Arr i64 _, codes: Arr i64 _ }
+private type DflWalk = { l: i64, code: i64, first: i64, index: i64, entry: i64 }
+
+private fn dfl_lit_template(sym: i64) -> i64
+  = if sym < 256 then shift_left(sym, 12) + 512
+    else if sym == 256 then 1536
+    else if sym < 265 then shift_left(sym - 254, 12) + 1024
+    else if sym < 285 then let extra = (sym - 261) / 4 in
+      shift_left(shift_left(4 + (sym - 265) % 4, extra) + 3, 12) + shift_left(extra, 5) + 1024
+    else if sym == 285 then shift_left(258, 12) + 1024
+    else 2048
+private fn dfl_dist_template(sym: i64) -> i64
+  = if sym < 4 then shift_left(sym + 1, 12) + 2560
+    else if sym < 30 then let extra = sym / 2 - 1 in
+      shift_left(shift_left(2 + sym % 2, extra) + 1, 12) + shift_left(extra, 5) + 2560
+    else 2048
+private fn dfl_template(kind: i64, sym: i64) -> i64
+  = if kind == 0 then dfl_lit_template(sym) else if kind == 1 then dfl_dist_template(sym) else shift_left(sym, 12) + 3072
+
+private fn dfl_length_at(borrow lens: Arr i64 n, at: i64) -> i64 {result >= 0, result <= 15}
+  = if at >= 0 && at < n then let value = lens[at] in if value >= 0 && value <= 15 then value else 0 else 0
+private fn dfl_count_at(borrow counts: Arr i64 n, l: i64) -> i64 = if l >= 0 && l < n then counts[l] else 0
+private fn dfl_counts(borrow lens: Arr i64 n, start: i64, count: i64) -> Arr i64 _
+  = loop(i = 0, counts = arr(j in 0..16) 0) while i < count
+      next(i + 1, let l = dfl_length_at(lens, start + i) in
+        if l >= 0 && l < len(counts) then set(counts, l, counts[l] + 1) else counts) yield counts
+; Kraft remainder: negative when over-subscribed, positive when incomplete.
+private fn dfl_left(borrow counts: Arr i64 n) -> i64
+  = loop(l = 1, left = 1) while l <= 15 && left >= 0 next(l + 1, left * 2 - dfl_count_at(counts, l)) yield left
+private fn dfl_longest(borrow counts: Arr i64 n) -> i64
+  = loop(l = 15) while l > 0 && dfl_count_at(counts, l) == 0 next(l - 1) yield l
+; First canonical code of each length, and the first sorted-symbol slot of each length.
+private fn dfl_first_codes(borrow counts: Arr i64 n) -> Arr i64 _
+  = loop(l: i64{l >= 1} = 1, code = 0, codes = arr(j in 0..16) 0) while l <= 15 && l < len(codes)
+      next(l + 1, (code + dfl_count_at(counts, l)) * 2, set(codes, l, code)) yield codes
+private fn dfl_offsets(borrow counts: Arr i64 n) -> Arr i64 _
+  = loop(l: i64{l >= 1} = 1, offset = 0, offsets = arr(j in 0..16) 0) while l <= 15 && l < len(offsets)
+      next(l + 1, offset + dfl_count_at(counts, l), set(offsets, l, offset)) yield offsets
+private fn dfl_reverse(code: i64, l: i64) -> i64
+  = loop(k = 0, c = code, r = 0) while k < l next(k + 1, shift_right(c, 1), bit_or(shift_left(r, 1), bit_and(c, 1))) yield r
+private fn dfl_replicate(move fast: Arr i64 _, from: i64, step: i64, entry: i64) -> Arr i64 _
+  = loop(j = from, fast = fast) while step > 0 && j >= 0 && j < len(fast) next(j + step, set(fast, j, entry)) yield fast
+private fn dfl_fill_step(move f: DflFill, borrow lens: Arr i64 n, start: i64, kind: i64, bits: i64) -> DflFill
+  = let i = f.i in let l = dfl_length_at(lens, start + i) in
+    let fast = f.fast in let symbols = f.symbols in let offsets = f.offsets in let codes = f.codes in
+    if l == 0 then DflFill { i = i + 1, fast = fast, symbols = symbols, offsets = offsets, codes = codes } else
+    let code = dfl_count_at(codes, l) in let at = dfl_count_at(offsets, l) in
+    let entry = dfl_template(kind, i) in
+    let filled = if l <= bits then dfl_replicate(fast, dfl_reverse(code, l), shift_left(1, l), entry + l) else fast in
+    let sorted = if at >= 0 && at < len(symbols) then set(symbols, at, entry) else symbols in
+    let offsets = if l < len(offsets) then set(offsets, l, at + 1) else offsets in
+    let codes = if l < len(codes) then set(codes, l, code + 1) else codes in
+    DflFill { i = i + 1, fast = filled, symbols = sorted, offsets = offsets, codes = codes }
+; zlib's rules: over-subscribed sets fail; incomplete sets fail unless they
+; consist of a single one-bit code (code-length codes must be complete).
+private fn dfl_build(borrow lens: Arr i64 n, start: i64, count: i64{count >= 0}, kind: i64, bits: i64{bits >= 1, bits <= 12}) -> DflBuilt
+  = let counts = dfl_counts(lens, start, count) in
+    let left = dfl_left(counts) in let longest = dfl_longest(counts) in
+    let ok = left == 0 || left > 0 && longest <= 1 && kind != 2 in
+    ; The table is no wider than the longest code (small inputs get small tables).
+    let width = if longest < 1 then 1 else if longest < bits then longest else bits in
+    let size = if ok then shift_left(1, width) else 0 in
+    let filled = loop(f = DflFill { i = 0, fast = arr(j in 0..(if size > 0 then size else 0)) 0, symbols = arr(j in 0..count) 0,
+        offsets = dfl_offsets(counts), codes = dfl_first_codes(counts) }) while ok && f.i < count
+      next(dfl_fill_step(f, lens, start, kind, width)) yield f in
+    DflBuilt { ok = ok, huff = DflHuff { fast = filled.fast, counts = counts, symbols = filled.symbols } }
+
+; Canonical decode one bit at a time (codes longer than the table, or invalid).
+private cold fn dfl_slow(borrow h: DflHuff, w: i64) -> i64
+  = let counts = h.counts in let symbols = h.symbols in
+    let walk = loop(s = DflWalk { l = 1, code = 0, first = 0, index = 0, entry = -1 }) while s.entry == -1 && s.l <= 15
+      next(let l = s.l in let code = bit_or(s.code, bit_and(shift_right(w, l - 1), 1)) in
+        let count = dfl_count_at(counts, l) in let first = s.first in let index = s.index in
+        if code - count < first then
+          let at = index + (code - first) in
+          DflWalk { l = l, code = code, first = first, index = index, entry = if at >= 0 && at < len(symbols) then symbols[at] + l else -2 }
+        else DflWalk { l = l + 1, code = shift_left(code, 1), first = shift_left(first + count, 1), index = index + count, entry = -1 })
+      yield s.entry in
+    if walk > 0 then walk else -1
+; Table entry for the next code, or 0 when it needs the canonical walk.
+private fn dfl_fast(borrow h: DflHuff, w: i64) -> i64
+  = let fast = h.fast in let i = bit_and(w, len(fast) - 1) in if i >= 0 && i < len(fast) then fast[i] else 0
+private fn dfl_decode(borrow h: DflHuff, w: i64) -> i64
+  = let e = dfl_fast(h, w) in if e != 0 then e else dfl_slow(h, w)
+
+; ---- Block decoding ---------------------------------------------------------
+
+; status: 0 inside a block, 1 between blocks, 2 after the final block,
+; negative: an error (see dfl_error).
+private type DflRun = { out: Arr u8 _, olen: i64, pos: i64, status: i64, last: bool }
+private type DflLengths = { i: i64, lens: Arr i64 _, pos: i64, status: i64 }
+
+private fn dfl_fail(move r: DflRun, status: i64) -> DflRun = r with { status = status }
+private cold fn dfl_error(status: i64, position: i64) -> BytesResult
+  = if status == -1 then bytes_error(5, "truncated deflate stream", position)
+    else if status == -2 then bytes_error(22, "invalid deflate block type", position)
+    else if status == -3 then bytes_error(22, "invalid stored block lengths", position)
+    else if status == -4 then bytes_error(22, "too many length or distance symbols", position)
+    else if status == -5 then bytes_error(22, "invalid code lengths set", position)
+    else if status == -6 then bytes_error(22, "invalid bit length repeat", position)
+    else if status == -7 then bytes_error(22, "missing end-of-block code", position)
+    else if status == -8 then bytes_error(22, "invalid literal/lengths set", position)
+    else if status == -9 then bytes_error(22, "invalid distances set", position)
+    else if status == -10 then bytes_error(22, "invalid literal/length code", position)
+    else if status == -11 then bytes_error(22, "invalid distance code", position)
+    else if status == -12 then bytes_error(22, "invalid distance too far back", position)
+    else if status == -13 then bytes_error(27, "decompressed size exceeds limit", position)
+    else bytes_error(22, "invalid deflate stream", position)
+
+; Guarantees olen + need + 16 <= len(out), growing geometrically up to the limit.
+private fn dfl_room(move out: Arr u8 _, olen: i64, need: i64, limit: i64) -> Arr u8 _
+  = if olen + need + 16 <= len(out) then out else dfl_grow(out, olen + need + 16, limit)
+private cold fn dfl_grow(move out: Arr u8 _, want: i64, limit: i64) -> Arr u8 _
+  = let size = len(out) in
+    let double = if size < 4096 then 8192 else size * 2 in
+    let capped = if double > limit + 16 then limit + 16 else double in
+    let target = if capped > want then capped else want in
+    let extra = target - size in
+    if extra > 0 then concat(out, arr(i in 0..extra) u8(0)) else out
+private fn dfl_buffer(n: i64, limit: i64{limit >= 0}) -> Arr u8 _
+  = let guess = if n > 268435456 then 536870912 else n * 2 + 1024 in
+    let size = if guess < limit then guess else limit in
+    arr(i in 0..(if size > 0 then size + 16 else 16)) u8(0)
+
+; Bytes of the period-`distance` pattern ending at `src`, repeated to 8 bytes.
+private fn dfl_pattern(borrow out: Arr u8 n, src: i64, distance: i64) -> i64
+  = loop(i = 0, word = 0, j = 0) while i < 8
+      next(i + 1, let at = src + j in bit_or(word, shift_left(if at >= 0 && at < n then i64(out[at]) else 0, i * 8)),
+        if j + 1 >= distance then 0 else j + 1) yield word
+private fn dfl_period_step(distance: i64) -> i64
+  = if distance == 3 || distance == 6 then 6 else if distance == 5 then 5 else if distance == 7 then 7 else 8
+; Overlapping LZ77 copy in 8-byte words (the first 16 bytes unconditionally).
+; Writes may run up to 13 bytes past the match; the caller reserved 16 bytes
+; of slack and later output overwrites them.
+private fn dfl_copy(move out: Arr u8 _, olen: i64, distance: i64, length: i64) -> Arr u8 _
+  = let src = olen - distance in
+    if distance >= 8 then
+      let first = byte_write_le(out, olen, byte_read_le(out, src, 8), 8) in
+      let second = byte_write_le(first, olen + 8, byte_read_le(first, src + 8, 8), 8) in
+      loop(k = 16, out = second) while k < length
+        next(k + 8, let word = byte_read_le(out, src + k, 8) in byte_write_le(out, olen + k, word, 8)) yield out
+    else
+      let pattern = dfl_pattern(out, src, distance) in let step = dfl_period_step(distance) in
+      loop(k = 0, out = out) while k < length next(k + step, byte_write_le(out, olen + k, pattern, 8)) yield out
+
+; Length (bits 0-8), distance (9-24) and bits used (25+) of the match whose
+; length entry is `e`, or -1 when its distance code is not in the fast table.
+private fn dfl_match(borrow dist: DflHuff, w: i64, e: i64) -> i64
+  = let l = bit_and(e, 31) in let extra = bit_and(shift_right(e, 5), 15) in
+    let w2 = shift_right(w, l + extra) in let d = dfl_fast(dist, w2) in
+    let dl = bit_and(d, 31) in let dextra = bit_and(shift_right(d, 5), 15) in
+    if bit_and(shift_right(d, 9), 7) != 5 then -1 else
+    bit_or(bit_or(shift_right(e, 12) + dfl_low(shift_right(w, l), extra),
+      shift_left(shift_right(d, 12) + dfl_low(shift_right(w2, dl), dextra), 9)), shift_left(l + extra + dl + dextra, 25))
+; Bytes that may be written at olen without growing the buffer or passing the limit.
+private fn dfl_space(size: i64, olen: i64, limit: i64) -> i64 = (if limit < size - 16 then limit else size - 16) - olen
+; The common case: one or two literals, or one match, whose codes are in the
+; fast tables, with room in the output and bits in the input. The rest is cold.
+; (Each byte_write_le re-checks buffer ownership, so pairing literals halves
+; that cost on literal-heavy streams.)
+private fn dfl_codes_step(move r: DflRun, borrow input: Arr u8 n, borrow lit: DflHuff, borrow dist: DflHuff, base: i64, limit: i64) -> DflRun
+  = let pos = r.pos in let olen = r.olen in let last = r.last in let out = r.out in
+    let w = dfl_window(input, pos) in let e = dfl_fast(lit, w) in
+    let l = bit_and(e, 31) in let kind = bit_and(shift_right(e, 9), 7) in
+    let space = dfl_space(len(out), olen, limit) in
+    if kind == 1 && space > 0 && pos + l <= n * 8 then
+      let e2 = dfl_fast(lit, shift_right(w, l)) in let l2 = bit_and(e2, 31) in
+      if bit_and(e2, 3584) == 512 && space > 1 && pos + l + l2 <= n * 8 then
+        DflRun { out = byte_write_le(out, olen, bit_or(shift_right(e, 12), shift_left(shift_right(e2, 12), 8)), 2), olen = olen + 2, pos = pos + l + l2, status = 0, last = last }
+      else DflRun { out = byte_write_le(out, olen, shift_right(e, 12), 1), olen = olen + 1, pos = pos + l, status = 0, last = last }
+    else dfl_match_step(DflRun { out = out, olen = olen, pos = pos, status = 0, last = last }, input, lit, dist, base, limit, w, e, space)
+; A match with both codes in the fast tables, room and input bits; else cold.
+private fn dfl_match_step(move r: DflRun, borrow input: Arr u8 n, borrow lit: DflHuff, borrow dist: DflHuff, base: i64, limit: i64, w: i64, e: i64, space: i64) -> DflRun
+  = let pos = r.pos in let olen = r.olen in
+    let m = if bit_and(e, 3584) == 1024 then dfl_match(dist, w, e) else -1 in
+    let length = bit_and(m, 511) in let distance = bit_and(shift_right(m, 9), 65535) in let used = shift_right(m, 25) in
+    if m > 0 && length <= space && pos + used <= n * 8 && distance <= olen - base then
+      let last = r.last in DflRun { out = dfl_copy(r.out, olen, distance, length), olen = olen + length, pos = pos + used, status = 0, last = last }
+    else dfl_codes_slow(r, input, lit, dist, base, limit)
+private cold fn dfl_codes_slow(move r: DflRun, borrow input: Arr u8 n, borrow lit: DflHuff, borrow dist: DflHuff, base: i64, limit: i64) -> DflRun
+  = let pos = r.pos in let olen = r.olen in
+    let w = dfl_window(input, pos) in
+    let e = dfl_decode(lit, w) in
+    let l = bit_and(e, 31) in let kind = bit_and(shift_right(e, 9), 7) in
+    if e < 0 || kind == 4 then dfl_fail(r, -10)
+    else if kind == 1 then
+      if pos + l > n * 8 then dfl_fail(r, -1)
+      else if olen >= limit then dfl_fail(r, -13)
+      else let last = r.last in let out = dfl_room(r.out, olen, 1, limit) in
+        DflRun { out = byte_write_le(out, olen, shift_right(e, 12), 1), olen = olen + 1, pos = pos + l, status = 0, last = last }
+    else if kind == 3 then
+      if pos + l > n * 8 then dfl_fail(r, -1) else r with { pos = pos + l, status = 1 }
+    else
+      let extra = bit_and(shift_right(e, 5), 15) in
+      let length = shift_right(e, 12) + dfl_low(shift_right(w, l), extra) in
+      let w2 = shift_right(w, l + extra) in
+      let d = dfl_decode(dist, w2) in
+      let dl = bit_and(d, 31) in
+      if d < 0 || bit_and(shift_right(d, 9), 7) != 5 then dfl_fail(r, -11) else
+      let dextra = bit_and(shift_right(d, 5), 15) in
+      let distance = shift_right(d, 12) + dfl_low(shift_right(w2, dl), dextra) in
+      let next_pos = pos + l + extra + dl + dextra in
+      if next_pos > n * 8 then dfl_fail(r, -1)
+      else if distance > olen - base then dfl_fail(r, -12)
+      else if length > limit - olen then dfl_fail(r, -13)
+      else let last = r.last in let out = dfl_room(r.out, olen, length, limit) in
+        DflRun { out = dfl_copy(out, olen, distance, length), olen = olen + length, pos = next_pos, status = 0, last = last }
+private fn dfl_codes(move r: DflRun, borrow input: Arr u8 n, borrow lit: DflHuff, borrow dist: DflHuff, base: i64, limit: i64) -> DflRun
+  = loop(s = r) while s.status == 0 next(dfl_codes_step(s, input, lit, dist, base, limit)) yield s
+
+private fn dfl_stored(move r: DflRun, borrow input: Arr u8 n, limit: i64) -> DflRun
+  = let at = shift_right(r.pos + 7, 3) in
+    if at < 0 || at + 4 > n then dfl_fail(r, -1) else
+    let size = byte_read_le(input, at, 2) in let inverse = byte_read_le(input, at + 2, 2) in
+    if bit_xor(size, inverse) != 65535 then dfl_fail(r, -3)
+    else if at + 4 + size > n then dfl_fail(r, -1)
+    else if size > limit - r.olen then dfl_fail(r, -13)
+    else let olen = r.olen in let last = r.last in let out = dfl_room(r.out, olen, size, limit) in
+      DflRun { out = byte_copy(out, olen, byte_slice(input, at + 4, at + 4 + size)), olen = olen + size,
+        pos = (at + 4 + size) * 8, status = 1, last = last }
+
+; Position of symbol s in the code-length code order 16,17,18,0,8,7,9,6,...
+private fn dfl_order_index(s: i64) -> i64 = str_byte("\x03\x11\x0f\x0d\x0b\x09\x07\x05\x04\x06\x08\x0a\x0c\x0e\x10\x12\x00\x01\x02", s)
+private fn dfl_repeat(move lens: Arr i64 _, from: i64, count: i64, value: i64) -> Arr i64 _
+  = if value == 0 then lens else
+    loop(j = from, lens = lens) while j < from + count && j >= 0 && j < len(lens) next(j + 1, set(lens, j, value)) yield lens
+private fn dfl_length_step(move s: DflLengths, borrow input: Arr u8 n, borrow code: DflHuff, total: i64) -> DflLengths
+  = let pos = s.pos in let i = s.i in let lens = s.lens in
+    let w = dfl_window(input, pos) in let e = dfl_decode(code, w) in
+    let l = bit_and(e, 31) in let symbol = shift_right(e, 12) in
+    if e < 0 then DflLengths { i = i, lens = lens, pos = pos, status = -5 }
+    else if symbol < 16 then
+      DflLengths { i = i + 1, lens = if i >= 0 && i < len(lens) then set(lens, i, symbol) else lens, pos = pos + l,
+        status = if pos + l > n * 8 then -1 else 0 }
+    else
+      let extra = if symbol == 16 then 2 else if symbol == 17 then 3 else 7 in
+      let repeat = (if symbol == 18 then 11 else 3) + dfl_low(shift_right(w, l), extra) in
+      let value = if symbol != 16 then 0 else if i > 0 && i - 1 < len(lens) then lens[i - 1] else -1 in
+      let next_pos = pos + l + extra in
+      if value < 0 || i + repeat > total then DflLengths { i = i, lens = lens, pos = pos, status = -6 }
+      else DflLengths { i = i + repeat, lens = dfl_repeat(lens, i, repeat, value), pos = next_pos,
+        status = if next_pos > n * 8 then -1 else 0 }
+private fn dfl_lengths(borrow input: Arr u8 n, borrow code: DflHuff, pos: i64, total: i64{total >= 0}) -> DflLengths
+  = loop(s = DflLengths { i = 0, lens = arr(j in 0..total) 0, pos = pos, status = 0 }) while s.status == 0 && s.i < total
+      next(dfl_length_step(s, input, code, total)) yield s
+
+private fn dfl_dynamic(move r: DflRun, borrow input: Arr u8 n, base: i64, limit: i64) -> DflRun
+  = let pos = r.pos in let w = dfl_window(input, pos) in
+    let nlit = bit_and(w, 31) + 257 in let ndist = bit_and(shift_right(w, 5), 31) + 1 in
+    let ncode = bit_and(shift_right(w, 10), 15) + 4 in
+    let header_end = pos + 14 + 3 * ncode in
+    if header_end > n * 8 then dfl_fail(r, -1)
+    else if nlit < 257 || nlit > 286 || ndist < 1 || ndist > 30 then dfl_fail(r, -4) else
+    let w2 = dfl_window(input, pos + 14) in
+    let order = arr(s in 0..19) let k = dfl_order_index(s) in if k < ncode then bit_and(shift_right(w2, 3 * k), 7) else 0 in
+    let code = dfl_build(order, 0, 19, 2, 7) in
+    if !code.ok then dfl_fail(r, -5) else
+    let decoded = dfl_lengths(input, code.huff, header_end, nlit + ndist) in
+    if decoded.status != 0 then dfl_fail(r, decoded.status) else
+    let lens = decoded.lens in
+    if dfl_length_at(lens, 256) == 0 then dfl_fail(r, -7) else
+    let lit = dfl_build(lens, 0, nlit, 0, 10) in
+    if !lit.ok then dfl_fail(r, -8) else
+    let dist = dfl_build(lens, nlit, ndist, 1, 9) in
+    if !dist.ok then dfl_fail(r, -9) else
+    let last = r.last in let olen = r.olen in
+    dfl_codes(DflRun { out = r.out, olen = olen, pos = decoded.pos, status = 0, last = last }, input, lit.huff, dist.huff, base, limit)
+
+private fn dfl_finish(move r: DflRun) -> DflRun = if r.status == 1 && r.last then r with { status = 2 } else r
+; Stored, dynamic and invalid blocks (fixed blocks are dispatched by dfl_step).
+private fn dfl_block(move r: DflRun, borrow input: Arr u8 n, base: i64, limit: i64) -> DflRun
+  = let pos = r.pos in
+    if pos + 3 > n * 8 then dfl_fail(r, -1) else
+    let w = dfl_window(input, pos) in
+    let kind = bit_and(shift_right(w, 1), 3) in
+    let olen = r.olen in
+    let started = DflRun { out = r.out, olen = olen, pos = pos + 3, status = 0, last = bit_and(w, 1) == 1 } in
+    dfl_finish(if kind == 0 then dfl_stored(started, input, limit)
+      else if kind == 2 then dfl_dynamic(started, input, base, limit)
+      else dfl_fail(started, -2))
+
+; Stream state between blocks. The fixed-Huffman tables are built by the first
+; fixed block and reused, so streams without one never pay for them.
+private type DflStream = { run: DflRun, lit: DflHuff, dist: DflHuff, fixed: bool }
+private fn dfl_no_huff() -> DflHuff = DflHuff { fast = arr(j in 0..0) 0, counts = arr(j in 0..0) 0, symbols = arr(j in 0..0) 0 }
+private fn dfl_with_fixed(move s: DflStream) -> DflStream
+  = if s.fixed then s else
+    let lengths = arr(i in 0..320) if i < 144 then 8 else if i < 256 then 9 else if i < 280 then 7 else if i < 288 then 8 else 5 in
+    let lit = dfl_build(lengths, 0, 288, 0, 10) in let dist = dfl_build(lengths, 288, 32, 1, 9) in
+    DflStream { run = s.run, lit = lit.huff, dist = dist.huff, fixed = true }
+private fn dfl_step(move s: DflStream, borrow input: Arr u8 n, base: i64, limit: i64) -> DflStream
+  = let pos = s.run.pos in let w = dfl_window(input, pos) in
+    if pos + 3 <= n * 8 && bit_and(shift_right(w, 1), 3) == 1 then
+      let t = dfl_with_fixed(s) in let r = t.run in let lit = t.lit in let dist = t.dist in let olen = r.olen in
+      let done = dfl_codes(DflRun { out = r.out, olen = olen, pos = pos + 3, status = 0, last = bit_and(w, 1) == 1 }, input, lit, dist, base, limit) in
+      DflStream { run = dfl_finish(done), lit = lit, dist = dist, fixed = true }
+    else
+      let lit = s.lit in let dist = s.dist in let fixed = s.fixed in
+      DflStream { run = dfl_block(s.run, input, base, limit), lit = lit, dist = dist, fixed = fixed }
+
+; Inflates one raw DEFLATE stream starting at input byte `start`, appending to
+; out[0..olen). Back-references may not reach before `olen`.
+private fn dfl_run(move out: Arr u8 _, olen: i64, borrow input: Arr u8 n, start: i64, limit: i64) -> DflRun
+  = let s = loop(s = DflStream { run = DflRun { out = out, olen = olen, pos = start * 8, status = 1, last = false },
+        lit = dfl_no_huff(), dist = dfl_no_huff(), fixed = false }) while s.run.status == 1
+      next(dfl_step(s, input, olen, limit)) yield s in
+    s.run
+
+; ---- Checksums --------------------------------------------------------------
+
+private fn crc_base(b: i64) -> i64
+  = loop(k = 0, c = b) while k < 8
+      next(k + 1, if bit_and(c, 1) == 1 then bit_xor(shift_right(c, 1), 3988292384) else shift_right(c, 1)) yield c
+private fn crc_at(borrow t: Arr i64 m, index: i64) -> i64 = if index >= 0 && index < m then t[index] else 0
+; Slicing-by-16 tables: entry k*256+b is the CRC of byte b followed by k zero
+; bytes. Each row derives from the previous one, so building costs 4K steps.
+private fn crc_tables() -> Arr i64 _
+  = loop(i = 256, t = arr(j in 0..4096) if j < 256 then crc_base(j) else 0) while i >= 256 && i < len(t)
+      next(i + 1, let prev = t[i - 256] in let low = bit_and(prev, 255) in
+        set(t, i, bit_xor(shift_right(prev, 8), if low >= 0 && low < len(t) then t[low] else 0))) yield t
+private fn crc_bytes8(borrow t: Arr i64 m, w: i64, row: i64) -> i64
+  = bit_xor(bit_xor(bit_xor(crc_at(t, row + 1792 + bit_and(w, 255)), crc_at(t, row + 1536 + bit_and(shift_right(w, 8), 255))),
+      bit_xor(crc_at(t, row + 1280 + bit_and(shift_right(w, 16), 255)), crc_at(t, row + 1024 + bit_and(shift_right(w, 24), 255)))),
+    bit_xor(bit_xor(crc_at(t, row + 768 + bit_and(shift_right(w, 32), 255)), crc_at(t, row + 512 + bit_and(shift_right(w, 40), 255))),
+      bit_xor(crc_at(t, row + 256 + bit_and(shift_right(w, 48), 255)), crc_at(t, row + shift_right(w, 56)))))
+; Updates a pre-inverted CRC register over bytes [start, end): 16 bytes per
+; step (the second word's lookups do not wait for the register), then bytes.
+private fn crc_update(borrow t: Arr i64 m, crc: i64, borrow data: Arr u8 n, start: i64, end: i64) -> i64
+  = if m != 4096 then crc else
+    let from = if start < 0 then 0 else start in let to = if end > n then n else end in
+    let middle = if to - from >= 16 then from + (to - from) / 16 * 16 else from in
+    let wide = loop(i = from, c = crc) while i < middle
+      next(i + 16, bit_xor(crc_bytes8(t, bit_xor(byte_read_le(data, i, 8), c), 2048), crc_bytes8(t, byte_read_le(data, i + 8, 8), 0))) yield c in
+    loop(i = middle, c = wide) while i >= 0 && i < to && i < n
+      next(i + 1, bit_xor(shift_right(c, 8), crc_at(t, bit_and(bit_xor(c, i64(data[i])), 255)))) yield c
+
+; The 256-entry table as 1 KiB of little-endian words. Called with a literal
+; argument, the compiler evaluates it once at build time into a constant.
+private fn crc_constant(seed: i64) -> Arr u8 _
+  = let base = arr(b in 0..256) crc_base(b + seed) in
+    arr(i in 0..1024) u8(shift_right(crc_at(base, i / 4), i % 4 * 8))
+private fn crc_bytewise(crc: i64, borrow data: Arr u8 n, start: i64, end: i64) -> i64
+  = let table = crc_constant(0) in
+    loop(i = start, c = crc) while i >= 0 && i < end && i < n
+      next(i + 1, bit_xor(shift_right(c, 8), byte_read_le(table, bit_and(bit_xor(c, i64(data[i])), 255) * 4, 4))) yield c
+; Short ranges go byte by byte over the constant table; long ones first build
+; the 32 KiB slicing tables (about 4K steps).
+private fn crc_range(crc: i64, borrow data: Arr u8 n, start: i64, end: i64) -> i64
+  = if end - start < 4096 then crc_bytewise(crc, data, start, end) else crc_update(crc_tables(), crc, data, start, end)
+
+; IEEE CRC-32 as used by gzip, PNG and zip.
+fn crc32(borrow bytes: Arr u8 n) -> i64 = bit_xor(crc_range(4294967295, bytes, 0, n), 4294967295)
+; Adler-32 over 8-byte words: even and odd bytes sit in 16-bit lanes, and one
+; multiply sums (or weights) the four lanes. Sums are reduced per 1 MiB chunk.
+private type Adler = { a: i64, b: i64 }
+private fn adler_lanes(lanes: i64, weights: i64) -> i64 = shift_right(wrapping_mul(lanes, weights), 48)
+private fn adler_chunk(borrow bytes: Arr u8 n, state: Adler, from: i64, to: i64) -> Adler
+  = let middle = from + (to - from) / 8 * 8 in
+    let words = loop(i = from, a = state.a, b = state.b) while i < middle
+      next(i + 8,
+        let w = byte_read_le(bytes, i, 8) in let even = bit_and(w, 71777214294589695) in let odd = bit_and(shift_right(w, 8), 71777214294589695) in
+        a + adler_lanes(even, 281479271743489) + adler_lanes(odd, 281479271743489),
+        let w = byte_read_le(bytes, i, 8) in let even = bit_and(w, 71777214294589695) in let odd = bit_and(shift_right(w, 8), 71777214294589695) in
+        b + a * 8 + adler_lanes(even, 2251825583751170) + adler_lanes(odd, 1970346312007681))
+      yield Adler { a = a, b = b } in
+    let tail = loop(i = middle, a = words.a, b = words.b) while i >= 0 && i < to && i < n
+      next(i + 1, a + i64(bytes[i]), b + a + i64(bytes[i])) yield Adler { a = a % 65521, b = b % 65521 } in
+    tail
+; Adler-32 as used by zlib.
+fn adler32(borrow bytes: Arr u8 n) -> i64
+  = let sums = loop(at = 0, state = Adler { a = 1, b = 0 }) while at < n
+      next(at + 1048576, adler_chunk(bytes, state, at, if n - at > 1048576 then at + 1048576 else n)) yield state in
+    sums.b * 65536 + sums.a
+
+; ---- Containers -------------------------------------------------------------
+
+private fn dfl_result(move r: DflRun) -> BytesResult = dfl_error(r.status, shift_right(r.pos, 3))
+
+; Limits beyond 2^62 bytes cannot be reached; capping them keeps the buffer
+; arithmetic (limit plus slack) far from i64 overflow.
+private fn dfl_cap(limit: i64{limit >= 0}) -> i64 {result >= 0} = if limit > 4611686018427387904 then 4611686018427387904 else limit
+
+; Raw DEFLATE (RFC 1951). The stream must end at the end of the input.
+fn inflate_raw(borrow bytes: Arr u8 n, limit: i64) -> BytesResult
+  = if limit < 0 then bytes_error(22, "negative output limit", 0) else
+    let limit = dfl_cap(limit) in
+    let r = dfl_run(dfl_buffer(n, limit), 0, bytes, 0, limit) in
+    if r.status != 2 then dfl_result(r) else
+    let end = shift_right(r.pos + 7, 3) in
+    if end != n then bytes_error(22, "trailing data after deflate stream", end) else
+    let olen = r.olen in bytes_ok(byte_slice(r.out, 0, olen))
+
+private fn dfl_be32(borrow bytes: Arr u8 n, at: i64) -> i64
+  = str_byte(bytes, at) * 16777216 + str_byte(bytes, at + 1) * 65536 + str_byte(bytes, at + 2) * 256 + str_byte(bytes, at + 3)
+private fn zlib_header_error(borrow bytes: Arr u8 n) -> i64
+  = if n < 2 then 5 else
+    let cmf = str_byte(bytes, 0) in let flg = str_byte(bytes, 1) in
+    if (cmf * 256 + flg) % 31 != 0 || bit_and(cmf, 15) != 8 || shift_right(cmf, 4) > 7 then 22
+    else if bit_and(flg, 32) != 0 then 95 else 0
+
+; zlib (RFC 1950): CMF/FLG check, no preset dictionary, Adler-32 verified.
+fn zlib_decode(borrow bytes: Arr u8 n, limit: i64) -> BytesResult
+  = if limit < 0 then bytes_error(22, "negative output limit", 0) else
+    let header = zlib_header_error(bytes) in
+    if header == 5 then bytes_error(5, "truncated zlib header", 0)
+    else if header == 95 then bytes_error(95, "zlib preset dictionary is not supported", 1)
+    else if header != 0 then bytes_error(22, "invalid zlib header", 0) else
+    let limit = dfl_cap(limit) in
+    let r = dfl_run(dfl_buffer(n, limit), 0, bytes, 2, limit) in
+    if r.status != 2 then dfl_result(r) else
+    let end = shift_right(r.pos + 7, 3) in
+    if end + 4 > n then bytes_error(5, "truncated zlib checksum", end) else
+    let olen = r.olen in let output = byte_slice(r.out, 0, olen) in
+    if adler32(output) != dfl_be32(bytes, end) then bytes_error(74, "zlib Adler-32 mismatch", end)
+    else if end + 4 != n then bytes_error(22, "trailing data after zlib stream", end + 4)
+    else bytes_ok(output)
+
+private fn gzip_zero_end(borrow bytes: Arr u8 n, from: i64) -> i64
+  = loop(i = from) while i >= 0 && i < n && bytes[i] != u8(0) next(i + 1) yield if i >= 0 && i < n then i + 1 else -1
+; Start of the deflate data after the member header at `at`. Bytes that are
+; present are validated before a short header is reported as truncated.
+private fn gzip_header(borrow bytes: Arr u8 n, at: i64) -> IntResult
+  = if at < 0 || at >= n then int_error(5, "truncated gzip header", at)
+    else if str_byte(bytes, at) != 31 || at + 1 < n && str_byte(bytes, at + 1) != 139 then int_error(22, "invalid gzip magic", at)
+    else if at + 2 < n && str_byte(bytes, at + 2) != 8 then int_error(22, "unsupported gzip compression method", at + 2)
+    else if at + 10 > n then int_error(5, "truncated gzip header", at) else
+    let flags = str_byte(bytes, at + 3) in
+    if bit_and(flags, 224) != 0 then int_error(22, "reserved gzip flags set", at + 3) else
+    let p1 = at + 10 in
+    let p2 = if bit_and(flags, 4) == 0 then p1 else if p1 + 2 > n then -1 else p1 + 2 + byte_read_le(bytes, p1, 2) in
+    let p3 = if p2 < 0 || bit_and(flags, 8) == 0 then p2 else gzip_zero_end(bytes, p2) in
+    let p4 = if p3 < 0 || bit_and(flags, 16) == 0 then p3 else gzip_zero_end(bytes, p3) in
+    if p4 < 0 || p4 > n then int_error(5, "truncated gzip header", at)
+    else if bit_and(flags, 2) == 0 then int_ok(p4)
+    else if p4 + 2 > n then int_error(5, "truncated gzip header", p4)
+    else if byte_read_le(bytes, p4, 2) != bit_and(bit_xor(crc_range(4294967295, bytes, at, p4), 4294967295), 65535)
+      then int_error(74, "gzip header CRC mismatch", p4)
+    else int_ok(p4 + 2)
+
+private type GzipState = { out: Arr u8 _, olen: i64, at: i64, done: bool, error: Error }
+private fn gzip_fail(move s: GzipState, code: i64, message: Arr u8 k, position: i64) -> GzipState
+  = s with { error = Error { code = code, message = message, position = position } }
+private fn gzip_member(move s: GzipState, borrow bytes: Arr u8 n, limit: i64) -> GzipState
+  = let header = gzip_header(bytes, s.at) in
+    if !header.ok then let failure = header.error in gzip_fail(s, failure.code, failure.message, failure.position) else
+    let start = s.olen in
+    let r = dfl_run(s.out, start, bytes, header.value, limit) in
+    let olen = r.olen in let status = r.status in let pos = r.pos in let out = r.out in
+    if status != 2 then let failure = dfl_error(status, shift_right(pos, 3)).error in
+      GzipState { out = out, olen = olen, at = shift_right(pos, 3), done = false, error = failure } else
+    let end = shift_right(pos + 7, 3) in
+    if end + 8 > n then GzipState { out = out, olen = olen, at = end, done = false, error = Error { code = 5, message = "truncated gzip trailer", position = end } }
+    else if bit_xor(crc_range(4294967295, out, start, olen), 4294967295) != byte_read_le(bytes, end, 4) then
+      GzipState { out = out, olen = olen, at = end, done = false, error = Error { code = 74, message = "gzip CRC-32 mismatch", position = end } }
+    else if bit_and(olen - start, 4294967295) != byte_read_le(bytes, end + 4, 4) then
+      GzipState { out = out, olen = olen, at = end + 4, done = false, error = Error { code = 74, message = "gzip ISIZE mismatch", position = end + 4 } }
+    else
+      let following = loop(i = end + 8) while i >= 0 && i < n && bytes[i] == u8(0) next(i + 1) yield i in
+      GzipState { out = out, olen = olen, at = following, done = following >= n, error = no_error() }
+
+; gzip (RFC 1952): header flags FTEXT/FHCRC/FEXTRA/FNAME/FCOMMENT, CRC-32 and
+; ISIZE verified, concatenated members joined. Zero padding between or after
+; members is skipped; empty input is an empty result.
+fn gzip_decode(borrow bytes: Arr u8 n, limit: i64) -> BytesResult
+  = if limit < 0 then bytes_error(22, "negative output limit", 0) else
+    let limit = dfl_cap(limit) in
+    let s = loop(s = GzipState { out = dfl_buffer(n, limit), olen = 0, at = 0, done = n == 0, error = no_error() })
+      while !s.done && s.error.code == 0 next(gzip_member(s, bytes, limit)) yield s in
+    let failure = s.error in
+    if failure.code != 0 then bytes_error(failure.code, failure.message, failure.position) else
+    let olen = s.olen in bytes_ok(byte_slice(s.out, 0, olen))
+
+; ---- HTTP Content-Encoding --------------------------------------------------
+
+private fn dfl_lower(byte: u8) -> i64 = let b = i64(byte) in if b >= 65 && b <= 90 then b + 32 else b
+private fn dfl_token_is(borrow token: Arr u8 n, borrow name: Arr u8 m) -> bool
+  = n == m && loop(i = 0, same = true) while same && i >= 0 && i < n && i < m
+      next(i + 1, dfl_lower(token[i]) == i64(name[i])) yield same
+private fn dfl_http_deflate(borrow body: Arr u8 n, limit: i64) -> BytesResult
+  = if n == 0 then bytes_ok(body) else
+    let wrapped = zlib_decode(body, limit) in
+    if wrapped.ok || wrapped.error.code == 27 || wrapped.error.code == 95 then wrapped else
+    let raw = inflate_raw(body, limit) in
+    if raw.ok || raw.error.code == 27 || zlib_header_error(body) != 0 then raw else wrapped
+private fn dfl_http_coding(borrow token: Arr u8 n, borrow body: Arr u8 m, limit: i64) -> BytesResult
+  = if n == 0 || dfl_token_is(token, "identity") then
+      if m > limit then bytes_error(27, "content exceeds limit", limit) else bytes_ok(body)
+    else if dfl_token_is(token, "gzip") || dfl_token_is(token, "x-gzip") then gzip_decode(body, limit)
+    else if dfl_token_is(token, "deflate") then dfl_http_deflate(body, limit)
+    else bytes_error(95, "unsupported content coding", 0)
+private type DflCodings = { end: i64, more: bool, result: BytesResult }
+private fn dfl_http_step(move s: DflCodings, borrow encoding: Arr u8 n, limit: i64) -> DflCodings
+  = let end = s.end in
+    let comma = loop(i = end - 1) while i >= 0 && i < n && encoding[i] != ',' next(i - 1) yield i in
+    let token = str_trim(str_slice(encoding, comma + 1, end)) in
+    let current = s.result in
+    DflCodings { end = comma, more = comma >= 0, result = dfl_http_coding(token, current.value, limit) }
+
+; Decodes an HTTP body by its Content-Encoding header value. Lists such as
+; "gzip, identity" are undone right to left. "deflate" is tried as zlib first
+; and then as raw DEFLATE, as browsers do; an empty value means identity, and
+; an empty body decodes to an empty body under every supported coding.
+fn http_content_decode(borrow encoding: Arr u8 n, borrow body: Arr u8 m, limit: i64) -> BytesResult
+  = if limit < 0 then bytes_error(22, "negative output limit", 0) else
+    let s = loop(s = DflCodings { end = n, more = true, result = bytes_ok(body) }) while s.more && s.result.ok
+      next(dfl_http_step(s, encoding, limit)) yield s in
+    s.result

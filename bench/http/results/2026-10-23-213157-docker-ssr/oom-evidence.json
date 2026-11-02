@@ -1,0 +1,43 @@
+{
+  "command": [
+    "docker",
+    "--context",
+    "colima-axon-bench",
+    "events",
+    "--since",
+    "20m",
+    "--until",
+    "1792791302",
+    "--filter",
+    "label=axon.benchmark=docker-ssr",
+    "--filter",
+    "event=oom",
+    "--format",
+    "{{json .}}"
+  ],
+  "events": [
+    {
+      "Type": "container",
+      "Action": "oom",
+      "Actor": {
+        "ID": "1e24a9ecc6c554c8f51e6d80eacd66fe714d04fcce8e9d2489f502c0bd22edac",
+        "Attributes": {
+          "axon.benchmark": "docker-ssr",
+          "image": "sha256:27ad0f050a347d8eb109563d34ce4defde3d81fa7894f672047e437f17fcf7c9",
+          "name": "wonderful_shirley",
+          "org.opencontainers.image.created": "2026-04-20T08:09:50.728Z",
+          "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+          "org.opencontainers.image.licenses": "NOASSERTION",
+          "org.opencontainers.image.revision": "bf2e2cecf27e800962b1e7f03d66278f9d5d2e79",
+          "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+          "org.opencontainers.image.title": "bun",
+          "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+          "org.opencontainers.image.version": "1.3.13-alpine"
+        }
+      },
+      "scope": "local",
+      "time": 1792791128,
+      "timeNano": 1792791128388786572
+    }
+  ]
+}

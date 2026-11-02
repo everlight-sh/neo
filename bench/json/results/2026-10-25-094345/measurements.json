@@ -1,0 +1,1806 @@
+{
+  "started": "2026-10-25T09:43:45.618657+00:00",
+  "directory": "/axon/bench/json/results/2026-10-25-094345",
+  "platform": "Linux-6.8.0-64-generic-aarch64-with-glibc2.39",
+  "repeats": 7,
+  "warmups": 2,
+  "cpu_affinity": [
+    0
+  ],
+  "results": [
+    {
+      "documents": 10000,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.005168387000026087,
+          "cpu_s": 0.004155999999999993,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.005033514000047035,
+          "cpu_s": 0.004114999999999702,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004910723999955735,
+          "cpu_s": 0.004049999999999554,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.0050889719999531735,
+          "cpu_s": 0.004176999999999653,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004524145999994289,
+          "cpu_s": 0.0038739999999995445,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004905307999933939,
+          "cpu_s": 0.004095000000000182,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004826642000011816,
+          "cpu_s": 0.004084999999999506,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "10000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 10000,
+      "implementation": "Axon previous",
+      "runs": [
+        {
+          "wall_s": 0.005200304000027245,
+          "cpu_s": 0.004290000000000738,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004999848000011298,
+          "cpu_s": 0.004063000000000427,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.0048812659999839525,
+          "cpu_s": 0.004048999999999858,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.005027513999948496,
+          "cpu_s": 0.0041180000000000105,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.005094304999943233,
+          "cpu_s": 0.00414099999999934,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.004891308000082972,
+          "cpu_s": 0.004071999999999132,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.0050184310000531696,
+          "cpu_s": 0.004138999999999948,
+          "peak_rss_bytes": 1441792,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Axon-previous-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "10000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 10000,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.006406037000033393,
+          "cpu_s": 0.005458999999999492,
+          "peak_rss_bytes": 1703936,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.007105984999952852,
+          "cpu_s": 0.005853999999999748,
+          "peak_rss_bytes": 1703936,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.009317663000047105,
+          "cpu_s": 0.005682999999999772,
+          "peak_rss_bytes": 1703936,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.006796947999987424,
+          "cpu_s": 0.005760999999999683,
+          "peak_rss_bytes": 1572864,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.006301247000010335,
+          "cpu_s": 0.005380999999999692,
+          "peak_rss_bytes": 1703936,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.006484327999942252,
+          "cpu_s": 0.0055340000000005385,
+          "peak_rss_bytes": 1572864,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.006828530999996474,
+          "cpu_s": 0.005788000000000293,
+          "peak_rss_bytes": 1572864,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Rust-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "10000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 10000,
+      "implementation": "Bun",
+      "runs": [
+        {
+          "wall_s": 0.02273977000004379,
+          "cpu_s": 0.020839999999999748,
+          "peak_rss_bytes": 43122688,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.021953822999989825,
+          "cpu_s": 0.019930000000000503,
+          "peak_rss_bytes": 42729472,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.022776645000021745,
+          "cpu_s": 0.020814000000000776,
+          "peak_rss_bytes": 42729472,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.02227586000003612,
+          "cpu_s": 0.02008300000000096,
+          "peak_rss_bytes": 43122688,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.022773895000000266,
+          "cpu_s": 0.0205530000000001,
+          "peak_rss_bytes": 43122688,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.020444093000037356,
+          "cpu_s": 0.018833999999999795,
+          "peak_rss_bytes": 42729472,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        },
+        {
+          "wall_s": 0.020578507999971407,
+          "cpu_s": 0.018663999999999903,
+          "peak_rss_bytes": 43122688,
+          "checksum": 5135000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/10000-Bun-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "10000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 100000,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.03344425299997056,
+          "cpu_s": 0.03238199999999969,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03333800500001871,
+          "cpu_s": 0.0323240000000003,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03228435299990906,
+          "cpu_s": 0.03119599999999917,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03282242899990706,
+          "cpu_s": 0.03178399999999998,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03241405999995095,
+          "cpu_s": 0.03136299999999925,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03335284399997818,
+          "cpu_s": 0.032084000000000557,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03231060799998886,
+          "cpu_s": 0.031314000000000286,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "100000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 100000,
+      "implementation": "Axon previous",
+      "runs": [
+        {
+          "wall_s": 0.04210034499999438,
+          "cpu_s": 0.040930999999999995,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03265038899996853,
+          "cpu_s": 0.031616000000000366,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03402012100002594,
+          "cpu_s": 0.03289700000000012,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03357671000003393,
+          "cpu_s": 0.03249500000000005,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.033251964999976735,
+          "cpu_s": 0.03236599999999934,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03342237899994416,
+          "cpu_s": 0.03209500000000087,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.03279326900008073,
+          "cpu_s": 0.03166599999999964,
+          "peak_rss_bytes": 1441792,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Axon-previous-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "100000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 100000,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.0426688780000859,
+          "cpu_s": 0.041632999999998865,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.044121693000079176,
+          "cpu_s": 0.04285300000000014,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.0431190389999756,
+          "cpu_s": 0.041993999999999976,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.043618782999942596,
+          "cpu_s": 0.042484999999999884,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.04377252999995562,
+          "cpu_s": 0.042543000000000775,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.043533249000006435,
+          "cpu_s": 0.04235000000000022,
+          "peak_rss_bytes": 1703936,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.042660760999979175,
+          "cpu_s": 0.04144599999999998,
+          "peak_rss_bytes": 1572864,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Rust-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "100000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 100000,
+      "implementation": "Bun",
+      "runs": [
+        {
+          "wall_s": 0.05695455900001889,
+          "cpu_s": 0.054893000000000414,
+          "peak_rss_bytes": 76677120,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.05722467999999026,
+          "cpu_s": 0.05521100000000029,
+          "peak_rss_bytes": 76677120,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.058226666999985355,
+          "cpu_s": 0.05604999999999988,
+          "peak_rss_bytes": 76677120,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.05770096599997032,
+          "cpu_s": 0.05583600000000005,
+          "peak_rss_bytes": 76939264,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.057645883999953185,
+          "cpu_s": 0.055766000000000315,
+          "peak_rss_bytes": 76677120,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.056587865999972564,
+          "cpu_s": 0.05474499999999993,
+          "peak_rss_bytes": 77070336,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        },
+        {
+          "wall_s": 0.05574687700004688,
+          "cpu_s": 0.05369400000000013,
+          "peak_rss_bytes": 76677120,
+          "checksum": 51350000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/100000-Bun-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "100000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 1000000,
+      "implementation": "Axon",
+      "runs": [
+        {
+          "wall_s": 0.3069130370000721,
+          "cpu_s": 0.30580500000000055,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3031514360000074,
+          "cpu_s": 0.30205300000000146,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3034459399999605,
+          "cpu_s": 0.30233299999999963,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3044387759999836,
+          "cpu_s": 0.3031430000000006,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.30225018299995554,
+          "cpu_s": 0.30112299999999936,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3070252169999321,
+          "cpu_s": 0.3058600000000018,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3065184440000621,
+          "cpu_s": 0.3052960000000007,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/json/results/2026-10-25-094345/axon-json",
+            "0",
+            "1000000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 1000000,
+      "implementation": "Axon previous",
+      "runs": [
+        {
+          "wall_s": 0.30488728099999207,
+          "cpu_s": 0.303554,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.30662454599996636,
+          "cpu_s": 0.30552199999999907,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3622039310000673,
+          "cpu_s": 0.3605360000000003,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.30736815900002057,
+          "cpu_s": 0.30619799999999997,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3184638019999966,
+          "cpu_s": 0.3166079999999991,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.31197700999996414,
+          "cpu_s": 0.310846999999999,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3089166080000041,
+          "cpu_s": 0.3075469999999976,
+          "peak_rss_bytes": 1441792,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Axon-previous-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bench/json/results/2026-10-25-081902/axon-json",
+            "0",
+            "1000000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 1000000,
+      "implementation": "Rust",
+      "runs": [
+        {
+          "wall_s": 0.4002750319999677,
+          "cpu_s": 0.39898699999999876,
+          "peak_rss_bytes": 1572864,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.40442301200005204,
+          "cpu_s": 0.4031899999999998,
+          "peak_rss_bytes": 1703936,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.40502216200002294,
+          "cpu_s": 0.4036660000000003,
+          "peak_rss_bytes": 1703936,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.41223144799994316,
+          "cpu_s": 0.41061700000000045,
+          "peak_rss_bytes": 1703936,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.4088866609999968,
+          "cpu_s": 0.40701099999999957,
+          "peak_rss_bytes": 1703936,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.4078113030000168,
+          "cpu_s": 0.4060589999999976,
+          "peak_rss_bytes": 1572864,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.40311125400000947,
+          "cpu_s": 0.40183999999999964,
+          "peak_rss_bytes": 1703936,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Rust-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "/axon/bench/rust/target/release/usability",
+            "parse",
+            "1000000"
+          ]
+        }
+      ]
+    },
+    {
+      "documents": 1000000,
+      "implementation": "Bun",
+      "runs": [
+        {
+          "wall_s": 0.37740779399996427,
+          "cpu_s": 0.3755000000000014,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-2.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3623819399999775,
+          "cpu_s": 0.3603820000000011,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-3.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.36139876199990795,
+          "cpu_s": 0.3593990000000006,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-4.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.36264415599998756,
+          "cpu_s": 0.3604810000000005,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-5.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3611793970000008,
+          "cpu_s": 0.35918199999999967,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-6.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.3659793570000147,
+          "cpu_s": 0.36357299999999737,
+          "peak_rss_bytes": 112852992,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-7.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        },
+        {
+          "wall_s": 0.36278941000000486,
+          "cpu_s": 0.3604920000000029,
+          "peak_rss_bytes": 114032640,
+          "checksum": 513500000,
+          "command": [
+            "/usr/bin/time",
+            "-f",
+            "%M",
+            "-o",
+            "/axon/bench/json/results/2026-10-25-094345/1000000-Bun-8.time",
+            "taskset",
+            "-c",
+            "0",
+            "bun",
+            "/axon/bench/usability/bun.ts",
+            "parse",
+            "1000000"
+          ]
+        }
+      ]
+    }
+  ],
+  "valid": true,
+  "versions": {
+    "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: aarch64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "bun": "1.3.13",
+    "python": "Python 3.12.3"
+  },
+  "binary_sha256": {
+    "Axon": "5e02ddadee8b262043a93f2e67bd8d99ea7a2a9b421ce3ff4dfe3d365bbdb949",
+    "Axon previous": "db9803ccb9495a125f146fcc9c2312ac1fc8eaa56522d3d393e869d1b750ce59",
+    "Rust": "3176ed65fb8447db558575965e0ed9765a948c1e38b84fd37c4ea2e022434f4a",
+    "Bun": "67892bb6734ef352f90a964f0a2a680d5f6e6d15bdb5510e56b8065ac4d599ae"
+  },
+  "binary_bytes": {
+    "Axon": 64528,
+    "Axon previous": 60544,
+    "Rust": 529104,
+    "Bun runtime": 101309000
+  },
+  "source_sha256": {
+    "bench/json/run.py": "113b90401ac8eeb946d16e62911f1da6052706c6737de04e06fa2e611d6c3bb6",
+    "examples/library_bench.ax": "20e49c67461fbd00e635d0299d76fd79a4e8d59630259a0886181ef4d51f50b9",
+    "bench/rust/src/usability.rs": "6019bcb41e3f5aa0b95d701ce8f807b322872bb21a88c92f3f4b588f6e6bd18a",
+    "bench/rust/Cargo.toml": "50497b191ddf8475de269288b5f24267f17b092dc00eb9d22f683d6b16844f43",
+    "bench/rust/Cargo.lock": "b552d6ada0c71853f904396f61ccf2a73802b70dd9b533014fcebe268ba4c335",
+    "bench/usability/bun.ts": "0101d3468970b91bd4814223d765a035923ceb7bbdf7185b1611eb580a42ebd5",
+    "axonc/formatter.py": "a0bffe30e3163150e86b2d405447cf1971c5fa3859afbd87d897f8c046e25a03",
+    "axonc/release.py": "caa3847161224e1407e9e553af8e29963fc869f2fdac962c265aac24041d3192",
+    "axonc/check.py": "9bf761f54c63269a580773538a1bedb5a775fa301fe7616ac6449e632f536f13",
+    "axonc/diagnostics.py": "9a90bb2a9e042045d4a0dd8a7721b87d34a6347ca71559e313321d4549a192b1",
+    "axonc/linear.py": "950588b5b9bed2ab2daae6a63bec9a1d22fba796abe506fd2991baaa65a9f663",
+    "axonc/graph.py": "b7fefe7afbcd460af382c8691c3f0d3f3749cf550c8e0e7a9439a6e194b29a0d",
+    "axonc/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "axonc/packages.py": "109614c0efb3407c22fc9f6751af365121ce39e5ed72a563a10ac3cd4ebde184",
+    "axonc/kernel_workers.py": "fe42649e5648d128d27a3f12d36d5e4e55292ca77441b9e75a4ec16890f4fe74",
+    "axonc/llvm.py": "16fe2ab0efbd62e59c7839a70673286911aa0800cc8d09c786b7c12b9c9afb3f",
+    "axonc/lsp.py": "cf3930d83e92e87e02d548645e7f0f927203c7aadaacf00874c541f20928476e",
+    "axonc/ranges.py": "744200711fd2f2836d30043273b73b03f0d6b2876f1f2c9b92a078c0f4ebe097",
+    "axonc/cli.py": "882b435670afaf197f808473e73156ddfabae16a97a95b11ee0dd83b3f4207d6",
+    "axonc/elaborate.py": "90a0e1968adbd0f026658f3be856a840e4a657dd7652341a0c3868871115c156",
+    "axonc/vectorize.py": "fb7aed863ab2a97beaa4fadf26eb87fb3f3f638efd62bd30931d789dfc3cb513",
+    "axonc/reference.py": "dee75be51b4f10984b9fdc486ef9e64e20ba0cb74cbd9610f288fe40a3e25f78",
+    "axonc/syntax.py": "2d12da900cd212a3a73d216b796f6eda440ea6efe908c4986668f87109c4aa50",
+    "axonc/resources.py": "28150f563102fb7dc83c07c9099a44070935c4b83e79a0f65ebcf0b18fd992da",
+    "axonc/modules.py": "96e3188bc5fe266f56e5705b6c0af54b7693e1db3de4cef5a7b7e61095a69ebc",
+    "axonc/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "axonc/fold.py": "597097d1c4ed1fad6050ee077b37626aab6970bd815ddf04a723334abe8a3776",
+    "axonc/project.py": "0fd8a9cb3c2b125f9cfc863ead2a10350199e525af76a50d3e659ada8197b516",
+    "axonc/inline.py": "793d7f0675eb34ca5c631ecb553b2948f77e84e8d541d3f861eb053147580ad3",
+    "runtime/platform_macos.ax": "c58725f9ecdf201b8a3f1fd23cc3a8734b16f1d0201a2d0d6787ffcede6682d5",
+    "runtime/handles.ax": "d76038a67d320f1f91fa146cc06350b344dbc9bfb56f7288cc6b5ed08c6c398d",
+    "runtime/platform_linux_x86_64.ax": "030452aae096633dcfef437a6c0aa1ae6d33e4c7cbb8a44845d955c71eaf406e",
+    "runtime/core.ax": "2710f9da9aaef7db443a15d2d3d0fb7460e4aa6904393d3c7f1848dfbfe20e73",
+    "runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "runtime/platform_linux.ax": "58346bec0c85b7aa1f39abddc558eee7874c048f34d79421c609c558cccd926d",
+    "runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1",
+    "stdlib/x509.ax": "c9cbd35632d4ef7af1e71e781b56d10f639b691954228707e37bb90db00b841c",
+    "stdlib/cancel.ax": "545e3f68c90914f4bc406f988c9010dbc337ef52cfc8b1deab2173f51cf8ad18",
+    "stdlib/unicode.ax": "df52c0815fe497b7ca58578d87ae4d14da2eb4bcdcc67df31efcd2b7218f5f55",
+    "stdlib/http_client.ax": "1f5faf74c2df9265bbf3d7cb43598889dac0ec258e427341c9577cd16012bfa7",
+    "stdlib/option.ax": "92c2414e4e960709dea9d5be2e0e4046dc5e71517086762e1257dfbe85f9e10b",
+    "stdlib/dns.ax": "92c8fe8191e699bb5a1c950ec8bac5251a9ef78af2e5ca8bb1b1dfa52412c720",
+    "stdlib/journal.ax": "d35eaedc1948c92350cac89646013f282d18e00b1a6c3f68f6ca2c872efc6f6f",
+    "stdlib/base64.ax": "b4c287d18a5b43f30dca480d075f003dbc79bc1ec87125b3efe612778b9f3a5c",
+    "stdlib/task.ax": "9403d22d8b1917d941b11608c55ea8659472d4238b3dafa7cc50ec60741d18e1",
+    "stdlib/vec.ax": "0169bc57adc5e97f204568c14d0aca9eedafbd283f0f238953f2187706683bc1",
+    "stdlib/bytesmap.ax": "69bcf492a209019aa6c1371f9653560df28fb912e6a4275ed53635aca9187d6a",
+    "stdlib/time.ax": "34db81fcb00c9b4edf7e2cbeca80cdf073f10812928037d7733142916c241b7e",
+    "stdlib/queue.ax": "a10818f66c7a097125ecb41fb0354ae3880ce9dd5d047c8c51ea7e9cf3bc25c7",
+    "stdlib/callback.ax": "eeb9e1f5bdbe31a002e9ca10ce1c541c810ca4d383efd41b4ae686eee3ae236d",
+    "stdlib/random.ax": "aa89394c4126ea9cd3d17266ca3137af42f0d2b24502797271cb40c246c0a249",
+    "stdlib/sse.ax": "a1dffe29b0e8d906d50e302fed0a53d87dd65dffd4d2c5040796b9c0d6c4b8f9",
+    "stdlib/unicode_data.ax": "e21755fcb4ee2c84ed26cb8621d287cfcd1c3e28bcfccbc06f0b037fb84dfd36",
+    "stdlib/numbers.ax": "6f5603838d7403a70e8cbc433492395991b227fc6f3e0433a423c090625eab5d",
+    "stdlib/bigint.ax": "ed4334da07e50fa90cd2b148409bd281bac5f0991bd4fde969f35644b3580b25",
+    "stdlib/io.ax": "f1fb308f201b9ec4789cff29e81147761d0c75813b1a07e9c19209a31baf1194",
+    "stdlib/net.ax": "b01d4e94cfef24e9b10b382daecb83d9eda53bbfc12fa2345e46e5a31172862a",
+    "stdlib/sha256.ax": "6f0cc3965ba7b52d6d3d49064989f7a2a2594f7f1928394d14b991555b004f5d",
+    "stdlib/channel.ax": "b6c1be9585a0a826e9c765a5ae104cbe911402e4246c056e4ba1f26fd47e435e",
+    "stdlib/socket_cancel.ax": "22c8b678d3dfed5b9a1ca9e3f83f2ced50ecf68df5075d4f34e63827e77dad76",
+    "stdlib/rsa.ax": "267efdc9ec74d6f8f135757a33f442193ba0ddd27c357cb6ecd101bf5217f005",
+    "stdlib/process.ax": "01188e75965cf81e42031d6dd9b50996bb3af086cc912e9935060a07bca4886e",
+    "stdlib/chacha20.ax": "6741b993d436126b2c9ab61300e8956c750ca08da181a4adc65538287aa4a1d2",
+    "stdlib/http.ax": "c9d8ce7dab29c6d9c33853152765ddaec7f0eb73fbe4ef5b289dad8ab045c692",
+    "stdlib/fs.ax": "5cb70b9debc9441209f41c4610c36b3214467d484c2c651f10df1ea98104a8dd",
+    "stdlib/debug.ax": "69a421d5533a3d550fc8d202e0322b12a58515a0e8e2e9dbdfda2175ae2ae1d4",
+    "stdlib/collections.ax": "a8daa6ebc21d0d26d58cddd189a04ddf4d0697df37fe59beffffca89c4d6d985",
+    "stdlib/https_client.ax": "6cbe4dc15cf12471a5019939e0114040566c19a599b4720bcce39166b019b982",
+    "stdlib/file.ax": "f3b0a7c27e2c5d5c43f2564bc3cdcb1e01dfd6fc29da58045550884d5af1a98b",
+    "stdlib/result.ax": "f082a48d13219631e85f8aa9c3e1dc575fcdd572b4bfb07197be70d842087ce2",
+    "stdlib/url.ax": "1f841a457343b22b4ae0c7d490e712955429ae98b18cff203a2be91c7ab32284",
+    "stdlib/tls.ax": "90d2c8713da444970308ed263d056f153c38ae3d1cc7a2777675a3caf2ffa7d6",
+    "stdlib/hash.ax": "cdb9ce802d537a1ee04ef336c7d196fa5db8205ee86843945af87c7e8d5327b6",
+    "stdlib/hashmap.ax": "619bfda85579f00eea5c4cd2b895effaac97512afd7bdcf5daed3303a2f0e5f0",
+    "stdlib/arena.ax": "0a26ead05abdbca24bd59252270b9d451dc052720b0ea93c2f859f651c4dd0c5",
+    "stdlib/strings.ax": "3502786f86db4941c18e946846b39b9e39750446de728248719cd043f9dab75b",
+    "stdlib/x25519.ax": "9ea66b685048e1cffdb2309befcc557b0c7d5da6b2ffe352737e24d49e407260",
+    "stdlib/json.ax": "37533ea23f71a5fdfb2b9eca90dcd90571320b071c69c32e45cd4e7f0384fd49",
+    "stdlib/der.ax": "16525d6588b4a7adf9a5de91790302e6b48f4a14f5795a8e7e7823b7972ab4d7",
+    "stdlib/socket.ax": "5bd83a16a8c2784ac4e1265193817de67887c1f62355f5ff30b82b1134778971",
+    "stdlib/datetime.ax": "959b184c50c994ebe60a62d2fd98d075b6d456b94942b4d721d2542b3895a8f5",
+    "stdlib/errors.ax": "f32e6108eea42558ee1c758bbd548a101c63fa6ec7f37e772c783bbdebb12e06",
+    "stdlib/math.ax": "98114d05368b1440d35e270039701558f4499061d7dc910cefcd4d35155e7a83"
+  },
+  "finished": "2026-10-25T09:44:05.950283+00:00"
+}

@@ -1,0 +1,111 @@
+=== 13:44:54 axonc check experiments/agent-loop/dot/dot.ax
+{
+  "ok": true,
+  "program": "e955c177e139a31c48e2487b638034314d89a45f2b3c86d4f01989608c8d6830",
+  "functions": {
+    "main": "f2d0bb7495fc9543ad0d212750774b945a557e0a662e52e43e2f819f08b77834"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 2,
+      "fn": "main",
+      "node": "04e5cef2de91",
+      "pos": [
+        5,
+        30
+      ],
+      "kind": "division",
+      "goal": "7 != 0",
+      "normalised": "(8 <= 0 || -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "main",
+      "node": "e2dfb25ad198",
+      "pos": [
+        5,
+        13
+      ],
+      "kind": "range",
+      "goal": "0 <= n",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "main",
+      "node": "adb0213d7f6b",
+      "pos": [
+        6,
+        36
+      ],
+      "kind": "division",
+      "goal": "11 != 0",
+      "normalised": "(12 <= 0 || -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "main",
+      "node": "9003152c02f4",
+      "pos": [
+        6,
+        13
+      ],
+      "kind": "range",
+      "goal": "0 <= n",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "main",
+      "node": "237c474541a9",
+      "pos": [
+        7,
+        21
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "main",
+      "node": "7a9ff1502a8f",
+      "pos": [
+        7,
+        28
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 7,
+    "proven": 6,
+    "runtime_checks": 1,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:44:57 axonc build experiments/agent-loop/dot/dot.ax -o experiments/agent-loop/dot/dot
+axonc: experiments/agent-loop/dot/dot  graph e955c177e139a31c  obligations 6/7 proven, 1 runtime checks, 3 parallel regions, build miss
+=== exit 0

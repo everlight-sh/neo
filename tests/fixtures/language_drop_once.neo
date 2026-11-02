@@ -1,0 +1,12 @@
+import "std:io"
+resource type Tracked = { id:i64 } drop release
+effect(fs) fn release(value:Tracked) -> unit = let printed=print_out(concat(int_text(value.id),"\n")) in noop()
+effect fn create(id:i64) -> Tracked = Tracked { id=id }
+effect(fs) fn consume(move value:Tracked) -> unit = noop()
+effect(fs) fn conditional(flag:bool,id:i64) -> unit
+  = using value=create(id) in if flag then consume(value) else noop()
+effect(fs) fn main() -> unit
+  = let first=conditional(true,1) in let second=conditional(false,2) in
+    let nested=(using outer=create(3) in using inner=outer in consume(inner)) in
+    let explicit=(using value=create(4) in release(value)) in
+    let borrowed=(using value=create(5) in check value.id==5 in noop()) in noop()

@@ -1,0 +1,13 @@
+import "std:io"
+
+; Wall time is for timestamps; monotonic time is for elapsed durations.
+effect(time) fn monotonic_ns() -> IntResult
+  = let value = rt_clock_ns() in if value < 0 then int_error(5,"monotonic clock failed",0) else int_ok(value)
+effect(time) fn monotonic_ms() -> IntResult
+  = let value = monotonic_ns() in if !value.ok then value else int_ok(value.value / 1000000)
+effect(time) fn deadline_after(milliseconds:i64) -> IntResult
+  = if milliseconds < 0 || milliseconds > 2147483647 then int_error(22,"invalid deadline duration",0) else
+    let now = monotonic_ms() in if !now.ok then now else int_ok(now.value + milliseconds)
+effect(time) fn deadline_remaining(deadline:i64) -> i64
+  = let now = monotonic_ms() in if !now.ok || now.value >= deadline then 0 else
+    if deadline - now.value > 2147483647 then 2147483647 else deadline - now.value

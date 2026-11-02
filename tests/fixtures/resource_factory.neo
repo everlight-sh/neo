@@ -1,0 +1,11 @@
+import "std:io"
+resource type Tracked = { id:i64,payload:Arr u8 _ } drop release
+private effect(fs) fn release(value:Tracked) -> unit
+  = let output=print_out(concat("drop ",int_text(value.id),":",value.payload,"\n")) in noop()
+effect(fs) fn factory(flag:bool) -> Tracked
+  = using outer=Tracked { id=1,payload="temporary" } in
+    using inner=Tracked { id=2,payload="inner" } in
+    if flag then Tracked { id=3,payload=concat(outer.payload,"!") } else Tracked { id=4,payload=inner.payload }
+effect(fs) fn main() -> unit
+  = let first=(using owner=factory(true) in let output=print_out(concat("use ",owner.payload,"\n")) in noop()) in
+    using owner=factory(false) in let output=print_out(concat("use ",owner.payload,"\n")) in noop()

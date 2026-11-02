@@ -1,0 +1,122 @@
+; Paths as neoc's Python sees them: posixpath's join, split, normpath and
+; realpath (Python 3.12's, which keeps missing components instead of failing),
+; and the pathlib parent, name and relative_to that neoc/modules.py uses.
+import "std:strings"
+import "std:fs"
+import "std:hashmap"
+import "std:option"
+import "text.neo"
+
+fn pt_abs(borrow p:Arr u8 _) -> bool = tx_byte(p,0)==47
+fn pt_copy(borrow p:Arr u8 _) -> Arr u8 _ = concat(tx_empty(),p)
+fn pt_slice(borrow p:Arr u8 _, start:i64, end:i64) -> Arr u8 _
+  = if start>=0 && start<=end && end<=len(p) then concat(tx_empty(),byte_slice(p,start,end)) else tx_empty()
+
+; posixpath.join(a, b)
+fn pt_join(borrow a:Arr u8 _, borrow b:Arr u8 _) -> Arr u8 _
+  = if pt_abs(b) then pt_copy(b) else if len(a)==0 || tx_byte(a,len(a)-1)==47 then concat(a,b) else concat(a,"/",b)
+
+; The index just after the last slash, 0 when there is none.
+fn pt_tail_start(borrow p:Arr u8 _) -> i64 = loop (i=len(p)) while i>0 && tx_byte(p,i-1)!=47 next (i-1) yield i
+; posixpath.split(p)[0]: trailing slashes go unless the head is only slashes.
+fn pt_head(borrow p:Arr u8 _) -> Arr u8 _
+  = let i=pt_tail_start(p) in
+    let slashes=loop (k=0, all=true) while all && k<i next (k+1, tx_byte(p,k)==47) yield all in
+    if i==0 || slashes then pt_slice(p,0,i)
+    else pt_slice(p,0,loop (j=i) while j>0 && tx_byte(p,j-1)==47 next (j-1) yield j)
+; posixpath.split(p)[1], and pathlib's name of a normalized path.
+fn pt_tail(borrow p:Arr u8 _) -> Arr u8 _ = pt_slice(p,pt_tail_start(p),len(p))
+; pathlib's parent of a normalized absolute path.
+fn pt_parent(borrow p:Arr u8 _) -> Arr u8 _ = let i=pt_tail_start(p) in if i<=1 then pt_slice(p,0,1) else pt_slice(p,0,i-1)
+
+; The end of the component starting at i.
+fn pt_part_end(borrow p:Arr u8 _, i:i64) -> i64 = loop (j=i) while j<len(p) && tx_byte(p,j)!=47 next (j+1) yield j
+fn pt_is_dots(borrow p:Arr u8 _, start:i64, end:i64, count:i64) -> bool
+  = end-start==count && loop (k=start, all=true) while all && k<end next (k+1, tx_byte(p,k)==46) yield all
+
+; The non-empty components of p other than "." as start, end pairs.
+fn pt_parts(borrow p:Arr u8 _) -> Arr i64 _
+  = loop (out=tx_ints(), i=0) while i<=len(p)
+      next (let j=pt_part_end(p,i) in if j==i || pt_is_dots(p,i,j,1) then out else push(push(out,i),j), pt_part_end(p,i)+1)
+      yield out
+
+; posixpath.normpath(p)
+fn pt_norm_step(borrow p:Arr u8 _, rooted:bool, move kept:Arr i64 _, start:i64, end:i64) -> Arr i64 _
+  = let n=len(kept) in
+    let last_dots=n>=2 && pt_is_dots(p,tx_at(kept,n-2),tx_at(kept,n-1),2) in
+    if !pt_is_dots(p,start,end,2) || (!rooted && n==0) || last_dots then push(push(kept,start),end)
+    else if n>=2 then tx_take(kept,n-2) else kept
+fn pt_normpath(borrow p:Arr u8 _) -> Arr u8 _
+  = if len(p)==0 then pt_copy(".") else
+    let initial=if tx_byte(p,0)!=47 then 0 else if tx_byte(p,1)==47 && tx_byte(p,2)!=47 then 2 else 1 in
+    let parts=pt_parts(p) in
+    let kept=loop (kept=tx_ints(), k=0) while k+1<len(parts)
+      next (pt_norm_step(p,initial>0,kept,tx_at(parts,k),tx_at(parts,k+1)), k+2) yield kept in
+    let body=loop (o=tx_empty(), k=0) while k+1<len(kept)
+      next (concat(if k>0 then push(o,'/') else o,pt_slice(p,tx_at(kept,k),tx_at(kept,k+1))), k+2) yield o in
+    let path=concat(if initial==2 then "//" else if initial==1 then "/" else "",body) in
+    if len(path)==0 then pt_copy(".") else path
+
+; posixpath.abspath(p)
+effect(fs) fn pt_abspath(borrow p:Arr u8 _) -> Arr u8 _
+  = if pt_abs(p) then pt_normpath(p) else let cwd=fs_cwd() in pt_normpath(pt_join(cwd.value,p))
+
+; Python 3.12's posixpath._joinrealpath. seen maps a link to its resolution
+; in resolved, or to -1 while it is being resolved (a loop).
+type Real = { path:Arr u8 _, ok:bool, seen:HashMap<Arr u8 _,i64>, resolved:Arr Arr u8 _ _ }
+type RealStep = { r:Real, rest:Arr u8 _, stop:bool }
+
+effect(fs) fn pt_real_step(move st:RealStep) -> RealStep
+  = let rest=st.rest in let cut=pt_part_end(rest,0) in
+    let name=pt_slice(rest,0,cut) in let after=pt_slice(rest,cut+1,len(rest)) in
+    let r=st.r in
+    if len(name)==0 || pt_is_dots(name,0,len(name),1) then RealStep { r=r, rest=after, stop=false }
+    else if pt_is_dots(name,0,len(name),2) then
+      let path=if len(r.path)==0 then pt_copy("..")
+        else let head=pt_head(r.path) in if pt_is_dots(pt_tail(r.path),0,len(pt_tail(r.path)),2) then pt_join(pt_join(head,".."),"..") else head in
+      RealStep { r=r with { path=path }, rest=after, stop=false }
+    else
+      let newpath=pt_join(r.path,name) in let link=fs_readlink(newpath) in
+      if !link.ok then RealStep { r=r with { path=newpath }, rest=after, stop=false } else
+      let known=hashmap_get(r.seen,newpath) in
+      if option_is_some(known) then
+        let k=option_or(known,-1) in
+        if k>=0 && k<len(r.resolved) then let resolved=r.resolved[k] in RealStep { r=r with { path=resolved }, rest=after, stop=false }
+        else RealStep { r=r with { path=pt_join(newpath,after), ok=false }, rest=tx_empty(), stop=true }
+      else
+        let inner=pt_join_real(r with { seen=hashmap_put(r.seen,newpath,-1) },link.value) in
+        if !inner.ok then RealStep { r=inner with { path=pt_join(inner.path,after) }, rest=tx_empty(), stop=true } else
+        let id=len(inner.resolved) in let resolved=pt_copy(inner.path) in
+        RealStep { r=inner with { seen=hashmap_put(inner.seen,newpath,id), resolved=push(inner.resolved,resolved) },
+                   rest=after, stop=false }
+
+effect(fs) fn pt_join_real(move r:Real, borrow rest:Arr u8 _) -> Real
+  = let rooted=pt_abs(rest) in
+    let start=RealStep { r=if rooted then r with { path=pt_copy("/") } else r,
+                         rest=if rooted then pt_slice(rest,1,len(rest)) else pt_copy(rest), stop=false } in
+    let done=loop (st=start) while !st.stop && len(st.rest)>0 next (pt_real_step(st)) yield st in
+    done.r
+
+; os.path.realpath(p), and so pathlib's resolve().
+effect(fs) fn pt_realpath(borrow p:Arr u8 _) -> Arr u8 _
+  = let r=pt_join_real(Real { path=tx_empty(), ok=true, seen=hashmap_empty::<Arr u8 _,i64>(13,17), resolved=arr(i in 0..0) tx_empty() },p) in
+    pt_abspath(r.path)
+
+; pathlib's is_relative_to for normalized absolute paths.
+fn pt_within(borrow p:Arr u8 _, borrow root:Arr u8 _) -> bool
+  = tx_equal(p,root) || (len(p)>len(root) && bytes_match_at(p,0,root) && (tx_byte(root,len(root)-1)==47 || tx_byte(p,len(root))==47))
+; str(p.relative_to(root)) for p strictly inside root.
+fn pt_relative_to(borrow p:Arr u8 _, borrow root:Arr u8 _) -> Arr u8 _
+  = if tx_byte(root,len(root)-1)==47 then pt_slice(p,len(root),len(p)) else pt_slice(p,len(root)+1,len(p))
+
+; os.path.relpath(p, start) for normalized absolute paths.
+fn pt_same_part(borrow a:Arr u8 _, borrow ap:Arr i64 _, borrow b:Arr u8 _, borrow bp:Arr i64 _, k:i64) -> bool
+  = let s=tx_at(ap,2*k) in let e=tx_at(ap,2*k+1) in let t=tx_at(bp,2*k) in let f=tx_at(bp,2*k+1) in
+    e-s==f-t && tx_equal(pt_slice(a,s,e),pt_slice(b,t,f))
+fn pt_relpath(borrow p:Arr u8 _, borrow start:Arr u8 _) -> Arr u8 _
+  = let pp=pt_parts(p) in let sp=pt_parts(start) in
+    let common=loop (k=0) while 2*k<len(pp) && 2*k<len(sp) && pt_same_part(p,pp,start,sp,k) next (k+1) yield k in
+    let ups=loop (o=tx_empty(), k=common) while 2*k<len(sp) next (concat(if len(o)>0 then push(o,'/') else o,".."), k+1) yield o in
+    let rel=loop (o=ups, k=common) while 2*k<len(pp)
+      next (concat(if len(o)>0 then push(o,'/') else o,pt_slice(p,tx_at(pp,2*k),tx_at(pp,2*k+1))), k+1) yield o in
+    if len(rel)==0 then pt_copy(".") else rel

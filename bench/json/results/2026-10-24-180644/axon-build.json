@@ -1,0 +1,8346 @@
+{
+  "ok": true,
+  "program": "41a61d26d64d82e3554087ba75e19cc7955bde158deb28c615898d844c4c3196",
+  "functions": {
+    "ax_runtime_init": "74a6c9bb4137d629f7ea463de838a2e963942b540bccf4bbd8e3f37e08f73ed6",
+    "rt_errno": "6f690fc95636d7d52b5969f2c2fdab70f99df516d0a45a2bb744eeffa5e267ef",
+    "rt_result": "a5836c12e556588e62b7866aaeb9f6283a52d379fa37e5ea5f78c86cf9e6ff8a",
+    "rt_cstrlen": "f3410de3ed0aadd16d5dce794cb8fc5e08d921616bb5e02698b36af5c7939c55",
+    "rt_write": "5191c9dcd57964c0ba8d11403f947bed2e9d27afa55f5352cbfc03518e8c1da8",
+    "rt_write_all": "861a6fe25a2699e93a6202a6f339784365fac22bab704df806d3eadeecf2ab92",
+    "rt_puts": "871fbe81e6225e49dd3c89605b463bfb2de6ea44533466a2c0561b13c702e1e4",
+    "ax_exit": "8ff237943d83f6283727fcd5f5bf36c83d05165122c1c9bd881c31e233655bc0",
+    "ax_trap": "adb26c764d45feedb1b60a10c456686b132bd44ee431819a7904c906c7376111",
+    "memcpy": "b739d879420306d5ebc62eeb93fe65fba430aa59dda0ae0a5b5b7df1afa1f97c",
+    "memmove": "fdb413823cf90857bef03c15f52453c2e265b0b35c87f8479790824f50dab10b",
+    "memset": "3d34a047527a88e91bbdd4596668769b982237a1cc64f9d7d2e0014e3c503e09",
+    "bzero": "51a17ae0fc8f71323e2438020e6244fd8e250620c14f7bdad63a3735ab4c5330",
+    "ax_cap": "ab50ca90f9015acfb0a51b290efb101916480035ba7ade3d4fd698a8369fbd50",
+    "rt_allocation_class": "eb6f0bb1268de8854930771e4c2ed6a1c467528a726a28093e10277dd52fad23",
+    "rt_mmap": "6a5c1ad199f8bad8e5ba0044ae14ff3bf6195dd44d3c28d2bb6033a756ef64e3",
+    "rt_map": "f282e27ae07f19afce50cf120bdc346694355f9dc58d1a8f6fbc993b325a0030",
+    "ax_alloc": "d2a9c7574a20d29fbf8ed7417e2211fb8db04117bfab000dbf34ab3ee39ef121",
+    "rt_munmap": "4fcd110e8a3fb0d81532a01488b135dd0578158afb1a52c0060257d7fade5af8",
+    "ax_release": "103deff31e36edf99d4ccc9fbf765dcd7ec51f7289a83dee30c53f826d8c6de0",
+    "ax_free": "5501c485e94ae9ca87f4998a7d483e2e154395c9dc9303c069931277a24789a6",
+    "calloc": "8839432fba5617c94685ee181e68823b4a86652f53d38c0d5341dbde270f78f2",
+    "rt_close": "67396d428fa38ea24fb8c90c84613502f196661e6989987dbc0f2a8bb360525c",
+    "rt_handle_after_fork": "c9e2b4333574b0fd0e51586c1da59ffc5900bff173e33aadf39f3bf180bb4b5c",
+    "rt_fork": "ae8af39e2799355a17172b31ee72017f5426cf4b14e35117c25619bff154f144",
+    "rt_env_match": "d62c7306a3490c42e490f73c33eb1baf8bcfcf5a77ce010a0dc9b8554e2928e5",
+    "rt_getenv": "03c84845afa383a68631e0d381311d710bfc9e61ab213d61990f0a20e3ceeff7",
+    "rt_digit_ok": "01ef19facbab700b8676b728e0e90292498b4089edfe35806cf5a61c7229037a",
+    "ax_parse_i64": "aae94e44a3c2e3a425e17cde57322d9a4ad1d9dd1ce9b24657b40e533343c693",
+    "rt_ncpu": "89fe26b37624f702106ef1e9ed81400530d23f966b68392207e41287f045b73a",
+    "rt_threads": "c4f2e63220316abdce2d6c644170faca63c7484954292c82b33ef81a08f19170",
+    "ax_chunks": "5d506a66c7c29a608dc599a291cab661a30382ae87cd21a7f684695e29581a3b",
+    "ax_chunks_work": "90a873b54f5ccf79d46e8f2de8e9461b2a41865938a9a3aa2111d6582de2e226",
+    "rt_wait": "0164b888effac40cabc2ecfbb71a9563400616ae4caf6f6fb09b628dcc21c568",
+    "ax_par_for": "27ecf6067de54add7ef2491b91bafedf8b6becf7c8120a8e16dd9ef123311fcf",
+    "ax_usage": "7dd046804a179582887eda837c7b37ad6a50b7b3dda71310400d4ed720f2790b",
+    "ax_precondition_failed": "08511977695e5ea4d04597595f3b60cfb1b017756ac295f80bdf0d8a52874987",
+    "rt_format_integer": "050e9777048a5cdc7da3f2ff84ad07dd0ede51b7534cc76f2231008dc678d7ef",
+    "ax_print_i64": "2d3b1216c59324de9d7378a98d5853146f57a7963e8e9cd3dda9943d7f4757d2",
+    "rt_normalize_float": "f82f5a9b854aa6785a887882430df1324426eccbba7d2308a4061ad4a70f87c9",
+    "ax_print_f64": "103131009d38976e1cbebc5b958c3a39ea73f9f57e3642d6fbb3b7f2a7b16eb2",
+    "ax_print_bytes": "d67fd7259993dd9ed289de9db994bcf0ed255069051d5cd3df60b9915a1f8da0",
+    "rt_again": "9163015d66ea28e25edba0d0ecab5f2d4ccfbcd3f05906c55f0db68c68b07419",
+    "rt_retry": "221e83363228ee18f4e496985d32824c9111cf084c04f0a4c49a55f6065faec4",
+    "rt_fcntl": "41cc16504a33b3d99b241b6794efa22876bb518ecfa2bbb5952698065d2ff534",
+    "rt_nonblock_flag": "5e443fd254ad9825644d3a49998db39d42346b57ea2b9960a560d32474a2bc32",
+    "rt_nonblock": "1d9b8b8624e43dd93c8b021a272304c30f5bdaee0ae8d7842186bab2c504ce29",
+    "rt_address": "82c718e10d48b51b6f54c6e00c9097c5b1a703a97f1b8bde4ee9327a8bd8808b",
+    "rt_bind": "0cb2b50a79e52d989ac3f9bea64f46cd6e4f31ff00c0863606978461e7d2688e",
+    "rt_listen": "7580db8cc6ec8a66c9915030c2b19187330dbdb1ade502e30692f3d1e0bbfa13",
+    "rt_reuseaddr": "8172014d9cae170906ced7d9630e65a57d34a061cdc3524bb56c53dbfdd63450",
+    "rt_setsockopt": "ecebf9bb4c281b4fe3742f59c5309b65d90bb801e9fc271b646e0b036f13e556",
+    "rt_socket": "a005d6f11688fb17fd2dc8171d5bfa1ed638f75cb3a67894e700b9169b9b7b34",
+    "rt_socket_level": "9f8c5953245c82df287b165e724ca4016d5f7bd8e717051f1b2777af505073eb",
+    "rt_listener": "17d8ebeac9d3012000ed6894848f8506684c61b3a15f4ba113a93c98aa143a5e",
+    "rt_region_spawn": "149a14f6931b12db826117f9c7d73061f86529a519f1cf156afc48a48ccfa46c",
+    "ax_par_for_shared": "2914139c9b21593668402b1342e6b5627ffc4f564d98d098ba1c8653e39ef406",
+    "rt_read": "8ac8d6d721d38af776bf1b05371c8683384cee5d0ab900d64f6a2522a5820db7",
+    "rt_private_map": "b7c3ab6d39ee39334f52257380f0c08bf993a10b913e12699a9efc5a8881e8de",
+    "rt_random": "9976999fd0f336c984e314f6b6fec0e89a04b10d3c596ad8a13f7df67d05c1eb",
+    "rt_word_wake": "ddcee47093253997883efeb52172328b70cda4fece7965095d3152ef10b9b484",
+    "rt_word_wait": "6d25118bf22feb85e0546391c5da0e58d6f04001b2ba3a58bef98d899203d1cc",
+    "rt_getpid": "1d65cd8c130fcddd7fbfdb5bdc85bb64008fac14abd3b0306834cc3a2e9952bf",
+    "rt_getppid": "f3c5e9a78f633fbf7ed31c8c7d7bbb1f0d20e4adbdbbda4027476dc37c0a3909",
+    "rt_accept_fd": "8b911ff24cd47569869ed15e7f1d75906af9b329b5209227b0cbd487328803d1",
+    "rt_send": "92e1448751fb86d82a38f4fbc8d714df2708cbc2a5af29e62f42a66729249c44",
+    "rt_poll": "8251e4329adf6bf754401653a94a79a44b45db99da5abe2d6e72aaba0f608aea",
+    "rt_epoll_create": "4c47f62e14c05671db002a8f08136c86927c0a186cd6b640f484732b103f2c85",
+    "rt_epoll_ctl": "25603e6b9fb438f98676b6ae5c62ba4991bb4d634bb1de72cf0bbb756a605c73",
+    "rt_epoll_wait": "504b4154805df7337bd8d6081d56f638a075f38023c16115f9f71220cc73baf0",
+    "rt_socketpair": "b47e44006b2910ef618c57cc95aa9ba919bfe5770022b4f2b385b52f393bfb34",
+    "rt_epoll_event_bytes": "96e40b63b53368607a0499f3757f5dad9728577fe07256f54da12446b1c96853",
+    "rt_epoll_data_offset": "131ab7d7c5f34599c5b9a471d3791e2b5f7a33e11c0e0a519eb2e59367fdb63b",
+    "rt_open": "0ca3cd5e04decbb40c88d24629d15d617eadd02569e3e7c847c6701097378fe4",
+    "rt_flock": "533f4db3abe22170ba854f232bf137c0299c6917c56f0c391dd2dec42ffb175a",
+    "rt_fsync": "3f87223a01b5d68010d5a41b94926e20d543857e66d04022d42522d57ebb5a45",
+    "rt_truncate": "4b29b1154428ac9531a363f579b8c6e460ed40e2a004746cc0cbdb4185698f02",
+    "rt_connect": "7ae0b6bc16db84ac5ad112f209a9047e7dfb0da3999a4cbf3b727eeb74bc6935",
+    "rt_open_write": "435bfd0917e0c5984919d6abf791ede45bd263898fbe0f57d6469b808860cc0c",
+    "rt_open_append": "45f986aae647bed409c64e86458baa083f5d88b7e7a83eb703f34203bc64f2a0",
+    "rt_open_update": "44e52899dc4f4f34fe08db29686fb2acc88d58a5d0d258c55079051652b138aa",
+    "rt_now_ms": "780170562f9c6c1664b97c9cfc3e54fbfd75aceb51d2cb5f9fa152ac1759ce12",
+    "rt_wait_ready": "2aeb559ecef00ccd7373776e70990332f77559cb0df1cfee8089a6ea9fd6d010",
+    "rt_seek": "74121998dc1466540a79feaec9e60c517aa608acae209c63320861afa5e5250b",
+    "rt_socket_error": "01bff57f054f48644f54bbadbdfc2a969989026d5ebfb46ea1f1017ea57c177f",
+    "rt_file_size": "e4858193a5ab163fe873cff5383cf046151074d2bb6c23fe3d278ffb7cf27c83",
+    "rt_map_file": "e37c8a8c6d25f1ada21d6ba36efea4fadb6c86f827637a09de24752f9be9708f",
+    "rt_mkdir": "51f0c90ba74c76f2ea24c8714a2dff28ad2f2784738af6d20f4b05283fe315f3",
+    "rt_sync_full": "13428f15f6cd085a03a0a0161a5eaa1460f3564d939670aa4274d7b78776e075",
+    "rt_clock_ns": "19519bec861d678f26e5caf75a68bbb599560e0a9bfe3286a8e28ba2f0740d88",
+    "rt_cpu_ns": "1c4ea1c9a7a50eb60587bf0eed068d2376d7ae705251b0059631834f86059645",
+    "rt_file_identity": "b922bb0a5e13abcb50fe83563bbeb044ab6d120e1c0753e964398d11d1e1bc74",
+    "rt_rename": "a12c76651ca7fbacdf4267fa0fdc37dda39fbbfc0326772a7c957862595b0b12",
+    "rt_unlink": "a9b23b600b118e7080182b32ee1574c58839c52465b674f69c374238277277b8",
+    "rt_file_remap_each_write": "b9e9fe041e1413edb5c522cfd5757002431ff705c96cbee4af8a216790de3b3e",
+    "rt_lower": "221a167c60faa7b329c0e88bd22669484a1d51ab28172a721f99a11c3e2d7c0f",
+    "rt_match": "ebd11855a7e207067fb7b29ac30ee9ee2a2a1eeae1c6944b4e05f82ce85f9b2e",
+    "rt_match_ci": "9e1e707f1e085e6d0d9e60dfad43ad413b5cae297e7fe96aec899587a271b590",
+    "rt_find": "eb5f2734a877d4733ac3f87a6cb361183c2e7049b5d857678f8c281e60907668",
+    "rt_header": "6e58388c674591677d13ca2e67b753d77398971c26e66f8d333cdbf7af115f21",
+    "rt_skip_space": "d3219cdc3a527cf202d6b5cb7ec710f76810265160eef5b869510ea5827e67ee",
+    "rt_body_length": "b5a8bfdc1897e5785f50d3baf22dcc4527f271aafd6b459516c85a330b7ef58b",
+    "rt_connection_token": "cc007414139e27c6a0c704bf688725c92dcada856bbb59cac87c447d71005ee0",
+    "rt_drop": "50f632f81dd801e53546691e34e4558e0999d77ab581ccdada55a24fce5ee4a9",
+    "rt_request": "af7ff73337419b032a93b819525fb33a58116697adeffd952909e80f46830613",
+    "rt_batch_next": "d6485cd2cd8c27f60156f477d82d37c33c55a540b7e52c84f1811d1cbcb80b10",
+    "rt_prepare": "ca67c2e235a0c8ab3dee74645d6fd5d1157885e3c0332f915a71175fad8b611c",
+    "rt_flush": "84d8f1768abd39085700943783b287e8930a315e8be01e798f610eebd7402bd4",
+    "rt_step": "1fcd28a787a80302a331c363404a000197342de109cefc5fab1d2e47a2420e62",
+    "rt_accept": "06ca42371a67f973afa926e97f5ba43daa7f496b7c3b47691f2d00f949590235",
+    "rt_compact": "a6b72b9139e52561dea8e4de39841938ccb0629c66d470b3011e91a46904f37f",
+    "rt_events": "10cbacbecd86a4deac0a64f9259abdc10dc1af137021ea831a73a88748dec84b",
+    "rt_http_worker": "2cb8258a0f1fa4a046245491826ee1c8b13aea3853b8ccecf58a2305763a0296",
+    "rt_epoll_apply": "2c0b02fbc121a31aa379b34ac8e672c7ed263de5d713d59bdc19b1eae3c0daea",
+    "rt_epoll_accept": "b14b23222bd2c94f09eb7cd526facfa471d955394541ac88f565b40b59ebe1f9",
+    "rt_epoll_compact": "a666cf7f57a8cff1222ef616604911595f357944e196b095d5cf9290d145c055",
+    "rt_epoll_listener": "49f1093cd8227eb8a83cb9f7a4bcc1d67994bd7f2fc1c47a18e227e15eca52f4",
+    "rt_epoll_sync": "785336366b37e508fdea0085b9a31614306d23f703724f208c4eb888954b8392",
+    "rt_http_epoll_worker": "80dfaead81db89affe231d3f7adac6fde51408832ed146b47f4fe950237e08d0",
+    "rt_serve_worker": "aa31bc02286d2dbee80832f1a4239c5582c34626d1011905f217177e7b720d35",
+    "ax_serve": "bd2189a6ba099835d9c8748756acb0c406594cbd5d1eea4492969f66243fe286",
+    "rt_handles": "40929c0be1c87b2584ffda7428c2071d1474f45dc87f14e9daa8624958d9b4b0",
+    "rt_handle_new": "4169c3aa80558266e35c40439611cb6c94650128752d0a13a88e504c7b881261",
+    "rt_handle_fd": "132e41523b6b967d95280cc12ef27eb253a639e5ac2410025eafa1aa5193d185",
+    "rt_handle_drop": "3e71cb21113dbdee26513c799ef67e96ca69589a887e82bdab53e6cd5bc164af",
+    "rt_handle_live": "736b3f77152cd4f717e7372de25ca375f29bb8be0a4ecee77e0e1c5b88cd5308",
+    "no_error": "0a113298737705fb1a317a705eed5247b7e7b3ec120cfd2beb1df15c7d5a1dea",
+    "bytes_ok": "e1eb7b8b44427b10c9830bf5dd31e28591ed03c357448a8fb39939eb59d2c19b",
+    "bytes_error": "16e9ede7c408dbdef103fc2b18651ca57a70ad960f648171e9d3ed98628328df",
+    "int_ok": "dbc3605db50ecc351494b5855d2161449fa5a10ba13607a2bb9ac9c48a6ed32a",
+    "int_error": "2ede3976facd1a9d4e8b301dbb11a58004f85a401bd01b2489d18b73339c7c08",
+    "some_int": "1474103f3a7938dc27367a5c4f84f6a84a0cc2b99c18e3ce5263411d06cd469f",
+    "none_int": "dca614e2fd0f118057d8c6540a67d058dd7c4d84c23ad4c9dda6c0bedddca74e",
+    "some_bytes": "dc9a49cd7d596cbc78af0dbe8bd0a83101f6e05385d75919a6a706638d1fb95f",
+    "none_bytes": "ee517cbb7f4ff2b092d703d653079b78a5488fe34588996c55eb20d6eb00d1d4",
+    "str_byte": "16cd36d32d220fbe0722b4fa2f894fb35ed2704b6b12765b5ccf743482ce31e5",
+    "str_equal": "000bb48e08f0373c85a4db737a951c56db94c1763426fe88fedc46c22640613c",
+    "str_slice": "2430547c047b3ea579fd0145563c94097478fc6932b2c98d2a2de874dfffadf1",
+    "str_starts": "16dd944fe6613e9f0969f6c1371202e99e15cbcc52f666e6437d19f0c6ab60a5",
+    "str_find": "87a899d9972b42ada9f07aea9d325e51b35a5451827dfa80437ca6b391e63765",
+    "str_trim": "24c45bb0e7bc989a3ea4a79c63d234e0f6af3a4a0ddf1d1452840ce2376794a8",
+    "int_shift10": "fd5f174a17cb3e0ca536b36edc2515568614463d8baa8cef6e83d4a2d3c57760",
+    "int_text": "c406a8f25fba385399e5c1e5d2662694918adc5a1213a3c24744f975f74836c7",
+    "int_parse": "647d69afa2852998fcae24f2524313ec40a9e872eca15b6c45b6ee74b5fa73aa",
+    "utf8_cont": "de7e531f5a49e1b95b93d57e9fbc8edded0e671de3c049117fb6f9c7348144cd",
+    "utf8_valid": "cd068d1319fe906f17e0738b43512eba36de4633df43652ac61c8e85e92bbf80",
+    "utf8_encode": "0b27e8ce9479c88b37cbb7da33d58cfb8b7c51c31e4ce54b2d82c2320a8b146b",
+    "json_none": "a0a867be298d761142b6a21deae3147a95b10c9a2ae48092c8cda2fa4fbd14ff",
+    "json_space": "4e3b8ea500e2741e74e6717da1ecddfc38fc61cc20af6b0537719cd146b11058",
+    "json_digit": "61fbebe4e1a4833ee3a27a10fb703862afe55301b57f2240056345a12dd74039",
+    "json_digits": "05170b914c63891c33a6720c47739f3887d9fd02415de0ebeeee77d2461dae04",
+    "json_hex": "f823b2f3544fad752c57266726530e89271cb39f667eb922699adf6f3c93c15e",
+    "json_hex4": "3c8b8ee92d8cf7b1206313069d876f92e6a99b49e2371c8bbfcb18db673573ff",
+    "json_escape_width": "df3e8f37d135d58f42f2f10ae4810097e82f980d5102bb66ad042496f59d40de",
+    "json_utf8_width": "fee343eb36f8abc644d1b43cb89709f5f712264661da9a593ce34be403dc45a6",
+    "json_string_unit": "5b90c06bf7a406b5ed5a059ee973871d5d4dca1b8a614b41c56bcfb5af5e0489",
+    "json_string_end": "7458c4166d2653aecb854658fed9bfef16dd0c3384ea73296fd5b0bfc0a921bf",
+    "json_number_end": "cac3d9701bed0c386c8c15e49ae77bad0706706ab67245da5f7aec322d541fb8",
+    "json_literal_at": "46eaef37b16e474d86add32c4c1d93c442141bb835da42e0ba760e9735afce12",
+    "json_plain_end": "8834d035d0380b1833a2dee8c9557fc596f63af76bc6b9fb023e2acab80db197",
+    "json_scan_item": "af356572ccc9d9d2b518c3ea5a856d2be9849ce29faf1675701f218ffdb62b29",
+    "json_sequence_step": "789fd6245645b199239ecfa3e4e2f2bbc04543e3b001840750297f5f47e86ee8",
+    "json_scan": "734e7d549fbc3cc046a849eeed422a248bc6937745279c9eede3adc78d74851d",
+    "json_kind": "15b4f055b23e6d8d04d07917198609dc7deb5c512cfb96d8cb6868ec817907c4",
+    "json_skip_string": "b509ae98934643d418d6e06293f8971f17cb65cea4064209d197fea718c23d17",
+    "json_skip": "293ce9f4efe730842cfa2c72d3bb63d31127e6cbe68d998de727df24ab7061d3",
+    "json_count": "7412751821b80e2096e57a9e627cd5ca0402482211a9e480cf20a4b34047b103",
+    "json_index_room": "c793005507825bcb050680cd6521814c5f5b2ba1660cd18f70b5b6112e68edf4",
+    "json_member": "97e5e8925ec1f12a5990ec39d6b6144f5bb04ee37466ff823f1ec0f9f638277d",
+    "json_index": "3a1840d8ab55a258152a8438bfbf4cfc0dda816cfbe1caf29ca4bb83462d471a",
+    "json_parse": "71ea605058ed93ef2d3b2bf8d818529ab4ee8b5020e6597ec2363f674f7fd8ee",
+    "json_text": "733dcf3e16ad4b8ab3e1d33668154221c8caf841de270d88e19fd871525da6e6",
+    "json_int": "396ed1764750f612d50605c9dfbab3028911eca9f1612e459004257f9ce9d9f7",
+    "json_array_len": "682217ed47ab1cbe12f1712e5c776e0b3341bf8f6c965c7c532bc6b6829e858f",
+    "json_array_get": "6581ecfd66f1e97edb7dfef7524c07146b71baea8e8176288fadbd19989b43c5",
+    "json_array_values": "a468d385c5cd958acd8aa487bca8f30f30263cf43aacebf4ce60111e2bdc4754",
+    "json_key_equal": "144d22110f2d73b6ae94e95aa80cd437c4a4b576574f4381779052826d572881",
+    "json_get": "820f6d9fff00f521d9009ba9197ff7a59c8edb247096d47433808b222d0526de",
+    "json_hex_digit": "244e06b47649a82bfb41260e643c1441ec2b13d86b72bcf96df658b25baabac4",
+    "json_quote": "f1757d873230097a755f9340bf3ab47dd83ba2267b6df6c1032783045561d2bc",
+    "json_compact": "12a31428e4f3b17e1d1e93da9f97ab0c603df8c72c66b75d5013e017168d22c0",
+    "rotate_left": "290f90585e020155782444df131a9cc5e31ca61517b619b145a3600bd4f10bcc",
+    "sip_round": "5f2dffee1362e061e54d885b6aafc2364fa17dc7f0e30a430e44423ef3966f0b",
+    "sip_initial": "fc51c97d5c9ea7aacc3aa8a81355a422def887e5493745d9234f851206f5a1d1",
+    "sip_block": "1e042f8ed7067e8b01fed962e4557c4e1b1673e08bda23642f5c1787950260f2",
+    "sip_finish": "c82d039ee28a2bbb0eedb132a5960ec8409e630a0eb15cfca77edd8c42615f98",
+    "hash_bytes": "7fb5936224ee33c1a55eb83b98a40a5dcf4a4ee24462febbfd2fa099ff558afa",
+    "hash_integer": "b850a6859ef5c4d9203096e91d9160107b1e26af69e79b9be28f35269f4602c1",
+    "io_path_valid": "e8a8b38eff310dc94552ad6dcb74c277c89c8daa6ab1376dae84a532741fe9df",
+    "file_open": "e66ebcb3ba2c3227a0d6bfd866323ad299cb36edf7f409d3cab6cfc978ed02ec",
+    "file_close": "75c25a9ef1b9b0fc4d0e803a58dfce42f13e733f4734839157d17c0fc718c5e5",
+    "file_lock": "92ea332205f22e0f31e7ebb88b0730a4d5d456c9cae137d1a5c49803231ef73b",
+    "file_sync": "b59a7a0b3b6a364738bef907da41986a47f9cd6781886025cd09434d938f8247",
+    "file_seek": "59c2c47c67c7140d87e1396c28c3c9a5e30bbb44ff54479cd54fc54714122b38",
+    "process_fork": "bd6caa909cea851d2dd5559e3d6ce061fb5c450cebfa812ad986664b9216c48c",
+    "process_id": "6488f8f33c9851cea7728d4af12962395f391bde7990c61e427009470e93e5b8",
+    "process_parent_id": "a40a10f1156da5d5723ac2e8367d40cc3ee5c5588f956c3df9795baed4122e85",
+    "process_wait": "3d93f5703721fda97bdf10ace25df7d407f9c0c809c9803b4e86927a0c34c560",
+    "file_truncate": "a15c58370466db2196dd2bd4f918b15127944e0dbfcfdb90bffa8d41ee865dc5",
+    "file_read_chunk": "4ffb29782e1b442b576437f3907b61f64acfc9d97dce2db5364da10821ef1e68",
+    "file_read": "99784f08f4ef5b97bc3d51658a84fd181a8c2eec162fc7589247a845078be37b",
+    "file_write_step": "8e0f18c43ff66eab9aae129d63b145c3abb63ea944cec94497d1b6f4bc9b5e1d",
+    "file_write": "00f0010ea51e8d3cc170347510e27419c3e0d643fe8ae30da2cf218e1b40e66c",
+    "fs_read": "1f4c188ebc6ed18a93a44e2a7c8c014cc7e18d909e4ae3875f5eaf424cccd744",
+    "fs_store": "760df38c6795252aa0eb51b6e8ea8a5a539e1c15b883cbee855472a11bee76f7",
+    "fs_write": "1fc357897a67a3f9637cf4bf25d4eb65957634df4b5cf8c6eb8b83262f841666",
+    "fs_append": "5b179add3b9360c807d571b20136cc9dc1d6e2f2a4ab429376cd00253f453dcb",
+    "env_get": "1dcf64f0cf090a8c359ed8a7222c89f5d95c205d157af033fae4e3276a2ae28c",
+    "cli_arg": "a78b592b818c46b2effeb83be94e6695f03b7287f1b74e8359bc8356b8f26996",
+    "process_exit": "427e147eb04a4f5c2025bb885642fdac67f220729650c225aa5994dfd8c1f0c5",
+    "print_out": "5688220cd178280c478817141d6bdf941aa977c254abcf54d4f7604d1a19420a",
+    "print_error": "559cd0b1550e01414f9e5e86cef15c5e7348ff2a4bf39044d5737db618ada64d",
+    "time_unix_ms": "b17c32f8345dce0da722cca972d74796a978b2d63a7d7f846b0fbbf32f795132",
+    "sleep_ms": "7080c14bf1b40bd42f9b610fbe02f744c8e6cf48283ae0edb94f53448036748b",
+    "random_step": "35d198d4a4692b5fd7b801e3981ed0e4e6b12e2a57f87bf47e6fad433142fee5",
+    "random_bytes": "ee7086d920e51af07734d12e9757ab8e9780e4634d2abd49c4b5f5eb0e7656ee",
+    "random_i64": "ad499088f9c01fb9797a1cea447e850969a6191ef0cdab70234286c348bc01cf",
+    "vector_empty": "c14c49f6b3445b173ca80a62bbca4460007723eb8496ffa1af8f9d7de8b09b90",
+    "vector_push": "8c03a8da2cb6ed2a3ac9cf9c5943d66a312d33f923d81f195bd1984ac798c990",
+    "vector_get": "92b1671c20407b3c222488c6047f33a97229770032f817f6aad4701c1e4bf845",
+    "vector_heap_down": "8c017637c8644b91c4f6bb2a234b86ff4c9f87af0592f28f68f6242c19aaa40b",
+    "vector_sort": "6d1c9516d760d77f3456920840c799627a7c164f8c5fa2d3e8768686d46be7f0",
+    "hashmap_empty__73a3018f01cece1e86e8": "cabe0b59e433780d01b2aa4e0710ebcdf98bfc360e9787fb1f324e066b97e4cf",
+    "map_empty": "497dccacf9d29e45c8046423e3d56d144d732710face31cbf08e947b95cbdaa4",
+    "hashmap_slot__73a3018f01cece1e86e8": "7e53a480071f9f6bd2602679c181fe839ce3e881d500d8ecea4add413af30dd4",
+    "hashmap_get__73a3018f01cece1e86e8": "2422584c752b37989ff8074dd9dcec9c91d5bfdeeb9a3608c6e3969c7f2386ae",
+    "map_get": "20a73af46f705370b621b100779a2bffe1a0f34a35b22de6ec0b2e9a25b2135e",
+    "hashmap_insert_slot__73a3018f01cece1e86e8": "039f139f756a5777cd3420c7828e37f7789a3ed264afbf58102159fa5c97efe1",
+    "hashmap_rehash__73a3018f01cece1e86e8": "bce261e0cfa6871444ecefa67aef15d7996e89899259e01271a72d2749a4b9ac",
+    "hashmap_put__73a3018f01cece1e86e8": "70ff7a4ea4226decfadb2d83f5fe271af50f290eb363f4808f531e4d6f0cc777",
+    "map_put": "55bb06deec89855bd20db671f5da634a9f73212a99f84a1c64248f3266322882",
+    "__m375c8dad3a3db1aa_library_document": "91b09fabc7488f1c0202eca0f5a79d2a5c4a9cd38361c5e95ef0e6453d57a95c",
+    "__m375c8dad3a3db1aa_library_collections": "39d1dd1b3b6a66770c5a612b32e1d6a19f02362452655dca409dd74461cb75da",
+    "main": "a821b6cec6fcdcc19670604fecfba5f7c43817e45e087d8aaefb37d4a9c6d962"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "memset",
+      "node": "b87bb98e71c9",
+      "pos": [
+        50,
+        24
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "memset",
+      "node": "5b23a84ac5d0",
+      "pos": [
+        50,
+        37
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "ax_release",
+      "node": "05dcadd53586",
+      "pos": [
+        103,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "ax_release",
+      "node": "8ce2e4777990",
+      "pos": [
+        106,
+        17
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "calloc",
+      "node": "03e46f23d988",
+      "pos": [
+        114,
+        66
+      ],
+      "kind": "division",
+      "goal": "size != 0",
+      "normalised": "(size + 1 <= 0 || -size + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "rt_threads",
+      "node": "58945588a82b",
+      "pos": [
+        159,
+        40
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨if#101⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "rt_threads",
+      "node": "522a751178e7",
+      "pos": [
+        159,
+        53
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= 256)",
+      "normalised": "⟨if#101⟩ - 256 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "ax_chunks_work",
+      "node": "76bd77fc0ee4",
+      "pos": [
+        173,
+        30
+      ],
+      "kind": "division",
+      "goal": "estimate != 0",
+      "normalised": "(⟨if#107⟩ + 1 <= 0 || -⟨if#107⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "ax_par_for",
+      "node": "9500ed5c5550",
+      "pos": [
+        183,
+        52
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#113⟩ + 1 <= 0 || -⟨if#113⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "ax_par_for",
+      "node": "c394eab878a8",
+      "pos": [
+        183,
+        95
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#113⟩ + 1 <= 0 || -⟨if#113⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "ax_par_for",
+      "node": "1cebc2ee517d",
+      "pos": [
+        188,
+        54
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#113⟩ + 1 <= 0 || -⟨if#113⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "ax_par_for",
+      "node": "4e580e499368",
+      "pos": [
+        188,
+        97
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#113⟩ + 1 <= 0 || -⟨if#113⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "ax_par_for",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        192,
+        49
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#113⟩ + 1 <= 0 || -⟨if#113⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "rt_format_integer",
+      "node": "b16c1af29647",
+      "pos": [
+        212,
+        15
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "rt_format_integer",
+      "node": "951a0d54584f",
+      "pos": [
+        212,
+        69
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        236,
+        68
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "ax_print_f64",
+      "node": "73b2435b2fd1",
+      "pos": [
+        241,
+        66
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) initially (divisor := 10000000000000000)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "ax_print_f64",
+      "node": "e15713ba9a40",
+      "pos": [
+        242,
+        99
+      ],
+      "kind": "division",
+      "goal": "divisor != 0",
+      "normalised": "(⟨state#178⟩ + 1 <= 0 || -⟨state#178⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "ax_print_f64",
+      "node": "24b343a9eea7",
+      "pos": [
+        242,
+        109
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        243,
+        47
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "ax_print_f64",
+      "node": "1c3d3e93c877",
+      "pos": [
+        243,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) preserved (divisor := if (divisor >= 10) then … else …)",
+      "normalised": "-⟨if#188⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "rt_nonblock",
+      "node": "23facd4e815f",
+      "pos": [
+        257,
+        35
+      ],
+      "kind": "division",
+      "goal": "rt_nonblock_flag() != 0",
+      "normalised": "(⟨call#194⟩ + 1 <= 0 || -⟨call#194⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "rt_nonblock",
+      "node": "31d54fd04e79",
+      "pos": [
+        257,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "rt_listener",
+      "node": "fa66432d526b",
+      "pos": [
+        265,
+        45
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "rt_listener",
+      "node": "29891c0eca04",
+      "pos": [
+        266,
+        44
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "ax_par_for_shared",
+      "node": "9500ed5c5550",
+      "pos": [
+        284,
+        40
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#214⟩ + 1 <= 0 || -⟨if#214⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "ax_par_for_shared",
+      "node": "c394eab878a8",
+      "pos": [
+        284,
+        85
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#214⟩ + 1 <= 0 || -⟨if#214⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "ax_par_for_shared",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        292,
+        48
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#214⟩ + 1 <= 0 || -⟨if#214⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "rt_word_wait",
+      "node": "bcb9e2ff05c2",
+      "pos": [
+        11,
+        80
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "rt_word_wait",
+      "node": "22b8489bc003",
+      "pos": [
+        11,
+        132
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "rt_ncpu",
+      "node": "19600b8938d3",
+      "pos": [
+        49,
+        97
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "rt_ncpu",
+      "node": "9ff5d8fb93b8",
+      "pos": [
+        49,
+        111
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "rt_nonblock_flag",
+      "node": "af3e2245ebfe",
+      "pos": [
+        54,
+        39
+      ],
+      "kind": "postcondition",
+      "goal": "(result > 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "rt_now_ms",
+      "node": "e16ab6c4bdac",
+      "pos": [
+        75,
+        81
+      ],
+      "kind": "division",
+      "goal": "1000000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "rt_wait_ready",
+      "node": "d42bd859971d",
+      "pos": [
+        78,
+        87
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "rt_wait_ready",
+      "node": "62ab929a2408",
+      "pos": [
+        78,
+        145
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "rt_match",
+      "node": "f772792f6442",
+      "pos": [
+        10,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "rt_match",
+      "node": "5d7d099a06e4",
+      "pos": [
+        11,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#409⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "rt_match",
+      "node": "7949e64dc59b",
+      "pos": [
+        11,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#409⟩ <= 0 && at - n + ⟨state#409⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "rt_match",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        11,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#409⟩ <= 0 && -m + ⟨state#409⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "rt_match_ci",
+      "node": "f772792f6442",
+      "pos": [
+        14,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 42,
+      "fn": "rt_match_ci",
+      "node": "5d7d099a06e4",
+      "pos": [
+        15,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#411⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 43,
+      "fn": "rt_match_ci",
+      "node": "7949e64dc59b",
+      "pos": [
+        15,
+        48
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#411⟩ <= 0 && at - n + ⟨state#411⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 44,
+      "fn": "rt_match_ci",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        15,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#411⟩ <= 0 && -m + ⟨state#411⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 45,
+      "fn": "rt_find",
+      "node": "1af212fd43bb",
+      "pos": [
+        18,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 46,
+      "fn": "rt_find",
+      "node": "849fcf625186",
+      "pos": [
+        18,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 47,
+      "fn": "rt_find",
+      "node": "5d7d099a06e4",
+      "pos": [
+        20,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#413⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 48,
+      "fn": "rt_find",
+      "node": "f51863d53b48",
+      "pos": [
+        20,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#413⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 49,
+      "fn": "rt_find",
+      "node": "b2325436c811",
+      "pos": [
+        20,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if rt_match(a, i, b) then … else …)",
+      "normalised": "-⟨if#416⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 50,
+      "fn": "rt_find",
+      "node": "61b3a6475209",
+      "pos": [
+        17,
+        81
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#417⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 51,
+      "fn": "rt_header",
+      "node": "1af212fd43bb",
+      "pos": [
+        23,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 52,
+      "fn": "rt_header",
+      "node": "849fcf625186",
+      "pos": [
+        23,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 53,
+      "fn": "rt_header",
+      "node": "5d7d099a06e4",
+      "pos": [
+        25,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#418⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 54,
+      "fn": "rt_header",
+      "node": "cf559b9108e5",
+      "pos": [
+        25,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(a)",
+      "normalised": "(-⟨state#418⟩ + 1 <= 0 && -n + ⟨state#418⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 55,
+      "fn": "rt_header",
+      "node": "f51863d53b48",
+      "pos": [
+        25,
+        70
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#418⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 56,
+      "fn": "rt_header",
+      "node": "6c00bd01ea41",
+      "pos": [
+        25,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if (((i == 0) || (a[(i - 1)] == '\\n')) && rt_match_ci(a, i, key)) then … else …)",
+      "normalised": "-⟨if#421⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 57,
+      "fn": "rt_header",
+      "node": "61b3a6475209",
+      "pos": [
+        22,
+        85
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#422⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 58,
+      "fn": "rt_skip_space",
+      "node": "f51863d53b48",
+      "pos": [
+        29,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 59,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        53
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#423⟩ <= 0 && -n + ⟨state#423⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 60,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        68
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#423⟩ <= 0 && -n + ⟨state#423⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 61,
+      "fn": "rt_skip_space",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        30,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#423⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 62,
+      "fn": "rt_skip_space",
+      "node": "4c51f7d67584",
+      "pos": [
+        28,
+        73
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨loop#424⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 63,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        33,
+        55
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 64,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        34,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 65,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        36,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#425⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 66,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        37,
+        45
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#425⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 67,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        38,
+        43
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-⟨call#428⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 68,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        31
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#429⟩ <= 0 && -n + ⟨state#429⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 69,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#429⟩ <= 0 && -n + ⟨state#429⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 70,
+      "fn": "rt_body_length",
+      "node": "f6296da08327",
+      "pos": [
+        40,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#429⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 71,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        40,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#429⟩ <= 0 && -n + ⟨state#429⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 72,
+      "fn": "rt_body_length",
+      "node": "1af212fd43bb",
+      "pos": [
+        42,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := i",
+      "normalised": "-⟨state#429⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 73,
+      "fn": "rt_body_length",
+      "node": "94f8d85a88ce",
+      "pos": [
+        43,
+        38
+      ],
+      "kind": "bounds",
+      "goal": "0 <= end && end < len(headers)",
+      "normalised": "(-⟨call#434⟩ <= 0 && -n + ⟨call#434⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 74,
+      "fn": "rt_body_length",
+      "node": "a3eada33dae0",
+      "pos": [
+        43,
+        62
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (end + 1) && (end + 1) < len(headers)",
+      "normalised": "(-⟨call#434⟩ - 1 <= 0 && -n + ⟨call#434⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 75,
+      "fn": "rt_connection_token",
+      "node": "f772792f6442",
+      "pos": [
+        46,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 76,
+      "fn": "rt_connection_token",
+      "node": "3e6586a70b8d",
+      "pos": [
+        48,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := field)",
+      "normalised": "-⟨call#441⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 77,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#442⟩ <= 0 && -n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 78,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        63
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#442⟩ <= 0 && -n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 79,
+      "fn": "rt_connection_token",
+      "node": "5d7d099a06e4",
+      "pos": [
+        50,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#442⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 80,
+      "fn": "rt_connection_token",
+      "node": "f51863d53b48",
+      "pos": [
+        50,
+        43
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#442⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 81,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#442⟩ + 1 <= 0 && -n + ⟨state#442⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 82,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        69
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#442⟩ + 1 <= 0 && -n + ⟨state#442⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 83,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#442⟩ + 1 <= 0 && -n + ⟨state#442⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 84,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        32
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#442⟩ <= 0 && m - n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 85,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        58
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#442⟩ <= 0 && m - n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 86,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        83
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#442⟩ <= 0 && m - n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 87,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        108
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#442⟩ <= 0 && m - n + ⟨state#442⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 88,
+      "fn": "rt_request",
+      "node": "b180c6c99250",
+      "pos": [
+        67,
+        5
+      ],
+      "kind": "check",
+      "goal": "((offset >= 0) && (offset <= n))",
+      "status": "checked"
+    },
+    {
+      "id": 89,
+      "fn": "rt_request",
+      "node": "742fa090ffa6",
+      "pos": [
+        68,
+        17
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-n + offset <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 90,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        69,
+        42
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 91,
+      "fn": "rt_request",
+      "node": "3040035e220b",
+      "pos": [
+        73,
+        7
+      ],
+      "kind": "check",
+      "goal": "((header_bytes >= 0) && (header_bytes <= (n - offset)))",
+      "status": "checked"
+    },
+    {
+      "id": 92,
+      "fn": "rt_request",
+      "node": "a43c757175f3",
+      "pos": [
+        74,
+        21
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#446⟩ - 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 93,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        93,
+        47
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 94,
+      "fn": "rt_prepare",
+      "node": "9723c9b6e860",
+      "pos": [
+        104,
+        5
+      ],
+      "kind": "check",
+      "goal": "((n >= 0) && (n <= 65536))",
+      "status": "checked"
+    },
+    {
+      "id": 95,
+      "fn": "rt_step",
+      "node": "8f30d0fd39f4",
+      "pos": [
+        128,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 96,
+      "fn": "rt_step",
+      "node": "34e7487a6e9f",
+      "pos": [
+        128,
+        19
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 97,
+      "fn": "rt_step",
+      "node": "92b5b3bf7cd3",
+      "pos": [
+        128,
+        38
+      ],
+      "kind": "division",
+      "goal": "32 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 98,
+      "fn": "rt_step",
+      "node": "fec7f2b87569",
+      "pos": [
+        128,
+        43
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 99,
+      "fn": "rt_step",
+      "node": "f2fa58b5a3b9",
+      "pos": [
+        129,
+        56
+      ],
+      "kind": "division",
+      "goal": "4 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 100,
+      "fn": "rt_step",
+      "node": "3ee6b2a6d451",
+      "pos": [
+        129,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 101,
+      "fn": "rt_step",
+      "node": "8ce2e4777990",
+      "pos": [
+        133,
+        63
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 102,
+      "fn": "rt_step",
+      "node": "92aded101155",
+      "pos": [
+        133,
+        82
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 103,
+      "fn": "rt_step",
+      "node": "c78e4a7c9741",
+      "pos": [
+        133,
+        87
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 104,
+      "fn": "rt_accept",
+      "node": "26d5a3b4dc64",
+      "pos": [
+        158,
+        36
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(workers + 1 <= 0 || -workers + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 105,
+      "fn": "rt_http_worker",
+      "node": "17c345ade511",
+      "pos": [
+        198,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 106,
+      "fn": "rt_http_worker",
+      "node": "303fca13fad3",
+      "pos": [
+        201,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 107,
+      "fn": "rt_http_worker",
+      "node": "fd12beb8cd8b",
+      "pos": [
+        201,
+        122
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 108,
+      "fn": "ax_serve",
+      "node": "2f3157c831f4",
+      "pos": [
+        231,
+        57
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-⟨call#564⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 109,
+      "fn": "rt_handle_fd",
+      "node": "2d6bc81de88b",
+      "pos": [
+        27,
+        28
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 110,
+      "fn": "rt_handle_fd",
+      "node": "b1f3151861ed",
+      "pos": [
+        27,
+        67
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 111,
+      "fn": "rt_handle_drop",
+      "node": "7bec0c8e7295",
+      "pos": [
+        35,
+        74
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 112,
+      "fn": "rt_epoll_accept",
+      "node": "f51863d53b48",
+      "pos": [
+        42,
+        72
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 113,
+      "fn": "rt_http_epoll_worker",
+      "node": "3867463d0ee2",
+      "pos": [
+        83,
+        92
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 114,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        90,
+        58
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 115,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        91,
+        67
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 116,
+      "fn": "str_byte",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        4,
+        45
+      ],
+      "kind": "bounds",
+      "goal": "0 <= index && index < len(text)",
+      "normalised": "(-index <= 0 && index - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 117,
+      "fn": "str_equal",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        38
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 118,
+      "fn": "str_equal",
+      "node": "5d7d099a06e4",
+      "pos": [
+        7,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#740⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 119,
+      "fn": "str_equal",
+      "node": "10bc4e1f6401",
+      "pos": [
+        7,
+        21
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#740⟩ <= 0 && -n + ⟨state#740⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 120,
+      "fn": "str_equal",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        7,
+        29
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#740⟩ <= 0 && -m + ⟨state#740⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 121,
+      "fn": "str_slice",
+      "node": "7144270d3198",
+      "pos": [
+        10,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 122,
+      "fn": "str_slice",
+      "node": "ef188ba35a93",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "range",
+      "goal": "start <= end",
+      "normalised": "-end + start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 123,
+      "fn": "str_starts",
+      "node": "f772792f6442",
+      "pos": [
+        12,
+        38
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 124,
+      "fn": "str_starts",
+      "node": "5d7d099a06e4",
+      "pos": [
+        13,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#743⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 125,
+      "fn": "str_starts",
+      "node": "10bc4e1f6401",
+      "pos": [
+        13,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-⟨state#743⟩ <= 0 && -n + ⟨state#743⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 126,
+      "fn": "str_starts",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        13,
+        37
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(prefix)",
+      "normalised": "(-⟨state#743⟩ <= 0 && -m + ⟨state#743⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 127,
+      "fn": "int_shift10",
+      "node": "4d1300cfd04d",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 128,
+      "fn": "int_text",
+      "node": "325f376ca292",
+      "pos": [
+        27,
+        64
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) initially (count := 1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 129,
+      "fn": "int_text",
+      "node": "4d1300cfd04d",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 130,
+      "fn": "int_text",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) preserved (count := (count + 1))",
+      "normalised": "-⟨state#772⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 131,
+      "fn": "int_text",
+      "node": "19916df7af3b",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 132,
+      "fn": "int_text",
+      "node": "b6ee975e3e45",
+      "pos": [
+        28,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= digits",
+      "normalised": "-⟨loop#775⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 133,
+      "fn": "utf8_encode",
+      "node": "a88b70e61b6f",
+      "pos": [
+        55,
+        38
+      ],
+      "kind": "range",
+      "goal": "0 <= 1",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 134,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 135,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 136,
+      "fn": "utf8_encode",
+      "node": "206e20396124",
+      "pos": [
+        56,
+        39
+      ],
+      "kind": "range",
+      "goal": "0 <= 2",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 137,
+      "fn": "utf8_encode",
+      "node": "41fc5ee015b7",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 138,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 139,
+      "fn": "utf8_encode",
+      "node": "d9dcf6df20da",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 140,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 141,
+      "fn": "utf8_encode",
+      "node": "cac9a51b7ad3",
+      "pos": [
+        57,
+        40
+      ],
+      "kind": "range",
+      "goal": "0 <= 3",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 142,
+      "fn": "utf8_encode",
+      "node": "51164e0610e2",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "division",
+      "goal": "262144 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 143,
+      "fn": "utf8_encode",
+      "node": "41fc5ee015b7",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 144,
+      "fn": "utf8_encode",
+      "node": "1e60b813960d",
+      "pos": [
+        58,
+        110
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 145,
+      "fn": "utf8_encode",
+      "node": "f5e010e2275a",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 146,
+      "fn": "utf8_encode",
+      "node": "d9dcf6df20da",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 147,
+      "fn": "utf8_encode",
+      "node": "8a66e35f90b9",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "division",
+      "goal": "64 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 148,
+      "fn": "utf8_encode",
+      "node": "d5340859efb4",
+      "pos": [
+        58,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= 4",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 149,
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 150,
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 151,
+      "fn": "json_text",
+      "node": "9db286186ac3",
+      "pos": [
+        112,
+        28
+      ],
+      "kind": "range",
+      "goal": "0 <= 1",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 152,
+      "fn": "json_array_len",
+      "node": "4c51f7d67584",
+      "pos": [
+        116,
+        48
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨if#1002⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 153,
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 154,
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        130,
+        86
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 155,
+      "fn": "json_array_values",
+      "node": "679fd55c4665",
+      "pos": [
+        130,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= count",
+      "normalised": "-⟨call#1042⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 156,
+      "fn": "json_array_values",
+      "node": "f772792f6442",
+      "pos": [
+        131,
+        28
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 157,
+      "fn": "json_array_values",
+      "node": "f6296da08327",
+      "pos": [
+        132,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#1046⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 158,
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 159,
+      "fn": "json_array_values",
+      "node": "9947d02f91f0",
+      "pos": [
+        134,
+        9
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(values)",
+      "normalised": "(-⟨state#1046⟩ <= 0 && -⟨call#1042⟩ + ⟨state#1046⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 160,
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 161,
+      "fn": "json_index_room",
+      "node": "1dfeb70febfb",
+      "pos": [
+        169,
+        48
+      ],
+      "kind": "check",
+      "goal": "((size >= n) && (size >= (needed + 4)))",
+      "status": "checked"
+    },
+    {
+      "id": 162,
+      "fn": "json_index_room",
+      "node": "7144270d3198",
+      "pos": [
+        170,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(entries)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 163,
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "kind": "range",
+      "goal": "0 <= size",
+      "normalised": "-⟨if#1132⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 164,
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 165,
+      "fn": "json_index",
+      "node": "8ab7553debeb",
+      "pos": [
+        176,
+        23
+      ],
+      "kind": "bounds",
+      "goal": "0 <= slot && slot < len(room)",
+      "normalised": "(-4*⟨state#1138⟩ <= 0 && -⟨json_index_room#1149⟩ + 4*⟨state#1138⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 166,
+      "fn": "json_index",
+      "node": "415b15883f74",
+      "pos": [
+        176,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 1) && (slot + 1) < len(set(room, slot, (step.key_start - start)))",
+      "normalised": "(-4*⟨state#1138⟩ - 1 <= 0 && -⟨json_index_room#1149⟩ + 4*⟨state#1138⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 167,
+      "fn": "json_index",
+      "node": "80fbd9a33a8d",
+      "pos": [
+        176,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 2) && (slot + 2) < len(set(set(room, slot, (step.key_start - start)), (slot + 1), (step.key_end - start)))",
+      "normalised": "(-4*⟨state#1138⟩ - 2 <= 0 && -⟨json_index_room#1149⟩ + 4*⟨state#1138⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 168,
+      "fn": "json_index",
+      "node": "dfcdcb950b61",
+      "pos": [
+        176,
+        11
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 3) && (slot + 3) < len(set(set(set(room, slot, (step.key_start - start)), (slot + 1), (step.key_end - start)), (slot + 2), (step.value_start - start)))",
+      "normalised": "(-4*⟨state#1138⟩ - 3 <= 0 && -⟨json_index_room#1149⟩ + 4*⟨state#1138⟩ + 4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 169,
+      "fn": "json_get",
+      "node": "7144270d3198",
+      "pos": [
+        183,
+        79
+      ],
+      "kind": "bounds",
+      "goal": "0 <= slot && slot < len(offsets)",
+      "normalised": "(-4*⟨state#1159⟩ <= 0 && -⟨fieldlen#1156⟩ + 4*⟨state#1159⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 170,
+      "fn": "json_get",
+      "node": "ace96d797a32",
+      "pos": [
+        183,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (slot + 1) && (slot + 1) < len(offsets)",
+      "normalised": "(-4*⟨state#1159⟩ - 1 <= 0 && -⟨fieldlen#1156⟩ + 4*⟨state#1159⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 171,
+      "fn": "json_get",
+      "node": "c5d4f4f39294",
+      "pos": [
+        185,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (found + 2) && (found + 2) < len(offsets)",
+      "normalised": "(-⟨loop#1167⟩ - 2 <= 0 && -⟨fieldlen#1156⟩ + ⟨loop#1167⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 172,
+      "fn": "json_get",
+      "node": "8267f3b527f9",
+      "pos": [
+        185,
+        61
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (found + 3) && (found + 3) < len(offsets)",
+      "normalised": "(-⟨loop#1167⟩ - 3 <= 0 && -⟨fieldlen#1156⟩ + ⟨loop#1167⟩ + 4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 173,
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 174,
+      "fn": "json_quote",
+      "node": "f772792f6442",
+      "pos": [
+        190,
+        39
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 175,
+      "fn": "json_quote",
+      "node": "5d7d099a06e4",
+      "pos": [
+        191,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#1174⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 176,
+      "fn": "json_quote",
+      "node": "6d4e16185e20",
+      "pos": [
+        191,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(text)",
+      "normalised": "(-⟨state#1174⟩ <= 0 && -n + ⟨state#1174⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 177,
+      "fn": "json_quote",
+      "node": "31618cecb9cf",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 178,
+      "fn": "json_quote",
+      "node": "ae7ddd6c93b8",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 179,
+      "fn": "json_quote",
+      "node": "a5e9f1f754eb",
+      "pos": [
+        193,
+        50
+      ],
+      "kind": "range",
+      "goal": "0 <= 2",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 180,
+      "fn": "json_hex_digit",
+      "node": "c848331c5948",
+      "pos": [
+        196,
+        79
+      ],
+      "kind": "bounds",
+      "goal": "0 <= value && value < len(digits)",
+      "normalised": "(-value <= 0 && value - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 181,
+      "fn": "json_compact",
+      "node": "f772792f6442",
+      "pos": [
+        198,
+        28
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 182,
+      "fn": "json_compact",
+      "node": "9a5440b933aa",
+      "pos": [
+        199,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#1197⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 183,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        199,
+        29
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 184,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        200,
+        37
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 185,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        30
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 186,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        50
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 187,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 188,
+      "fn": "json_compact",
+      "node": "e57bfdc22cba",
+      "pos": [
+        201,
+        92
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(source)",
+      "normalised": "(-⟨state#1197⟩ <= 0 && -n + ⟨state#1197⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 189,
+      "fn": "hash_bytes",
+      "node": "fa3ee269a522",
+      "pos": [
+        30,
+        17
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 190,
+      "fn": "hash_bytes",
+      "node": "39cf479c7ff2",
+      "pos": [
+        33,
+        20
+      ],
+      "kind": "check",
+      "goal": "(((at + j) >= 0) && ((at + j) < n))",
+      "status": "checked"
+    },
+    {
+      "id": 191,
+      "fn": "hash_bytes",
+      "node": "2f53431b843e",
+      "pos": [
+        33,
+        86
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + j) && (at + j) < len(text)",
+      "normalised": "(-⟨state#1246⟩ - ⟨state#1248⟩ <= 0 && -n + ⟨state#1246⟩ + ⟨state#1248⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 192,
+      "fn": "hash_bytes",
+      "node": "932e529b971a",
+      "pos": [
+        35,
+        19
+      ],
+      "kind": "check",
+      "goal": "((at >= 0) && (at < n))",
+      "status": "checked"
+    },
+    {
+      "id": 193,
+      "fn": "hash_bytes",
+      "node": "43fa453812fe",
+      "pos": [
+        35,
+        77
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(text)",
+      "normalised": "(-⟨state#1270⟩ <= 0 && -n + ⟨state#1270⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 194,
+      "fn": "file_read_chunk",
+      "node": "0adc19a4503f",
+      "pos": [
+        38,
+        9
+      ],
+      "kind": "check",
+      "goal": "(bounded >= 0)",
+      "status": "checked"
+    },
+    {
+      "id": 195,
+      "fn": "file_read_chunk",
+      "node": "a3b78a9f4405",
+      "pos": [
+        38,
+        40
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨if#1318⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 196,
+      "fn": "env_get",
+      "node": "2b1498cb2c70",
+      "pos": [
+        73,
+        7
+      ],
+      "kind": "check",
+      "goal": "(count >= 0)",
+      "status": "checked"
+    },
+    {
+      "id": 197,
+      "fn": "env_get",
+      "node": "19260805ec11",
+      "pos": [
+        73,
+        38
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#1349⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 198,
+      "fn": "cli_arg",
+      "node": "2b1498cb2c70",
+      "pos": [
+        78,
+        7
+      ],
+      "kind": "check",
+      "goal": "(count >= 0)",
+      "status": "checked"
+    },
+    {
+      "id": 199,
+      "fn": "cli_arg",
+      "node": "19260805ec11",
+      "pos": [
+        78,
+        38
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#1351⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 200,
+      "fn": "random_bytes",
+      "node": "91fc705ee0d6",
+      "pos": [
+        15,
+        97
+      ],
+      "kind": "check",
+      "goal": "(n >= 0)",
+      "status": "checked"
+    },
+    {
+      "id": 201,
+      "fn": "random_bytes",
+      "node": "04c0aaf54fc2",
+      "pos": [
+        15,
+        120
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 202,
+      "fn": "random_i64",
+      "node": "07130baedd84",
+      "pos": [
+        20,
+        16
+      ],
+      "kind": "check",
+      "goal": "((i >= 0) && (i < len(bytes.value)))",
+      "status": "checked"
+    },
+    {
+      "id": 203,
+      "fn": "random_i64",
+      "node": "80677a4a73fe",
+      "pos": [
+        20,
+        91
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(bytes.value)",
+      "normalised": "(-⟨state#1373⟩ <= 0 && -⟨fieldlen#1375⟩ + ⟨state#1373⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 204,
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        8,
+        56
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 205,
+      "fn": "vector_get",
+      "node": "c848331c5948",
+      "pos": [
+        12,
+        77
+      ],
+      "kind": "bounds",
+      "goal": "0 <= index && index < len(a)",
+      "normalised": "(-index <= 0 && index - ⟨fieldlen#1386⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 206,
+      "fn": "vector_heap_down",
+      "node": "b5a89dfb9b4b",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "check",
+      "goal": "(((root >= 0) && (root < count)) && (count <= n))",
+      "status": "checked"
+    },
+    {
+      "id": 207,
+      "fn": "vector_heap_down",
+      "node": "6d4e16185e20",
+      "pos": [
+        15,
+        22
+      ],
+      "kind": "bounds",
+      "goal": "0 <= root && root < len(values)",
+      "normalised": "(-root <= 0 && -n + root + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 208,
+      "fn": "vector_heap_down",
+      "node": "b14519e2fd07",
+      "pos": [
+        16,
+        86
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 209,
+      "fn": "vector_heap_down",
+      "node": "da6e0897321f",
+      "pos": [
+        18,
+        12
+      ],
+      "kind": "check",
+      "goal": "(((left >= 0) && (left < count)) && (left < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 210,
+      "fn": "vector_heap_down",
+      "node": "ef5ccc0c8c2a",
+      "pos": [
+        19,
+        46
+      ],
+      "kind": "check",
+      "goal": "((right >= 0) && (right < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 211,
+      "fn": "vector_heap_down",
+      "node": "237c474541a9",
+      "pos": [
+        19,
+        92
+      ],
+      "kind": "bounds",
+      "goal": "0 <= right && right < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 2 <= 0 && -n + 2*⟨state#1389⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 212,
+      "fn": "vector_heap_down",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        19,
+        105
+      ],
+      "kind": "bounds",
+      "goal": "0 <= left && left < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 1 <= 0 && -n + 2*⟨state#1389⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 213,
+      "fn": "vector_heap_down",
+      "node": "c4c683a0670b",
+      "pos": [
+        20,
+        12
+      ],
+      "kind": "check",
+      "goal": "((child >= 0) && (child < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 214,
+      "fn": "vector_heap_down",
+      "node": "ccb5828a5d60",
+      "pos": [
+        21,
+        26
+      ],
+      "kind": "bounds",
+      "goal": "0 <= child && child < len(row)",
+      "normalised": "(-⟨if#1418⟩ <= 0 && -n + ⟨if#1418⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 215,
+      "fn": "vector_heap_down",
+      "node": "78600985346e",
+      "pos": [
+        23,
+        12
+      ],
+      "kind": "check",
+      "goal": "(((left >= 0) && (left < count)) && (left < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 216,
+      "fn": "vector_heap_down",
+      "node": "ef5ccc0c8c2a",
+      "pos": [
+        24,
+        46
+      ],
+      "kind": "check",
+      "goal": "((right >= 0) && (right < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 217,
+      "fn": "vector_heap_down",
+      "node": "237c474541a9",
+      "pos": [
+        24,
+        92
+      ],
+      "kind": "bounds",
+      "goal": "0 <= right && right < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 2 <= 0 && -n + 2*⟨state#1389⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 218,
+      "fn": "vector_heap_down",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        24,
+        105
+      ],
+      "kind": "bounds",
+      "goal": "0 <= left && left < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 1 <= 0 && -n + 2*⟨state#1389⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 219,
+      "fn": "vector_heap_down",
+      "node": "0707b90ba42e",
+      "pos": [
+        25,
+        12
+      ],
+      "kind": "check",
+      "goal": "((child >= 0) && (child < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 220,
+      "fn": "vector_heap_down",
+      "node": "ccb5828a5d60",
+      "pos": [
+        25,
+        63
+      ],
+      "kind": "bounds",
+      "goal": "0 <= child && child < len(row)",
+      "normalised": "(-⟨if#1427⟩ <= 0 && -n + ⟨if#1427⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 221,
+      "fn": "vector_heap_down",
+      "node": "85c6ec18eeb0",
+      "pos": [
+        27,
+        12
+      ],
+      "kind": "check",
+      "goal": "(((left >= 0) && (left < count)) && (left < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 222,
+      "fn": "vector_heap_down",
+      "node": "ef5ccc0c8c2a",
+      "pos": [
+        28,
+        46
+      ],
+      "kind": "check",
+      "goal": "((right >= 0) && (right < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 223,
+      "fn": "vector_heap_down",
+      "node": "237c474541a9",
+      "pos": [
+        28,
+        92
+      ],
+      "kind": "bounds",
+      "goal": "0 <= right && right < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 2 <= 0 && -n + 2*⟨state#1389⟩ + 3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 224,
+      "fn": "vector_heap_down",
+      "node": "0d1e7a0fe59c",
+      "pos": [
+        28,
+        105
+      ],
+      "kind": "bounds",
+      "goal": "0 <= left && left < len(row)",
+      "normalised": "(-2*⟨state#1389⟩ - 1 <= 0 && -n + 2*⟨state#1389⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 225,
+      "fn": "vector_heap_down",
+      "node": "e2133e884ed6",
+      "pos": [
+        29,
+        12
+      ],
+      "kind": "check",
+      "goal": "((((child >= 0) && (child < len(row))) && (i >= 0)) && (i < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 226,
+      "fn": "vector_heap_down",
+      "node": "ccb5828a5d60",
+      "pos": [
+        30,
+        27
+      ],
+      "kind": "bounds",
+      "goal": "0 <= child && child < len(row)",
+      "normalised": "(-⟨if#1433⟩ <= 0 && -n + ⟨if#1433⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 227,
+      "fn": "vector_heap_down",
+      "node": "63d6bef403f1",
+      "pos": [
+        31,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(row)",
+      "normalised": "(-⟨state#1389⟩ <= 0 && -n + ⟨state#1389⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 228,
+      "fn": "vector_heap_down",
+      "node": "f40241a3d9a4",
+      "pos": [
+        32,
+        7
+      ],
+      "kind": "check",
+      "goal": "((i >= 0) && (i < len(row)))",
+      "status": "checked"
+    },
+    {
+      "id": 229,
+      "fn": "vector_heap_down",
+      "node": "d90bdeaad5f8",
+      "pos": [
+        32,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(row)",
+      "normalised": "(-⟨state#1389⟩ <= 0 && -n + ⟨state#1389⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 230,
+      "fn": "vector_sort",
+      "node": "05dcadd53586",
+      "pos": [
+        36,
+        27
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 231,
+      "fn": "vector_sort",
+      "node": "3cdbecb96a2a",
+      "pos": [
+        39,
+        21
+      ],
+      "kind": "check",
+      "goal": "(((len(row) == n) && (left <= n)) && (left > 1))",
+      "status": "checked"
+    },
+    {
+      "id": 232,
+      "fn": "vector_sort",
+      "node": "35a0a69c111f",
+      "pos": [
+        40,
+        25
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(row)",
+      "normalised": "-⟨fieldlen#1435⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 233,
+      "fn": "vector_sort",
+      "node": "aff18a5f54b7",
+      "pos": [
+        40,
+        46
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (left - 1) && (left - 1) < len(row)",
+      "normalised": "(-⟨state#1439⟩ + 1 <= 0 && -⟨fieldlen#1435⟩ + ⟨state#1439⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 234,
+      "fn": "vector_sort",
+      "node": "0fbec9078915",
+      "pos": [
+        41,
+        30
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(row)",
+      "normalised": "-⟨fieldlen#1435⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 235,
+      "fn": "vector_sort",
+      "node": "5d8bd5aeb21f",
+      "pos": [
+        41,
+        26
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (left - 1) && (left - 1) < len(set(row, 0, last))",
+      "normalised": "(-⟨state#1439⟩ + 1 <= 0 && -⟨fieldlen#1435⟩ + ⟨state#1439⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 236,
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "node": "b298d1f5a3a3",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 237,
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "node": "b298d1f5a3a3",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 238,
+      "fn": "main",
+      "node": "af3e2245ebfe",
+      "pos": [
+        13,
+        48
+      ],
+      "kind": "precondition",
+      "goal": "(iterations > 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 239,
+      "fn": "main",
+      "node": "cfc5d437d830",
+      "pos": [
+        13,
+        64
+      ],
+      "kind": "precondition",
+      "goal": "(iterations <= 10000000)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 240,
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        12,
+        80
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 241,
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        12,
+        101
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 242,
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "node": "733f0ab1be79",
+      "pos": [
+        12,
+        30
+      ],
+      "kind": "range",
+      "goal": "0 <= 8",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 243,
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        36,
+        20
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 244,
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "6f3db4c969d4",
+      "pos": [
+        36,
+        37
+      ],
+      "kind": "check",
+      "goal": "(at < len(table))",
+      "status": "checked"
+    },
+    {
+      "id": 245,
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "c848331c5948",
+      "pos": [
+        37,
+        13
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨call#1464⟩ <= 0 && ⟨call#1464⟩ - ⟨fieldlen#1465⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 246,
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        37,
+        34
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 247,
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "c848331c5948",
+      "pos": [
+        37,
+        56
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨call#1464⟩ <= 0 && ⟨call#1464⟩ - ⟨fieldlen#1465⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 248,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "e730ed6a964c",
+      "pos": [
+        24,
+        5
+      ],
+      "kind": "check",
+      "goal": "(capacity > 0)",
+      "status": "checked"
+    },
+    {
+      "id": 249,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "6ad8c5bce509",
+      "pos": [
+        24,
+        94
+      ],
+      "kind": "division",
+      "goal": "capacity != 0",
+      "normalised": "(⟨fieldlen#1469⟩ + 1 <= 0 || -⟨fieldlen#1469⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 250,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "85e6d5e62437",
+      "pos": [
+        27,
+        12
+      ],
+      "kind": "check",
+      "goal": "((at >= 0) && (at < capacity))",
+      "status": "checked"
+    },
+    {
+      "id": 251,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "ad532a19ab53",
+      "pos": [
+        27,
+        54
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨state#1474⟩ <= 0 && -⟨fieldlen#1469⟩ + ⟨state#1474⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 252,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "aa405b756cf7",
+      "pos": [
+        28,
+        12
+      ],
+      "kind": "check",
+      "goal": "((at >= 0) && (at < capacity))",
+      "status": "checked"
+    },
+    {
+      "id": 253,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "ad532a19ab53",
+      "pos": [
+        29,
+        20
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨state#1474⟩ <= 0 && -⟨fieldlen#1469⟩ + ⟨state#1474⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 254,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "ad532a19ab53",
+      "pos": [
+        30,
+        20
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨state#1474⟩ <= 0 && -⟨fieldlen#1469⟩ + ⟨state#1474⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 255,
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "node": "ad532a19ab53",
+      "pos": [
+        31,
+        23
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨state#1474⟩ <= 0 && -⟨fieldlen#1469⟩ + ⟨state#1474⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 256,
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "node": "4cb3e0b79dd2",
+      "pos": [
+        60,
+        7
+      ],
+      "kind": "check",
+      "goal": "(capacity <= 4611686018427387903)",
+      "status": "checked"
+    },
+    {
+      "id": 257,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "5653953b1154",
+      "pos": [
+        48,
+        5
+      ],
+      "kind": "check",
+      "goal": "(capacity >= 8)",
+      "status": "checked"
+    },
+    {
+      "id": 258,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        49,
+        99
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 259,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        49,
+        120
+      ],
+      "kind": "range",
+      "goal": "0 <= 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 260,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "68bef4d6303b",
+      "pos": [
+        49,
+        42
+      ],
+      "kind": "range",
+      "goal": "0 <= capacity",
+      "normalised": "-capacity <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 261,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "eca3678d712a",
+      "pos": [
+        52,
+        18
+      ],
+      "kind": "check",
+      "goal": "((i >= 0) && (i < len(table)))",
+      "status": "checked"
+    },
+    {
+      "id": 262,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "6d4e16185e20",
+      "pos": [
+        53,
+        20
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(table)",
+      "normalised": "(-⟨state#1515⟩ <= 0 && -⟨fieldlen#1514⟩ + ⟨state#1515⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 263,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "6d4e16185e20",
+      "pos": [
+        54,
+        23
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(table)",
+      "normalised": "(-⟨state#1515⟩ <= 0 && -⟨fieldlen#1514⟩ + ⟨state#1515⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 264,
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "node": "e57bfdc22cba",
+      "pos": [
+        55,
+        25
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(table)",
+      "normalised": "(-⟨state#1515⟩ <= 0 && -⟨fieldlen#1514⟩ + ⟨state#1515⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 265,
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "node": "7ed9a8bbcb16",
+      "pos": [
+        42,
+        30
+      ],
+      "kind": "check",
+      "goal": "((at >= 0) && (at < len(table)))",
+      "status": "checked"
+    },
+    {
+      "id": 266,
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "node": "aeb2159b4114",
+      "pos": [
+        42,
+        86
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨call#1527⟩ <= 0 && ⟨call#1527⟩ - ⟨fieldlen#1532⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 267,
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "node": "2a36f58c810b",
+      "pos": [
+        43,
+        30
+      ],
+      "kind": "bounds",
+      "goal": "0 <= at && at < len(table)",
+      "normalised": "(-⟨call#1527⟩ <= 0 && ⟨call#1527⟩ - ⟨fieldlen#1532⟩ + 1 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 267,
+    "proven": 234,
+    "runtime_checks": 33,
+    "unproven": 0
+  },
+  "folded_calls": 0,
+  "inlined_calls": 0,
+  "parallel_regions": [
+    {
+      "fn": "str_slice",
+      "node": "ef188ba35a93",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "int_text",
+      "node": "b6ee975e3e45",
+      "pos": [
+        28,
+        15
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "a88b70e61b6f",
+      "pos": [
+        55,
+        38
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "206e20396124",
+      "pos": [
+        56,
+        39
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "cac9a51b7ad3",
+      "pos": [
+        57,
+        40
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "utf8_encode",
+      "node": "d5340859efb4",
+      "pos": [
+        58,
+        19
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_text",
+      "node": "9db286186ac3",
+      "pos": [
+        112,
+        28
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 9
+    },
+    {
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "json_quote",
+      "node": "a5e9f1f754eb",
+      "pos": [
+        193,
+        50
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        8,
+        56
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": 1
+    },
+    {
+      "fn": "main",
+      "node": "9d5609313525",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "sum",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        36,
+        20
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "node": "b82012b12bc6",
+      "pos": [
+        37,
+        34
+      ],
+      "kind": "arr",
+      "dispatcher": "ax_par_for",
+      "work_cost": null
+    }
+  ],
+  "vector_sums": [],
+  "vector_arrays": [
+    {
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_none",
+      "node": "54c075cec286",
+      "pos": [
+        12,
+        119
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_parse",
+      "node": "54c075cec286",
+      "pos": [
+        100,
+        132
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_get",
+      "node": "54c075cec286",
+      "pos": [
+        127,
+        226
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        130,
+        86
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        130,
+        86
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_array_values",
+      "node": "54c075cec286",
+      "pos": [
+        134,
+        202
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_key_equal",
+      "node": "54c075cec286",
+      "pos": [
+        164,
+        103
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "lanes": 4,
+      "reads": [
+        [
+          "entries",
+          0
+        ]
+      ]
+    },
+    {
+      "fn": "json_index_room",
+      "node": "ddd84ff4924f",
+      "pos": [
+        170,
+        5
+      ],
+      "lanes": 4,
+      "reads": [
+        [
+          "entries",
+          0
+        ]
+      ]
+    },
+    {
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_index",
+      "node": "1f76ed70a61b",
+      "pos": [
+        172,
+        19
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "json_get",
+      "node": "54c075cec286",
+      "pos": [
+        188,
+        104
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        8,
+        56
+      ],
+      "lanes": 4,
+      "reads": []
+    },
+    {
+      "fn": "vector_empty",
+      "node": "bd8e7edbd69e",
+      "pos": [
+        8,
+        56
+      ],
+      "lanes": 4,
+      "reads": []
+    }
+  ],
+  "bounded_remainders": [
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        110
+      ],
+      "divisor": 64,
+      "bounds": [
+        16,
+        271
+      ],
+      "width": 32,
+      "lanes": 1
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        110
+      ],
+      "divisor": 64,
+      "bounds": [
+        16,
+        271
+      ],
+      "width": 32,
+      "lanes": 1
+    }
+  ],
+  "overflow_checks": [
+    {
+      "fn": "ax_print_f64",
+      "pos": [
+        235,
+        23
+      ],
+      "kind": "float to integer out of range"
+    },
+    {
+      "fn": "bytes_ok",
+      "pos": [
+        8,
+        48
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_ok",
+      "pos": [
+        8,
+        48
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_error",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "bytes_error",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_error",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_error",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "some_bytes",
+      "pos": [
+        16,
+        50
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "some_bytes",
+      "pos": [
+        16,
+        50
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        10,
+        10
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_slice",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        15,
+        69
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        15,
+        69
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "str_find",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_shift10",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_shift10",
+      "pos": [
+        23,
+        54
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        29,
+        22
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        90
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        27,
+        102
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        28,
+        82
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        29,
+        22
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_text",
+      "pos": [
+        25,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        89
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        40,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        89
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        36,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "int_parse",
+      "pos": [
+        40,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        44,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        44,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_valid",
+      "pos": [
+        46,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        83
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        56,
+        104
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        84
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        122
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        127
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        57,
+        148
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        54,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        63
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        103
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        146
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        151
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "utf8_encode",
+      "pos": [
+        58,
+        172
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_none",
+      "pos": [
+        12,
+        33
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_space",
+      "pos": [
+        14,
+        128
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_space",
+      "pos": [
+        14,
+        128
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_digits",
+      "pos": [
+        17,
+        63
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_digits",
+      "pos": [
+        17,
+        63
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        21,
+        72
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        21,
+        72
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_hex4",
+      "pos": [
+        22,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        25,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        28,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        31,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        25,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        28,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        31,
+        34
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_escape_width",
+      "pos": [
+        32,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        83
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        113
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        83
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_utf8_width",
+      "pos": [
+        35,
+        113
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_unit",
+      "pos": [
+        43,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_unit",
+      "pos": [
+        43,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_end",
+      "pos": [
+        46,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_string_end",
+      "pos": [
+        46,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        49,
+        56
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        52,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        95
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        56,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        49,
+        56
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        51,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        52,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        95
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        54,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_number_end",
+      "pos": [
+        56,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_plain_end",
+      "pos": [
+        62,
+        105
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_plain_end",
+      "pos": [
+        62,
+        105
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        69,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        70,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        73,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        74,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        75,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        69,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        70,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        73,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        74,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan",
+      "pos": [
+        75,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        80,
+        91
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        49
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        65
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        80,
+        91
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        49
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_sequence_step",
+      "pos": [
+        81,
+        65
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        83,
+        50
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        83,
+        50
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_scan_item",
+      "pos": [
+        86,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_parse",
+      "pos": [
+        90,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        106,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        107,
+        43
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        110,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        111,
+        48
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        112,
+        16
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        106,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        107,
+        43
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        110,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        111,
+        48
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        112,
+        16
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_text",
+      "pos": [
+        102,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        64
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        64
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_count",
+      "pos": [
+        120,
+        76
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        90
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        125,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_get",
+      "pos": [
+        122,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        132,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        132,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_array_values",
+      "pos": [
+        129,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        136,
+        31
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        136,
+        31
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip_string",
+      "pos": [
+        137,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        142,
+        23
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        144,
+        17
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        146,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        142,
+        23
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        144,
+        17
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_skip",
+      "pos": [
+        146,
+        115
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        152,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        154,
+        61
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        152,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_member",
+      "pos": [
+        154,
+        61
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        84
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        162,
+        84
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_key_equal",
+      "pos": [
+        159,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        82
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        169,
+        82
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index_room",
+      "pos": [
+        168,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        173,
+        57
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        174,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        124
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        159
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        173,
+        57
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        174,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        175,
+        99
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        124
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        176,
+        159
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_index",
+      "pos": [
+        172,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        181,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        182,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        183,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        184,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        181,
+        39
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        182,
+        33
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        183,
+        30
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        184,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_get",
+      "pos": [
+        179,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        66
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        14
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        192,
+        66
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        97
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        109
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        193,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        14
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        194,
+        67
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_quote",
+      "pos": [
+        190,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        201,
+        119
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        198,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        201,
+        119
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "json_compact",
+      "pos": [
+        198,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        30,
+        17
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        32,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        35,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        35,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        30,
+        17
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        32,
+        15
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        44
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        33,
+        98
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        35,
+        87
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hash_bytes",
+      "pos": [
+        35,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "file_open",
+      "pos": [
+        7,
+        22
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "file_open",
+      "pos": [
+        6,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "file_read",
+      "pos": [
+        43,
+        58
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "file_read",
+      "pos": [
+        44,
+        41
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "file_read",
+      "pos": [
+        41,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "file_read",
+      "pos": [
+        45,
+        54
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "file_write_step",
+      "pos": [
+        50,
+        103
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "fs_read",
+      "pos": [
+        57,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "fs_store",
+      "pos": [
+        61,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "fs_store",
+      "pos": [
+        61,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "fs_store",
+      "pos": [
+        61,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "env_get",
+      "pos": [
+        71,
+        17
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "env_get",
+      "pos": [
+        70,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "cli_arg",
+      "pos": [
+        77,
+        42
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "random_step",
+      "pos": [
+        5,
+        52
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "random_step",
+      "pos": [
+        5,
+        79
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "random_step",
+      "pos": [
+        6,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "random_bytes",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "random_bytes",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "random_i64",
+      "pos": [
+        18,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        8,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        8,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        8,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_empty",
+      "pos": [
+        8,
+        35
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "array push size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        26
+      ],
+      "kind": "array push size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_push",
+      "pos": [
+        10,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        16,
+        86
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        16,
+        86
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        17,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        22,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        25
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        29
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        26,
+        53
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_heap_down",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        36,
+        27
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        36,
+        27
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "vector_sort",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        109
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        50
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        20
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        4,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        60
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        78
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_document",
+      "pos": [
+        7,
+        109
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        12,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        12,
+        118
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        40
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        9,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        12,
+        104
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "__m375c8dad3a3db1aa_library_collections",
+      "pos": [
+        12,
+        118
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        14,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_empty__73a3018f01cece1e86e8",
+      "pos": [
+        12,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_get__73a3018f01cece1e86e8",
+      "pos": [
+        35,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        24,
+        94
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        26,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        26,
+        58
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        23,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        24,
+        94
+      ],
+      "kind": "integer division overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        26,
+        27
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        26,
+        58
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_slot__73a3018f01cece1e86e8",
+      "pos": [
+        23,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        59,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        59,
+        52
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        62
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        59,
+        36
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        59,
+        52
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        46
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        62
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_put__73a3018f01cece1e86e8",
+      "pos": [
+        61,
+        94
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_rehash__73a3018f01cece1e86e8",
+      "pos": [
+        47,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        44,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        44,
+        77
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        40,
+        5
+      ],
+      "kind": "array allocation size overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        44,
+        21
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "hashmap_insert_slot__73a3018f01cece1e86e8",
+      "pos": [
+        44,
+        77
+      ],
+      "kind": "integer overflow"
+    }
+  ],
+  "literal_inlined_functions": [
+    "bytes_error",
+    "int_error",
+    "json_get",
+    "json_literal_at",
+    "map_get",
+    "map_put",
+    "rt_connection_token",
+    "rt_find",
+    "rt_header",
+    "str_find"
+  ],
+  "backend": "llvm-ir",
+  "ir": "/axon/examples/.axon-build/bdff0142064fd2e6.ll",
+  "build": {
+    "cache": "miss",
+    "graph": "41a61d26d64d82e3",
+    "llvm_seconds": 0.68,
+    "warnings": "clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]",
+    "total_seconds": 3.6424
+  },
+  "binary": "/axon/bench/json/results/2026-10-24-180644/axon-json",
+  "runtime": "Axon kernel syscalls; no libc function imports",
+  "loader_dependency": "none (static ELF)",
+  "undefined_symbols": [],
+  "binary_sha256": "a7f27f8db070cfde4f366e57abd856f171ef1712312e021b043a78c841dc655b",
+  "cache_key": "bdff0142064fd2e6e936bff4096a351b225cf0bcdb1f2b6092113b6e207d4304",
+  "sources": {
+    "/axon/runtime/core.ax": "4d869a4eb10d5a667deb44cbf9cc448d8d14a0cfdb1bff0255e1d813462ffaae",
+    "/axon/runtime/platform_linux.ax": "0a6587fd1c3eae52b6db778cff077aa03011ace76967fb8badaa7bc3f4db1a2f",
+    "/axon/runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "/axon/runtime/handles.ax": "20a4aecc79b7c6fb433bfdf0f10dfdd0bd48467d01cc583a6a300e1efae52cc0",
+    "/axon/runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1",
+    "/axon/stdlib/errors.ax": "f32e6108eea42558ee1c758bbd548a101c63fa6ec7f37e772c783bbdebb12e06",
+    "/axon/stdlib/strings.ax": "3502786f86db4941c18e946846b39b9e39750446de728248719cd043f9dab75b",
+    "/axon/stdlib/json.ax": "c52358bff623196fb8b7a40d43e173f9d1c173fba6650a86921967f47f2bdec8",
+    "/axon/stdlib/hash.ax": "cdb9ce802d537a1ee04ef336c7d196fa5db8205ee86843945af87c7e8d5327b6",
+    "/axon/stdlib/option.ax": "92c2414e4e960709dea9d5be2e0e4046dc5e71517086762e1257dfbe85f9e10b",
+    "/axon/stdlib/result.ax": "f082a48d13219631e85f8aa9c3e1dc575fcdd572b4bfb07197be70d842087ce2",
+    "/axon/stdlib/io.ax": "f1fb308f201b9ec4789cff29e81147761d0c75813b1a07e9c19209a31baf1194",
+    "/axon/stdlib/random.ax": "aa89394c4126ea9cd3d17266ca3137af42f0d2b24502797271cb40c246c0a249",
+    "/axon/stdlib/hashmap.ax": "283ca7ba7d7fc397132b782558452c89f3dd3a3e1807a955dafb00b457b754fc",
+    "/axon/stdlib/collections.ax": "7bfa6a2f6901c784276ab891e455af57c12b86b9f074b4694a0f68e50b96d46c",
+    "/axon/examples/library_bench.ax": "20e49c67461fbd00e635d0299d76fd79a4e8d59630259a0886181ef4d51f50b9"
+  }
+}

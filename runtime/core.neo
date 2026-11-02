@@ -1,0 +1,465 @@
+; Freestanding Neo runtime. No extern declarations and no libc calls.
+; Globals and syscalls are compiler primitives; policy and allocation are Neo.
+; State: envp@0, errno@8, cpu cache@16, slab bump@24, remaining@32,
+; parked large block shared@136/private@144; private slab@152/160, heap mode@184,
+; selected small-buffer allocator@192.
+; Shared free lists/counts@256/768; private free lists/counts@512/1024.
+; One private state per process. Freed mapped blocks are retained per class
+; up to 64 MiB per heap kind (retained bytes@1280 shared, @1288 private).
+; Each aligned payload has a 16-byte header: managed reference count, followed
+; by class/flags. Capacity is 16 << class, so it needs no redundant size word.
+
+export effect fn ax_runtime_init (envp : ptr) -> unit
+  = let saved=store_ptr(runtime_state(),0,envp) in
+    let allocator=if rt_heap_mode()==1 then addr(rt_heap_small_private) else addr(rt_heap_small_shared) in
+    store_ptr(runtime_state(),192,allocator)
+
+effect fn rt_errno () -> ptr = ptr_add(runtime_state(), 8)
+effect fn rt_result (value : i64) -> i64
+  = if value < 0 then let saved = store_i32(rt_errno(), 0, i32(0 - value)) in -1 else value
+
+effect fn rt_cstrlen (text : ptr) -> i64
+  = loop (i = 0) while volatile_load_u8(text, i) != u8(0) next (i + 1) yield i
+
+effect fn rt_write_all (fd : i64, text : ptr, n : i64) -> unit
+  = let done = loop (offset = 0) while offset >= 0 && offset < n
+      next (let count = rt_write(fd, ptr_add(text, offset), n - offset) in
+            if count > 0 then offset + count
+            else if count < 0 && load_i32(rt_errno(), 0) == i32(4) then offset else -1)
+      yield offset in noop()
+
+effect fn rt_puts (fd : i64, text : ptr) -> unit = rt_write_all(fd, text, rt_cstrlen(text))
+
+export effect fn ax_trap (message : ptr) -> unit
+  = let prefix = rt_write_all(2, data("neo: trap: "), 11) in
+    let body = rt_puts(2, message) in let newline = rt_write_all(2, data("\n"), 1) in ax_exit(1)
+
+; Plain unaligned word loops let LLVM vectorize these into wide loads/stores.
+; The compiler marks only these runtime definitions "no-builtins", so loop
+; idiom recognition cannot turn them back into recursive libcalls; every other
+; function may use llvm.memcpy/memset and have its own loops recognized.
+; Up to 32 bytes are copied as two or four overlapping words with no loop: the
+; many short copies of literal pieces otherwise pay three loop setups each.
+; Every word is loaded before any is stored, as memmove's forward case needs.
+export effect fn memcpy (dst : ptr, src : ptr, n : i64) -> ptr
+  = if n <= 32 then
+      if n > 16 then
+        let a = load_i64(src, 0) in let b = load_i64(src, 8) in let c = load_i64(src, n - 16) in let d = load_i64(src, n - 8) in
+        let sa = store_i64(dst, 0, a) in let sb = store_i64(dst, 8, b) in
+        let sc = store_i64(dst, n - 16, c) in let sd = store_i64(dst, n - 8, d) in dst
+      else if n >= 8 then
+        let a = load_i64(src, 0) in let b = load_i64(src, n - 8) in
+        let sa = store_i64(dst, 0, a) in let sb = store_i64(dst, n - 8, b) in dst
+      else if n >= 4 then
+        let a = load_i32(src, 0) in let b = load_i32(src, n - 4) in
+        let sa = store_i32(dst, 0, a) in let sb = store_i32(dst, n - 4, b) in dst
+      else let tail = loop (i = 0) while i < n
+        next (let copied = store_u8(dst, i, load_u8(src, i)) in i + 1) yield i in dst
+    else
+    let blocks = loop (i = 0) while i + 32 <= n
+      next (let a = load_i64(src, i) in let b = load_i64(src, i + 8) in
+            let c = load_i64(src, i + 16) in let d = load_i64(src, i + 24) in
+            let sa = store_i64(dst, i, a) in let sb = store_i64(dst, i + 8, b) in
+            let sc = store_i64(dst, i + 16, c) in let sd = store_i64(dst, i + 24, d) in i + 32) yield i in
+    let words = loop (i = blocks) while i + 8 <= n
+      next (let copied = store_i64(dst, i, load_i64(src, i)) in i + 8) yield i in
+    let tail = loop (i = words) while i < n
+      next (let copied = store_u8(dst, i, load_u8(src, i)) in i + 1) yield i in dst
+
+; Forward copies read each 32-byte block before writing it, so a destination
+; below the source is safe. A higher destination copies backward.
+export effect fn memmove (dst : ptr, src : ptr, n : i64) -> ptr
+  = if ptr_to_i64(dst) <= ptr_to_i64(src) then memcpy(dst, src, n)
+    else let blocks = loop (left = n) while left >= 32
+      next (let a = load_i64(src, left - 8) in let b = load_i64(src, left - 16) in
+            let c = load_i64(src, left - 24) in let d = load_i64(src, left - 32) in
+            let sa = store_i64(dst, left - 8, a) in let sb = store_i64(dst, left - 16, b) in
+            let sc = store_i64(dst, left - 24, c) in let sd = store_i64(dst, left - 32, d) in left - 32) yield left in
+    let words = loop (left = blocks) while left >= 8
+      next (let copied = store_i64(dst, left - 8, load_i64(src, left - 8)) in left - 8) yield left in
+    let tail = loop (left = words) while left > 0
+      next (let copied = store_u8(dst, left - 1, load_u8(src, left - 1)) in left - 1) yield left in dst
+
+export effect fn memset (dst : ptr, byte : i32, n : i64) -> ptr
+  = let b = (i64(byte) % 256 + 256) % 256 in
+    let pattern = b * 72340172838076673 in
+    let blocks = loop (i = 0) while i + 32 <= n
+      next (let a = store_i64(dst, i, pattern) in let b = store_i64(dst, i + 8, pattern) in
+            let c = store_i64(dst, i + 16, pattern) in let d = store_i64(dst, i + 24, pattern) in i + 32) yield i in
+    let words = loop (i = blocks) while i + 8 <= n
+      next (let cleared = store_i64(dst, i, pattern) in i + 8) yield i in
+    let tail = loop (i = words) while i < n
+      next (let cleared = store_u8(dst, i, u8(b)) in i + 1) yield i in dst
+
+; LLVM may lower merged comparisons to memcmp/bcmp once builtins are allowed.
+export effect fn memcmp (a : ptr, b : ptr, n : i64) -> i32
+  = let words = loop (i = 0) while i + 8 <= n && load_i64(a, i) == load_i64(b, i) next (i + 8) yield i in
+    loop (i = words, result = 0) while result == 0 && i < n
+      next (i + 1, i64(load_u8(a, i)) - i64(load_u8(b, i))) yield i32(result)
+
+export effect fn bcmp (a : ptr, b : ptr, n : i64) -> i32
+  = let words = loop (i = 0) while i + 8 <= n && load_i64(a, i) == load_i64(b, i) next (i + 8) yield i in
+    if words + 8 <= n then i32(1) else
+    loop (i = words, same = true) while same && i < n next (i + 1, load_u8(a, i) == load_u8(b, i)) yield if same then i32(0) else i32(1)
+
+; Darwin's loop-idiom pass may emit this for repeating 16-byte patterns.
+export effect fn memset_pattern16 (dst : ptr, pattern : ptr, n : i64) -> unit
+  = let low = load_i64(pattern, 0) in let high = load_i64(pattern, 8) in
+    let blocks = loop (i = 0) while i + 16 <= n
+      next (let a = store_i64(dst, i, low) in let b = store_i64(dst, i + 8, high) in i + 16) yield i in
+    let tail = loop (i = blocks) while i < n
+      next (let copied = store_u8(dst, i, load_u8(pattern, i - blocks)) in i + 1) yield i in noop()
+
+export effect fn bzero (dst : ptr, n : i64) -> unit
+  = let cleared = memset(dst, i32(0), n) in noop()
+
+export fn ax_cap (bytes : i64) -> i64
+  = loop (capacity = 16) while capacity < bytes && capacity <= 4611686018427387903
+      next (capacity * 2) yield capacity
+
+type RuntimeAllocationClass = { capacity: i64, index: i64 }
+fn rt_allocation_class (bytes: i64) -> RuntimeAllocationClass
+  = loop (c = 16, k = 0) while c < bytes next (c * 2, k + 1)
+      yield RuntimeAllocationClass { capacity = c, index = k }
+
+; A freed mapped block that the retention cap below would unmap is parked
+; instead: one block per heap kind (shared@136, private@144). The next
+; allocation of the same class takes it back with its pages still resident,
+; so a loop that replaces a large array each pass stops faulting in and
+; clearing fresh pages. Every new allocator mapping first unmaps both parked
+; blocks, and a newly parked block unmaps the previous one, so resident memory
+; never exceeds what was live just before the free.
+; These paths stay out of line (cold): the allocator's inlined fast paths
+; keep their previous size.
+effect fn rt_unpark(at:i64) -> unit
+  = let p=load_ptr(runtime_state(),at) in if p==null() then noop() else
+    let cleared=store_ptr(runtime_state(),at,null()) in
+    let unmapped=rt_munmap(ptr_add(p,-16),shift_left(16,load_i64(p,-8)/4)+16) in noop()
+cold effect fn rt_unpark_all() -> unit = let shared_parked=rt_unpark(136) in rt_unpark(144)
+cold effect fn rt_park(p:ptr,is_private:bool) -> unit
+  = let at=if is_private then 144 else 136 in let previous=rt_unpark(at) in store_ptr(runtime_state(),at,p)
+; Private managed blocks of 4 MiB or more ask for transparent huge pages
+; (MADV_HUGEPAGE) over the 2 MiB-aligned regions that their requested bytes
+; cover entirely: one fault and one TLB entry per 2 MiB instead of 512. A
+; managed array writes every element when it is created, so those regions
+; are resident either way; the partial region at the end keeps 4 KiB pages
+; and the block's resident size is unchanged. Kernels without THP, or with
+; it disabled, ignore the advice.
+effect fn rt_advise_block(header:ptr,bytes:i64) -> unit
+  = let start=ptr_to_i64(header) in let stop=bit_and(start+16+bytes,0-2097152) in
+    if stop-start<2097152 then noop() else let advised=rt_advise_huge(header,stop-start) in noop()
+effect fn rt_map_kind(bytes:i64,is_private:bool) -> ptr
+  = let evicted=rt_unpark_all() in
+    let address=if is_private then rt_private_map(bytes) else rt_mmap(bytes) in
+    if address<0 then let failed=ax_trap(data("mmap failed\0")) in null() else ptr_from_i64(address)
+effect fn rt_map(bytes:i64) -> ptr = rt_map_kind(bytes,false)
+; A mapped block of class k: the parked block when it has that class, else a
+; fresh mapping; large private managed blocks get the huge page advice.
+cold effect fn rt_large_block(bytes:i64,capacity:i64,k:i64,is_private:bool) -> ptr
+  = let state=runtime_state() in let at=if is_private then 144 else 136 in let parked=load_ptr(state,at) in
+    let block=if parked!=null() && load_i64(parked,-8)/4==k then let taken=store_ptr(state,at,null()) in ptr_add(parked,-16)
+      else rt_map_kind(capacity+16,is_private) in
+    let advised=if is_private && k>=18 then rt_advise_block(block,bytes) else noop() in block
+; Raw allocations preserve their cross-fork shared mapping contract. Managed
+; arrays use private pages with one numeric worker; multiple workers retain
+; shared pages for the allocating fork dispatcher. A program whose parallel
+; regions all run on shared-address threads has mode 1 (private) preset by the
+; compiler's main. Their pools never mix.
+export effect fn ax_alloc(bytes:i64) -> ptr = ax_allocate(bytes,false)
+effect fn rt_heap_mode() -> i64
+  = let mode=load_i64(runtime_state(),184) in
+    let selected=if mode!=0 then mode else if rt_threads()==1 then 1 else 2 in
+    let cached=if mode!=0 then noop() else store_i64(runtime_state(),184,selected) in selected
+export effect fn ax_heap_alloc(bytes:i64) -> ptr
+  = let p=ax_allocate(bytes,rt_heap_mode()==1) in let initialized=store_i64(p,-16,1) in p
+; Small managed buffers have a fixed size class and never need mapped-block
+; cache accounting. The compiler exposes this path for payloads up to 16 bytes.
+export effect fn ax_heap_small(bytes:i64{bytes>=0 && bytes<=16}) -> ptr
+  = if rt_heap_mode()==1 then rt_heap_small_private(bytes) else rt_heap_small_shared(bytes)
+effect fn rt_heap_small_record(bytes:i64) -> unit
+  = if !allocation_stats_enabled() then noop() else
+      let count=store_i64(runtime_state(),64,load_i64(runtime_state(),64)+1) in
+      store_i64(runtime_state(),80,load_i64(runtime_state(),80)+bytes)
+effect fn rt_heap_small_private(bytes:i64) -> ptr
+  = let recorded=rt_heap_small_record(bytes) in rt_heap_small_kind(true)
+effect fn rt_heap_small_shared(bytes:i64) -> ptr
+  = let recorded=rt_heap_small_record(bytes) in rt_heap_small_kind(false)
+effect fn rt_heap_small_kind(is_private:bool) -> ptr
+  = let state=runtime_state() in
+    let heads=if is_private then 512 else 256 in let bump=if is_private then 152 else 24 in
+    let cached=load_ptr(state,heads) in let header=if cached!=null() then
+      let popped=store_ptr(state,heads,load_ptr(cached,0)) in ptr_add(cached,-16) else
+      let refill=if load_i64(state,bump+8)<32 then
+        let chunk=store_ptr(state,bump,rt_map_kind(65536,is_private)) in store_i64(state,bump+8,65536) else noop() in
+      let header=load_ptr(state,bump) in
+      let advanced=store_ptr(state,bump,ptr_add(header,32)) in
+      let remaining=store_i64(state,bump+8,load_i64(state,bump+8)-32) in header in
+    let references=store_i64(header,0,1) in
+    let metadata=store_i64(header,8,if is_private then 3 else 1) in ptr_add(header,16)
+effect fn ax_allocate(bytes:i64,is_private:bool) -> ptr
+  = let recorded=if !allocation_stats_enabled() then noop() else
+      let count=store_i64(runtime_state(),64,load_i64(runtime_state(),64)+1) in
+      store_i64(runtime_state(),80,load_i64(runtime_state(),80)+bytes) in
+    if bytes<0 || bytes>4611686018427387904 then let failed=ax_trap(data("allocation size out of range\0")) in null() else
+    let allocation=rt_allocation_class(bytes) in let capacity=allocation.capacity in let k=allocation.index in let state=runtime_state() in
+    let heads=if is_private then 512 else 256 in let counts=if is_private then 1024 else 768 in let bump=if is_private then 152 else 24 in
+    let cached=if k>26 then null() else load_ptr(state,heads+k*8) in
+    if cached!=null() then
+      let popped=store_ptr(state,heads+k*8,load_ptr(cached,0)) in
+      ; Slab blocks are retained until process exit regardless of list length.
+      ; Individually mapped blocks are counted against the retained-byte cap.
+      let count=if capacity<=32768 then noop() else
+        let listed=store_i64(state,counts+k*8,load_i64(state,counts+k*8)-1) in rt_retained_add(is_private,0-capacity) in cached else
+    let header=if capacity>32768 then rt_large_block(bytes,capacity,k,is_private) else
+      let available=load_i64(state,bump+8) in
+      let refill=if available<capacity+16 then
+        let chunk=store_ptr(state,bump,rt_map_kind(65536,is_private)) in store_i64(state,bump+8,65536) else noop() in
+      let p=load_ptr(state,bump) in let advanced=store_ptr(state,bump,ptr_add(p,capacity+16)) in
+      let remaining=store_i64(state,bump+8,load_i64(state,bump+8)-capacity-16) in p in
+    let metadata=store_i64(header,8,k*4+(if capacity<=32768 then 1 else 0)+(if is_private then 2 else 0)) in ptr_add(header,16)
+; Retained bytes of freed mapped blocks, per heap kind, at 1280/1288.
+effect fn rt_retained_add(is_private:bool,delta:i64) -> unit
+  = let at=if is_private then 1288 else 1280 in store_i64(runtime_state(),at,load_i64(runtime_state(),at)+delta)
+effect fn ax_allocation_capacity(p:ptr) -> i64 = shift_left(16,load_i64(p,-8)/4)
+; Freed mapped blocks stay mapped on their class list while all retained
+; mapped blocks of that heap kind total at most 64 MiB. Reusing them avoids
+; page faults and kernel page clearing on every large temporary array. A block
+; beyond that cap is parked (see rt_unpark) rather than unmapped.
+effect fn ax_release(p:ptr) -> unit
+  = if p==null() then noop() else
+    let metadata=load_i64(p,-8) in let k=metadata/4 in
+    let is_private=bit_and(metadata,2)!=0 in let heads=if is_private then 512 else 256 in let counts=if is_private then 1024 else 768 in let state=runtime_state() in
+    let pooled=metadata%2!=0 in let capacity=shift_left(16,k) in
+    let retained=load_i64(state,if is_private then 1288 else 1280) in
+    if !pooled && (k>26 || retained+capacity>67108864) then rt_park(p,is_private) else
+      let link=store_ptr(p,0,load_ptr(state,heads+k*8)) in let head=store_ptr(state,heads+k*8,p) in
+      if pooled then noop() else let listed=store_i64(state,counts+k*8,load_i64(state,counts+k*8)+1) in rt_retained_add(is_private,capacity)
+
+export effect fn ax_free (p : ptr, bytes : i64) -> unit = ax_release(p)
+
+export effect fn calloc (n : i64, size : i64) -> ptr
+  = if n < 0 || size < 0 || (size > 0 && n > 9223372036854775807 / size) then
+      let failed = ax_trap(data("calloc overflow\0")) in null()
+    else let bytes = n * size in let p = ax_alloc(bytes) in memset(p, i32(0), bytes)
+
+; A forked child must not reuse a parent's shared allocator slab or free lists.
+effect fn rt_fork () -> i64
+  = let pid = fork_syscall() in
+    if pid != 0 then pid else
+      let slab = memset(ptr_add(runtime_state(), 24), i32(0), 16) in
+      let reset = memset(ptr_add(runtime_state(), 256), i32(0), 1792) in
+      let cache = memset(ptr_add(runtime_state(),136),i32(0),32) in
+      let handles = rt_handle_after_fork() in 0
+
+effect fn rt_env_match (entry : ptr, name : ptr) -> bool
+  = let length = rt_cstrlen(name) in
+    let matched = loop (i = 0, ok = true) while ok && i < length
+      next (i + 1, load_u8(entry, i) == load_u8(name, i)) yield ok in
+    matched && load_u8(entry, length) == '='
+
+; NEO_ variables fall back to their legacy AXON_ names (see neoc/legacy.py).
+effect fn rt_getenv_legacy (name : ptr, legacy : ptr) -> ptr
+  = let value = rt_getenv(name) in if value == null() then rt_getenv(legacy) else value
+
+effect fn rt_getenv (name : ptr) -> ptr
+  = let envp = load_ptr(runtime_state(), 0) in
+    if envp == null() then null() else
+      loop (i = 0, found = null()) while found == null() && load_ptr(envp, i * 8) != null()
+        next (i + 1, let entry = load_ptr(envp, i * 8) in
+              if rt_env_match(entry, name) then ptr_add(entry, rt_cstrlen(name) + 1) else null()) yield found
+
+fn rt_digit_ok (acc : i64, digit : i64, negative : bool) -> bool
+  = digit >= 0 && digit <= 9 && acc >= -922337203685477580 &&
+    (acc != -922337203685477580 || digit <= (if negative then 8 else 7))
+
+export effect fn ax_parse_i64 (text : ptr, name : ptr) -> i64
+  = let first = load_u8(text, 0) in
+    let negative = first == '-' in
+    let start = if negative || first == '+' then 1 else 0 in
+    loop (i = start, acc = 0, ok = true, digits = 0)
+      while ok && load_u8(text, i) != u8(0)
+      next (i + 1,
+            let digit = i64(load_u8(text, i)) - 48 in if rt_digit_ok(acc, digit, negative) then acc * 10 - digit else acc,
+            rt_digit_ok(acc, i64(load_u8(text, i)) - 48, negative), digits + 1)
+      yield if !ok || digits == 0 then
+        let prefix = rt_write_all(2, data("neo: argument "), 14) in
+        let label = rt_puts(2, name) in let message = rt_write_all(2, data(": not an integer: "), 18) in
+        let value = rt_puts(2, text) in let newline = rt_write_all(2, data("\n"), 1) in
+        let stopped = ax_exit(2) in 0
+      else if negative then acc else 0 - acc
+
+; Every parallel construct asks for the worker budget, including small array
+; comprehensions; the environment is read once and cached at 1600 (cleared for
+; forked children with the rest of the allocator/pool state).
+effect fn rt_threads () -> i64 {result >= 1, result <= 256}
+  = let cached = load_i64(runtime_state(), 1600) in
+    if cached >= 1 && cached <= 256 then cached else
+    let e = rt_getenv_legacy(data("NEO_THREADS\0"), data("AXON_THREADS\0")) in
+    let n = if e == null() then rt_ncpu() else ax_parse_i64(e, data("NEO_THREADS\0")) in
+    let bounded = if n < 1 then 1 else if n > 256 then 256 else n in
+    let saved = store_i64(runtime_state(), 1600, bounded) in bounded
+
+export effect fn ax_chunks (n : i64) -> i64
+  = let t = rt_threads() in if n <= 0 then 0 else if t == 1 || n < 1024 then 1
+    else if n < t * 8 then n else t * 8
+
+; Cheap vector bodies need enough work to repay creating kernel workers.
+; Division avoids overflowing n*cost. Calls/loops use the default dispatcher.
+export effect fn ax_chunks_work(n: i64, cost: i64) -> i64
+  = let threads = rt_threads() in
+    let estimate = if cost < 1 then 1 else cost in
+    if n < threads * 1048576 / estimate then (if n <= 0 then 0 else 1) else ax_chunks(n)
+
+export effect fn ax_par_for (chunks : i64, work : ptr, context : ptr) -> unit
+  = if chunks <= 0 then noop() else
+    let configured = rt_threads() in
+    let workers = if chunks < configured then chunks else configured in
+    let pids = stack_alloc(2048) in
+    let launched = loop (worker = 0) while worker + 1 < workers
+      next (let pid = rt_fork() in
+            if pid == 0 then
+              let done = loop (i = chunks * worker / workers) while i < chunks * (worker + 1) / workers
+                next (let ran = invoke_region(work, context, i) in i + 1) yield i in
+              let exited = ax_exit(0) in workers
+            else let saved = store_i64(pids, worker * 8, pid) in
+              let fallback = if pid < 0 then
+                let done = loop (i = chunks * worker / workers) while i < chunks * (worker + 1) / workers
+                  next (let ran = invoke_region(work, context, i) in i + 1) yield i in noop()
+              else noop() in worker + 1)
+      yield worker in
+    let done = loop (i = chunks * (workers - 1) / workers) while i < chunks
+      next (let ran = invoke_region(work, context, i) in i + 1) yield i in
+    let joined = loop (worker = 0) while worker + 1 < workers
+      next (let pid = load_i64(pids, worker * 8) in
+            let status = if pid > 0 then rt_wait(pid) else 0 in
+            let failed = if status != 0 then ax_trap(data("parallel worker failed\0")) else noop() in worker + 1)
+      yield worker in noop()
+
+export effect fn ax_usage (program : ptr, names : ptr) -> unit
+  = let prefix = rt_write_all(2, data("usage: "), 7) in let p = rt_puts(2, program) in
+    let space = rt_write_all(2, data(" "), 1) in let n = rt_puts(2, names) in rt_write_all(2, data("\n"), 1)
+
+export effect fn ax_precondition_failed (predicate : ptr) -> unit
+  = let prefix = rt_write_all(2, data("neo: precondition failed: "), 26) in
+    let p = rt_puts(2, predicate) in rt_write_all(2, data("\n"), 1)
+
+effect fn rt_format_integer (buffer : ptr, end : i64, value : i64) -> i64
+  = let negative = value < 0 in
+    let mag = if negative then value else 0 - value in
+    let start = loop (v = mag, i = end, again = true) while again
+      next (v / 10, let written = store_u8(buffer, i - 1, u8(48 - v % 10)) in i - 1, v <= -10)
+      yield i in
+    if negative then let sign = store_u8(buffer, start - 1, '-') in start - 1 else start
+
+export effect fn ax_print_i64 (v : i64) -> unit
+  = let buffer = stack_alloc(64) in
+    let start = rt_format_integer(buffer, 63, v) in
+    let newline = store_u8(buffer, 63, '\n') in rt_write_all(1, ptr_add(buffer, start), 64 - start)
+
+type RuntimeFloat = { value : f64, exponent : i64 }
+fn rt_normalize_float (value : f64) -> RuntimeFloat
+  = let high = loop (v = value, e = 0) while v >= 10.0 next (v / 10.0, e + 1)
+      yield RuntimeFloat { value = v, exponent = e } in
+    loop (v = high.value, e = high.exponent) while v < 1.0 next (v * 10.0, e - 1)
+      yield RuntimeFloat { value = v, exponent = e }
+
+export effect fn ax_print_f64 (v : f64) -> unit
+  = if v != v then rt_write_all(1, data("nan\n"), 4)
+    else let negative = float_bits(v) < 0 in
+      let a = if negative then 0.0 - v else v in
+      if a == 0.0 then if negative then rt_write_all(1, data("-0\n"), 3) else rt_write_all(1, data("0\n"), 2)
+      else if a / 2.0 == a then if negative then rt_write_all(1, data("-inf\n"), 5) else rt_write_all(1, data("inf\n"), 4)
+      else let normalized = rt_normalize_float(a) in
+        let rounded = i64(normalized.value * 10000000000000000.0 + 0.5) in
+        let digits = if rounded >= 100000000000000000 then rounded / 10 else rounded in
+        let exponent = normalized.exponent + (if rounded >= 100000000000000000 then 1 else 0) in
+        let buffer = stack_alloc(128) in
+        let sign = if negative then let written = store_u8(buffer, 0, '-') in 1 else 0 in
+        let point = store_u8(buffer, sign + 1, '.') in
+        let written = loop (i = 0, divisor : i64{divisor >= 1} = 10000000000000000) while i < 17
+          next (let digit = store_u8(buffer, sign + (if i == 0 then 0 else i + 1), u8(48 + digits / divisor % 10)) in i + 1,
+                if divisor >= 10 then divisor / 10 else 1) yield i in
+        let e = store_u8(buffer, sign + 18, 'e') in
+        let prefix = rt_write_all(1, buffer, sign + 19) in
+        let start = rt_format_integer(buffer, 127, exponent) in
+        let newline = store_u8(buffer, 127, '\n') in rt_write_all(1, ptr_add(buffer, start), 128 - start)
+
+export effect fn ax_print_bytes (p : ptr, n : i64) -> unit = rt_write_all(1, p, n)
+
+effect fn rt_retry () -> bool
+  = let error = i64(load_i32(rt_errno(), 0)) in error == 4 || error == rt_again()
+
+effect fn rt_nonblock (fd : i64) -> i64
+  = let flags = rt_fcntl(fd, 3, 0) in
+    if flags < 0 then -1
+    else rt_fcntl(fd, 4, if flags / rt_nonblock_flag() % 2 == 1 then flags else flags + rt_nonblock_flag())
+
+effect fn rt_listener (port : i64) -> i64
+  = let fd = rt_socket(2, 1, 0) in
+    if fd < 0 then let failed = ax_trap(data("socket failed\0")) in -1 else
+    let address = stack_alloc(32) in
+    let cleared = memset(address, i32(0), 32) in
+    let family = rt_address(address) in
+    let high = store_u8(address, 2, u8(port / 256)) in
+    let low = store_u8(address, 3, u8(port % 256)) in
+    let one = store_i32(address, 16, i32(1)) in
+    let reuse = rt_setsockopt(fd, rt_socket_level(), rt_reuseaddr(), ptr_add(address, 16), 4) in
+    let bound = rt_bind(fd, address, 16) in
+    if bound < 0 || rt_listen(fd, 4096) < 0 || rt_nonblock(fd) < 0 then
+      let closed = rt_close(fd) in let failed = ax_trap(data("bind/listen failed\0")) in -1
+    else fd
+
+; Allocation-free numeric regions run on a persistent pool of worker threads,
+; started on first use with separate stacks (see neoc/kernel_workers.py). The
+; parent alone owns allocator state; workers only run certified regions. The
+; parent publishes a job, claims chunks from the same counter as the workers,
+; and returns once every worker has released the job, so the context and the
+; region's outputs outlive all worker access. Pool fields live in runtime
+; state at 1536: generation, region, context, next chunk, end, pending; 1584
+; holds the started worker count, or -1 when no worker could be started.
+effect fn ax_claim_chunk(counter: ptr) -> i64
+  = loop(expected = atomic_load_i64(counter, 0), seen = -1) while seen != expected
+      next(if seen < 0 then expected else seen,
+           atomic_compare_exchange_i64(counter, 0, if seen < 0 then expected else seen, (if seen < 0 then expected else seen) + 1))
+      yield expected
+effect fn ax_pool_start(pool: ptr, wanted: i64) -> i64
+  = let started = loop(worker = 0, running = 0) while worker < wanted
+      next(worker + 1, let stack = ax_alloc(1048576) in
+           if rt_thread_spawn(pool, ptr_add(stack, 1048576)) > 0 then running + 1
+           else let released = ax_free(stack, 1048576) in running)
+      yield running in
+    let saved = store_i64(runtime_state(), 1584, if started == 0 then -1 else started) in started
+export effect fn ax_par_for_shared(chunks: i64, work: ptr, context: ptr) -> unit
+  = if chunks <= 0 then noop() else
+    let pool = ptr_add(runtime_state(), 1536) in
+    let configured = rt_threads() in
+    let known = load_i64(runtime_state(), 1584) in
+    let workers = if configured == 1 || chunks == 1 then 0 else if known == 0 then ax_pool_start(pool, configured - 1) else if known < 0 then 0 else known in
+    if workers == 0 then
+      let done = loop(i = 0) while i < chunks next(let ran = invoke_region(work, context, i) in i + 1) yield i in noop()
+    else
+      let job = store_ptr(pool, 8, work) in let job_context = store_ptr(pool, 16, context) in
+      let first = store_i64(pool, 24, 0) in let last = store_i64(pool, 32, chunks) in
+      let pending = atomic_store_i64(pool, 40, workers) in
+      let published = atomic_store_i64(pool, 0, atomic_load_i64(pool, 0) + 1) in
+      let woken = rt_futex_wake(pool, 2147483647) in
+      let counter = ptr_add(pool, 24) in
+      let done = loop(i = ax_claim_chunk(counter)) while i < chunks
+        next(let ran = invoke_region(work, context, i) in ax_claim_chunk(counter)) yield i in
+      let joined = loop(left = atomic_load_i64(pool, 40)) while left != 0
+        next(let waited = rt_futex_wait(ptr_add(pool, 40), left) in atomic_load_i64(pool, 40)) yield left in noop()
+
+; Failure closes the descriptor. All Neo-created socket descriptors used by
+; the subprocess API are close-on-exec; only the duplicated stdio survives.
+effect fn rt_cloexec(fd:i64) -> i64
+  = if fd<0 then fd else let result=rt_fcntl(fd,2,1) in if result>=0 then fd else let closed=rt_close(fd) in -1
+effect fn rt_spawn_exec(path:ptr,argv:ptr,envp:ptr,stdio:i64,stderr:i64) -> i64
+  = let pid=rt_result(fork_syscall()) in if pid!=0 then pid else
+    let input=rt_dup_stdio(stdio,0) in let output=rt_dup_stdio(stdio,1) in let error=rt_dup_stdio(stderr,2) in
+    let result=if input<0 || output<0 || error<0 then -1 else rt_exec(path,argv,envp) in
+    let exited=ax_exit(127) in -1
+
+effect fn rt_socketpair(p:ptr) -> i64
+  = let result=rt_socketpair_raw(p) in if result<0 then result else
+    let first=rt_cloexec(i64(load_i32(p,0))) in let second=rt_cloexec(i64(load_i32(p,4))) in
+    if first<0 || second<0 then let a=if first>=0 then rt_close(first) else 0 in let b=if second>=0 then rt_close(second) else 0 in -1 else 0

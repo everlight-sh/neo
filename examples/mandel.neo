@@ -1,0 +1,16 @@
+; Mandelbrot escape-time, summed over a w x h grid.
+; Every `sum` is parallel by default: the outer one becomes a chunked
+; dispatch_apply, the inner one a plain loop inside each chunk, and `escape`
+; (called from inside a parallel body) is compiled in sequential mode.
+
+fn escape (cx : f64, cy : f64, max : i64) -> i64
+  = loop (zx = 0.0, zy = 0.0, k = 0)
+      while k < max && zx*zx + zy*zy <= 4.0
+      next (zx*zx - zy*zy + cx, 2.0*zx*zy + cy, k + 1)
+      yield k
+
+fn main (w : i64{w > 0}, h : i64{h > 0}, max : i64{max >= 0}) -> i64
+  = sum(y in 0..h)
+      let cy = -1.5 + 3.0 * f64(y) / f64(h) in
+      sum(x in 0..w)
+        escape(-2.0 + 3.0 * f64(x) / f64(w), cy, max)

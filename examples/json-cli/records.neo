@@ -1,0 +1,39 @@
+import "std:json"
+
+fn record_score (value: Json) -> i64 = let field = json_get(value, "score") in json_int(field.value).value
+fn record_valid (value: Json) -> bool
+  = let id = json_get(value, "id") in let name = json_get(value, "name") in let score = json_get(value, "score") in
+    value.kind == 6 && id.present && name.present && score.present && json_int(id.value).ok && json_text(name.value).ok && json_int(score.value).ok
+fn records_take_left (left: Arr Json n, right: Arr Json m, i: i64, j: i64) -> bool
+  = if j >= m then true else if i < 0 || i >= n || j < 0 then false else record_score(left[i]) <= record_score(right[j])
+fn records_sort (values: Arr Json n) -> Arr Json _
+  = if n <= 1 then values else
+    let half = n / 2 in check half >= 0 && half <= n in
+    let left = records_sort(arr(i in 0..half) values[i]) in
+    let right = records_sort(arr(i in half..n) values[i]) in
+    let initial = arr(i in 0..n) json_none().value in
+    loop (i: i64{i >= 0} = 0, j: i64{j >= 0} = 0, out = initial) while i + j < n
+      next (i + (if records_take_left(left, right, i, j) then 1 else 0),
+        j + (if records_take_left(left, right, i, j) then 0 else 1),
+        set(out, i + j, if records_take_left(left, right, i, j) then
+          if i < len(left) then left[i] else json_none().value
+          else if j < len(right) then right[j] else json_none().value)) yield out
+fn records_filter (values: Arr Json n, minimum: i64) -> Arr Json _
+  = let count = sum(i in 0..n) if record_score(values[i]) >= minimum then 1 else 0 in
+    check count >= 0 && count <= n in
+    let initial = arr(i in 0..count) json_none().value in
+    loop (i: i64{i >= 0} = 0, used = 0, out = initial) while i < n
+      next (i + 1, used + (if record_score(values[i]) >= minimum then 1 else 0),
+        if record_score(values[i]) >= minimum && used >= 0 && used < count then set(out, used, values[i]) else out) yield out
+fn records_render (values: Arr Json n) -> Arr u8 _
+  = let body = loop (i: i64{i >= 0} = 0, out = "[") while i < n
+      next (i + 1, concat(out, if i == 0 then "" else ",", values[i].raw)) yield out in concat(body, "]\n")
+fn records_process (source: Arr u8 n, minimum: i64) -> BytesResult
+  = let parsed = json_parse(source) in
+    if !parsed.ok then bytes_error(1, parsed.error.message, parsed.error.position)
+    else if parsed.value.kind != 5 then bytes_error(1, "expected an array of records", 0) else
+      let rows = json_array_values(parsed.value) in
+      let valid = loop (i: i64{i >= 0} = 0, ok = true) while ok && i < len(rows)
+        next (i + 1, record_valid(rows[i])) yield ok in
+      if !valid then bytes_error(1, "records require integer id/score and string name", 0)
+      else bytes_ok(records_render(records_sort(records_filter(rows, minimum))))

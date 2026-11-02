@@ -1,0 +1,750 @@
+=== 13:46:30 axonc check experiments/agent-loop/bsearch/bsearch.ax
+{
+  "ok": false,
+  "program": "289b45aab43706a48204d8c6ea074f0b392b5068a7d43d4f9516a569e69fadaf",
+  "functions": {
+    "search": "2af00e87ca94fdfcb47c817ab26aae8f24cd9a0de4b1b04a910db06eb2936aae",
+    "main": "d0986b9c7bb1585520e2b5916724fa15a918d760030e5d861cb6fe7922d76832"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "search",
+      "node": "f772792f6442",
+      "pos": [
+        7,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(lo >= 0) initially (lo := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "search",
+      "node": "763a0c37c441",
+      "pos": [
+        7,
+        55
+      ],
+      "kind": "invariant",
+      "goal": "(hi < n) initially (hi := (n - 1))",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "search",
+      "node": "ab99e03411f9",
+      "pos": [
+        10,
+        34
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        11,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-lo - ⟨((hi - lo) / 2)⟩ <= 0 && lo - n + ⟨((hi - lo) / 2)⟩ + 1 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "hi": 0,
+        "lo": 0,
+        "n": 1,
+        "r": -1,
+        "⟨((hi - lo) / 2)⟩": -1
+      },
+      "fixes": [
+        "guard: if 0 <= mid && mid < len(a) then … else …",
+        "check 0 <= mid && mid < len(a) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 5,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        11,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-lo - ⟨((hi - lo) / 2)⟩ <= 0 && lo - n + ⟨((hi - lo) / 2)⟩ + 1 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "hi": 0,
+        "lo": 0,
+        "n": 1,
+        "r": -1,
+        "t": 0,
+        "⟨((hi - lo) / 2)⟩": -1,
+        "⟨index#1⟩": 1
+      },
+      "fixes": [
+        "guard: if 0 <= mid && mid < len(a) then … else …",
+        "check 0 <= mid && mid < len(a) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 6,
+      "fn": "search",
+      "node": "190ebab95032",
+      "pos": [
+        10,
+        9
+      ],
+      "kind": "invariant",
+      "goal": "(lo >= 0) preserved (lo := let mid = (lo + ((hi - lo) / 2)) in …)",
+      "normalised": "-⟨if#4⟩ <= 0",
+      "status": "unproven",
+      "counterexample": null,
+      "fixes": [
+        "strengthen the loop condition",
+        "weaken the invariant",
+        "check … in the next expression"
+      ]
+    },
+    {
+      "id": 7,
+      "fn": "search",
+      "node": "ab99e03411f9",
+      "pos": [
+        12,
+        34
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        13,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-lo - ⟨((hi - lo) / 2)⟩ <= 0 && lo - n + ⟨((hi - lo) / 2)⟩ + 1 <= 0)",
+      "status": "unproven",
+      "counterexample": null,
+      "fixes": [
+        "guard: if 0 <= mid && mid < len(a) then … else …",
+        "check 0 <= mid && mid < len(a) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 9,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        13,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-lo - ⟨((hi - lo) / 2)⟩ <= 0 && lo - n + ⟨((hi - lo) / 2)⟩ + 1 <= 0)",
+      "status": "unproven",
+      "counterexample": null,
+      "fixes": [
+        "guard: if 0 <= mid && mid < len(a) then … else …",
+        "check 0 <= mid && mid < len(a) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 10,
+      "fn": "search",
+      "node": "82a56043affd",
+      "pos": [
+        12,
+        9
+      ],
+      "kind": "invariant",
+      "goal": "(hi < n) preserved (hi := let mid = (lo + ((hi - lo) / 2)) in …)",
+      "normalised": "-n + ⟨if#8⟩ + 1 <= 0",
+      "status": "unproven",
+      "counterexample": null,
+      "fixes": [
+        "strengthen the loop condition",
+        "weaken the invariant",
+        "check … in the next expression"
+      ]
+    },
+    {
+      "id": 11,
+      "fn": "search",
+      "node": "ab99e03411f9",
+      "pos": [
+        14,
+        34
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        15,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-lo - ⟨((hi - lo) / 2)⟩ <= 0 && lo - n + ⟨((hi - lo) / 2)⟩ + 1 <= 0)",
+      "status": "unproven",
+      "counterexample": null,
+      "fixes": [
+        "guard: if 0 <= mid && mid < len(a) then … else …",
+        "check 0 <= mid && mid < len(a) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 13,
+      "fn": "main",
+      "node": "68f4ff1d5c86",
+      "pos": [
+        19,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 14,
+      "fn": "main",
+      "node": "3bf0525737fe",
+      "pos": [
+        20,
+        13
+      ],
+      "kind": "range",
+      "goal": "0 <= n",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 14,
+    "proven": 6,
+    "runtime_checks": 1,
+    "unproven": 7
+  }
+}
+=== exit 1
+=== 13:47:32 axonc check experiments/agent-loop/bsearch/bsearch.ax
+{
+  "ok": false,
+  "program": "4c5ab4084673b6be9f252eace5a11e249df043331adcd315adc910e308d50e2f",
+  "functions": {
+    "midpoint": "abfcbc96cca2911a6102859d07e3861e4002d74206814f1bd52e8c26a0463707",
+    "main": "26968a61240b746c51f93fab4542f250aa054d841b904121d45e9c677fd6e3ff"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "midpoint",
+      "node": "1e0786a8e44e",
+      "pos": [
+        6,
+        20
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "midpoint",
+      "node": "a81a4fb1d127",
+      "pos": [
+        5,
+        64
+      ],
+      "kind": "postcondition",
+      "goal": "(lo <= result)",
+      "normalised": "-⟨((hi - lo) / 2)⟩ <= 0",
+      "status": "unproven",
+      "counterexample": {
+        "hi": 0,
+        "lo": 0,
+        "⟨((hi - lo) / 2)⟩": -1
+      },
+      "fixes": [
+        "make the body's shape expose the fact (loop invariant on the yielded state, if/else, let)",
+        "weaken the return refinement",
+        "insert `check … in` before returning"
+      ]
+    },
+    {
+      "id": 3,
+      "fn": "midpoint",
+      "node": "bbaef93f8ef9",
+      "pos": [
+        5,
+        82
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= hi)",
+      "normalised": "-hi + lo + ⟨((hi - lo) / 2)⟩ <= 0",
+      "status": "unproven",
+      "counterexample": {
+        "hi": 0,
+        "lo": 0,
+        "⟨((hi - lo) / 2)⟩": 1
+      },
+      "fixes": [
+        "make the body's shape expose the fact (loop invariant on the yielded state, if/else, let)",
+        "weaken the return refinement",
+        "insert `check … in` before returning"
+      ]
+    },
+    {
+      "id": 4,
+      "fn": "main",
+      "node": "68f4ff1d5c86",
+      "pos": [
+        8,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 5,
+      "fn": "main",
+      "node": "f772792f6442",
+      "pos": [
+        9,
+        14
+      ],
+      "kind": "precondition",
+      "goal": "(lo >= 0) with lo := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "main",
+      "node": "d36cf771386c",
+      "pos": [
+        9,
+        19
+      ],
+      "kind": "precondition",
+      "goal": "(lo <= hi) with hi := (n - 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 6,
+    "proven": 3,
+    "runtime_checks": 1,
+    "unproven": 2
+  }
+}
+=== exit 1
+=== 13:47:50 axonc check experiments/agent-loop/bsearch/bsearch.ax
+{
+  "ok": true,
+  "program": "a9f469b8caff8371cde13a69c3df7cae6752007984781ee477c586fc66dff055",
+  "functions": {
+    "midpoint": "bd3eb154344c20ab62065ae22fd0a475633abeec497b632da07f363356f3a961",
+    "main": "09ffb6765f21d1f52249603041269d1877b7556084618df96b72afd616234110"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "midpoint",
+      "node": "1e0786a8e44e",
+      "pos": [
+        6,
+        28
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "midpoint",
+      "node": "a81a4fb1d127",
+      "pos": [
+        5,
+        64
+      ],
+      "kind": "postcondition",
+      "goal": "(lo <= result)",
+      "normalised": "lo - ⟨if#2⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "midpoint",
+      "node": "bbaef93f8ef9",
+      "pos": [
+        5,
+        82
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= hi)",
+      "normalised": "-hi + ⟨if#2⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "main",
+      "node": "68f4ff1d5c86",
+      "pos": [
+        9,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 5,
+      "fn": "main",
+      "node": "f772792f6442",
+      "pos": [
+        10,
+        14
+      ],
+      "kind": "precondition",
+      "goal": "(lo >= 0) with lo := 0",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "main",
+      "node": "d36cf771386c",
+      "pos": [
+        10,
+        19
+      ],
+      "kind": "precondition",
+      "goal": "(lo <= hi) with hi := (n - 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 6,
+    "proven": 5,
+    "runtime_checks": 1,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:48:07 axonc check experiments/agent-loop/bsearch/bsearch.ax
+{
+  "ok": true,
+  "program": "aa3aea62c8c405e38084be56d9d336f4c19947484c3a734638ebd6175d69aed1",
+  "functions": {
+    "midpoint": "bd3eb154344c20ab62065ae22fd0a475633abeec497b632da07f363356f3a961",
+    "search": "e58c30bfadc677ce9e6e6f25e2da3a925b231431f9b8532a4809ff5cabf1b42c",
+    "main": "b83dc404ee4cdf88a20f6aee35d89d764b15e6a5a697ddbaaf2446e8e9a133da"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "midpoint",
+      "node": "1e0786a8e44e",
+      "pos": [
+        14,
+        28
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "(3 <= 0 || -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "midpoint",
+      "node": "a81a4fb1d127",
+      "pos": [
+        13,
+        64
+      ],
+      "kind": "postcondition",
+      "goal": "(lo <= result)",
+      "normalised": "lo - ⟨if#2⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "midpoint",
+      "node": "bbaef93f8ef9",
+      "pos": [
+        13,
+        82
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= hi)",
+      "normalised": "-hi + ⟨if#2⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "search",
+      "node": "f772792f6442",
+      "pos": [
+        18,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(lo >= 0) initially (lo := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "search",
+      "node": "763a0c37c441",
+      "pos": [
+        18,
+        55
+      ],
+      "kind": "invariant",
+      "goal": "(hi < n) initially (hi := (n - 1))",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "search",
+      "node": "1af212fd43bb",
+      "pos": [
+        21,
+        28
+      ],
+      "kind": "precondition",
+      "goal": "(lo >= 0) with lo := lo",
+      "normalised": "-lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "search",
+      "node": "f51863d53b48",
+      "pos": [
+        21,
+        32
+      ],
+      "kind": "precondition",
+      "goal": "(lo <= hi) with hi := hi",
+      "normalised": "-hi + lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        22,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-⟨call#3⟩ <= 0 && -n + ⟨call#3⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        22,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-⟨call#3⟩ <= 0 && -n + ⟨call#3⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "search",
+      "node": "57dc85475ee0",
+      "pos": [
+        21,
+        9
+      ],
+      "kind": "invariant",
+      "goal": "(lo >= 0) preserved (lo := let mid = midpoint(lo, hi) in …)",
+      "normalised": "-⟨if#7⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "search",
+      "node": "1af212fd43bb",
+      "pos": [
+        23,
+        28
+      ],
+      "kind": "precondition",
+      "goal": "(lo >= 0) with lo := lo",
+      "normalised": "-lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "search",
+      "node": "f51863d53b48",
+      "pos": [
+        23,
+        32
+      ],
+      "kind": "precondition",
+      "goal": "(lo <= hi) with hi := hi",
+      "normalised": "-hi + lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        24,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-⟨call#8⟩ <= 0 && -n + ⟨call#8⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        24,
+        43
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-⟨call#8⟩ <= 0 && -n + ⟨call#8⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "search",
+      "node": "00c0351bfe56",
+      "pos": [
+        23,
+        9
+      ],
+      "kind": "invariant",
+      "goal": "(hi < n) preserved (hi := let mid = midpoint(lo, hi) in …)",
+      "normalised": "-n + ⟨if#12⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "search",
+      "node": "1af212fd43bb",
+      "pos": [
+        25,
+        28
+      ],
+      "kind": "precondition",
+      "goal": "(lo >= 0) with lo := lo",
+      "normalised": "-lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "search",
+      "node": "f51863d53b48",
+      "pos": [
+        25,
+        32
+      ],
+      "kind": "precondition",
+      "goal": "(lo <= hi) with hi := hi",
+      "normalised": "-hi + lo <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "search",
+      "node": "ce5fcbaf8df9",
+      "pos": [
+        26,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= mid && mid < len(a)",
+      "normalised": "(-⟨call#13⟩ <= 0 && -n + ⟨call#13⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "main",
+      "node": "68f4ff1d5c86",
+      "pos": [
+        30,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 20,
+      "fn": "main",
+      "node": "3bf0525737fe",
+      "pos": [
+        31,
+        13
+      ],
+      "kind": "range",
+      "goal": "0 <= n",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 20,
+    "proven": 19,
+    "runtime_checks": 1,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:48:13 axonc build experiments/agent-loop/bsearch/bsearch.ax -o experiments/agent-loop/bsearch/bsearch
+axonc: experiments/agent-loop/bsearch/bsearch  graph aa3aea62c8c405e3  obligations 19/20 proven, 1 runtime checks, 1 parallel regions, build miss
+=== exit 0

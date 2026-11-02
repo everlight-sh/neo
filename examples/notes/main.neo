@@ -1,0 +1,35 @@
+import "model.neo"
+
+effect(env) fn notes_path () -> Arr u8 _
+  = let value = env_get("NEO_NOTES_FILE") in if value.present then value.value else "notes.axlog"
+effect(fs) fn notes_mutate (journal: Journal, state: Notes, request: Arr u8 n, method: Arr u8 m, id: i64) -> Arr u8 _
+  = let values = state.values in let found = notes_find(state, id) in
+    let exists = found >= 0 && found < len(values) && !values[found].deleted in
+    let deletion = str_equal(method, "DELETE") in let creation = str_equal(method, "POST") in
+    let body = if deletion then json_parse("{\"title\":\"\"}") else json_parse(http_body(request)) in
+    let title = json_get(body.value, "title") in let text = json_text(title.value) in
+    if !creation && !exists then let closed = journal_close(journal) in http_json(404, "{\"error\":\"not found\"}")
+    else if !body.ok || !title.present || !text.ok || (!deletion && (len(text.value) < 1 || len(text.value) > 8192)) then
+      let closed = journal_close(journal) in http_json(400, "{\"error\":\"title must be a nonempty UTF-8 string of at most 8192 bytes\"}")
+    else let key = if creation then state.next_id else id in
+      let event = concat("{\"op\":", json_quote(if deletion then "delete" else "put"), ",\"id\":", int_text(key), ",\"title\":", json_quote(text.value), "}") in
+      let committed = journal_commit(journal, event) in
+      if !committed.ok then http_json(503, "{\"error\":\"storage unavailable\"}") else
+        http_json(if creation then 201 else 200, if deletion then "{\"deleted\":true}" else note_json(Note { id = key, title = text.value, deleted = false }))
+effect(fs,env) fn notes_handler (request: Arr u8 n) -> Arr u8 _
+  = let path = http_path(request) in let method = http_method(request) in
+    let list = str_equal(path, "/api/notes") in let item = str_starts(path, "/api/notes/") in let home = str_equal(path, "/") in
+    if !list && !item && !home then http_json(404, "{\"error\":\"not found\"}") else
+      let id = if item then int_parse(str_slice(path, 11, len(path))) else int_ok(0) in
+      if !id.ok || (item && id.value < 1) then http_json(400, "{\"error\":\"invalid id\"}") else
+      if !(str_equal(method, "GET") || (list && str_equal(method, "POST")) || (item && (str_equal(method, "PUT") || str_equal(method, "DELETE")))) then
+        http_json(405, "{\"error\":\"method not allowed\"}") else
+      let journal = journal_begin(notes_path()) in if !journal.ok then http_json(503, "{\"error\":\"storage unavailable\"}") else
+        let state = notes_replay(journal.bytes) in
+        if !state.ok then let closed = journal_close(journal) in http_json(503, "{\"error\":\"corrupt journal\"}") else
+        if !str_equal(method, "GET") then notes_mutate(journal, state, request, method, id.value) else
+          let closed = journal_close(journal) in
+          if home then http_response(200, notes_html(state), "text/html; charset=utf-8") else
+          if list then http_json(200, notes_json(state)) else let found = notes_find(state, id.value) in let values = state.values in
+            if found < 0 || found >= len(values) || values[found].deleted then http_json(404, "{\"error\":\"not found\"}") else http_json(200, note_json(values[found]))
+effect(fs,env,net) fn main (port: i64{port > 0, port < 65536}) -> i64 = serve_effect(port, notes_handler)

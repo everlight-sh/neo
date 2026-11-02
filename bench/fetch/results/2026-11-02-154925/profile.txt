@@ -1,0 +1,46 @@
+== EC handshake profile (30 HTTPS GET /hello, new connection each)
+1894009229 30
+    68.09%  [.] ax_p256_multiply__seq
+    15.11%  [.] ax_tls_handshake__seq
+     8.34%  [.] ax_ecdsa_p256_verify_sha256__seq
+     4.96%  [.] ax_heap_alloc
+     0.54%  [.] ax_rt_heap_mode__seq
+     0.39%  [.] memset
+     0.23%  [.] ax_sha_block__seq
+     0.16%  [k] vma_alloc_folio
+     0.16%  [k] free_unref_page_commit
+     0.15%  [k] asm_sysvec_apic_timer_interrupt
+     0.08%  [.] ax_tls_handshake_append__seq
+     0.08%  [k] bbr_main
+     0.08%  [k] __alloc_pages
+     0.08%  [k] __mod_timer
+== TLS bulk profile (keep-alive, 30 x GET /1m)
+259354482 30
+    66.91%  [.] ax_tls_read_step__seq
+     8.70%  [.] ax_poly_multiply__seq
+     8.02%  [.] ax_p256_multiply__seq
+     3.67%  [.] ax_heap_alloc
+     1.68%  [.] ax_tls_handshake__seq
+     1.14%  [.] memcpy
+     0.93%  [.] memset
+     0.70%  [k] srso_alias_safe_ret
+     0.46%  [.] ax_ecdsa_p256_verify_sha256__seq
+     0.46%  [k] syscall_exit_to_user_mode
+     0.46%  [k] poll_freewait
+     0.46%  [k] _copy_to_iter
+     0.46%  [k] __x64_sys_getpid
+     0.43%  [k] asm_sysvec_apic_timer_interrupt
+== RSA 2048 certificates: 30 HTTPS GET /hello, new connection each
+1904745557 30
+1912697381 30
+    44.40%  [.] ax_tls_handshake__seq
+    29.16%  [.] ax_rsa_verify_pss_sha256__seq
+    17.34%  [.] memset
+     5.02%  [.] ax_heap_alloc
+     0.53%  [.] ax_free
+     0.53%  [.] ax_sha_block__seq
+     0.22%  [k] asm_sysvec_apic_timer_interrupt
+     0.16%  [k] inet_release
+     0.16%  [k] __rcu_read_unlock
+     0.15%  [.] ax_rt_heap_mode__seq
+

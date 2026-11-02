@@ -1,0 +1,33 @@
+validated Vif
+validated Zig std.http
+validated Zig http.zig 1+1
+validated Zig http.zig default
+validated Vif before
+== hello
+  Vif                    req/s    108829 (runs 105053-114061)  p50     573  p99     816 us  CPU/req 0.18+9.01  CPUs server 1.00 client 1.40  peak RSS 0.8 MiB  threads 1
+  Zig std.http           req/s     58427 (runs 58038-61972)  p50    1080  p99    1850 us  CPU/req 0.95+16.16  CPUs server 1.00 client 1.11  peak RSS 18.0 MiB  threads 65
+  Zig http.zig 1+1       req/s     55240 (runs 53088-56916)  p50    1020  p99    3950 us  CPU/req 1.37+16.81  CPUs server 1.00 client 0.93  peak RSS 3.7 MiB  threads 3
+  Zig http.zig default   req/s     74414 (runs 74071-76796)  p50     846  p99    3000 us  CPU/req 0.69+12.71  CPUs server 1.00 client 1.14  peak RSS 12.3 MiB  threads 34
+  Vif before             req/s    104428 (runs 99577-116165)  p50     599  p99     759 us  CPU/req 0.16+9.38  CPUs server 1.00 client 1.37  peak RSS 0.8 MiB  threads 1
+== pipeline-16
+  Vif                    req/s   1426310 (runs 1386651-1594165)  p50     471  p99       0 us  CPU/req 0.13+0.57  CPUs server 1.00 client 1.38  peak RSS 0.8 MiB  threads 1
+  Zig std.http           req/s    100985 (runs 99370-110911)  p50    5540  p99   11570 us  CPU/req 0.50+9.39  CPUs server 1.00 client 0.74  peak RSS 18.0 MiB  threads 65
+  Vif before             req/s   1428824 (runs 1374348-1499821)  p50     454  p99       0 us  CPU/req 0.12+0.58  CPUs server 1.00 client 1.37  peak RSS 0.8 MiB  threads 1
+== smooth-10000
+  Vif                    req/s      2880 (runs 2830-2918)  p50   21780  p99   27640 us  CPU/req 337.43+9.24  CPUs server 1.00 client 0.05  peak RSS 1.4 MiB  threads 1
+  Zig std.http           req/s      2381 (runs 2324-2407)  p50   26590  p99   36670 us  CPU/req 399.50+20.04  CPUs server 1.00 client 0.08  peak RSS 33.7 MiB  threads 66
+  Zig http.zig 1+1       req/s      2351 (runs 2326-2383)  p50   26870  p99   31280 us  CPU/req 396.57+28.75  CPUs server 1.00 client 0.09  peak RSS 13.2 MiB  threads 3
+  Zig http.zig default   req/s      2316 (runs 2253-2344)  p50   27090  p99  101800 us  CPU/req 406.92+25.52  CPUs server 1.00 client 0.07  peak RSS 23.8 MiB  threads 34
+  Vif before             req/s      2868 (runs 2794-2893)  p50   22020  p99   34160 us  CPU/req 339.04+9.45  CPUs server 1.00 client 0.05  peak RSS 1.0 MiB  threads 1
+== nbody-256-4
+  Vif                    req/s      1329 (runs 1321-1335)  p50   47850  p99   49810 us  CPU/req 740.74+12.83  CPUs server 1.00 client 0.02  peak RSS 1.3 MiB  threads 1
+  Zig std.http           req/s       796 (runs 790-802)  p50   79460  p99  349280 us  CPU/req 1232.07+23.88  CPUs server 1.00 client 0.03  peak RSS 34.6 MiB  threads 103
+  Zig http.zig 1+1       req/s       786 (runs 780-791)  p50   79990  p99  113190 us  CPU/req 1228.74+43.53  CPUs server 1.00 client 0.03  peak RSS 4.4 MiB  threads 3
+  Zig http.zig default   req/s       778 (runs 773-781)  p50   74930  p99  401740 us  CPU/req 1243.26+43.62  CPUs server 1.00 client 0.04  peak RSS 13.7 MiB  threads 34
+  Vif before             req/s      1330 (runs 1325-1334)  p50   47830  p99  298480 us  CPU/req 738.43+14.25  CPUs server 1.00 client 0.03  peak RSS 0.8 MiB  threads 1
+== page-50
+  Vif                    req/s     68508 (runs 66266-73152)  p50     930  p99    1190 us  CPU/req 3.14+11.32  CPUs server 1.00 client 0.92  peak RSS 1.3 MiB  threads 1
+  Zig std.http           req/s     45553 (runs 44997-47234)  p50    1380  p99    2260 us  CPU/req 3.10+18.86  CPUs server 1.00 client 0.92  peak RSS 18.8 MiB  threads 65
+  Zig http.zig 1+1       req/s     43486 (runs 43179-44513)  p50    1400  p99    4260 us  CPU/req 3.19+19.79  CPUs server 1.00 client 0.80  peak RSS 3.7 MiB  threads 3
+  Zig http.zig default   req/s     53952 (runs 53066-55416)  p50    1140  p99    3510 us  CPU/req 2.86+15.71  CPUs server 1.00 client 0.90  peak RSS 12.6 MiB  threads 34
+  Vif before             req/s     67113 (runs 63137-69571)  p50     940  p99    1200 us  CPU/req 3.32+11.57  CPUs server 1.00 client 0.92  peak RSS 1.3 MiB  threads 1

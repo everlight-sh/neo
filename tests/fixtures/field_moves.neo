@@ -1,0 +1,31 @@
+import "std:io"
+type Buffers = { left:Arr i64 _,right:Arr i64 _ }
+fn empty() -> Buffers = Buffers { left=arr(i in 0..0) i,right=arr(i in 0..0) i }
+fn grow(move buffers:Buffers,n:i64) -> Buffers
+  = let left=buffers.left in let right=buffers.right in Buffers { left=push(left,n),right=push(right,n*7) }
+type Nested = { pair:Buffers,extra:Arr i64 _ }
+fn split_branch(move source:Buffers,flag:bool) -> Buffers
+  = let left=if flag then source.left else arr(i in 0..1) 99 in
+    let right=source.right in Buffers { left=left,right=right }
+fn split_nested(move source:Nested) -> Nested
+  = let pair=source.pair in let extra=source.extra in Nested { pair=grow(pair,8),extra=push(extra,9) }
+fn ownership_edges() -> bool
+  = let a=split_branch(grow(empty(),3),true) in let b=split_branch(grow(empty(),4),false) in
+    let nested=split_nested(Nested { pair=grow(empty(),2),extra=arr(i in 0..1) 1 }) in
+    check len(a.left)==1 && len(a.right)==1 && len(b.left)==1 && len(b.right)==1 && len(nested.pair.left)==2 && len(nested.extra)==2 in
+    a.left[0]==3 && a.right[0]==21 && b.left[0]==99 && b.right[0]==28 && nested.pair.left[1]==8 && nested.extra[1]==9
+fn alias_check(flag:bool) -> bool
+  = let original=grow(empty(),3) in let changed=grow(original,5) in
+    let branch=if flag then let field=original.left in Buffers { left=field,right=arr(i in 0..1) 42 } else original in
+    let held=changed.left in let intact=changed in
+    len(original.left)==1 && original.left[0]==3 && len(original.right)==1 && original.right[0]==21 &&
+    len(changed.left)==2 && changed.left[1]==5 && len(changed.right)==2 && changed.right[1]==35 &&
+    len(held)==2 && held[0]==3 && len(intact.right)==2 &&
+    len(branch.left)==1 && branch.left[0]==3 && len(branch.right)==1 && branch.right[0]==(if flag then 42 else 21)
+effect(fs,unsafe) fn main(n:i64{n>=0 && n<=100000}) -> unit
+  = check alias_check(true) && alias_check(false) && ownership_edges() in
+    let result=loop(i=0,b=empty()) while i<n next(i+1,grow(b,i)) yield b in
+    check len(result.left)==n && len(result.right)==n in
+    let checksum=sum(i in 0..n) result.left[i]+result.right[i] in
+    let requests=load_i64(runtime_state(),64) in let traffic=load_i64(runtime_state(),80) in
+    let printed=print_out(concat(int_text(checksum)," ",int_text(requests)," ",int_text(traffic),"\n")) in noop()

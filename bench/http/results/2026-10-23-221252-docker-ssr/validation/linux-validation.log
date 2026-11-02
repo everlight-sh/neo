@@ -1,0 +1,85 @@
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+axon: serving, workers=1
+PASS: TSX->Axon vs React, all 1000 inputs, 1 worker(s); concurrent + pipelined HTTP
+axon: serving, workers=4
+PASS: TSX->Axon vs React, all 1000 inputs, 4 worker(s); concurrent + pipelined HTTP
+React reference: http://localhost:36521
+PASS: Bun/React reference HTTP routes
+axon: serving, workers=4
+PASS: generated Axon server runs with only its binary in an empty root
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=4
+Test server stopped.
+HTTP PASS from an empty root containing only the executable: no /lib, /usr, /proc or runtime files.
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+axon: serving, workers=4
+Test server stopped.
+............................
+----------------------------------------------------------------------
+Ran 28 tests in 0.009s
+
+OK
+bun test v1.3.13 (bf2e2cec)
+
+examples/jsx-ssr/compile.test.ts:
+(pass) shared React source generates ordinary Axon functions and escaped props [17.00ms]
+(pass) fragments, comments, entities, numeric props, null and ternaries [1.00ms]
+(pass) reject: runtime imports [2.00ms]
+(pass) reject: one return expression [1.00ms]
+(pass) reject: Unsupported CallExpression
+(pass) reject: Unsupported HTML attribute onClick [1.00ms]
+(pass) reject: Unsupported HTML attribute
+(pass) reject: Unsupported HTML attribute style
+(pass) reject: Unsupported HTML tag [1.00ms]
+(pass) reject: Spread attributes
+(pass) reject: Duplicate prop
+(pass) reject: Unknown prop missing [1.00ms]
+(pass) reject: Only integer comparisons
+(pass) reject: Reserved React props
+(pass) reject: Declare children as ReactNode
+(pass) reject: must be boolean [1.00ms]
+(pass) reject: Unsupported PrefixUnaryExpression
+(pass) reject: safe integer
+(pass) reject: Unsupported JSX entity
+(pass) reject: unknown component [1.00ms]
+(pass) reject: Recursive component cycles
+(pass) reject: Recursive component cycles
+(pass) reject: Missing required prop
+(pass) reject: expects text
+(pass) reject: does not accept children
+(pass) diagnostics include the source location [1.00ms]
+(pass) JavaScript control characters become valid Axon byte escapes
+(pass) literal attribute spacing is preserved
+(pass) optimizations have an explicit baseline mode [2.00ms]
+(pass) static markup is coalesced, dynamic text escaped once, numbers formatted once [2.00ms]
+(pass) sharing never hoists conditional escaping out of its branch [1.00ms]
+
+ 31 pass
+ 0 fail
+ 46 expect() calls
+Ran 31 tests across 1 file. [267.00ms]

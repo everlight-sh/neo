@@ -1,0 +1,12 @@
+; Count runs of equal consecutive bytes in v[i] = u8((i / 3) % 5), i in 0..n.
+; A run is a maximal block of equal adjacent values; a single element is a run.
+
+fn count_runs (v : Arr u8 n) -> i64 {result >= 1}
+  = loop (count : i64{count >= 1} = 1, i : i64{i >= 1} = 1)
+      while i < n
+      next (if v[i] != v[i-1] then count + 1 else count, i + 1)
+      yield count
+
+fn main (n : i64{n >= 1}) -> i64
+  = let v = arr(i in 0..n) u8((i / 3) % 5) in
+    count_runs(v)

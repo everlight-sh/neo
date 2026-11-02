@@ -1,0 +1,195 @@
+[package]
+name = "neo"
+version = "0.1.0"
+entry = "examples/hello.neo"
+
+[tool.neo]
+python-tests = "tests"
+doc-tests = ["docs/getting-started.md", "docs/language-v01.md"]
+integration = "tests/integration.py"
+
+[[test]]
+name = "language-generics-results"
+file = "tests/fixtures/language_types.neo"
+args = ["7"]
+stdout = "owned:value=7\n"
+
+[[test]]
+name = "language-result-errors"
+file = "tests/fixtures/language_types.neo"
+args = ["-1"]
+stdout = "error:negative\n"
+
+[[test]]
+name = "language-collections"
+file = "tests/fixtures/language_collections.neo"
+args = ["10000"]
+stdout = "206 428548743\n"
+
+[[test]]
+name = "language-resources"
+file = "tests/fixtures/language_resources.neo"
+args = ["1000"]
+stdout = "resources OK\n"
+
+[[test]]
+name = "language-kernel"
+file = "tests/fixtures/language_kernel.neo"
+args = []
+stdout = "language kernel OK\n"
+
+[[test]]
+name = "language-fork-cancellation"
+file = "tests/fixtures/language_cancel.neo"
+args = []
+stdout = "fork cancellation OK\n"
+
+[[test]]
+name = "language-file-fork-isolation"
+file = "tests/fixtures/language_fork_file.neo"
+args = []
+stdout = "file fork isolation OK\n"
+
+[[test]]
+name = "language-unit-and-empty-values"
+file = "tests/fixtures/language_unit.neo"
+args = []
+stdout = "42\n"
+
+[[test]]
+name = "borrowed-record-lifetimes"
+file = "tests/fixtures/borrow_records.neo"
+args = ["7"]
+stdout = "ownership OK\n"
+
+[[test]]
+name = "owned-records"
+file = "tests/fixtures/owned_records.neo"
+args = ["7"]
+stdout = "hello world / new label\n"
+
+[[test]]
+name = "stdlib"
+file = "tests/fixtures/stdlib.neo"
+args = []
+stdout = "\"café 🚀\" -9223372036854775808\n"
+
+[[test]]
+name = "http-client"
+file = "tests/fixtures/http_client.neo"
+args = []
+stdout = "0\n"
+
+[[test]]
+name = "documented-greeting"
+file = "examples/greet.neo"
+args = ["7"]
+stdout = "Hello, 7!\n"
+
+[[test]]
+name = "custom-resource-exactly-once"
+file = "tests/fixtures/language_drop_once.neo"
+args = []
+stdout = "1\n2\n3\n4\n5\n"
+
+[[test]]
+name = "compact-byte-map"
+file = "tests/fixtures/bytesmap.neo"
+args = ["1000"]
+stdout = "206 1724766 32509\n"
+
+[[test]]
+name = "inline-byte-map-words"
+file = "tests/fixtures/map_inline_keys.neo"
+args = ["8192"]
+stdout = "inline maps OK\n"
+
+[[test]]
+name = "owned-word-byte-arrays"
+file = "tests/fixtures/word_bytes.neo"
+args = ["72623859790382856", "8"]
+stdout = "8 36 28\n"
+
+[[test]]
+name = "disjoint-record-field-moves"
+file = "tests/fixtures/field_moves.neo"
+args = ["1000"]
+stdout = "3996000 0 0\n"
+
+[[test]]
+name = "bounded-large-buffer-reuse"
+file = "tests/fixtures/allocator_cache.neo"
+args = []
+stdout = "allocator cache OK\n"
+
+[[test]]
+name = "typed-callbacks"
+file = "tests/fixtures/callbacks.neo"
+args = []
+stdout = "42\n"
+
+[[test]]
+name = "typed-resource-arena"
+file = "tests/fixtures/resource_arena.neo"
+args = []
+stdout = "1\n3\n2\narena OK\n"
+
+[[test]]
+name = "agent-core-libraries"
+file = "tests/fixtures/agent_libraries.neo"
+args = []
+stdout = "agent libraries OK\n"
+
+[[test]]
+name = "child-process-streams"
+file = "tests/fixtures/agent_process.neo"
+args = ["/bin/sh"]
+stdout = "child process OK\n"
+
+[[test]]
+name = "non-escaping-array-borrows"
+file = "tests/fixtures/map_array_borrows.neo"
+args = ["1000"]
+stdout = "3998 0 0\n"
+
+[[test]]
+name = "push-capacity-boundaries"
+file = "tests/fixtures/push_boundaries.neo"
+args = ["0", "17"]
+stdout = "136 0 0\n"
+
+[[test]]
+name = "push-record-planes"
+file = "tests/fixtures/push_boundaries.neo"
+args = ["5", "17"]
+stdout = "1088 0 0\n"
+
+[[test]]
+name="reactor-and-process-halfclose"
+file="tests/fixtures/reactor.neo"
+args=[]
+stdout="reactor OK\n"
+
+[[test]]
+name="scoped-datagram-transport"
+file="tests/fixtures/datagram.neo"
+args=[]
+stdout="UDP OK\n"
+
+[[test]]
+name="bounded-private-buffers"
+file="tests/fixtures/language_buffer.neo"
+args=[]
+stdout="buffer OK\n"
+
+[[test]]
+name="factory-resource-cleanup"
+file="tests/fixtures/resource_factory.neo"
+args=[]
+stdout="drop 2:inner\ndrop 1:temporary\nuse temporary!\ndrop 3:temporary!\ndrop 2:inner\ndrop 1:temporary\nuse inner\ndrop 4:inner\n"
+
+[[test]]
+name="utf16-code-unit-arrays"
+file="tests/fixtures/u16_units.neo"
+args=[]
+stdout="u16 OK 991961738 184979539 517441387\n"

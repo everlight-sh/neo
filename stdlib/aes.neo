@@ -1,0 +1,84 @@
+import "std:sha256"
+
+; AES-128, CTR and GCM building blocks. The S-box uses fixed-work GF arithmetic
+; with no secret-indexed table. This is experimental source, not a claim of
+; audited machine-code constant-time behavior. Protocols must enforce nonce/key
+; limits and authenticate before exposing plaintext.
+sealed type AES128 = { valid:bool,keys:Arr u8 _ }
+private fn aes_xtime(a:i64) -> i64
+  = bit_and(bit_xor(shift_left(a,1),bit_and(27,0-shift_right(a,7))),255)
+private fn aes_mul(a:i64,b:i64) -> i64
+  = loop(i=0,a=a,b=b,out=0) while i<8 next(i+1,aes_xtime(a),shift_right(b,1),bit_xor(out,bit_and(a,0-bit_and(b,1)))) yield out
+private fn aes_square(v:i64) -> i64
+  = let columns="\x01\x04\x10\x40\x1b\x6c\xab\x9a" in
+    loop(i=0,out=0) while i<8 next(i+1,bit_xor(out,bit_and(str_byte(columns,i),0-bit_and(shift_right(v,i),1)))) yield out
+private fn aes_rot(v:i64,n:i64) -> i64 = bit_and(bit_or(shift_left(v,n),shift_right(v,8-n)),255)
+private fn aes_sbox(v:i64) -> i64
+  = let x2=aes_square(v) in let x3=aes_mul(x2,v) in let x6=aes_square(x3) in let x12=aes_square(x6) in let x15=aes_mul(x12,x3) in
+    let x30=aes_square(x15) in let x60=aes_square(x30) in let x120=aes_square(x60) in let x240=aes_square(x120) in
+    let inverse=aes_mul(aes_mul(x240,x12),x2) in
+    bit_xor(bit_xor(bit_xor(inverse,aes_rot(inverse,1)),bit_xor(aes_rot(inverse,2),aes_rot(inverse,3))),bit_xor(aes_rot(inverse,4),99))
+fn aes128_key(key:Arr u8 n) -> AES128
+  = if n!=16 then AES128 { valid=false,keys="" } else
+    let initial=arr(i in 0..176) if i<16 then key[i] else u8(0) in
+    let keys=loop(i=16,out=initial) while i<176 next(i+1,
+      check i>=16 && i<176 && len(out)==176 in
+      let special=i%16<4 in let at=i-i%4-4+(i+1)%4 in
+      let value=if special then check at>=0 && at<176 in bit_xor(aes_sbox(i64(out[at])),if i%16==0 then str_byte("\x01\x02\x04\x08\x10\x20\x40\x80\x1b\x36",i/16-1) else 0) else i64(out[i-4]) in
+      set(out,i,u8(bit_xor(i64(out[i-16]),value)))) yield out in AES128 { valid=true,keys=keys }
+private fn aes_round(bytes:Arr u8 n,keys:Arr u8 k,round:i64) -> Arr u8 _
+  = check n==16 && k==176 && round>=1 && round<=10 in
+    let shifted=arr(i in 0..16) u8(aes_sbox(str_byte(bytes,4*((i/4+i%4)%4)+i%4))) in
+    arr(i in 0..16) let base=i/4*4 in let row=i%4 in
+      let a=str_byte(shifted,base+row) in let b=str_byte(shifted,base+(row+1)%4) in
+      let mixed=if round==10 then a else bit_xor(bit_xor(bit_xor(a,str_byte(shifted,base)),bit_xor(str_byte(shifted,base+1),str_byte(shifted,base+2))),bit_xor(str_byte(shifted,base+3),aes_xtime(bit_xor(a,b)))) in
+      u8(bit_xor(mixed,str_byte(keys,round*16+i)))
+private fn aes_block(key:AES128,block:Arr u8 n) -> Arr u8 _
+  = check key.valid && n==16 && len(key.keys)==176 in
+    let initial=arr(i in 0..16) u8(bit_xor(i64(block[i]),str_byte(key.keys,i))) in
+    loop(round=1,out=initial) while round<=10 next(round+1,aes_round(out,key.keys,round)) yield out
+fn aes128_encrypt(key:AES128,block:Arr u8 n) -> BytesResult
+  = if !key.valid || n!=16 then bytes_error(22,"invalid AES-128 key or block",0) else bytes_ok(aes_block(key,block))
+private fn aes_counter(initial:Arr u8 n,block:i64) -> Arr u8 _
+  = check n==16 && block>=0 && block<=1048576 in
+    let last=loop(i=12,value=0) while i<16 next(i+1,value*256+str_byte(initial,i)) yield value in
+    let count=bit_and(last+block,4294967295) in
+    arr(i in 0..16) if i<12 then initial[i] else u8(bit_and(shift_right(count,(15-i)*8),255))
+fn aes128_ctr(key:AES128,initial:Arr u8 n,bytes:Arr u8 m) -> BytesResult
+  = if !key.valid || n!=16 || m>16777216 then bytes_error(22,"invalid AES CTR input",0) else
+    let blocks=(m+15)/16 in let result=loop(i=0,out=arr(j in 0..m) u8(0)) while i<blocks next(i+1,
+      let mask=aes_block(key,aes_counter(initial,i)) in
+      loop(j=0,out=out) while j<16 && i*16+j<m next(j+1,
+        check i*16+j>=0 && i*16+j<m && i*16+j<len(out) in set(out,i*16+j,u8(bit_xor(i64(bytes[i*16+j]),str_byte(mask,j))))) yield out) yield out in bytes_ok(result)
+type GCMWord = { a:i64,b:i64,c:i64,d:i64 }
+private fn gcm_word(bytes:Arr u8 n,offset:i64) -> i64
+  = loop(i=0,value=0) while i<4 next(i+1,value*256+(if offset+i>=0 && offset+i<n then str_byte(bytes,offset+i) else 0)) yield value
+private fn gcm_block(bytes:Arr u8 _,offset:i64) -> GCMWord
+  = GCMWord { a=gcm_word(bytes,offset),b=gcm_word(bytes,offset+4),c=gcm_word(bytes,offset+8),d=gcm_word(bytes,offset+12) }
+private fn gcm_xor(x:GCMWord,y:GCMWord) -> GCMWord
+  = GCMWord { a=bit_xor(x.a,y.a),b=bit_xor(x.b,y.b),c=bit_xor(x.c,y.c),d=bit_xor(x.d,y.d) }
+private fn gcm_multiply(x:GCMWord,y:GCMWord) -> GCMWord
+  = loop(i=0,z=GCMWord { a=0,b=0,c=0,d=0 },v=y) while i<128 next(i+1,
+      let word=if i<32 then x.a else if i<64 then x.b else if i<96 then x.c else x.d in let mask=0-bit_and(shift_right(word,31-i%32),1) in
+      gcm_xor(z,GCMWord { a=bit_and(v.a,mask),b=bit_and(v.b,mask),c=bit_and(v.c,mask),d=bit_and(v.d,mask) }),
+      GCMWord { a=bit_xor(shift_right(v.a,1),bit_and(3774873600,0-bit_and(v.d,1))),b=bit_or(shift_right(v.b,1),shift_left(bit_and(v.a,1),31)),c=bit_or(shift_right(v.c,1),shift_left(bit_and(v.b,1),31)),d=bit_or(shift_right(v.d,1),shift_left(bit_and(v.c,1),31)) }) yield z
+private fn gcm_encode(word:GCMWord) -> Arr u8 _
+  = arr(i in 0..16) u8(bit_and(shift_right(if i<4 then word.a else if i<8 then word.b else if i<12 then word.c else word.d,(3-i%4)*8),255))
+private fn gcm_hash_bytes(state:GCMWord,h:GCMWord,bytes:Arr u8 n) -> GCMWord
+  = loop(i=0,state=state) while i<(n+15)/16 next(i+1,gcm_multiply(gcm_xor(state,gcm_block(bytes,i*16)),h)) yield state
+private fn gcm_tag(key:AES128,j0:Arr u8 _,aad:Arr u8 n,ciphertext:Arr u8 m) -> Arr u8 _
+  = check n<=16777216 && m<=16777216 in
+    let h=gcm_block(aes_block(key,"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),0) in
+    let first=gcm_hash_bytes(GCMWord { a=0,b=0,c=0,d=0 },h,aad) in let second=gcm_hash_bytes(first,h,ciphertext) in
+    let tag=gcm_multiply(gcm_xor(second,GCMWord { a=0,b=n*8,c=0,d=m*8 }),h) in
+    let mask=aes_block(key,j0) in let encoded=gcm_encode(tag) in arr(i in 0..16) u8(bit_xor(str_byte(mask,i),str_byte(encoded,i)))
+fn aes128_gcm_seal(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,plaintext:Arr u8 p) -> BytesResult
+  = if n!=16 || m!=12 || a>16777216 || p>16777216 then bytes_error(22,"invalid AES-GCM input",0) else
+    let expanded=aes128_key(key) in let j0=concat(nonce,"\0\0\0\x01") in
+    let ciphertext=aes128_ctr(expanded,aes_counter(j0,1),plaintext) in
+    if !ciphertext.ok then ciphertext else bytes_ok(concat(ciphertext.value,gcm_tag(expanded,j0,aad,ciphertext.value)))
+fn aes128_gcm_open(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,wire:Arr u8 s) -> BytesResult
+  = if n!=16 || m!=12 || a>16777216 || s<16 || s>16777232 then bytes_error(22,"invalid AES-GCM input",0) else
+    let expanded=aes128_key(key) in let j0=concat(nonce,"\0\0\0\x01") in let ciphertext=str_slice(wire,0,s-16) in
+    let expected=gcm_tag(expanded,j0,aad,ciphertext) in
+    if !crypto_equal(expected,str_slice(wire,s-16,s)) then bytes_error(74,"AES-GCM authentication failed",0) else aes128_ctr(expanded,aes_counter(j0,1),ciphertext)

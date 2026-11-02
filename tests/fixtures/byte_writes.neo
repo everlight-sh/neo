@@ -1,0 +1,25 @@
+import "std:io"
+import "std:strings"
+type BytePair = {destination:Arr u8 _,source:Arr u8 _}
+fn copy_pair(pair:BytePair) -> Arr u8 _ = byte_copy(pair.destination,1,pair.source)
+fn overlap(value:Arr u8 _) -> Arr u8 _ = byte_copy(value,2,byte_slice(value,0,4))
+fn shadow_write(move out:Arr u8 _,value:i64) -> Arr u8 _
+  = let out=byte_write_le(out,0,value,8) in let out=byte_copy(out,8,"payload") in out
+fn shadow_loop(count:i64) -> Arr u8 _
+  = let out=arr(i in 0..65536) u8(0) in
+    loop(i=0,out=out) while i<count next(i+1,shadow_write(out,i)) yield out
+effect fn main(n:i64{n>=8 && n<=4096}) -> unit
+  = let original=arr(i in 0..n) u8(i%256) in
+    let changed=byte_write_le(original,0,-9223372036854775807,8) in
+    check len(changed)==n && changed[0]==u8(1) && changed[7]==u8(128) && original[0]==u8(0) in
+    let copied=byte_copy(changed,n-3,"abc") in
+    check len(copied)==n && copied[n-1]==u8(99) && changed[n-1]==u8(if n==8 then 128 else (n-1)%256) in
+    let pair=copy_pair(BytePair {destination="123456",source="ABC"}) in check str_equal(pair,"1ABC56") in
+    let overlapped=overlap("abcdef") in check str_equal(overlapped,"ababcd") in
+    let empty=byte_copy(byte_write_le(original,n,42,0),n,"") in check str_equal(empty,original) in
+    let literal=byte_write_le("hello",1,65,1) in check str_equal(literal,"hAllo") in
+    let sliced=byte_copy(byte_slice(original,1,n),0,"z") in check len(sliced)==n-1 && sliced[0]==u8(122) && original[1]==u8(1) in
+    let result=loop(i=0,result=original) while i<n next(i+1,byte_write_le(result,i,i,1)) yield result in check str_equal(result,original) in
+    let before=load_i64(runtime_state(),64) in let shadowed=shadow_loop(n) in let after=load_i64(runtime_state(),64) in
+    check len(shadowed)==65536 && bytes_le64(shadowed,0)==n-1 && after-before<=2 in
+    let printed=print_out("byte writes OK\n") in noop()

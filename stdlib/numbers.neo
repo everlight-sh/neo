@@ -1,0 +1,73 @@
+import "std:bigint"
+import "std:strings"
+type FloatResult = { ok:bool,value:f64,error:Error }
+fn float_ok(value:f64) -> FloatResult = FloatResult { ok=true,value=value,error=no_error() }
+fn float_error(message:Arr u8 n,position:i64) -> FloatResult = FloatResult { ok=false,value=0.0,error=Error { code=22,message=message,position=position } }
+fn float_finite(value:f64) -> bool = value==value && (value==0.0 || value/2.0!=value)
+private fn number_compare(numerator:Arr i64 _,denominator:Arr i64 _,mantissa:i64,exponent:i64) -> i64
+  = check mantissa>=0 && exponent>= -20000 && exponent<=20000 in
+    let right=big_mul(denominator,big_small(mantissa)) in
+    if exponent>=0 then big_compare(numerator,big_shift(right,exponent)) else big_compare(big_shift(numerator,0-exponent),right)
+private fn number_mantissa(bits:i64) -> i64
+  = let fraction=bit_and(bits,4503599627370495) in if bits/4503599627370496==0 then fraction else fraction+4503599627370496
+private fn number_exponent(bits:i64) -> i64
+  = let value=bits/4503599627370496 in if value==0 then -1074 else value-1075
+fn float_parse(text:Arr u8 n) -> FloatResult
+  = if n==0 || n>4096 then float_error("decimal input length outside 1..4096",0) else
+    let negative=u8(str_byte(text,0))=='-' in let start=if negative || u8(str_byte(text,0))=='+' then 1 else 0 in
+    let first=loop(i=start) while i<n && u8(str_byte(text,i))>='0' && u8(str_byte(text,i))<='9' next(i+1) yield i in
+    let point=first<n && u8(str_byte(text,first))=='.' in
+    let last=if !point then first else loop(i=first+1) while i<n && u8(str_byte(text,i))>='0' && u8(str_byte(text,i))<='9' next(i+1) yield i in
+    let fraction=if point then last-first-1 else 0 in
+    let digits=concat(str_slice(text,start,first),if point then str_slice(text,first+1,last) else "") in
+    let has_exp=last<n && (u8(str_byte(text,last))=='e' || u8(str_byte(text,last))=='E') in
+    let exp_start=if has_exp then last+1 else last in
+    let exp_negative=exp_start<n && u8(str_byte(text,exp_start))=='-' in
+    let exp_digits=if exp_start<n && (u8(str_byte(text,exp_start))=='+' || u8(str_byte(text,exp_start))=='-') then exp_start+1 else exp_start in
+    let exponent=loop(i=exp_digits,value=0,valid=true) while valid && i<n
+      next(i+1,check i>=0 && i<n in if value>10000 then 10001 else value*10+i64(u8(str_byte(text,i)))-48,
+        check i>=0 && i<n in u8(str_byte(text,i))>='0' && u8(str_byte(text,i))<='9') yield if valid then value else -1 in
+    if len(digits)==0 || !has_exp && last!=n || has_exp && (exp_digits==n || exponent<0) then float_error("invalid decimal number",last) else
+    let scale=(if exp_negative then 0-exponent else exponent)-fraction in
+    let raw=big_decimal(digits) in if len(raw)==0 then float_ok(bits_float(if negative then shift_left(1,63) else 0)) else
+    let leading=loop(i=0) while i<len(digits) && (check i>=0 in digits[i]=='0') next(i+1) yield i in
+    let magnitude=len(digits)-leading+scale in
+    if magnitude>310 then float_error("floating-point overflow",n) else if magnitude< -325 then float_ok(bits_float(if negative then shift_left(1,63) else 0)) else
+    check scale>= -20000 && scale<=20000 in
+    let numerator=if scale<=0 then raw else loop(i=0,value=raw) while i<scale next(i+1,big_mul_small(value,10)) yield value in
+    let denominator=if scale>=0 then big_small(1) else loop(i=0,value=big_small(1)) while i<0-scale next(i+1,big_mul_small(value,10)) yield value in
+    let floor=loop(lo=0,hi=9218868437227405311) while lo<hi
+      next(let middle=lo+(hi-lo)/2+1 in if number_compare(numerator,denominator,number_mantissa(middle),number_exponent(middle))>=0 then middle else lo,
+           let middle=lo+(hi-lo)/2+1 in if number_compare(numerator,denominator,number_mantissa(middle),number_exponent(middle))<0 then middle-1 else hi) yield lo in
+    let ceil=floor+1 in let low_exp=number_exponent(floor) in let high_exp=number_exponent(ceil) in
+    let midpoint=number_mantissa(floor)+shift_left(number_mantissa(ceil),high_exp-low_exp) in
+    let comparison=number_compare(numerator,denominator,midpoint,low_exp-1) in
+    let rounded=if comparison<0 || comparison==0 && floor%2==0 then floor else ceil in
+    if rounded==9218868437227405312 then float_error("floating-point overflow",n) else
+      float_ok(bits_float(if negative then bit_or(rounded,shift_left(1,63)) else rounded))
+
+private fn decimal_mul(digits:Arr i64 n,factor:i64) -> Arr i64 _
+  = loop(i=0,carry=0,out=digits) while i<n
+      next(i+1,check i>=0 && i<n in (out[i]*factor+carry)/1000000000,
+        check i>=0 && i<n in set(out,i,(out[i]*factor+carry)%1000000000))
+      yield if carry==0 then out else push(out,carry)
+fn float_text(value:f64) -> BytesResult
+  = if !float_finite(value) then bytes_error(22,"nonfinite value cannot be JSON encoded",0) else
+    let raw=float_bits(value) in let negative=raw<0 in let bits=bit_and(raw,9223372036854775807) in
+    if bits==0 then bytes_ok(if negative then "-0" else "0") else
+    let mantissa=number_mantissa(bits) in let exponent=number_exponent(bits) in
+    let initial=arr(i in 0..2) if i==0 then mantissa%1000000000 else mantissa/1000000000 in
+    let expanded=loop(i=0,digits=initial) while i<(if exponent<0 then 0-exponent else exponent)
+      next(i+1,decimal_mul(digits,if exponent<0 then 5 else 2)) yield digits in
+    let top=loop(i=len(expanded)) while i>1 && (check i<=len(expanded) in expanded[i-1]==0) next(i-1) yield i in
+    let digits=loop(i=top,text="") while i>0
+      next(i-1,check i>0 && i<=len(expanded) in let part=int_text(expanded[i-1]) in check len(part)<=9 in
+        concat(text,if i==top then "" else arr(j in 0..9-len(part)) '0',part)) yield text in
+    let power=len(digits)-1+(if exponent<0 then exponent else 0) in
+    let prefix=str_slice(digits,0,if len(digits)<17 then len(digits) else 17) in let parsed=int_parse(prefix) in check parsed.ok in
+    let tail=if len(digits)<=17 then 0 else i64(digits[17])-48 in
+    let rest=loop(i=18,nonzero=false) while i<len(digits) next(i+1,check i>=0 && i<len(digits) in nonzero || digits[i]!='0') yield nonzero in
+    let rounded=parsed.value+(if tail>5 || tail==5 && (rest || parsed.value%2==1) then 1 else 0) in
+    let carry=rounded>=100000000000000000 in let significant=int_text(if carry then rounded/10 else rounded) in
+    let length=len(significant) in check length>0 in
+    bytes_ok(concat(if negative then "-" else "",str_slice(significant,0,1),if length==1 then "" else concat(".",str_slice(significant,1,length)),"e",int_text(power+(if carry then 1 else 0))))

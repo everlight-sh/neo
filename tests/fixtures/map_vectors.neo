@@ -1,0 +1,16 @@
+import "std:bytesmap"
+import "std:io"
+fn vector_key(n:i64) -> Arr u8 _ = check n>=0 in arr(i in 0..n) u8((i*37+n)%256)
+fn vector_value(n:i64) -> Arr u8 _ = check n>=0 in arr(i in 0..n%37) u8((i*13+n)%256)
+fn vector_score(value:OptionBytes) -> i64 = check value.present in len(value.value)*31+sum(i in 0..len(value.value)) i64(value.value[i])
+fn vector_checks(n:i64) -> Arr u8 _
+  = let original=loop(i=0,map=bytesmap_empty(19,41)) while i<n next(i+1,bytesmap_put(map,vector_key(i),vector_value(i))) yield map in
+    let removed=loop(i=0,map=original) while i<n next(i+2,bytesmap_delete(map,vector_key(i))) yield bytesmap_compact(map) in
+    let before=loop(i=0,total=0) while i<n next(i+1,
+      let key=vector_key(i) in let got=bytesmap_get(original,key) in check got.present && str_equal(got.value,vector_value(i)) in
+      let missing=if i==0 then key else check i>0 && i<=len(key) in set(key,i-1,u8(bit_xor(i64(key[i-1]),1))) in
+      check i==0 || !bytesmap_get(original,missing).present in total+vector_score(got)) yield total in
+    let after=loop(i=0,total=0) while i<n next(i+1,let got=bytesmap_get(removed,vector_key(i)) in
+      if i%2==0 then check !got.present in total else total+vector_score(got)) yield total in
+    concat(int_text(before)," ",int_text(after),"\n")
+effect(fs) fn main(n:i64{n>=0 && n<=2048}) -> unit = let printed=print_out(vector_checks(n)) in noop()

@@ -1,0 +1,46 @@
+; UTF-16 code-unit arrays (the element type JavaScript strings index by):
+; comprehensions, proven indexing, len, set, push, concat, wrapping u16(...)
+; and zero-extending i64(...), unsigned comparison, equality, records and
+; passing/returning both scalars and arrays.
+import "std:strings"
+type Unit = { code : u16, at : i64 }
+enum Slot { Empty, Code(u16) }
+
+fn units(text : Arr u8 n) -> Arr u16 n = arr(i in 0..n) u16(i64(text[i]))
+fn unit_at(s : Arr u16 n, i : i64) -> i64 = if i >= 0 && i < n then i64(s[i]) else -1
+fn first(s : Arr u16 n) -> u16 = if n > 0 then s[0] else u16(0)
+fn upper(s : Arr u16 n) -> Arr u16 n
+  = arr(i in 0..n) let c = s[i] in if c >= u16(97) && c <= u16(122) then u16(i64(c) - 32) else c
+fn count(s : Arr u16 n, c : u16) -> i64 = sum(i in 0..n) if s[i] == c then 1 else 0
+fn hash(s : Arr u16 n) -> i64
+  = loop(i = 0, h = 7) while i >= 0 && i < n next(i + 1, bit_and(h * 31 + i64(s[i]), 1073741823)) yield h
+; In-place growth: each concat appends three units to an owned accumulator.
+fn grown(k : i64) -> Arr u16 _
+  = loop(i = 0, out = arr(j in 0..0) u16(0)) while i < k
+      next(i + 1, concat(out, arr(j in 0..3) u16(55296 + i * 3 + j))) yield out
+fn pushed(k : i64) -> Arr u16 _
+  = loop(i = 0, out = arr(j in 0..0) u16(0)) while i < k next(i + 1, push(out, u16(i * 7919))) yield out
+; set-only loop state: unique once at entry, then written in place.
+fn filled(s : Arr u16 _, v : u16) -> Arr u16 _
+  = loop(i = 0, out = s) while i >= 0 && i < len(out) next(i + 1, set(out, i, v)) yield out
+fn larger(a : u16, b : u16) -> u16 = if a > b then a else b
+fn slot_value(s : Slot) -> i64 = match s { Empty => -1, Code(c) => i64(c) }
+fn record(s : Arr u16 n) -> Unit = if n > 1 then Unit { code = s[1], at = 1 } else Unit { code = u16(0), at = -1 }
+fn sharing() -> bool
+  = let a = units("abc") in let b = filled(a, u16(65)) in let c = set(a, 0, u16(66)) in
+    unit_at(a, 0) == 97 && unit_at(b, 2) == 65 && unit_at(c, 0) == 66 && unit_at(c, 1) == 98
+fn conversions() -> bool
+  = u16(65536 + 65) == u16(65) && i64(u16(65535)) == 65535 && i64(u16(-1)) == 65535 &&
+    u16(65535) > u16(1) && larger(u16(40000), u16(300)) == u16(40000) && i64(u16(70000)) == 4464 &&
+    slot_value(Code(u16(65500))) == 65500 && slot_value(Empty()) == -1 && i64(u8(i64(u16(511)))) == 255
+fn main () -> Arr u8 _
+  = let text = units("hello, world") in
+    let up = upper(text) in
+    let g = grown(5000) in let p = pushed(3000) in
+    let joined = concat(up, units(" / "), text) in
+    let r = record(up) in
+    let ok = sharing() && conversions() && len(g) == 15000 && unit_at(g, 0) == 55296 &&
+             unit_at(g, 14999) == bit_and(55296 + 14999, 65535) && unit_at(p, 2999) == bit_and(2999 * 7919, 65535) &&
+             count(text, u16(108)) == 3 && i64(first(up)) == 72 && r.code == u16(69) && r.at == 1 &&
+             len(joined) == 27 && unit_at(joined, 12) == 32 && unit_at(joined, 26) == 100 in
+    concat(if ok then "u16 OK " else "u16 FAILED ", int_text(hash(joined)), " ", int_text(hash(g)), " ", int_text(hash(p)), "\n")

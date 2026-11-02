@@ -1,0 +1,17 @@
+import "std:collections"
+import "std:io"
+
+fn collection_work(mode:i64,n:i64{n>=0 && n<=1000000}) -> i64
+  = if mode==0 then
+      let vector=loop(i=0,vector=vector_empty()) while i<n next(i+1,vector_push(vector,i%997)) yield vector in
+      sum(i in 0..len(vector.values)) check i>=0 && i<len(vector.values) in vector.values[i] else
+    if mode==1 then
+      let vector=vector_sort(IntVector { values=arr(i in 0..n) (n-i)%997 }) in
+      sum(i in 0..len(vector.values)) check i>=0 && i<len(vector.values) in vector.values[i]*(i+1) else
+      let map=loop(i=0,map=map_empty()) while i<n next(i+1,map_put(map,int_text(i),int_text(i*7))) yield map in
+      loop(i=0,checksum=0) while i<n next(i+1,let found=map_get(map,int_text(i)) in
+        check found.present in let number=int_parse(found.value) in check number.ok in checksum+number.value) yield checksum
+effect fn main(mode:i64,n:i64{n>=0 && n<=1000000}) -> unit
+  = let before=rt_clock_ns() in let checksum=collection_work(mode,n) in let after=rt_clock_ns() in
+    let requests=load_i64(runtime_state(),64) in let requested=load_i64(runtime_state(),80) in
+    let output=print_out(concat(int_text(checksum)," ",int_text(after-before)," ",int_text(requests)," ",int_text(requested),"\n")) in noop()

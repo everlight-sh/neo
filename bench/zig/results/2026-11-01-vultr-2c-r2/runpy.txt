@@ -1,0 +1,17 @@
+go version go1.25.1 linux/amd64
+## mandel 3000 3000 2000
+after          wall   2419.8  (min   2413.4 max   2442.7)  user  4808.0 sys    1.0  out ['3063818920']
+before         wall   2418.3  (min   2409.9 max   2503.1)  user  4810.9 sys    1.0  out ['3063818920']
+go             wall   3629.0  (min   3598.7 max   3686.9)  user  7172.6 sys    8.0  out ['3063818920']
+## stencil 50000000 20
+after          wall    772.8  (min    711.3 max    790.6)  user  1468.0 sys   46.0  out ['25000046624222']
+before         wall   5607.4  (min   5496.7 max   5767.4)  user  2063.8 sys 7649.4  out ['25000046624222']
+go             wall   1286.5  (min   1242.6 max   1347.0)  user  2019.4 sys  410.0  out ['25000046624222']
+## stencil_small 1000000 2000
+after          wall   1688.9  (min   1531.2 max   1926.3)  user  3238.0 sys   32.0  out ['499967939935']
+before         wall   1715.3  (min   1404.8 max   1831.3)  user  3194.6 sys   32.0  out ['499967939935']
+go             wall   2481.6  (min   1929.3 max   2599.3)  user  4775.7 sys   25.9  out ['499967939935']
+## nbody 16384 10
+after          wall   2809.4  (min   2794.6 max   2836.6)  user  5546.8 sys    3.0  out ['-8.9457810633378992e-1']
+before         wall   2794.4  (min   2792.3 max   2836.6)  user  5538.3 sys    3.0  out ['-8.9457810633378992e-1']
+go             wall   8833.8  (min   8793.1 max   8849.4)  user 17440.4 sys   29.9  out ['-0.89457810633378876']

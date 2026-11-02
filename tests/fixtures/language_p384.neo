@@ -1,0 +1,41 @@
+import "std:p384"
+import "std:p256"
+import "std:io"
+; Batched ECDSA verification. Records: [curve u8][hash u8][u8 key length][key]
+; [u8 signature length][signature][u16 message length][message]; one '1'/'0' per record.
+; curve 1 = P-384, 0 = P-256 through std:p384, 2 = P-256 through std:p256 (SHA-256 only).
+; hash 0 = message is already a digest, 1 SHA-256, 2 SHA-384, 3 SHA-512.
+; mode 1: records [curve u8][u8 key length][key]; '1'/'0' for public-key validity.
+; mode 2: the first verify record repeated `repeat` times (odd runs alter the message).
+type EcBatch = { at:i64,out:Arr u8 _ }
+type EcRecord = { curve:i64,hash:i64,public:Arr u8 _,signature:Arr u8 _,message:Arr u8 _,end:i64 }
+fn ec_verify(curve:i64,hash:i64,public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool
+  = if curve==1 then
+      (if hash==0 then ecdsa_p384_verify_digest(public,message,signature) else if hash==1 then ecdsa_p384_verify_sha256(public,message,signature) else
+       if hash==2 then ecdsa_p384_verify_sha384(public,message,signature) else ecdsa_p384_verify_sha512(public,message,signature)) else
+    if curve==2 then hash==1 && ecdsa_p256_verify_sha256(public,message,signature) else
+      (if hash==0 then ecdsa_p256_verify_digest(public,message,signature) else if hash==1 then ecdsa_p256_verify_digest(public,sha256(message),signature) else
+       if hash==2 then ecdsa_p256_verify_sha384(public,message,signature) else ecdsa_p256_verify_sha512(public,message,signature))
+fn ec_record(input:Arr u8 n,at:i64) -> EcRecord
+  = let size=str_byte(input,at+2) in let sig_at=at+3+size in let sig_size=str_byte(input,sig_at) in
+    let message_at=sig_at+1+sig_size in let message_size=str_byte(input,message_at)*256+str_byte(input,message_at+1) in
+    let end=message_at+2+message_size in
+    EcRecord { curve=str_byte(input,at),hash=str_byte(input,at+1),public=str_slice(input,at+3,sig_at),signature=str_slice(input,sig_at+1,message_at),
+      message=str_slice(input,message_at+2,end),end=if size<0 || sig_size<0 || message_size<0 || end>n then n+1 else end }
+fn ec_step(move state:EcBatch,input:Arr u8 n,mode:i64) -> EcBatch
+  = if mode==1 then
+      let size=str_byte(input,state.at+1) in let end=state.at+2+size in
+      let valid=if str_byte(input,state.at)==1 then p384_public_valid(str_slice(input,state.at+2,end)) else p256_public_valid(str_slice(input,state.at+2,end)) in
+      EcBatch { at=if size<0 || end>n then n+1 else end,out=push(state.out,u8(if valid then 49 else 48)) } else
+    let record=ec_record(input,state.at) in
+    EcBatch { at=record.end,out=push(state.out,u8(if ec_verify(record.curve,record.hash,record.public,record.message,record.signature) then 49 else 48)) }
+effect(fs,process) fn main(mode:i64,repeat:i64) -> unit
+  = let raw=file_read(0,4194304) in check raw.ok in let input=raw.value in let size=len(input) in
+    let result=if mode==2 then
+      let record=ec_record(input,0) in
+      let valid=loop(i=0,valid=0) while i<repeat next(i+1,
+        valid+(if ec_verify(record.curve,record.hash,record.public,if i%2==0 then record.message else concat(record.message,"x"),record.signature) then 1 else 0)) yield valid in
+      bytes_ok(concat("valid=",int_text(valid),"\n")) else
+      let batch=loop(state=EcBatch { at=0,out="" }) while state.at<size next(ec_step(state,input,mode)) yield state in
+      if batch.at!=size then bytes_error(22,"batch framing",0) else bytes_ok(batch.out) in
+    if !result.ok then process_exit(2) else let output=file_write(1,result.value) in check output.ok in noop()

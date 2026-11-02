@@ -1,0 +1,17 @@
+import "std:vec"
+import "std:result"
+type Marker<T> = { value:T,number:i64 }
+type Empty = {}
+type EmptyPair = { left:Empty,right:Empty }
+fn identity_unit<T>(value:T) -> T = value
+fn successful() -> Result<unit,unit> = Ok::<unit,unit>(identity_unit(noop()))
+fn propagated() -> Result<i64,unit>
+  = let ignored=successful()? in Ok::<i64,unit>(42)
+fn main() -> i64
+  = let result=match propagated() { Ok(value) => value,Err(error) => 0 } in
+    let markers=arr(i in 0..3) Marker::<unit> { value=noop(),number=i } in
+    let empty=arr(i in 0..2000) Empty {} in
+    let pairs=arr(i in 0..3) EmptyPair { left=Empty {},right=Empty {} } in
+    let vector=vec_push(vec_empty::<unit>(),noop()) in
+    let unit_ok=match vec_get(vector,0) { None => false,Some(value) => let ignored=identity_unit(value) in true } in
+    check unit_ok && len(empty)==2000 && len(pairs)==3 && len(markers)==3 && markers[2].number==2 in result

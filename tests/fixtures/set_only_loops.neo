@@ -1,0 +1,21 @@
+; Set-only loop states are made unique once at loop entry and then updated in
+; place without per-set tests. Every source they could share must stay intact.
+fn fill(a:Arr i64 _,v:i64) -> Arr i64 _ = loop(i=0,out=a) while i>=0 && i<len(out) next(i+1,set(out,i,v)) yield out
+fn fill_moved(move a:Arr i64 _,v:i64) -> Arr i64 _ = loop(i=0,out=a) while i>=0 && i<len(out) next(i+1,set(out,i,v)) yield out
+fn fill_bytes(a:Arr u8 _) -> Arr u8 _ = loop(i=0,out=a) while i>=0 && i<len(out) next(i+1,set(out,i,u8(122))) yield out
+fn at(a:Arr i64 _,i:i64) -> i64 = if i>=0 && i<len(a) then a[i] else -1
+fn byte_at(a:Arr u8 _,i:i64) -> i64 = if i>=0 && i<len(a) then i64(a[i]) else -1
+fn case(k:i64{k>=0, k<=64}) -> bool
+  = let a=arr(i in 0..k) i*10 in
+    let filled=fill(a,7) in
+    let moved=fill_moved(arr(i in 0..k) i,5) in
+    let first=loop(i=0,x=a,y=a) while i>=0 && i<len(x) next(i+1,set(x,i,9),y) yield x in
+    let second=loop(i=0,x=a,y=a) while i>=0 && i<len(x) next(i+1,set(x,i,9),y) yield y in
+    let none=loop(i=0,out=a) while i<0 && len(out)>0 next(i+1,set(out,0,5)) yield out in
+    let text=fill_bytes("abc") in let again="abc" in
+    len(filled)==k && len(moved)==k && len(first)==k && len(second)==k && len(none)==k &&
+    loop(i=0,ok=true) while ok && i<k next(i+1,
+      at(a,i)==i*10 && at(filled,i)==7 && at(moved,i)==5 && at(first,i)==9 && at(second,i)==i*10 && at(none,i)==i*10) yield ok &&
+    byte_at(text,0)==122 && byte_at(text,2)==122 && byte_at(again,0)==97 && byte_at(again,2)==99
+fn main() -> Arr u8 _
+  = if loop(k:i64{k>=0}=0,ok=true) while ok && k<64 next(k+1,case(k)) yield ok then "set-only loops OK\n" else "set-only loops FAILED\n"

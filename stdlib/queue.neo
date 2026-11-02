@@ -1,0 +1,20 @@
+import "std:option"
+; A bounded FIFO. Rejected pushes leave the queue intact; popped slots release
+; their managed contents. Ordinary value aliases retain copy-on-write semantics.
+sealed type Queue<T> = { slots:Arr Option<T> _,head:i64,count:i64 }
+type QueuePush<T> = { queue:Queue<T>,accepted:bool }
+type QueueTake<T> = { queue:Queue<T>,value:Option<T> }
+fn queue_new<T>(capacity:i64) -> Queue<T>
+  = check capacity>=0 && capacity<=1048576 in Queue::<T> { slots=arr(i in 0..capacity) None::<T>(),head=0,count=0 }
+fn queue_len<T>(queue:Queue<T>) -> i64 = queue.count
+fn queue_capacity<T>(queue:Queue<T>) -> i64 = len(queue.slots)
+fn queue_push<T>(move queue:Queue<T>,value:T) -> QueuePush<T>
+  = let slots=queue.slots in let count=queue.count in let head=queue.head in let size=len(slots) in
+    if count>=size then QueuePush::<T> { queue=Queue::<T> { slots=slots,head=head,count=count },accepted=false } else
+      check size>0 in let at=(head+count)%size in check at>=0 && at<size in
+      QueuePush::<T> { queue=Queue::<T> { slots=set(slots,at,Some::<T>(value)),head=head,count=count+1 },accepted=true }
+fn queue_take<T>(move queue:Queue<T>) -> QueueTake<T>
+  = let slots=queue.slots in let count=queue.count in let head=queue.head in let size=len(slots) in
+    if count==0 then QueueTake::<T> { queue=Queue::<T> { slots=slots,head=head,count=0 },value=None::<T>() } else
+      check head>=0 && head<size in let value=slots[head] in
+      QueueTake::<T> { queue=Queue::<T> { slots=set(slots,head,None::<T>()),head=(head+1)%size,count=count-1 },value=value }

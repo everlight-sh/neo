@@ -1,0 +1,26 @@
+import "std:x509"
+import "std:base64"
+import "std:io"
+; Parses every PEM CERTIFICATE block of a bundle on stdin (PEM -> Base64 -> DER ->
+; x509_parse) and prints "valid sig_mode ec_key_length rsa_valid der_length" per block.
+; Uses only Certificate fields that predate P-384 support, so it also builds
+; against an older std:x509 for before/after counts.
+type PemList = { at:i64,certs:Arr Certificate _,sizes:Arr i64 _ }
+fn pem_strip(text:Arr u8 n) -> Arr u8 _
+  = loop(i=0,out="") while i<n next(i+1,let c=str_byte(text,i) in if c==10 || c==13 || c==32 || c==9 then out else push(out,u8(c))) yield out
+fn pem_step(move state:PemList,text:Arr u8 n) -> PemList
+  = let begin=str_find(str_slice(text,state.at,n),"-----BEGIN CERTIFICATE-----") in
+    if !begin.present then PemList { at=n,certs=state.certs,sizes=state.sizes } else
+    let body=state.at+begin.value+27 in let finish=str_find(str_slice(text,body,n),"-----END CERTIFICATE-----") in
+    if !finish.present then PemList { at=n,certs=state.certs,sizes=state.sizes } else
+    let der=base64_decode(pem_strip(str_slice(text,body,body+finish.value))) in let wire=if der.ok then der.value else "" in
+    PemList { at=body+finish.value+25,certs=push(state.certs,x509_parse(wire)),sizes=push(state.sizes,len(wire)) }
+effect(fs) fn main() -> unit
+  = let raw=file_read(0,8388608) in check raw.ok in let text=raw.value in
+    let list=loop(state=PemList { at=0,certs=arr(i in 0..0) x509_parse(""),sizes=arr(i in 0..0) 0 }) while state.at<len(text) next(pem_step(state,text)) yield state in
+    let certs=list.certs in
+    let report=loop(i=0,out="",valid=0) while i<len(certs) next(i+1,
+        check i>=0 && i<len(certs) && i<len(list.sizes) in let c=certs[i] in
+        concat(out,if c.valid then "1 " else "0 ",int_text(c.sig_mode)," ",int_text(len(c.ec_key))," ",if c.key.valid then "1 " else "0 ",int_text(list.sizes[i]),"\n"),
+        check i>=0 && i<len(certs) in valid+(if certs[i].valid then 1 else 0)) yield concat(out,"total ",int_text(len(certs))," valid ",int_text(valid),"\n") in
+    let printed=print_out(report) in noop()

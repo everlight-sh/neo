@@ -1,0 +1,5 @@
+import "std:io"
+effect(fs,env,process) fn main() -> unit
+  = let input=loop(out="") while len(out)<6 next(let piece=file_read_chunk(0,6-len(out)) in check piece.ok && len(piece.value)>0 in concat(out,piece.value)) yield out in
+    let environment=env_get("NEO_TEST") in let output=print_out(concat("OUT:",str_trim(input),":",environment.value)) in
+    let errors=print_error("ERR") in process_exit(7)

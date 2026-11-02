@@ -1,0 +1,185 @@
+{
+  "iterations": 500000,
+  "repeats": 5,
+  "warmup_iterations": 1000,
+  "commands": {
+    "Axon baseline": [
+      ".kernel-build/jsx-ssr/render-bench",
+      "500000",
+      "0"
+    ],
+    "Axon optimized": [
+      ".kernel-build/jsx-ssr/render-bench",
+      "500000",
+      "1"
+    ],
+    "Bun + React": [
+      "/opt/homebrew/bin/bun",
+      "run",
+      "examples/jsx-ssr/render-bench.ts",
+      "500000"
+    ]
+  },
+  "results": {
+    "Axon baseline": [
+      {
+        "wall_s": 0.2612623330205679,
+        "cpu_s": 0.25830200000000003,
+        "cpu_us_per_render": 0.5166040000000001,
+        "renders_per_s": 1913785.2526205431,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.26181475003249943,
+        "cpu_s": 0.25915999999999945,
+        "cpu_us_per_render": 0.5183199999999989,
+        "renders_per_s": 1909747.2542625437,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.25976929091848433,
+        "cpu_s": 0.2566949999999988,
+        "cpu_us_per_render": 0.5133899999999976,
+        "renders_per_s": 1924784.8667258369,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.25985370809212327,
+        "cpu_s": 0.2573320000000002,
+        "cpu_us_per_render": 0.5146640000000005,
+        "renders_per_s": 1924159.5729807331,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.2590055000036955,
+        "cpu_s": 0.2563810000000014,
+        "cpu_us_per_render": 0.5127620000000028,
+        "renders_per_s": 1930460.9361301826,
+        "checksum": 23660846500
+      }
+    ],
+    "Axon optimized": [
+      {
+        "wall_s": 0.10567504190839827,
+        "cpu_s": 0.10357799999999953,
+        "cpu_us_per_render": 0.20715599999999906,
+        "renders_per_s": 4731486.17658853,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.10749120800755918,
+        "cpu_s": 0.10375800000000063,
+        "cpu_us_per_render": 0.20751600000000126,
+        "renders_per_s": 4651543.221700869,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.1055350408423692,
+        "cpu_s": 0.10290100000000085,
+        "cpu_us_per_render": 0.2058020000000017,
+        "renders_per_s": 4737762.889075084,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.10584637499414384,
+        "cpu_s": 0.10332500000000022,
+        "cpu_us_per_render": 0.20665000000000044,
+        "renders_per_s": 4723827.339648273,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 0.10827008285559714,
+        "cpu_s": 0.10284299999999957,
+        "cpu_us_per_render": 0.20568599999999915,
+        "renders_per_s": 4618080.884512337,
+        "checksum": 23660846500
+      }
+    ],
+    "Bun + React": [
+      {
+        "wall_s": 3.264313207939267,
+        "cpu_s": 3.652113,
+        "cpu_us_per_render": 7.304226,
+        "renders_per_s": 153171.57642346632,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 3.08528829109855,
+        "cpu_s": 3.5367249999999997,
+        "cpu_us_per_render": 7.073449999999999,
+        "renders_per_s": 162059.409956134,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 3.256030458956957,
+        "cpu_s": 3.6927389999999995,
+        "cpu_us_per_render": 7.385477999999999,
+        "renders_per_s": 153561.2170410012,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 3.198102334048599,
+        "cpu_s": 3.6408530000000017,
+        "cpu_us_per_render": 7.281706000000003,
+        "renders_per_s": 156342.71445186404,
+        "checksum": 23660846500
+      },
+      {
+        "wall_s": 3.213271375047043,
+        "cpu_s": 3.617786,
+        "cpu_us_per_render": 7.235572,
+        "renders_per_s": 155604.66006164197,
+        "checksum": 23660846500
+      }
+    ]
+  },
+  "summary": {
+    "Axon baseline": {
+      "median_renders_per_s": 1924159.5729807331,
+      "min_renders_per_s": 1909747.2542625437,
+      "max_renders_per_s": 1930460.9361301826,
+      "median_cpu_us_per_render": 0.5146640000000005
+    },
+    "Axon optimized": {
+      "median_renders_per_s": 4723827.339648273,
+      "min_renders_per_s": 4618080.884512337,
+      "max_renders_per_s": 4737762.889075084,
+      "median_cpu_us_per_render": 0.20665000000000044
+    },
+    "Bun + React": {
+      "median_renders_per_s": 155604.66006164197,
+      "min_renders_per_s": 153171.57642346632,
+      "max_renders_per_s": 162059.409956134,
+      "median_cpu_us_per_render": 7.281706000000003
+    }
+  },
+  "binary_sha256": "78d8e892634d4acb2adcb25c08ce0918a21f0f3bd7b29e34964838ff8b03cd89",
+  "directory": "bench/http/results/2026-10-23-224258-jsx-render",
+  "note": "Every iteration varies count 1..1000, renders the full document and checksums every UTF-8 byte. Wall/CPU include process startup and checksum work. One native binary contains both variants; mode chooses the renderer. Bun uses production React and includes UTF-8 encoding. This is not isolated render-call timing.",
+  "archived_binary": "bench/http/results/2026-10-23-224258-jsx-render/bin/render-bench",
+  "source_sha256": {
+    "axonc/check.py": "0e3ad1dd4fcc01ce49bace55600a6d2963ba4a128482a07d8428406c7459f752",
+    "axonc/linear.py": "3f6334bc3df2d545f305eff5464d82668ba704c49f1d5325faaa6d3af38d133c",
+    "axonc/graph.py": "29060cbef603fad29662f3a0da67c2413adbaa6c01214d637d4bbec6cfc3a3ba",
+    "axonc/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "axonc/llvm.py": "fbd597c009253ac126be237aac013d2da479c9ce18cb3d983aebad785174f907",
+    "axonc/ranges.py": "744200711fd2f2836d30043273b73b03f0d6b2876f1f2c9b92a078c0f4ebe097",
+    "axonc/cli.py": "d4d225df86a6a8638d0297f711dbe06b2165148ad92bcb28d1c8895df71f0e1f",
+    "axonc/vectorize.py": "6d3d92deae3808e0314242e22eccbda43dae4cf8d5ba235f5e6d501fa1311033",
+    "axonc/syntax.py": "76673e9f0b97a62a088866bad07f3bd3c665f31d27a4dec31499f48ef5254076",
+    "axonc/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "axonc/fold.py": "a72ce4770208595d53c4ddd77abbd778c5ad502b5aa4f6467babd54dc94178fb",
+    "axonc/inline.py": "793d7f0675eb34ca5c631ecb553b2948f77e84e8d541d3f861eb053147580ad3",
+    "runtime/platform_macos.ax": "332df57ab1b38141c8392cc4631118666ce0539aecbfcaadd84fd6679595c3ea",
+    "runtime/core.ax": "b6ab092fe6c165fcc298118c86e18906725b7c08f9a56ceb5abdf850cc46866e",
+    "runtime/http.ax": "f0d4e69e7ed3a1a4de85435db4485dcf684f5a998f60d98e84cf935b05740806",
+    "runtime/platform_linux.ax": "83bd098a0d6bcb2d1aa7a45020723d6fb7771e779a67970318a86d3823aaea1c",
+    "examples/jsx-ssr/page.tsx": "800c86dd747777a15061a62c3395875cbb718c71144bdab986155686f40db95d",
+    "examples/jsx-ssr/compile.ts": "1e9752a268f2a4372396aa1087776e01254e5087e1c1f93b1ea2b4e379b4324c",
+    "examples/jsx-ssr/html.ax": "b1ed2af9515a4742e43808f7c875d6dfc33f509626998ce45dbfe6737ab75ee2",
+    "examples/jsx-ssr/build-render-bench.ts": "fcd763aad6b746709429ccaeaefc4c5dbb98670b3d7def6215ea722604223609",
+    "examples/jsx-ssr/render-bench.ts": "b79aba0a8ccca69fd23aa86fd6c606596635b2f41cff3a7f4ed1672fd1940e97",
+    "examples/jsx-ssr/reference.tsx": "653811374e24df40307272a3cd95142ab7564f76544dd2b381116d4c078913cd",
+    "examples/jsx-ssr/bun.lock": "40e7182d523f307ce3e6ce53c6143b411e3f1e6e96aba6662a46581d24c08ea7"
+  }
+}

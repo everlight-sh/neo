@@ -1,0 +1,2043 @@
+{
+  "ok": true,
+  "program": "0703bc54ddca00105ba80efd077aa19cd3ccaa5523edcd0b9a57ae659fa423ae",
+  "functions": {
+    "ax_runtime_init": "74a6c9bb4137d629f7ea463de838a2e963942b540bccf4bbd8e3f37e08f73ed6",
+    "rt_errno": "6f690fc95636d7d52b5969f2c2fdab70f99df516d0a45a2bb744eeffa5e267ef",
+    "rt_result": "a5836c12e556588e62b7866aaeb9f6283a52d379fa37e5ea5f78c86cf9e6ff8a",
+    "rt_cstrlen": "f3410de3ed0aadd16d5dce794cb8fc5e08d921616bb5e02698b36af5c7939c55",
+    "rt_write": "5191c9dcd57964c0ba8d11403f947bed2e9d27afa55f5352cbfc03518e8c1da8",
+    "rt_write_all": "861a6fe25a2699e93a6202a6f339784365fac22bab704df806d3eadeecf2ab92",
+    "rt_puts": "871fbe81e6225e49dd3c89605b463bfb2de6ea44533466a2c0561b13c702e1e4",
+    "ax_exit": "8ff237943d83f6283727fcd5f5bf36c83d05165122c1c9bd881c31e233655bc0",
+    "ax_trap": "adb26c764d45feedb1b60a10c456686b132bd44ee431819a7904c906c7376111",
+    "memcpy": "b739d879420306d5ebc62eeb93fe65fba430aa59dda0ae0a5b5b7df1afa1f97c",
+    "memmove": "fdb413823cf90857bef03c15f52453c2e265b0b35c87f8479790824f50dab10b",
+    "memset": "3d34a047527a88e91bbdd4596668769b982237a1cc64f9d7d2e0014e3c503e09",
+    "bzero": "51a17ae0fc8f71323e2438020e6244fd8e250620c14f7bdad63a3735ab4c5330",
+    "ax_cap": "ab50ca90f9015acfb0a51b290efb101916480035ba7ade3d4fd698a8369fbd50",
+    "rt_allocation_class": "eb6f0bb1268de8854930771e4c2ed6a1c467528a726a28093e10277dd52fad23",
+    "rt_mmap": "6a5c1ad199f8bad8e5ba0044ae14ff3bf6195dd44d3c28d2bb6033a756ef64e3",
+    "rt_map": "f282e27ae07f19afce50cf120bdc346694355f9dc58d1a8f6fbc993b325a0030",
+    "rt_munmap": "4fcd110e8a3fb0d81532a01488b135dd0578158afb1a52c0060257d7fade5af8",
+    "rt_take_large": "13cae8c1ad9d9d365a76258bbfac8e3d8c41758e6b76579ee0cc419e2e1f93e6",
+    "ax_alloc": "532176136afb9cd6d09bb58bcb14db7f1b24846b6130aa3805afcf8cd3ad5234",
+    "ax_release": "392ef1526663f3abee773252d82b4c2e70e0060036c42ba17697e5a26156ba80",
+    "ax_free": "1955bb17cb3b383cfc0c048ab221d74f39b6c96bd9843063ba6f8b9115af89b1",
+    "calloc": "1dd74cd54c26c10e525243fe3a4b11d0145051c1299297594d1b723e7d9a6d8a",
+    "rt_close": "67396d428fa38ea24fb8c90c84613502f196661e6989987dbc0f2a8bb360525c",
+    "rt_handle_after_fork": "c9e2b4333574b0fd0e51586c1da59ffc5900bff173e33aadf39f3bf180bb4b5c",
+    "rt_fork": "d69be8d8422b04e98b729825ff7b223ea5aa63533b88552287b853090c4e58f8",
+    "rt_env_match": "d62c7306a3490c42e490f73c33eb1baf8bcfcf5a77ce010a0dc9b8554e2928e5",
+    "rt_getenv": "03c84845afa383a68631e0d381311d710bfc9e61ab213d61990f0a20e3ceeff7",
+    "rt_digit_ok": "01ef19facbab700b8676b728e0e90292498b4089edfe35806cf5a61c7229037a",
+    "ax_parse_i64": "aae94e44a3c2e3a425e17cde57322d9a4ad1d9dd1ce9b24657b40e533343c693",
+    "rt_ncpu": "89fe26b37624f702106ef1e9ed81400530d23f966b68392207e41287f045b73a",
+    "rt_threads": "c4f2e63220316abdce2d6c644170faca63c7484954292c82b33ef81a08f19170",
+    "ax_chunks": "5d506a66c7c29a608dc599a291cab661a30382ae87cd21a7f684695e29581a3b",
+    "ax_chunks_work": "90a873b54f5ccf79d46e8f2de8e9461b2a41865938a9a3aa2111d6582de2e226",
+    "rt_wait": "0164b888effac40cabc2ecfbb71a9563400616ae4caf6f6fb09b628dcc21c568",
+    "ax_par_for": "d53f1124c6ae8ed97cbd0125158a4d955178e004e599389c7c9f82bc5575276a",
+    "ax_usage": "7dd046804a179582887eda837c7b37ad6a50b7b3dda71310400d4ed720f2790b",
+    "ax_precondition_failed": "08511977695e5ea4d04597595f3b60cfb1b017756ac295f80bdf0d8a52874987",
+    "rt_format_integer": "050e9777048a5cdc7da3f2ff84ad07dd0ede51b7534cc76f2231008dc678d7ef",
+    "ax_print_i64": "2d3b1216c59324de9d7378a98d5853146f57a7963e8e9cd3dda9943d7f4757d2",
+    "rt_normalize_float": "cf97271b9caac4323bec0d342086adc0c2c833f62006a03ace25b5da4ac38ba7",
+    "ax_print_f64": "236580e8bd6279c6ea001cabf27d39e87a3b8459aff005e0171837d38eb16fb1",
+    "ax_print_bytes": "d67fd7259993dd9ed289de9db994bcf0ed255069051d5cd3df60b9915a1f8da0",
+    "rt_again": "9163015d66ea28e25edba0d0ecab5f2d4ccfbcd3f05906c55f0db68c68b07419",
+    "rt_retry": "221e83363228ee18f4e496985d32824c9111cf084c04f0a4c49a55f6065faec4",
+    "rt_fcntl": "41cc16504a33b3d99b241b6794efa22876bb518ecfa2bbb5952698065d2ff534",
+    "rt_nonblock_flag": "5e443fd254ad9825644d3a49998db39d42346b57ea2b9960a560d32474a2bc32",
+    "rt_nonblock": "1d9b8b8624e43dd93c8b021a272304c30f5bdaee0ae8d7842186bab2c504ce29",
+    "rt_address": "82c718e10d48b51b6f54c6e00c9097c5b1a703a97f1b8bde4ee9327a8bd8808b",
+    "rt_bind": "0cb2b50a79e52d989ac3f9bea64f46cd6e4f31ff00c0863606978461e7d2688e",
+    "rt_listen": "7580db8cc6ec8a66c9915030c2b19187330dbdb1ade502e30692f3d1e0bbfa13",
+    "rt_reuseaddr": "8172014d9cae170906ced7d9630e65a57d34a061cdc3524bb56c53dbfdd63450",
+    "rt_setsockopt": "ecebf9bb4c281b4fe3742f59c5309b65d90bb801e9fc271b646e0b036f13e556",
+    "rt_socket": "a005d6f11688fb17fd2dc8171d5bfa1ed638f75cb3a67894e700b9169b9b7b34",
+    "rt_socket_level": "9f8c5953245c82df287b165e724ca4016d5f7bd8e717051f1b2777af505073eb",
+    "rt_listener": "17d8ebeac9d3012000ed6894848f8506684c61b3a15f4ba113a93c98aa143a5e",
+    "rt_region_spawn": "149a14f6931b12db826117f9c7d73061f86529a519f1cf156afc48a48ccfa46c",
+    "ax_par_for_shared": "11a8545bbfb9fa2710e7844c5b91785ce31059b0a2c6b6ced93230d8157b3929",
+    "rt_read": "8ac8d6d721d38af776bf1b05371c8683384cee5d0ab900d64f6a2522a5820db7",
+    "rt_private_map": "b7c3ab6d39ee39334f52257380f0c08bf993a10b913e12699a9efc5a8881e8de",
+    "rt_random": "9976999fd0f336c984e314f6b6fec0e89a04b10d3c596ad8a13f7df67d05c1eb",
+    "rt_word_wake": "ddcee47093253997883efeb52172328b70cda4fece7965095d3152ef10b9b484",
+    "rt_word_wait": "6d25118bf22feb85e0546391c5da0e58d6f04001b2ba3a58bef98d899203d1cc",
+    "rt_getpid": "1d65cd8c130fcddd7fbfdb5bdc85bb64008fac14abd3b0306834cc3a2e9952bf",
+    "rt_getppid": "f3c5e9a78f633fbf7ed31c8c7d7bbb1f0d20e4adbdbbda4027476dc37c0a3909",
+    "rt_accept_fd": "8b911ff24cd47569869ed15e7f1d75906af9b329b5209227b0cbd487328803d1",
+    "rt_send": "92e1448751fb86d82a38f4fbc8d714df2708cbc2a5af29e62f42a66729249c44",
+    "rt_poll": "8251e4329adf6bf754401653a94a79a44b45db99da5abe2d6e72aaba0f608aea",
+    "rt_epoll_create": "4c47f62e14c05671db002a8f08136c86927c0a186cd6b640f484732b103f2c85",
+    "rt_epoll_ctl": "25603e6b9fb438f98676b6ae5c62ba4991bb4d634bb1de72cf0bbb756a605c73",
+    "rt_epoll_wait": "504b4154805df7337bd8d6081d56f638a075f38023c16115f9f71220cc73baf0",
+    "rt_socketpair": "b47e44006b2910ef618c57cc95aa9ba919bfe5770022b4f2b385b52f393bfb34",
+    "rt_epoll_event_bytes": "96e40b63b53368607a0499f3757f5dad9728577fe07256f54da12446b1c96853",
+    "rt_epoll_data_offset": "131ab7d7c5f34599c5b9a471d3791e2b5f7a33e11c0e0a519eb2e59367fdb63b",
+    "rt_open": "0ca3cd5e04decbb40c88d24629d15d617eadd02569e3e7c847c6701097378fe4",
+    "rt_flock": "533f4db3abe22170ba854f232bf137c0299c6917c56f0c391dd2dec42ffb175a",
+    "rt_fsync": "3f87223a01b5d68010d5a41b94926e20d543857e66d04022d42522d57ebb5a45",
+    "rt_truncate": "4b29b1154428ac9531a363f579b8c6e460ed40e2a004746cc0cbdb4185698f02",
+    "rt_connect": "7ae0b6bc16db84ac5ad112f209a9047e7dfb0da3999a4cbf3b727eeb74bc6935",
+    "rt_open_write": "435bfd0917e0c5984919d6abf791ede45bd263898fbe0f57d6469b808860cc0c",
+    "rt_open_append": "45f986aae647bed409c64e86458baa083f5d88b7e7a83eb703f34203bc64f2a0",
+    "rt_open_update": "44e52899dc4f4f34fe08db29686fb2acc88d58a5d0d258c55079051652b138aa",
+    "rt_now_ms": "780170562f9c6c1664b97c9cfc3e54fbfd75aceb51d2cb5f9fa152ac1759ce12",
+    "rt_wait_ready": "2aeb559ecef00ccd7373776e70990332f77559cb0df1cfee8089a6ea9fd6d010",
+    "rt_seek": "74121998dc1466540a79feaec9e60c517aa608acae209c63320861afa5e5250b",
+    "rt_socket_error": "01bff57f054f48644f54bbadbdfc2a969989026d5ebfb46ea1f1017ea57c177f",
+    "rt_file_size": "e4858193a5ab163fe873cff5383cf046151074d2bb6c23fe3d278ffb7cf27c83",
+    "rt_map_file": "e37c8a8c6d25f1ada21d6ba36efea4fadb6c86f827637a09de24752f9be9708f",
+    "rt_mkdir": "51f0c90ba74c76f2ea24c8714a2dff28ad2f2784738af6d20f4b05283fe315f3",
+    "rt_sync_full": "13428f15f6cd085a03a0a0161a5eaa1460f3564d939670aa4274d7b78776e075",
+    "rt_clock_ns": "19519bec861d678f26e5caf75a68bbb599560e0a9bfe3286a8e28ba2f0740d88",
+    "rt_cpu_ns": "1c4ea1c9a7a50eb60587bf0eed068d2376d7ae705251b0059631834f86059645",
+    "rt_file_identity": "b922bb0a5e13abcb50fe83563bbeb044ab6d120e1c0753e964398d11d1e1bc74",
+    "rt_rename": "a12c76651ca7fbacdf4267fa0fdc37dda39fbbfc0326772a7c957862595b0b12",
+    "rt_unlink": "a9b23b600b118e7080182b32ee1574c58839c52465b674f69c374238277277b8",
+    "rt_file_remap_each_write": "b9e9fe041e1413edb5c522cfd5757002431ff705c96cbee4af8a216790de3b3e",
+    "rt_lower": "221a167c60faa7b329c0e88bd22669484a1d51ab28172a721f99a11c3e2d7c0f",
+    "rt_match": "ebd11855a7e207067fb7b29ac30ee9ee2a2a1eeae1c6944b4e05f82ce85f9b2e",
+    "rt_match_ci": "9e1e707f1e085e6d0d9e60dfad43ad413b5cae297e7fe96aec899587a271b590",
+    "rt_find": "eb5f2734a877d4733ac3f87a6cb361183c2e7049b5d857678f8c281e60907668",
+    "rt_header": "6e58388c674591677d13ca2e67b753d77398971c26e66f8d333cdbf7af115f21",
+    "rt_skip_space": "d3219cdc3a527cf202d6b5cb7ec710f76810265160eef5b869510ea5827e67ee",
+    "rt_body_length": "b5a8bfdc1897e5785f50d3baf22dcc4527f271aafd6b459516c85a330b7ef58b",
+    "rt_connection_token": "cc007414139e27c6a0c704bf688725c92dcada856bbb59cac87c447d71005ee0",
+    "rt_drop": "e43284a7015a8376a010a083222b5d8549ed2ca0f579d2dce5095cd8149678d5",
+    "rt_request": "7d7b1f2bf2acfca5ed1a376f4c1309d098c71d05330e73ed12e96a8c00e11ad4",
+    "rt_batch_next": "25b5f3fb9177575daeb31c0b21841c723c7aecc08b4dbbb800d7fe1f382b2256",
+    "rt_prepare": "ee05c2c6d7bab42bfb47fc7d7be3a2126f7e02835ae440ba8b8714b6e39d24ec",
+    "rt_flush": "1ff6b4c9f60da484ec7e059d02edc6110eda92c199cad3e756c7d42ea03382f0",
+    "rt_step": "1612eb9735eca2c65a3c3d4a7e6fa5a75626b00a89db07262be5fc17301d09c0",
+    "rt_accept": "a4235390e4743f37b8a48a3f8cf4f0048fb5f5d80846bb1ecb8ea595c35c604f",
+    "rt_compact": "a6b72b9139e52561dea8e4de39841938ccb0629c66d470b3011e91a46904f37f",
+    "rt_events": "10cbacbecd86a4deac0a64f9259abdc10dc1af137021ea831a73a88748dec84b",
+    "rt_http_worker": "0e3e231e63456f6eda4b3092acb8ac91f06d1afb81f5d49e52c93c95e0e8bb7a",
+    "rt_epoll_apply": "2c0b02fbc121a31aa379b34ac8e672c7ed263de5d713d59bdc19b1eae3c0daea",
+    "rt_epoll_accept": "48f7f45e02653dac829536a9fce55e5769b448ff00a6f89a5c81550108b24279",
+    "rt_epoll_compact": "a666cf7f57a8cff1222ef616604911595f357944e196b095d5cf9290d145c055",
+    "rt_epoll_listener": "49f1093cd8227eb8a83cb9f7a4bcc1d67994bd7f2fc1c47a18e227e15eca52f4",
+    "rt_epoll_sync": "785336366b37e508fdea0085b9a31614306d23f703724f208c4eb888954b8392",
+    "rt_http_epoll_worker": "8bb11f5ccfeb9310a7f5a19595bbed4c992e84e35a1ba2dd6415e2ce6a205c8c",
+    "rt_serve_worker": "b5346754428831462900db6b10b249a64eab843c0411ee45d3459d74df00aeea",
+    "ax_serve": "a93b0ea631800aed43867c79fd2a61298779a8a8de04e96f54fd91fb70c810b7",
+    "rt_handles": "40929c0be1c87b2584ffda7428c2071d1474f45dc87f14e9daa8624958d9b4b0",
+    "rt_handle_new": "4169c3aa80558266e35c40439611cb6c94650128752d0a13a88e504c7b881261",
+    "rt_handle_fd": "132e41523b6b967d95280cc12ef27eb253a639e5ac2410025eafa1aa5193d185",
+    "rt_handle_drop": "3e71cb21113dbdee26513c799ef67e96ca69589a887e82bdab53e6cd5bc164af",
+    "rt_handle_live": "736b3f77152cd4f717e7372de25ca375f29bb8be0a4ecee77e0e1c5b88cd5308",
+    "__md31e05dbb8d27923_escape": "4ff643c5d3072701247ffe5243c511f3d1c6b48ae89b46a96fbb7378313e873f",
+    "main": "59c854b3e5169cf028f13f2184ce8a4ac6a7a31a95ee6ed5891338ca37d26c90"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "memset",
+      "node": "b87bb98e71c9",
+      "pos": [
+        51,
+        24
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "memset",
+      "node": "5b23a84ac5d0",
+      "pos": [
+        51,
+        37
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "ax_release",
+      "node": "05dcadd53586",
+      "pos": [
+        110,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "ax_release",
+      "node": "8ce2e4777990",
+      "pos": [
+        117,
+        19
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "calloc",
+      "node": "03e46f23d988",
+      "pos": [
+        125,
+        66
+      ],
+      "kind": "division",
+      "goal": "size != 0",
+      "normalised": "(size + 1 <= 0 || -size + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "rt_threads",
+      "node": "58945588a82b",
+      "pos": [
+        171,
+        40
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨if#100⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "rt_threads",
+      "node": "522a751178e7",
+      "pos": [
+        171,
+        53
+      ],
+      "kind": "postcondition",
+      "goal": "(result <= 256)",
+      "normalised": "⟨if#100⟩ - 256 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "ax_chunks_work",
+      "node": "76bd77fc0ee4",
+      "pos": [
+        185,
+        30
+      ],
+      "kind": "division",
+      "goal": "estimate != 0",
+      "normalised": "(⟨if#106⟩ + 1 <= 0 || -⟨if#106⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "ax_par_for",
+      "node": "9500ed5c5550",
+      "pos": [
+        195,
+        52
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#112⟩ + 1 <= 0 || -⟨if#112⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "ax_par_for",
+      "node": "c394eab878a8",
+      "pos": [
+        195,
+        95
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#112⟩ + 1 <= 0 || -⟨if#112⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "ax_par_for",
+      "node": "1cebc2ee517d",
+      "pos": [
+        200,
+        54
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#112⟩ + 1 <= 0 || -⟨if#112⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "ax_par_for",
+      "node": "4e580e499368",
+      "pos": [
+        200,
+        97
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#112⟩ + 1 <= 0 || -⟨if#112⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "ax_par_for",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        204,
+        49
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#112⟩ + 1 <= 0 || -⟨if#112⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "rt_format_integer",
+      "node": "b16c1af29647",
+      "pos": [
+        224,
+        15
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "rt_format_integer",
+      "node": "951a0d54584f",
+      "pos": [
+        224,
+        69
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        248,
+        68
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "ax_print_f64",
+      "node": "73b2435b2fd1",
+      "pos": [
+        253,
+        66
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) initially (divisor := 10000000000000000)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "ax_print_f64",
+      "node": "e15713ba9a40",
+      "pos": [
+        254,
+        99
+      ],
+      "kind": "division",
+      "goal": "divisor != 0",
+      "normalised": "(⟨state#177⟩ + 1 <= 0 || -⟨state#177⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "ax_print_f64",
+      "node": "24b343a9eea7",
+      "pos": [
+        254,
+        109
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "ax_print_f64",
+      "node": "e88c12479cc5",
+      "pos": [
+        255,
+        47
+      ],
+      "kind": "division",
+      "goal": "10 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "ax_print_f64",
+      "node": "1c3d3e93c877",
+      "pos": [
+        255,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(divisor >= 1) preserved (divisor := if (divisor >= 10) then … else …)",
+      "normalised": "-⟨if#187⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "rt_nonblock",
+      "node": "23facd4e815f",
+      "pos": [
+        269,
+        35
+      ],
+      "kind": "division",
+      "goal": "rt_nonblock_flag() != 0",
+      "normalised": "(⟨call#193⟩ + 1 <= 0 || -⟨call#193⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "rt_nonblock",
+      "node": "31d54fd04e79",
+      "pos": [
+        269,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "rt_listener",
+      "node": "fa66432d526b",
+      "pos": [
+        277,
+        45
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "rt_listener",
+      "node": "29891c0eca04",
+      "pos": [
+        278,
+        44
+      ],
+      "kind": "division",
+      "goal": "256 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "ax_par_for_shared",
+      "node": "9500ed5c5550",
+      "pos": [
+        296,
+        40
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#213⟩ + 1 <= 0 || -⟨if#213⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "ax_par_for_shared",
+      "node": "c394eab878a8",
+      "pos": [
+        296,
+        85
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#213⟩ + 1 <= 0 || -⟨if#213⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "ax_par_for_shared",
+      "node": "c25ef3bb8b1c",
+      "pos": [
+        304,
+        48
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(⟨if#213⟩ + 1 <= 0 || -⟨if#213⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "rt_word_wait",
+      "node": "bcb9e2ff05c2",
+      "pos": [
+        11,
+        80
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "rt_word_wait",
+      "node": "22b8489bc003",
+      "pos": [
+        11,
+        132
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "rt_ncpu",
+      "node": "19600b8938d3",
+      "pos": [
+        49,
+        97
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "rt_ncpu",
+      "node": "9ff5d8fb93b8",
+      "pos": [
+        49,
+        111
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "rt_nonblock_flag",
+      "node": "af3e2245ebfe",
+      "pos": [
+        54,
+        39
+      ],
+      "kind": "postcondition",
+      "goal": "(result > 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "rt_now_ms",
+      "node": "e16ab6c4bdac",
+      "pos": [
+        75,
+        81
+      ],
+      "kind": "division",
+      "goal": "1000000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "rt_wait_ready",
+      "node": "d42bd859971d",
+      "pos": [
+        78,
+        87
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "rt_wait_ready",
+      "node": "62ab929a2408",
+      "pos": [
+        78,
+        145
+      ],
+      "kind": "division",
+      "goal": "1000 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "rt_match",
+      "node": "f772792f6442",
+      "pos": [
+        10,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "rt_match",
+      "node": "5d7d099a06e4",
+      "pos": [
+        11,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#408⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "rt_match",
+      "node": "7949e64dc59b",
+      "pos": [
+        11,
+        39
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#408⟩ <= 0 && at - n + ⟨state#408⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "rt_match",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        11,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#408⟩ <= 0 && -m + ⟨state#408⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "rt_match_ci",
+      "node": "f772792f6442",
+      "pos": [
+        14,
+        44
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 42,
+      "fn": "rt_match_ci",
+      "node": "5d7d099a06e4",
+      "pos": [
+        15,
+        33
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#410⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 43,
+      "fn": "rt_match_ci",
+      "node": "7949e64dc59b",
+      "pos": [
+        15,
+        48
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (at + i) && (at + i) < len(a)",
+      "normalised": "(-at - ⟨state#410⟩ <= 0 && at - n + ⟨state#410⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 44,
+      "fn": "rt_match_ci",
+      "node": "bf3fad0fb9c1",
+      "pos": [
+        15,
+        71
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(b)",
+      "normalised": "(-⟨state#410⟩ <= 0 && -m + ⟨state#410⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 45,
+      "fn": "rt_find",
+      "node": "1af212fd43bb",
+      "pos": [
+        18,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 46,
+      "fn": "rt_find",
+      "node": "849fcf625186",
+      "pos": [
+        18,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 47,
+      "fn": "rt_find",
+      "node": "5d7d099a06e4",
+      "pos": [
+        20,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#412⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 48,
+      "fn": "rt_find",
+      "node": "f51863d53b48",
+      "pos": [
+        20,
+        35
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#412⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 49,
+      "fn": "rt_find",
+      "node": "b2325436c811",
+      "pos": [
+        20,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if rt_match(a, i, b) then … else …)",
+      "normalised": "-⟨if#415⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 50,
+      "fn": "rt_find",
+      "node": "61b3a6475209",
+      "pos": [
+        17,
+        81
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#416⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 51,
+      "fn": "rt_header",
+      "node": "1af212fd43bb",
+      "pos": [
+        23,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 52,
+      "fn": "rt_header",
+      "node": "849fcf625186",
+      "pos": [
+        23,
+        63
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) initially (found := -1)",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 53,
+      "fn": "rt_header",
+      "node": "5d7d099a06e4",
+      "pos": [
+        25,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#417⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 54,
+      "fn": "rt_header",
+      "node": "cf559b9108e5",
+      "pos": [
+        25,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(a)",
+      "normalised": "(-⟨state#417⟩ + 1 <= 0 && -n + ⟨state#417⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 55,
+      "fn": "rt_header",
+      "node": "f51863d53b48",
+      "pos": [
+        25,
+        70
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#417⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 56,
+      "fn": "rt_header",
+      "node": "6c00bd01ea41",
+      "pos": [
+        25,
+        20
+      ],
+      "kind": "invariant",
+      "goal": "(found >= -1) preserved (found := if (((i == 0) || (a[(i - 1)] == '\\n')) && rt_match_ci(a, i, key)) then … else …)",
+      "normalised": "-⟨if#420⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 57,
+      "fn": "rt_header",
+      "node": "61b3a6475209",
+      "pos": [
+        22,
+        85
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= -1)",
+      "normalised": "-⟨loop#421⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 58,
+      "fn": "rt_skip_space",
+      "node": "f51863d53b48",
+      "pos": [
+        29,
+        29
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-start <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 59,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        53
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#422⟩ <= 0 && -n + ⟨state#422⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 60,
+      "fn": "rt_skip_space",
+      "node": "ccb5828a5d60",
+      "pos": [
+        29,
+        68
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(a)",
+      "normalised": "(-⟨state#422⟩ <= 0 && -n + ⟨state#422⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 61,
+      "fn": "rt_skip_space",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        30,
+        15
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#422⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 62,
+      "fn": "rt_skip_space",
+      "node": "4c51f7d67584",
+      "pos": [
+        28,
+        73
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 0)",
+      "normalised": "-⟨loop#423⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 63,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        33,
+        55
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 64,
+      "fn": "rt_body_length",
+      "node": "f772792f6442",
+      "pos": [
+        34,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 65,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        36,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#424⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 66,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        37,
+        45
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := field",
+      "normalised": "-⟨call#424⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 67,
+      "fn": "rt_body_length",
+      "node": "3e6586a70b8d",
+      "pos": [
+        38,
+        43
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := start)",
+      "normalised": "-⟨call#427⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 68,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        31
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#428⟩ <= 0 && -n + ⟨state#428⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 69,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        39,
+        52
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#428⟩ <= 0 && -n + ⟨state#428⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 70,
+      "fn": "rt_body_length",
+      "node": "f6296da08327",
+      "pos": [
+        40,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#428⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 71,
+      "fn": "rt_body_length",
+      "node": "ad532a19ab53",
+      "pos": [
+        40,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#428⟩ <= 0 && -n + ⟨state#428⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 72,
+      "fn": "rt_body_length",
+      "node": "1af212fd43bb",
+      "pos": [
+        42,
+        49
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := i",
+      "normalised": "-⟨state#428⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 73,
+      "fn": "rt_body_length",
+      "node": "94f8d85a88ce",
+      "pos": [
+        43,
+        38
+      ],
+      "kind": "bounds",
+      "goal": "0 <= end && end < len(headers)",
+      "normalised": "(-⟨call#433⟩ <= 0 && -n + ⟨call#433⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 74,
+      "fn": "rt_body_length",
+      "node": "a3eada33dae0",
+      "pos": [
+        43,
+        62
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (end + 1) && (end + 1) < len(headers)",
+      "normalised": "(-⟨call#433⟩ - 1 <= 0 && -n + ⟨call#433⟩ + 2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 75,
+      "fn": "rt_connection_token",
+      "node": "f772792f6442",
+      "pos": [
+        46,
+        51
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 76,
+      "fn": "rt_connection_token",
+      "node": "3e6586a70b8d",
+      "pos": [
+        48,
+        31
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := field)",
+      "normalised": "-⟨call#440⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 77,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        41
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#441⟩ <= 0 && -n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 78,
+      "fn": "rt_connection_token",
+      "node": "88d38e54a0ed",
+      "pos": [
+        49,
+        63
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(headers)",
+      "normalised": "(-⟨state#441⟩ <= 0 && -n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 79,
+      "fn": "rt_connection_token",
+      "node": "5d7d099a06e4",
+      "pos": [
+        50,
+        17
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-⟨state#441⟩ - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 80,
+      "fn": "rt_connection_token",
+      "node": "f51863d53b48",
+      "pos": [
+        50,
+        43
+      ],
+      "kind": "precondition",
+      "goal": "(at >= 0) with at := i",
+      "normalised": "-⟨state#441⟩ <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 81,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        44
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#441⟩ + 1 <= 0 && -n + ⟨state#441⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 82,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        69
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#441⟩ + 1 <= 0 && -n + ⟨state#441⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 83,
+      "fn": "rt_connection_token",
+      "node": "cf559b9108e5",
+      "pos": [
+        51,
+        94
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(headers)",
+      "normalised": "(-⟨state#441⟩ + 1 <= 0 && -n + ⟨state#441⟩ <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 84,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        32
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#441⟩ <= 0 && m - n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 85,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        58
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#441⟩ <= 0 && m - n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 86,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        83
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#441⟩ <= 0 && m - n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 87,
+      "fn": "rt_connection_token",
+      "node": "5b0a643a7efb",
+      "pos": [
+        52,
+        108
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i + m) && (i + m) < len(headers)",
+      "normalised": "(-m - ⟨state#441⟩ <= 0 && m - n + ⟨state#441⟩ + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 88,
+      "fn": "rt_request",
+      "node": "16c58f891ec2",
+      "pos": [
+        67,
+        5
+      ],
+      "kind": "check",
+      "goal": "((offset >= 0) && (offset <= n))",
+      "status": "checked"
+    },
+    {
+      "id": 89,
+      "fn": "rt_request",
+      "node": "742fa090ffa6",
+      "pos": [
+        68,
+        17
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-n + offset <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 90,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        69,
+        42
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 91,
+      "fn": "rt_request",
+      "node": "d7c0fa144180",
+      "pos": [
+        73,
+        7
+      ],
+      "kind": "check",
+      "goal": "((header_bytes >= 0) && (header_bytes <= (n - offset)))",
+      "status": "checked"
+    },
+    {
+      "id": 92,
+      "fn": "rt_request",
+      "node": "a43c757175f3",
+      "pos": [
+        74,
+        21
+      ],
+      "kind": "size",
+      "goal": "view length >= 0",
+      "normalised": "-⟨call#445⟩ - 4 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 93,
+      "fn": "rt_request",
+      "node": "f772792f6442",
+      "pos": [
+        93,
+        47
+      ],
+      "kind": "precondition",
+      "goal": "(start >= 0) with start := 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 94,
+      "fn": "rt_prepare",
+      "node": "46eecea6e7c4",
+      "pos": [
+        104,
+        5
+      ],
+      "kind": "check",
+      "goal": "((n >= 0) && (n <= 65536))",
+      "status": "checked"
+    },
+    {
+      "id": 95,
+      "fn": "rt_step",
+      "node": "8f30d0fd39f4",
+      "pos": [
+        128,
+        15
+      ],
+      "kind": "division",
+      "goal": "8 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 96,
+      "fn": "rt_step",
+      "node": "34e7487a6e9f",
+      "pos": [
+        128,
+        19
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 97,
+      "fn": "rt_step",
+      "node": "92b5b3bf7cd3",
+      "pos": [
+        128,
+        38
+      ],
+      "kind": "division",
+      "goal": "32 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 98,
+      "fn": "rt_step",
+      "node": "fec7f2b87569",
+      "pos": [
+        128,
+        43
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 99,
+      "fn": "rt_step",
+      "node": "f2fa58b5a3b9",
+      "pos": [
+        129,
+        56
+      ],
+      "kind": "division",
+      "goal": "4 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 100,
+      "fn": "rt_step",
+      "node": "3ee6b2a6d451",
+      "pos": [
+        129,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 101,
+      "fn": "rt_step",
+      "node": "8ce2e4777990",
+      "pos": [
+        133,
+        63
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 102,
+      "fn": "rt_step",
+      "node": "92aded101155",
+      "pos": [
+        133,
+        82
+      ],
+      "kind": "division",
+      "goal": "16 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 103,
+      "fn": "rt_step",
+      "node": "c78e4a7c9741",
+      "pos": [
+        133,
+        87
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 104,
+      "fn": "rt_accept",
+      "node": "26d5a3b4dc64",
+      "pos": [
+        158,
+        36
+      ],
+      "kind": "division",
+      "goal": "workers != 0",
+      "normalised": "(workers + 1 <= 0 || -workers + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 105,
+      "fn": "rt_http_worker",
+      "node": "17c345ade511",
+      "pos": [
+        198,
+        60
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 106,
+      "fn": "rt_http_worker",
+      "node": "303fca13fad3",
+      "pos": [
+        201,
+        56
+      ],
+      "kind": "division",
+      "goal": "2 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 107,
+      "fn": "rt_http_worker",
+      "node": "fd12beb8cd8b",
+      "pos": [
+        201,
+        122
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 108,
+      "fn": "ax_serve",
+      "node": "2f3157c831f4",
+      "pos": [
+        231,
+        57
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-⟨call#563⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 109,
+      "fn": "rt_handle_fd",
+      "node": "2d6bc81de88b",
+      "pos": [
+        27,
+        28
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 110,
+      "fn": "rt_handle_fd",
+      "node": "b1f3151861ed",
+      "pos": [
+        27,
+        67
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 111,
+      "fn": "rt_handle_drop",
+      "node": "7bec0c8e7295",
+      "pos": [
+        35,
+        74
+      ],
+      "kind": "division",
+      "goal": "4096 != 0",
+      "normalised": "true",
+      "status": "proven"
+    },
+    {
+      "id": 112,
+      "fn": "rt_epoll_accept",
+      "node": "f51863d53b48",
+      "pos": [
+        42,
+        72
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 113,
+      "fn": "rt_http_epoll_worker",
+      "node": "3867463d0ee2",
+      "pos": [
+        83,
+        92
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 114,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        90,
+        58
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 115,
+      "fn": "rt_serve_worker",
+      "node": "1af212fd43bb",
+      "pos": [
+        91,
+        67
+      ],
+      "kind": "precondition",
+      "goal": "(workers >= 1) with workers := workers",
+      "normalised": "-workers + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 116,
+      "fn": "main",
+      "node": "a59c435f8267",
+      "pos": [
+        12,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(w > 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 117,
+      "fn": "main",
+      "node": "9816a8976aaa",
+      "pos": [
+        12,
+        36
+      ],
+      "kind": "precondition",
+      "goal": "(h > 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 118,
+      "fn": "main",
+      "node": "4c51f7d67584",
+      "pos": [
+        12,
+        56
+      ],
+      "kind": "precondition",
+      "goal": "(max >= 0)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    }
+  ],
+  "summary": {
+    "obligations": 118,
+    "proven": 112,
+    "runtime_checks": 6,
+    "unproven": 0
+  },
+  "folded_calls": 0,
+  "inlined_calls": 0,
+  "parallel_regions": [
+    {
+      "fn": "main",
+      "node": "fdbc66574883",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "sum",
+      "dispatcher": "ax_par_for_shared",
+      "work_cost": null
+    }
+  ],
+  "vector_sums": [
+    {
+      "fn": "main",
+      "node": "4ea636b0f001",
+      "pos": [
+        15,
+        7
+      ],
+      "lanes": 16
+    },
+    {
+      "fn": "main",
+      "node": "4ea636b0f001",
+      "pos": [
+        15,
+        7
+      ],
+      "lanes": 16
+    }
+  ],
+  "vector_arrays": [],
+  "bounded_remainders": [],
+  "overflow_checks": [
+    {
+      "fn": "ax_print_f64",
+      "pos": [
+        247,
+        23
+      ],
+      "kind": "float to integer out of range"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer vector overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer vector overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        15,
+        7
+      ],
+      "kind": "integer overflow"
+    },
+    {
+      "fn": "main",
+      "pos": [
+        13,
+        5
+      ],
+      "kind": "integer overflow"
+    }
+  ],
+  "literal_inlined_functions": [
+    "rt_connection_token",
+    "rt_find",
+    "rt_header"
+  ],
+  "backend": "llvm-ir",
+  "ir": "/axon/examples/.axon-build/b8beb198a51e8bfe.ll",
+  "build": {
+    "cache": "hit",
+    "graph": "0703bc54ddca0010",
+    "total_seconds": 0.1619
+  },
+  "binary": "/axon/bench/usability/results/2026-10-25-081540-compute/axon-mandel",
+  "runtime": "Axon kernel syscalls; no libc function imports",
+  "loader_dependency": "none (static ELF)",
+  "undefined_symbols": [],
+  "binary_sha256": "b4fa1ac40d7f2e5ff002825acb4e51585f972e67688d867df42a07e91052df25",
+  "cache_key": "b8beb198a51e8bfe953577d8794336737c074db778f4868ea58de3c01dacd206",
+  "sources": {
+    "/axon/runtime/core.ax": "20a8b1b333ee282403c02a039182a9a73e54eb8a936b30c40f9101abee876321",
+    "/axon/runtime/platform_linux.ax": "0a6587fd1c3eae52b6db778cff077aa03011ace76967fb8badaa7bc3f4db1a2f",
+    "/axon/runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "/axon/runtime/handles.ax": "20a4aecc79b7c6fb433bfdf0f10dfdd0bd48467d01cc583a6a300e1efae52cc0",
+    "/axon/runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1",
+    "/axon/examples/mandel.ax": "8ba5850375e68c5f157c47e7286dea29f3a900d9732eea851475327beb452929"
+  }
+}

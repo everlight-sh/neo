@@ -1,0 +1,2280 @@
+=== 13:46:20 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": false,
+  "errors": [
+    {
+      "kind": "syntax",
+      "pos": [
+        5,
+        44
+      ],
+      "msg": "expected 'IDENT', got '16'"
+    }
+  ]
+}
+=== exit 1
+=== 13:46:31 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": false,
+  "errors": [
+    {
+      "kind": "syntax",
+      "pos": [
+        13,
+        23
+      ],
+      "msg": "expected 'IDENT', got '16'"
+    }
+  ]
+}
+=== exit 1
+=== 13:46:38 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": false,
+  "errors": [
+    {
+      "kind": "type",
+      "fn": "max16",
+      "pos": [
+        13,
+        11
+      ],
+      "msg": "array parameter sizes must be variables"
+    }
+  ],
+  "obligations": []
+}
+=== exit 1
+=== 13:47:04 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": false,
+  "program": "734608d27193ae524efccfcee59868aad0d7fa0c18045d735b6f8150c53e43f7",
+  "functions": {
+    "build_hist": "3c1d57e0f38a75640c33b2411116da6965d75f61de504d010d9174914fca895b",
+    "main": "998d072a2be7887019f3a1399cd2eeba225376ca179246038bcbe4f51197c0da"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "build_hist",
+      "node": "1f76ed70a61b",
+      "pos": [
+        6,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "-16 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "build_hist",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        52
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "build_hist",
+      "node": "891f302465df",
+      "pos": [
+        8,
+        38
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "build_hist",
+      "node": "7e0d7fd1e283",
+      "pos": [
+        9,
+        28
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "build_hist",
+      "node": "ccb5828a5d60",
+      "pos": [
+        10,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "i": 0,
+        "n": 1,
+        "⟨((v * 16) / 1000003)⟩": -1
+      },
+      "fixes": [
+        "guard: if 0 <= b && b < len(h) then … else …",
+        "check 0 <= b && b < len(h) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 6,
+      "fn": "build_hist",
+      "node": "a1a917f2922f",
+      "pos": [
+        10,
+        13
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "i": 0,
+        "n": 1,
+        "⟨((v * 16) / 1000003)⟩": -1
+      },
+      "fixes": [
+        "guard: if 0 <= b && b < len(h) then … else …",
+        "check 0 <= b && b < len(h) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 7,
+      "fn": "build_hist",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        10,
+        36
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        13,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 9,
+      "fn": "main",
+      "node": "3e6586a70b8d",
+      "pos": [
+        14,
+        24
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "main",
+      "node": "35a0a69c111f",
+      "pos": [
+        15,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(h)",
+      "normalised": "(0 <= 0 && -15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        16,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        16,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        17,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        17,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        18,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        18,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        19,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        19,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        20,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        20,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        21,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        21,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        22,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        22,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        23,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        23,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        24,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        24,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        25,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        25,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        26,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        26,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        27,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        27,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        28,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        28,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        29,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        29,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        30,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        30,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 40,
+    "proven": 37,
+    "runtime_checks": 1,
+    "unproven": 2
+  }
+}
+=== exit 1
+=== 13:48:21 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": false,
+  "program": "35d10a9be1151013a6f94fb4c94077a2f135d50381786360b27f22b077ec7bc3",
+  "functions": {
+    "build_hist": "03bf0d43a4f9124989cc0822dbb62d1420fa81a3613dd62dd701a91df5a69cd5",
+    "main": "1c2b60e6b09ae0da9ac5961473d1885ec46e22ce96cc682c0b28f6aef81d55d6"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "build_hist",
+      "node": "1f76ed70a61b",
+      "pos": [
+        6,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "-16 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "build_hist",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        52
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "build_hist",
+      "node": "891f302465df",
+      "pos": [
+        8,
+        38
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "build_hist",
+      "node": "5253736f6616",
+      "pos": [
+        9,
+        13
+      ],
+      "kind": "check",
+      "goal": "((0 <= v) && (v < 1000003))",
+      "status": "checked"
+    },
+    {
+      "id": 5,
+      "fn": "build_hist",
+      "node": "7e0d7fd1e283",
+      "pos": [
+        10,
+        28
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "build_hist",
+      "node": "ccb5828a5d60",
+      "pos": [
+        11,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "i": 0,
+        "n": 1,
+        "⟨((i * 2654435761) % 1000003)⟩": 0,
+        "⟨((v * 16) / 1000003)⟩": -1
+      },
+      "fixes": [
+        "guard: if 0 <= b && b < len(h) then … else …",
+        "check 0 <= b && b < len(h) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 7,
+      "fn": "build_hist",
+      "node": "a1a917f2922f",
+      "pos": [
+        11,
+        13
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "unproven",
+      "counterexample": {
+        "i": 0,
+        "n": 1,
+        "⟨((i * 2654435761) % 1000003)⟩": 0,
+        "⟨((v * 16) / 1000003)⟩": -1
+      },
+      "fixes": [
+        "guard: if 0 <= b && b < len(h) then … else …",
+        "check 0 <= b && b < len(h) in …",
+        "refine the index parameter, e.g. i : i64{0 <= i, i < n}"
+      ]
+    },
+    {
+      "id": 8,
+      "fn": "build_hist",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        11,
+        36
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        14,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 10,
+      "fn": "main",
+      "node": "3e6586a70b8d",
+      "pos": [
+        15,
+        24
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "main",
+      "node": "35a0a69c111f",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(h)",
+      "normalised": "(0 <= 0 && -15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 41,
+    "proven": 37,
+    "runtime_checks": 2,
+    "unproven": 2
+  }
+}
+=== exit 1
+=== 13:48:46 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": true,
+  "program": "90e934ff641228e10b93348808ff669ccb7876d39526d038ba13229c63af0b80",
+  "functions": {
+    "build_hist": "7938c37bf64a1c93dd8ab928437943530113e838ac7fab96c52b82ec3050238e",
+    "main": "f5d7f32016faa01c1e64848dda37c5dec846d1dcf4fa35a90952af2d9a535b58"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "build_hist",
+      "node": "1f76ed70a61b",
+      "pos": [
+        6,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "-16 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "build_hist",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        52
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "build_hist",
+      "node": "891f302465df",
+      "pos": [
+        8,
+        38
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "build_hist",
+      "node": "7e0d7fd1e283",
+      "pos": [
+        9,
+        28
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "build_hist",
+      "node": "a097cd0245a3",
+      "pos": [
+        10,
+        13
+      ],
+      "kind": "check",
+      "goal": "((0 <= b) && (b < 16))",
+      "status": "checked"
+    },
+    {
+      "id": 6,
+      "fn": "build_hist",
+      "node": "ccb5828a5d60",
+      "pos": [
+        11,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "build_hist",
+      "node": "a1a917f2922f",
+      "pos": [
+        11,
+        13
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "build_hist",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        11,
+        36
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        14,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 10,
+      "fn": "main",
+      "node": "3e6586a70b8d",
+      "pos": [
+        15,
+        24
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "main",
+      "node": "35a0a69c111f",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(h)",
+      "normalised": "(0 <= 0 && -15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 41,
+    "proven": 39,
+    "runtime_checks": 2,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:48:58 axonc check experiments/agent-loop/hist/hist.ax
+{
+  "ok": true,
+  "program": "90e934ff641228e10b93348808ff669ccb7876d39526d038ba13229c63af0b80",
+  "functions": {
+    "build_hist": "7938c37bf64a1c93dd8ab928437943530113e838ac7fab96c52b82ec3050238e",
+    "main": "f5d7f32016faa01c1e64848dda37c5dec846d1dcf4fa35a90952af2d9a535b58"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "build_hist",
+      "node": "1f76ed70a61b",
+      "pos": [
+        6,
+        15
+      ],
+      "kind": "range",
+      "goal": "0 <= 16",
+      "normalised": "-16 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "build_hist",
+      "node": "f772792f6442",
+      "pos": [
+        6,
+        52
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) initially (i := 0)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "build_hist",
+      "node": "891f302465df",
+      "pos": [
+        8,
+        38
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "build_hist",
+      "node": "7e0d7fd1e283",
+      "pos": [
+        9,
+        28
+      ],
+      "kind": "division",
+      "goal": "1000003 != 0",
+      "normalised": "(1000004 <= 0 || -1000002 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "build_hist",
+      "node": "a097cd0245a3",
+      "pos": [
+        10,
+        13
+      ],
+      "kind": "check",
+      "goal": "((0 <= b) && (b < 16))",
+      "status": "checked"
+    },
+    {
+      "id": 6,
+      "fn": "build_hist",
+      "node": "ccb5828a5d60",
+      "pos": [
+        11,
+        24
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "build_hist",
+      "node": "a1a917f2922f",
+      "pos": [
+        11,
+        13
+      ],
+      "kind": "bounds",
+      "goal": "0 <= b && b < len(h)",
+      "normalised": "(-⟨((v * 16) / 1000003)⟩ <= 0 && ⟨((v * 16) / 1000003)⟩ - 15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "build_hist",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        11,
+        36
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 0) preserved (i := (i + 1))",
+      "normalised": "-i - 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 9,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        14,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 10,
+      "fn": "main",
+      "node": "3e6586a70b8d",
+      "pos": [
+        15,
+        24
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "normalised": "-n + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "main",
+      "node": "35a0a69c111f",
+      "pos": [
+        16,
+        15
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 0 && 0 < len(h)",
+      "normalised": "(0 <= 0 && -15 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 12,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 13,
+      "fn": "main",
+      "node": "0e5f1f0c2a98",
+      "pos": [
+        17,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 1 && 1 < len(h)",
+      "normalised": "(-1 <= 0 && -14 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 14,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 15,
+      "fn": "main",
+      "node": "55ed291ad236",
+      "pos": [
+        18,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 2 && 2 < len(h)",
+      "normalised": "(-2 <= 0 && -13 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 16,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 17,
+      "fn": "main",
+      "node": "203b718b0aa5",
+      "pos": [
+        19,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 3 && 3 < len(h)",
+      "normalised": "(-3 <= 0 && -12 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 18,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 19,
+      "fn": "main",
+      "node": "ce0f4ba81fbb",
+      "pos": [
+        20,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 4 && 4 < len(h)",
+      "normalised": "(-4 <= 0 && -11 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 20,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 21,
+      "fn": "main",
+      "node": "876bf8aa7e2f",
+      "pos": [
+        21,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 5 && 5 < len(h)",
+      "normalised": "(-5 <= 0 && -10 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 22,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 23,
+      "fn": "main",
+      "node": "d538180dabba",
+      "pos": [
+        22,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 6 && 6 < len(h)",
+      "normalised": "(-6 <= 0 && -9 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 24,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 25,
+      "fn": "main",
+      "node": "0b0efa1cf1fc",
+      "pos": [
+        23,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 7 && 7 < len(h)",
+      "normalised": "(-7 <= 0 && -8 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 26,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 27,
+      "fn": "main",
+      "node": "be587c1fa178",
+      "pos": [
+        24,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 8 && 8 < len(h)",
+      "normalised": "(-8 <= 0 && -7 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 28,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        18
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 29,
+      "fn": "main",
+      "node": "77d902a9ae19",
+      "pos": [
+        25,
+        33
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 9 && 9 < len(h)",
+      "normalised": "(-9 <= 0 && -6 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 30,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 31,
+      "fn": "main",
+      "node": "a12c603f3fbf",
+      "pos": [
+        26,
+        35
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 10 && 10 < len(h)",
+      "normalised": "(-10 <= 0 && -5 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 32,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 33,
+      "fn": "main",
+      "node": "604c36abe221",
+      "pos": [
+        27,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 11 && 11 < len(h)",
+      "normalised": "(-11 <= 0 && -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 34,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 35,
+      "fn": "main",
+      "node": "a762b4027c60",
+      "pos": [
+        28,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 12 && 12 < len(h)",
+      "normalised": "(-12 <= 0 && -3 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 36,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 37,
+      "fn": "main",
+      "node": "b962c5551ecd",
+      "pos": [
+        29,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 13 && 13 < len(h)",
+      "normalised": "(-13 <= 0 && -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 38,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 39,
+      "fn": "main",
+      "node": "348445d21b2c",
+      "pos": [
+        30,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 14 && 14 < len(h)",
+      "normalised": "(-14 <= 0 && -1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 40,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        19
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 41,
+      "fn": "main",
+      "node": "faa3b7f1483c",
+      "pos": [
+        31,
+        36
+      ],
+      "kind": "bounds",
+      "goal": "0 <= 15 && 15 < len(h)",
+      "normalised": "(-15 <= 0 && 0 <= 0)",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 41,
+    "proven": 39,
+    "runtime_checks": 2,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:49:15 axonc build experiments/agent-loop/hist/hist.ax -o experiments/agent-loop/hist/hist
+axonc: experiments/agent-loop/hist/hist  graph 90e934ff641228e1  obligations 39/41 proven, 2 runtime checks, 1 parallel regions, build miss
+=== exit 0

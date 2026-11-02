@@ -1,0 +1,17 @@
+; Validate complete buffers and guard regions around the block-copy/fill loops.
+effect fn memory_case(n: i64, source_offset: i64, target_offset: i64, fill: bool) -> i64
+  = let size = n + 96 in let source = ax_alloc(size) in let target = ax_alloc(size) in
+    let initialized = loop(i = 0) while i < size
+      next(let a = store_u8(source,i,u8((i * 29 + 17) % 251)) in let b = store_u8(target,i,u8(165)) in i + 1) yield i in
+    let copied = if fill then memset(ptr_add(target,target_offset),i32(382),n) else
+      memcpy(ptr_add(target,target_offset),ptr_add(source,source_offset),n) in
+    let correct = loop(i = 0, ok = true) while ok && i < size
+      next(i + 1, i64(load_u8(target,i)) == (if i >= target_offset && i < target_offset + n then
+          (if fill then 126 else ((i - target_offset + source_offset) * 29 + 17) % 251) else 165)) yield ok in
+    let a = ax_release(source) in let b = ax_release(target) in if correct then 0 else 1
+
+effect fn main() -> i64
+  = loop(n = 0, failures = 0) while n <= 257
+      next(n + 1,failures + loop(offset = 0, bad = 0) while offset < 16
+        next(offset + 1,bad + memory_case(n,15 - offset,offset,false) + memory_case(n,offset,15 - offset,true)) yield bad)
+      yield failures + memory_case(4095,3,17,false) + memory_case(4096,7,31,false) + memory_case(4097,13,3,true)

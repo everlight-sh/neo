@@ -1,0 +1,83 @@
+import "std:time"
+import "std:cancel"
+resource type Process = { token:i64 } drop process_release
+type ProcessStatus = { ok:bool,running:bool,exit_code:i64,signal:i64,error:Error }
+private fn process_arguments_valid(values:Arr Arr u8 _ n) -> bool
+  = n<=1024 && loop(i=0,valid=true,total=0) while valid && i<n next(i+1,
+      check i>=0 && i<n in len(values[i])<=65536 && !str_find(values[i],"\0").present && total<=1048576,
+      check i>=0 && i<n in total+len(values[i])+1) yield valid && total<=1048576
+; Explicit environment and absolute executable path. No shell or PATH lookup.
+; Failed exec is reported as child exit 127. Streams use full-duplex socketpairs.
+effect(process,fs,env) fn process_start(path:Arr u8 n,args:Arr Arr u8 _ m,environment:Arr Arr u8 _ k) -> Process
+  = if !io_path_valid(path) || !str_starts(path,"/") || !process_arguments_valid(args) || !process_arguments_valid(environment) then Process { token= -22 } else
+    check m>=0 && k>=0 in
+    let executable=concat(path,"\0") in
+    let argv_blob=loop(i=0,out=executable) while i<m next(i+1,check i>=0 && i<m in concat(out,args[i],"\0")) yield out in
+    let env_blob=loop(i=0,out="") while i<k next(i+1,check i>=0 && i<k in concat(out,environment[i],"\0")) yield out in
+    let header=(m+k+3)*8 in let allocation=header+len(argv_blob)+len(env_blob) in let address=rt_private_map(allocation) in
+    if address<0 then Process { token= -12 } else
+    let argv_ptr=ptr_from_i64(address) in let env_ptr=ptr_add(argv_ptr,(m+2)*8) in
+    let arg_bytes=ptr_add(argv_ptr,header) in let env_bytes=ptr_add(arg_bytes,len(argv_blob)) in
+    let acopy=memcpy(arg_bytes,data(argv_blob),len(argv_blob)) in let ecopy=memcpy(env_bytes,data(env_blob),len(env_blob)) in
+    let first=store_ptr(argv_ptr,0,arg_bytes) in
+    let a=loop(i=0,offset=n+1) while i<m next(i+1,
+      check i>=0 && i<m in let saved=store_ptr(argv_ptr,(i+1)*8,ptr_add(arg_bytes,offset)) in offset+len(args[i])+1) yield offset in
+    let ae=store_ptr(argv_ptr,(m+1)*8,null()) in
+    let e=loop(i=0,offset=0) while i<k next(i+1,
+      check i>=0 && i<k in let saved=store_ptr(env_ptr,i*8,ptr_add(env_bytes,offset)) in offset+len(environment[i])+1) yield offset in
+    let ee=store_ptr(env_ptr,k*8,null()) in
+    let pair=stack_alloc(32) in let clear=memset(pair,i32(255),32) in
+    let io=rt_socketpair(pair) in let err=if io<0 then -1 else rt_socketpair(ptr_add(pair,8)) in
+    let parent=i64(load_i32(pair,0)) in let child=i64(load_i32(pair,4)) in let errors=i64(load_i32(pair,8)) in let child_error=i64(load_i32(pair,12)) in
+    let ready=if io<0 || err<0 then -1 else let a=rt_cloexec(parent) in let b=rt_cloexec(child) in let c=rt_cloexec(errors) in let d=rt_cloexec(child_error) in
+      if a<0 || b<0 || c<0 || d<0 then -1 else 0 in
+    let pid=if ready<0 then -1 else rt_spawn_exec(arg_bytes,argv_ptr,env_ptr,child,child_error) in
+    let unmapped=rt_munmap(argv_ptr,allocation) in
+    let closed=if child>=0 then rt_close(child) else 0 in let closed=if child_error>=0 then rt_close(child_error) else 0 in
+    if pid<0 then let closed=if parent>=0 then rt_close(parent) else 0 in let closed=if errors>=0 then rt_close(errors) else 0 in Process { token= -5 } else
+      let input_mode=rt_nonblock(parent) in let error_mode=rt_nonblock(errors) in
+      let address=if input_mode<0 || error_mode<0 then -1 else rt_private_map(64) in
+      if address<0 then let stopped=rt_kill(pid,9) in let waited=rt_wait(pid) in let a=rt_close(parent) in let b=rt_close(errors) in Process { token= -12 } else
+        let p=ptr_from_i64(address) in let clear=memset(p,i32(0),64) in let a=store_i64(p,0,64) in let b=store_i64(p,8,pid) in let c=store_i64(p,16,parent) in let d=store_i64(p,24,errors) in
+        let s=store_i64(p,32,0) in let token=rt_handle_new(address,10) in
+        if token>0 then Process { token=token } else
+          let stopped=rt_kill(pid,9) in let waited=rt_wait(pid) in let a=rt_close(parent) in let b=rt_close(errors) in Process { token=token }
+effect(process) fn process_status(process:Process) -> ProcessStatus
+  = let address=rt_handle_fd(process.token,10) in
+    if address<0 then ProcessStatus { ok=false,running=false,exit_code=0,signal=0,error=Error { code=if process.token<0 then 0-process.token else 9,message="invalid process owner",position=0 } } else
+    let p=ptr_from_i64(address) in let pid=load_i64(p,8) in
+    let raw=stack_alloc(8) in let cleared=store_i64(raw,0,0) in
+    let waited=if pid==0 then 0 else rt_wait_status(pid,raw,1) in
+    let code=if pid==0 then load_i64(p,32) else i64(load_i32(raw,0)) in
+    let saved=if waited==pid && pid>0 then let a=store_i64(p,8,0) in store_i64(p,32,code) else noop() in
+    ProcessStatus { ok=waited>=0,running=pid>0 && waited==0,exit_code=if code%128==0 then code/256%256 else 0,signal=code%128,
+      error=if waited<0 then Error { code=i64(load_i32(rt_errno(),0)),message="wait failed",position=0 } else no_error() }
+effect(process,fs) fn process_try_read(process:Process,stream:i64,limit:i64) -> BytesResult
+  = let address=rt_handle_fd(process.token,10) in
+    if address<0 || stream<1 || stream>2 then bytes_error(9,"invalid process stream",0) else file_read_chunk(load_i64(ptr_from_i64(address),if stream==1 then 16 else 24),limit)
+effect(process,fs) fn process_try_write(process:Process,bytes:Arr u8 n,offset:i64) -> IntResult
+  = let address=rt_handle_fd(process.token,10) in if address<0 then int_error(9,"invalid process owner",0) else
+    if offset<0 || offset>n then int_error(22,"invalid write offset",0) else
+      let count=rt_send(load_i64(ptr_from_i64(address),16),ptr_add(data(bytes),offset),n-offset) in
+      if count<0 then int_error(i64(load_i32(rt_errno(),0)),"child write failed",offset) else int_ok(count)
+effect(process) fn process_signal(process:Process,signal:i64) -> IntResult
+  = if signal!=15 && signal!=9 then int_error(22,"unsupported child signal",0) else
+    let status=process_status(process) in if !status.ok then int_error(status.error.code,status.error.message,0) else
+    if !status.running then int_ok(0) else
+      let address=rt_handle_fd(process.token,10) in let result=rt_kill(load_i64(ptr_from_i64(address),8),signal) in
+      if result<0 then int_error(i64(load_i32(rt_errno(),0)),"child signal failed",0) else int_ok(0)
+private effect(process,fs) fn process_release(process:Process) -> unit
+  = let address=rt_handle_fd(process.token,10) in if address<0 then noop() else
+    let p=ptr_from_i64(address) in let status=process_status(process) in let pid=load_i64(p,8) in
+    let stopped=if pid>0 then rt_kill(pid,9) else 0 in
+    let waited=if pid>0 then rt_wait(pid) else 0 in
+    let a=rt_close(load_i64(p,16)) in let b=rt_close(load_i64(p,24)) in rt_handle_drop(process.token,10)
+
+fn process_identity(process:Process) -> i64 = process.token
+; Half-close stdin without closing stdout: useful for EOF-driven child tools.
+effect(process) fn process_close_input(process:Process) -> IntResult
+  = let address=rt_handle_fd(process.token,10) in if address<0 then int_error(9,"invalid process owner",0) else
+    let p=ptr_from_i64(address) in if load_i64(p,40)!=0 then int_ok(0) else
+    let result=rt_shutdown_write(load_i64(p,16)) in
+    if result<0 then int_error(i64(load_i32(rt_errno(),0)),"child stdin half-close failed",0) else
+      let closed=store_i64(p,40,1) in int_ok(0)

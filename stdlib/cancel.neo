@@ -1,0 +1,18 @@
+import "std:time"
+
+; Explicitly shared across fork; cancellation is one-way and idempotent.
+resource type Cancellation = { token:i64 } drop cancellation_release
+effect(process) fn new_cancellation() -> Cancellation
+  = let address=rt_mmap(4096) in
+    if address<0 then Cancellation { token=address } else
+      let p=ptr_from_i64(address) in let length=store_i64(p,0,4096) in let initial=atomic_store_i64(p,8,0) in
+      Cancellation { token=rt_handle_new(address,5) }
+private effect(process) fn cancellation_release(cancel:Cancellation) -> unit = rt_handle_drop(cancel.token,5)
+effect(process) fn cancellation_status(cancel:Cancellation) -> IntResult
+  = let address=rt_handle_fd(cancel.token,5) in if address<0 then int_error(9,"invalid cancellation owner",0) else int_ok(0)
+effect(process) fn is_cancelled(cancel:Cancellation) -> bool
+  = let address=rt_handle_fd(cancel.token,5) in address<0 || atomic_load_i64(ptr_from_i64(address),8)!=0
+effect(process) fn cancel(cancel:Cancellation) -> unit
+  = let address=rt_handle_fd(cancel.token,5) in if address<0 then noop() else atomic_store_i64(ptr_from_i64(address),8,1)
+
+fn cancellation_identity(cancellation:Cancellation) -> i64 = cancellation.token

@@ -1,0 +1,42 @@
+import "std:strings"
+
+type SipState = { a: i64, b: i64, c: i64, d: i64 }
+
+fn rotate_left(value: i64, count: i64) -> i64
+  = bit_or(shift_left(value,count),shift_right(value,64 - count))
+
+fn sip_round(s: SipState) -> SipState
+  = let a = wrapping_add(s.a,s.b) in let b = bit_xor(rotate_left(s.b,13),a) in
+    let a = rotate_left(a,32) in let c = wrapping_add(s.c,s.d) in
+    let d = bit_xor(rotate_left(s.d,16),c) in let a = wrapping_add(a,d) in
+    let d = bit_xor(rotate_left(d,21),a) in let c = wrapping_add(c,b) in
+    let b = bit_xor(rotate_left(b,17),c) in
+    SipState { a = a, b = b, c = rotate_left(c,32), d = d }
+
+fn sip_initial(seed0: i64, seed1: i64) -> SipState
+  = SipState { a = bit_xor(8317987319222330741,seed0), b = bit_xor(7237128888997146477,seed1),
+      c = bit_xor(7816392313619706465,seed0), d = bit_xor(8387220255154660723,seed1) }
+
+fn sip_block(s: SipState, word: i64) -> SipState
+  = let mixed = sip_round(sip_round(s with { d = bit_xor(s.d,word) })) in
+    mixed with { a = bit_xor(mixed.a,word) }
+
+fn sip_finish(s: SipState, tail: i64) -> i64
+  = let mixed = sip_block(s,tail) in
+    let final = sip_round(sip_round(sip_round(sip_round(mixed with { c = bit_xor(mixed.c,255) })))) in
+    bit_xor(bit_xor(final.a,final.b),bit_xor(final.c,final.d))
+
+fn hash_bytes_range(text:Arr u8 n,start:i64,finish:i64,seed0:i64,seed1:i64) -> i64
+  = check start>=0 && finish>=start && finish<=n in let length=finish-start in let end=start+length/8*8 in
+    let state=loop(at=start,state=sip_initial(seed0,seed1)) while at<end
+      next(at+8,sip_block(state,bytes_le64(text,at))) yield state in
+    let four=finish-end>=4 in let at=end+(if four then 4 else 0) in
+    let first=if four then bytes_le32(text,end) else 0 in
+    let two=finish-at>=2 in let last=at+(if two then 2 else 0) in
+    let middle=if two then shift_left(bytes_le16(text,at),if four then 32 else 0) else 0 in
+    let final=if last<finish then check last>=0 && last<n in shift_left(i64(text[last]),(last-end)*8) else 0 in
+    sip_finish(state,bit_or(shift_left(bit_and(length,255),56),bit_or(first,bit_or(middle,final))))
+fn hash_bytes(text:Arr u8 n,seed0:i64,seed1:i64) -> i64 = hash_bytes_range(text,0,n,seed0,seed1)
+
+fn hash_integer(value: i64, seed0: i64, seed1: i64) -> i64
+  = sip_finish(sip_block(sip_initial(seed0,seed1),value),shift_left(8,56))

@@ -1,0 +1,17 @@
+# Reproducible ARM64 Linux comparison environment. These are build/test tools;
+# the resulting Neo executable is linked without any of these runtime libraries.
+FROM rust:1.98.1-bookworm AS rust
+FROM golang:1.25.1-bookworm AS go
+FROM oven/bun:1.3.13 AS bun
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang lld python3 wrk ca-certificates git build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+COPY --from=go /usr/local/go /usr/local/go
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WORKDIR /neo
+CMD ["sleep", "infinity"]

@@ -1,0 +1,343 @@
+import "std:sha256"
+import "std:der"
+
+; P-256 arithmetic for ECDSA/ECDH protocol libraries. Field and order values
+; are records of nine unsigned 29-bit limbs (no allocation per operation) in
+; Montgomery form with R = 2^261; tests/generate_crypto_fields.py writes the
+; unrolled product and the constants. Values stay below twice the modulus
+; between operations; p256_normal returns the canonical residue.
+; Secret scalars (key generation, ECDH, signing) use a fixed double-and-add
+; ladder with mask selections. Signature verification works on public data
+; and uses ordinary branches with width-5 NAF digits and precomputed odd
+; multiples of the generator. Independent vectors are required; no security or
+; constant-time audit is claimed.
+type P9 = { l0:i64,l1:i64,l2:i64,l3:i64,l4:i64,l5:i64,l6:i64,l7:i64,l8:i64 }
+type P256Mod = { modulus:P9,twice:P9,r2:P9,one:P9,inverse:i64 }
+type P9Affine = { x:P9,y:P9 }
+; generated: begin p9_mont
+private fn p9_mont(a:P9,b:P9,m:P9,inverse:i64) -> P9
+  = let acc=0 in
+    let acc=wrapping_add(acc,wrapping_mul(a.l0,b.l0)) in
+    let q0=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q0,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l1)),wrapping_mul(q0,m.l1)),wrapping_mul(a.l1,b.l0)) in
+    let q1=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q1,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l2)),wrapping_mul(q0,m.l2)),wrapping_mul(a.l1,b.l1)),wrapping_mul(q1,m.l1)),wrapping_mul(a.l2,b.l0)) in
+    let q2=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q2,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l3)),wrapping_mul(q0,m.l3)),wrapping_mul(a.l1,b.l2)),wrapping_mul(q1,m.l2)),wrapping_mul(a.l2,b.l1)),wrapping_mul(q2,m.l1)),wrapping_mul(a.l3,b.l0)) in
+    let q3=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q3,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l4)),wrapping_mul(q0,m.l4)),wrapping_mul(a.l1,b.l3)),wrapping_mul(q1,m.l3)),wrapping_mul(a.l2,b.l2)),wrapping_mul(q2,m.l2)),wrapping_mul(a.l3,b.l1)),wrapping_mul(q3,m.l1)),wrapping_mul(a.l4,b.l0)) in
+    let q4=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q4,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l5)),wrapping_mul(q0,m.l5)),wrapping_mul(a.l1,b.l4)),wrapping_mul(q1,m.l4)),wrapping_mul(a.l2,b.l3)),wrapping_mul(q2,m.l3)),wrapping_mul(a.l3,b.l2)),wrapping_mul(q3,m.l2)),wrapping_mul(a.l4,b.l1)),wrapping_mul(q4,m.l1)),wrapping_mul(a.l5,b.l0)) in
+    let q5=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q5,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l6)),wrapping_mul(q0,m.l6)),wrapping_mul(a.l1,b.l5)),wrapping_mul(q1,m.l5)),wrapping_mul(a.l2,b.l4)),wrapping_mul(q2,m.l4)),wrapping_mul(a.l3,b.l3)),wrapping_mul(q3,m.l3)),wrapping_mul(a.l4,b.l2)),wrapping_mul(q4,m.l2)),wrapping_mul(a.l5,b.l1)),wrapping_mul(q5,m.l1)),wrapping_mul(a.l6,b.l0)) in
+    let q6=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q6,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l7)),wrapping_mul(q0,m.l7)),wrapping_mul(a.l1,b.l6)),wrapping_mul(q1,m.l6)),wrapping_mul(a.l2,b.l5)),wrapping_mul(q2,m.l5)),wrapping_mul(a.l3,b.l4)),wrapping_mul(q3,m.l4)),wrapping_mul(a.l4,b.l3)),wrapping_mul(q4,m.l3)),wrapping_mul(a.l5,b.l2)),wrapping_mul(q5,m.l2)),wrapping_mul(a.l6,b.l1)),wrapping_mul(q6,m.l1)),wrapping_mul(a.l7,b.l0)) in
+    let q7=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q7,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l8)),wrapping_mul(q0,m.l8)),wrapping_mul(a.l1,b.l7)),wrapping_mul(q1,m.l7)),wrapping_mul(a.l2,b.l6)),wrapping_mul(q2,m.l6)),wrapping_mul(a.l3,b.l5)),wrapping_mul(q3,m.l5)),wrapping_mul(a.l4,b.l4)),wrapping_mul(q4,m.l4)),wrapping_mul(a.l5,b.l3)),wrapping_mul(q5,m.l3)),wrapping_mul(a.l6,b.l2)),wrapping_mul(q6,m.l2)),wrapping_mul(a.l7,b.l1)),wrapping_mul(q7,m.l1)),wrapping_mul(a.l8,b.l0)) in
+    let q8=bit_and(wrapping_mul(bit_and(acc,536870911),inverse),536870911) in
+    let acc=shift_right(wrapping_add(acc,wrapping_mul(q8,m.l0)),29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l1,b.l8)),wrapping_mul(q1,m.l8)),wrapping_mul(a.l2,b.l7)),wrapping_mul(q2,m.l7)),wrapping_mul(a.l3,b.l6)),wrapping_mul(q3,m.l6)),wrapping_mul(a.l4,b.l5)),wrapping_mul(q4,m.l5)),wrapping_mul(a.l5,b.l4)),wrapping_mul(q5,m.l4)),wrapping_mul(a.l6,b.l3)),wrapping_mul(q6,m.l3)),wrapping_mul(a.l7,b.l2)),wrapping_mul(q7,m.l2)),wrapping_mul(a.l8,b.l1)),wrapping_mul(q8,m.l1)) in
+    let r0=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l2,b.l8)),wrapping_mul(q2,m.l8)),wrapping_mul(a.l3,b.l7)),wrapping_mul(q3,m.l7)),wrapping_mul(a.l4,b.l6)),wrapping_mul(q4,m.l6)),wrapping_mul(a.l5,b.l5)),wrapping_mul(q5,m.l5)),wrapping_mul(a.l6,b.l4)),wrapping_mul(q6,m.l4)),wrapping_mul(a.l7,b.l3)),wrapping_mul(q7,m.l3)),wrapping_mul(a.l8,b.l2)),wrapping_mul(q8,m.l2)) in
+    let r1=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l3,b.l8)),wrapping_mul(q3,m.l8)),wrapping_mul(a.l4,b.l7)),wrapping_mul(q4,m.l7)),wrapping_mul(a.l5,b.l6)),wrapping_mul(q5,m.l6)),wrapping_mul(a.l6,b.l5)),wrapping_mul(q6,m.l5)),wrapping_mul(a.l7,b.l4)),wrapping_mul(q7,m.l4)),wrapping_mul(a.l8,b.l3)),wrapping_mul(q8,m.l3)) in
+    let r2=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l4,b.l8)),wrapping_mul(q4,m.l8)),wrapping_mul(a.l5,b.l7)),wrapping_mul(q5,m.l7)),wrapping_mul(a.l6,b.l6)),wrapping_mul(q6,m.l6)),wrapping_mul(a.l7,b.l5)),wrapping_mul(q7,m.l5)),wrapping_mul(a.l8,b.l4)),wrapping_mul(q8,m.l4)) in
+    let r3=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l5,b.l8)),wrapping_mul(q5,m.l8)),wrapping_mul(a.l6,b.l7)),wrapping_mul(q6,m.l7)),wrapping_mul(a.l7,b.l6)),wrapping_mul(q7,m.l6)),wrapping_mul(a.l8,b.l5)),wrapping_mul(q8,m.l5)) in
+    let r4=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l6,b.l8)),wrapping_mul(q6,m.l8)),wrapping_mul(a.l7,b.l7)),wrapping_mul(q7,m.l7)),wrapping_mul(a.l8,b.l6)),wrapping_mul(q8,m.l6)) in
+    let r5=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l7,b.l8)),wrapping_mul(q7,m.l8)),wrapping_mul(a.l8,b.l7)),wrapping_mul(q8,m.l7)) in
+    let r6=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(acc,wrapping_mul(a.l8,b.l8)),wrapping_mul(q8,m.l8)) in
+    let r7=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    P9 { l0=r0,l1=r1,l2=r2,l3=r3,l4=r4,l5=r5,l6=r6,l7=r7,l8=acc }
+; generated: end p9_mont
+; generated: begin p9_norm
+private fn p9_norm(l0:i64,l1:i64,l2:i64,l3:i64,l4:i64,l5:i64,l6:i64,l7:i64,l8:i64) -> P9
+  = let c=arithmetic_shift_right(l0,29) in let l0=bit_and(l0,536870911) in let l1=wrapping_add(l1,c) in
+    let c=arithmetic_shift_right(l1,29) in let l1=bit_and(l1,536870911) in let l2=wrapping_add(l2,c) in
+    let c=arithmetic_shift_right(l2,29) in let l2=bit_and(l2,536870911) in let l3=wrapping_add(l3,c) in
+    let c=arithmetic_shift_right(l3,29) in let l3=bit_and(l3,536870911) in let l4=wrapping_add(l4,c) in
+    let c=arithmetic_shift_right(l4,29) in let l4=bit_and(l4,536870911) in let l5=wrapping_add(l5,c) in
+    let c=arithmetic_shift_right(l5,29) in let l5=bit_and(l5,536870911) in let l6=wrapping_add(l6,c) in
+    let c=arithmetic_shift_right(l6,29) in let l6=bit_and(l6,536870911) in let l7=wrapping_add(l7,c) in
+    let c=arithmetic_shift_right(l7,29) in let l7=bit_and(l7,536870911) in let l8=wrapping_add(l8,c) in
+    P9 { l0=l0,l1=l1,l2=l2,l3=l3,l4=l4,l5=l5,l6=l6,l7=l7,l8=l8 }
+; generated: end p9_norm
+; generated: begin p9_unpack
+private fn p9_unpack(w0:i64,w1:i64,w2:i64,w3:i64) -> P9
+  = P9 { l0=bit_and(w0,536870911),l1=bit_and(shift_right(w0,29),536870911),l2=bit_and(bit_or(shift_right(w0,58),shift_left(w1,6)),536870911),l3=bit_and(shift_right(w1,23),536870911),l4=bit_and(bit_or(shift_right(w1,52),shift_left(w2,12)),536870911),l5=bit_and(shift_right(w2,17),536870911),l6=bit_and(bit_or(shift_right(w2,46),shift_left(w3,18)),536870911),l7=bit_and(shift_right(w3,11),536870911),l8=bit_and(shift_right(w3,40),536870911) }
+; generated: end p9_unpack
+; generated: begin p9_words
+private fn p9_bytes(a:P9) -> Arr u8 _
+  = let out=arr(i in 0..32) u8(0) in
+    let out=byte_write_le(out,24,byte_swap64(bit_or(bit_or(a.l0,shift_left(a.l1,29)),shift_left(a.l2,58))),8) in
+    let out=byte_write_le(out,16,byte_swap64(bit_or(bit_or(shift_right(a.l2,6),shift_left(a.l3,23)),shift_left(a.l4,52))),8) in
+    let out=byte_write_le(out,8,byte_swap64(bit_or(bit_or(shift_right(a.l4,12),shift_left(a.l5,17)),shift_left(a.l6,46))),8) in
+    let out=byte_write_le(out,0,byte_swap64(bit_or(bit_or(shift_right(a.l6,18),shift_left(a.l7,11)),shift_left(a.l8,40))),8) in out
+; generated: end p9_words
+; generated: begin p9_constants
+private fn p9_field() -> P256Mod
+  = P256Mod { modulus=P9 { l0=536870911,l1=536870911,l2=536870911,l3=511,l4=0,l5=0,l6=262144,l7=534773760,l8=16777215 },twice=P9 { l0=536870910,l1=536870911,l2=536870911,l3=1023,l4=0,l5=0,l6=524288,l7=532676608,l8=33554431 },
+      r2=P9 { l0=3072,l1=0,l2=536805376,l3=534773759,l4=532676607,l5=536870911,l6=536870911,l7=536870910,l8=19 },
+      one=P9 { l0=32,l1=0,l2=0,l3=536854528,l4=536870911,l5=536870911,l6=528482303,l7=67108863,l8=0 },inverse=1 }
+private fn p9_order() -> P256Mod
+  = P256Mod { modulus=P9 { l0=476259665,l1=500061719,l2=99066172,l3=234183502,l4=536869838,l5=536870911,l6=262143,l7=534773760,l8=16777215 },twice=P9 { l0=415648418,l1=463252527,l2=198132345,l3=468367004,l4=536868764,l5=536870911,l6=524287,l7=532676608,l8=33554431 },
+      r2=P9 { l0=344825589,l1=256802677,l2=348563025,l3=66631525,l4=374890993,l5=307681240,l6=471358243,l7=223128335,l8=8697429 },
+      one=P9 { l0=328947168,l1=104152323,l2=51107938,l3=22320698,l4=34354,l5=0,l6=528482304,l7=67108863,l8=0 },inverse=234929231 }
+private fn p9_curve_b() -> P9 = P9 { l0=412597243,l1=484401705,l2=25462468,l3=24324129,l4=497900000,l5=180318738,l6=436654352,l7=393354528,l8=8782019 }
+private fn p9_generator(index:i64) -> P9Affine
+  = if index==0 then P9Affine { x=P9 { l0=354584451,l1=120640536,l2=229641167,l3=92213755,l4=169929589,l5=314013218,l6=53542329,l7=452255063,l8=1182702 },
+      y=P9 { l0=313180496,l1=307451854,l2=253945583,l3=238620294,l4=105584277,l5=143512095,l6=44659779,l7=43393398,l8=11419619 } } else
+    if index==1 then P9Affine { x=P9 { l0=494413028,l1=205492302,l2=202366973,l3=504527391,l4=422666319,l5=500726971,l6=522409659,l7=526122449,l8=13790535 },
+      y=P9 { l0=276102522,l1=207364041,l2=267441538,l3=300617240,l4=320647292,l5=51487470,l6=55853316,l7=181804848,l8=12455237 } } else
+    if index==2 then P9Affine { x=P9 { l0=193740473,l1=462073540,l2=177991152,l3=421950254,l4=68755928,l5=447547244,l6=65408602,l7=423892111,l8=2159296 },
+      y=P9 { l0=390717966,l1=278612711,l2=474046297,l3=440130938,l4=517007242,l5=410511265,l6=182624340,l7=242698148,l8=7605975 } } else
+    if index==3 then P9Affine { x=P9 { l0=48720354,l1=104156832,l2=505914,l3=8712335,l4=370169764,l5=189841979,l6=32644949,l7=122439928,l8=7817763 },
+      y=P9 { l0=192129469,l1=131084351,l2=333375810,l3=482106729,l4=53137029,l5=499612820,l6=327403933,l7=425234465,l8=6142754 } } else
+    if index==4 then P9Affine { x=P9 { l0=163847452,l1=158240550,l2=490867630,l3=268115561,l4=369186765,l5=4476046,l6=354836558,l7=121836421,l8=747024 },
+      y=P9 { l0=199647873,l1=393706148,l2=170858741,l3=519795095,l4=506768734,l5=430476050,l6=227653376,l7=404098430,l8=838457 } } else
+    if index==5 then P9Affine { x=P9 { l0=146571399,l1=489032290,l2=520030035,l3=31804831,l4=359349192,l5=22600385,l6=427030994,l7=108163649,l8=13505054 },
+      y=P9 { l0=311021837,l1=377839915,l2=453918931,l3=82288479,l4=142232095,l5=143780566,l6=114427605,l7=287610594,l8=1204228 } } else
+    if index==6 then P9Affine { x=P9 { l0=98230574,l1=69559115,l2=513306214,l3=433735003,l4=270670954,l5=66410985,l6=212229738,l7=319706845,l8=7376629 },
+      y=P9 { l0=31207423,l1=355176640,l2=379001259,l3=14933771,l4=394449129,l5=36426229,l6=188901426,l7=185048798,l8=7868653 } } else
+    P9Affine { x=P9 { l0=201370492,l1=483964860,l2=334650261,l3=150691256,l4=115345304,l5=38684697,l6=75962810,l7=262885224,l8=5587400 },
+      y=P9 { l0=276335524,l1=408047459,l2=14232069,l3=223676585,l4=254783180,l5=233273508,l6=438466515,l7=172091063,l8=541409 } }
+; generated: end p9_constants
+private fn p9_zero() -> P9 = P9 { l0=0,l1=0,l2=0,l3=0,l4=0,l5=0,l6=0,l7=0,l8=0 }
+private fn p9_small(value:i64) -> P9 = P9 { l0=value,l1=0,l2=0,l3=0,l4=0,l5=0,l6=0,l7=0,l8=0 }
+private fn p9_add_raw(a:P9,b:P9) -> P9
+  = p9_norm(a.l0+b.l0,a.l1+b.l1,a.l2+b.l2,a.l3+b.l3,a.l4+b.l4,a.l5+b.l5,a.l6+b.l6,a.l7+b.l7,a.l8+b.l8)
+private fn p9_sub_raw(a:P9,b:P9) -> P9
+  = p9_norm(a.l0-b.l0,a.l1-b.l1,a.l2-b.l2,a.l3-b.l3,a.l4-b.l4,a.l5-b.l5,a.l6-b.l6,a.l7-b.l7,a.l8-b.l8)
+; 1 when a normalized value is negative (its signed top limb), else 0.
+private fn p9_negative(a:P9) -> i64 = shift_right(a.l8,63)
+; bit is 0 or 1; returns a when 0 and b when 1.
+private fn p256_select(a:P9,b:P9,bit:i64) -> P9
+  = let m=0-bit in
+    P9 { l0=bit_xor(a.l0,bit_and(bit_xor(a.l0,b.l0),m)),l1=bit_xor(a.l1,bit_and(bit_xor(a.l1,b.l1),m)),l2=bit_xor(a.l2,bit_and(bit_xor(a.l2,b.l2),m)),
+      l3=bit_xor(a.l3,bit_and(bit_xor(a.l3,b.l3),m)),l4=bit_xor(a.l4,bit_and(bit_xor(a.l4,b.l4),m)),l5=bit_xor(a.l5,bit_and(bit_xor(a.l5,b.l5),m)),
+      l6=bit_xor(a.l6,bit_and(bit_xor(a.l6,b.l6),m)),l7=bit_xor(a.l7,bit_and(bit_xor(a.l7,b.l7),m)),l8=bit_xor(a.l8,bit_and(bit_xor(a.l8,b.l8),m)) }
+private fn p256_is_zero(a:P9) -> i64
+  = let any=bit_or(bit_or(bit_or(a.l0,a.l1),bit_or(a.l2,a.l3)),bit_or(bit_or(bit_or(a.l4,a.l5),bit_or(a.l6,a.l7)),a.l8)) in
+    1-shift_right(bit_or(any,wrapping_sub(0,any)),63)
+; Subtracts modulus once when a >= modulus (a below twice the modulus).
+private fn p256_reduce(a:P9,modulus:P9) -> P9
+  = let difference=p9_sub_raw(a,modulus) in p256_select(difference,a,p9_negative(difference))
+private fn p256_words(bytes:Arr u8 n) -> P9
+  = check n==32 in p9_unpack(byte_swap64(byte_read_le(bytes,24,8)),byte_swap64(byte_read_le(bytes,16,8)),
+      byte_swap64(byte_read_le(bytes,8,8)),byte_swap64(byte_read_le(bytes,0,8)))
+private fn p256_mod(order:bool) -> P256Mod = if order then p9_order() else p9_field()
+private fn p256_add(a:P9,b:P9,modulus:P9) -> P9
+  = let total=p9_add_raw(a,b) in let less=p9_sub_raw(total,p9_add_raw(modulus,modulus)) in p256_select(less,total,p9_negative(less))
+private fn p256_sub(a:P9,b:P9,modulus:P9) -> P9
+  = let difference=p9_sub_raw(a,b) in p256_select(difference,p9_add_raw(difference,p9_add_raw(modulus,modulus)),p9_negative(difference))
+private fn p256_multiply(a:P9,b:P9,mod:P256Mod) -> P9 = p9_mont(a,b,mod.modulus,mod.inverse)
+private fn p256_square(a:P9,mod:P256Mod) -> P9 = p9_mont(a,a,mod.modulus,mod.inverse)
+private fn p256_montgomery(value:P9,mod:P256Mod) -> P9 = p9_mont(value,mod.r2,mod.modulus,mod.inverse)
+private fn p256_normal(value:P9,mod:P256Mod) -> P9 = p256_reduce(p9_mont(value,p9_small(1),mod.modulus,mod.inverse),mod.modulus)
+private fn p9_limb(a:P9,index:i64) -> i64
+  = if index==0 then a.l0 else if index==1 then a.l1 else if index==2 then a.l2 else if index==3 then a.l3 else
+    if index==4 then a.l4 else if index==5 then a.l5 else if index==6 then a.l6 else if index==7 then a.l7 else a.l8
+private fn p9_bit(a:P9,index:i64) -> i64 = bit_and(shift_right(p9_limb(a,index/29),index%29),1)
+; value^(modulus-2) in Montgomery form. The exponent is public, so the
+; sequence of operations does not depend on value.
+private fn p256_inverse(value:P9,mod:P256Mod) -> P9
+  = let exponent=p9_sub_raw(mod.modulus,p9_small(2)) in
+    loop(i=255,out=mod.one) while i>=0 next(i-1,
+      let square=p256_square(out,mod) in if p9_bit(exponent,i)==1 then p256_multiply(square,value,mod) else square) yield out
+
+sealed type P256Point = { x:P9,y:P9,z:P9 }
+private fn p256_infinity(mod:P256Mod) -> P256Point = P256Point { x=p9_zero(),y=mod.one,z=p9_zero() }
+private fn p256_point_select(a:P256Point,b:P256Point,bit:i64) -> P256Point
+  = P256Point { x=p256_select(a.x,b.x,bit),y=p256_select(a.y,b.y,bit),z=p256_select(a.z,b.z,bit) }
+private fn p256_double(a:P256Point,mod:P256Mod) -> P256Point
+  = let p=mod.modulus in
+    let delta=p256_square(a.z,mod) in let gamma=p256_square(a.y,mod) in let beta=p256_multiply(a.x,gamma,mod) in
+    let alpha=p256_multiply(p256_sub(a.x,delta,p),p256_add(a.x,delta,p),mod) in let alpha=p256_add(p256_add(alpha,alpha,p),alpha,p) in
+    let beta2=p256_add(beta,beta,p) in let beta4=p256_add(beta2,beta2,p) in let beta8=p256_add(beta4,beta4,p) in
+    let x=p256_sub(p256_square(alpha,mod),beta8,p) in
+    let yz=p256_add(a.y,a.z,p) in let z=p256_sub(p256_sub(p256_square(yz,mod),gamma,p),delta,p) in
+    let gamma2=p256_square(gamma,mod) in let gamma2=p256_add(gamma2,gamma2,p) in let gamma2=p256_add(gamma2,gamma2,p) in let gamma2=p256_add(gamma2,gamma2,p) in
+    let y=p256_sub(p256_multiply(alpha,p256_sub(beta4,x,p),mod),gamma2,p) in P256Point { x=x,y=y,z=z }
+private fn p256_zero_value(a:P9,mod:P256Mod) -> i64 = p256_is_zero(p256_reduce(a,mod.modulus))
+; Complete for the ladder: doubling and infinity are selected with masks.
+private fn p256_point_add(a:P256Point,b:P256Point,mod:P256Mod) -> P256Point
+  = let p=mod.modulus in let zz1=p256_square(a.z,mod) in let zz2=p256_square(b.z,mod) in
+    let u1=p256_multiply(a.x,zz2,mod) in let u2=p256_multiply(b.x,zz1,mod) in
+    let s1=p256_multiply(p256_multiply(a.y,b.z,mod),zz2,mod) in let s2=p256_multiply(p256_multiply(b.y,a.z,mod),zz1,mod) in
+    let h=p256_sub(u2,u1,p) in let r=p256_sub(s2,s1,p) in let hh=p256_square(h,mod) in let hhh=p256_multiply(h,hh,mod) in let v=p256_multiply(u1,hh,mod) in
+    let x=p256_sub(p256_sub(p256_square(r,mod),hhh,p),p256_add(v,v,p),p) in
+    let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_multiply(s1,hhh,mod),p) in let z=p256_multiply(p256_multiply(h,a.z,mod),b.z,mod) in
+    let generic=P256Point { x=x,y=y,z=z } in
+    let combined=p256_point_select(generic,p256_double(a,mod),bit_and(p256_zero_value(h,mod),p256_zero_value(r,mod))) in
+    let combined=p256_point_select(combined,b,p256_zero_value(a.z,mod)) in p256_point_select(combined,a,p256_zero_value(b.z,mod))
+; Fixed 256 doublings and additions; the scalar only drives mask selections.
+private fn p256_scalar(point:P256Point,scalar:P9,mod:P256Mod) -> P256Point
+  = loop(i=255,out=p256_infinity(mod)) while i>=0 next(i-1,
+      let doubled=p256_double(out,mod) in let added=p256_point_add(doubled,point,mod) in
+      p256_point_select(doubled,added,p9_bit(scalar,i))) yield out
+private fn p256_affine(point:P256Point,mod:P256Mod) -> P256Point
+  = let inverse=p256_inverse(point.z,mod) in let square=p256_square(inverse,mod) in
+    P256Point { x=p256_multiply(point.x,square,mod),y=p256_multiply(p256_multiply(point.y,square,mod),inverse,mod),z=mod.one }
+private fn p256_generator(mod:P256Mod) -> P256Point
+  = let g=p9_generator(0) in P256Point { x=g.x,y=g.y,z=mod.one }
+private fn p256_scalar_valid(value:P9,mod:P256Mod) -> bool = p256_is_zero(value)==0 && p9_negative(p9_sub_raw(value,mod.modulus))==1
+private fn p256_point_decode(bytes:Arr u8 n,mod:P256Mod) -> P256Point
+  = check n==65 in P256Point { x=p256_montgomery(p256_words(str_slice(bytes,1,33)),mod),y=p256_montgomery(p256_words(str_slice(bytes,33,65)),mod),z=mod.one }
+private fn p256_point_valid(bytes:Arr u8 n,mod:P256Mod) -> bool
+  = if n!=65 || str_byte(bytes,0)!=4 then false else
+    let x=p256_words(str_slice(bytes,1,33)) in let y=p256_words(str_slice(bytes,33,65)) in
+    if p9_negative(p9_sub_raw(x,mod.modulus))!=1 || p9_negative(p9_sub_raw(y,mod.modulus))!=1 then false else
+    let point=p256_point_decode(bytes,mod) in let p=mod.modulus in
+    let x3=p256_multiply(p256_square(point.x,mod),point.x,mod) in let triple=p256_add(p256_add(point.x,point.x,p),point.x,p) in
+    p256_zero_value(p256_sub(p256_square(point.y,mod),p256_add(p256_sub(x3,triple,p),p9_curve_b(),p),p),mod)==1
+private fn p256_encode(point:P256Point,mod:P256Mod) -> Arr u8 _
+  = let normal=p256_affine(point,mod) in concat("\x04",p9_bytes(p256_normal(normal.x,mod)),p9_bytes(p256_normal(normal.y,mod)))
+private fn p256_bytes(value:P9) -> Arr u8 _ = p9_bytes(value)
+fn p256_public(secret:Arr u8 n) -> BytesResult
+  = if n!=32 then bytes_error(22,"P-256 private key requires 32 bytes",0) else
+    let scalar=p256_words(secret) in if !p256_scalar_valid(scalar,p256_mod(true)) then bytes_error(22,"invalid P-256 private scalar",0) else
+    let mod=p256_mod(false) in bytes_ok(p256_encode(p256_scalar(p256_generator(mod),scalar,mod),mod))
+fn p256_public_valid(public:Arr u8 n) -> bool = p256_point_valid(public,p256_mod(false))
+fn p256_ecdh(secret:Arr u8 n,public:Arr u8 m) -> BytesResult
+  = if n!=32 then bytes_error(22,"P-256 private key requires 32 bytes",0) else
+    let scalar=p256_words(secret) in let mod=p256_mod(false) in
+    if !p256_scalar_valid(scalar,p256_mod(true)) || !p256_point_valid(public,mod) then bytes_error(22,"invalid P-256 ECDH key",0) else
+    let shared=p256_scalar(p256_point_decode(public,mod),scalar,mod) in
+    if p256_zero_value(shared.z,mod)==1 then bytes_error(74,"P-256 ECDH infinity",0) else bytes_ok(p9_bytes(p256_normal(p256_affine(shared,mod).x,mod)))
+
+; Verification (public inputs only). Mixed addition of an affine point
+; (madd-2007-bl) and general addition (add-2007-bl) branch on the exceptional
+; cases; a result at infinity has z = 0.
+private fn p256_negate(a:P9,mod:P256Mod) -> P9 = p256_sub(p9_zero(),a,mod.modulus)
+private fn p256_add_affine(a:P256Point,b:P9Affine,mod:P256Mod) -> P256Point
+  = let p=mod.modulus in let z1z1=p256_square(a.z,mod) in
+    let u2=p256_multiply(b.x,z1z1,mod) in let s2=p256_multiply(b.y,p256_multiply(a.z,z1z1,mod),mod) in
+    let h=p256_sub(u2,a.x,p) in let r=p256_sub(s2,a.y,p) in
+    if p256_zero_value(h,mod)==1 then
+      (if p256_zero_value(r,mod)==1 then p256_double(P256Point { x=b.x,y=b.y,z=mod.one },mod) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
+    let hh=p256_square(h,mod) in let i=p256_add(p256_add(hh,hh,p),p256_add(hh,hh,p),p) in let j=p256_multiply(h,i,mod) in
+    let r=p256_add(r,r,p) in let v=p256_multiply(a.x,i,mod) in
+    let x=p256_sub(p256_sub(p256_square(r,mod),j,p),p256_add(v,v,p),p) in
+    let yj=p256_multiply(a.y,j,mod) in let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_add(yj,yj,p),p) in
+    let z=p256_sub(p256_sub(p256_square(p256_add(a.z,h,p),mod),z1z1,p),hh,p) in P256Point { x=x,y=y,z=z }
+private fn p256_add_general(a:P256Point,b:P256Point,mod:P256Mod) -> P256Point
+  = let p=mod.modulus in let z1z1=p256_square(a.z,mod) in let z2z2=p256_square(b.z,mod) in
+    let u1=p256_multiply(a.x,z2z2,mod) in let u2=p256_multiply(b.x,z1z1,mod) in
+    let s1=p256_multiply(a.y,p256_multiply(b.z,z2z2,mod),mod) in let s2=p256_multiply(b.y,p256_multiply(a.z,z1z1,mod),mod) in
+    let h=p256_sub(u2,u1,p) in let r=p256_sub(s2,s1,p) in
+    if p256_zero_value(h,mod)==1 then
+      (if p256_zero_value(r,mod)==1 then p256_double(b,mod) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
+    let h2=p256_add(h,h,p) in let i=p256_square(h2,mod) in let j=p256_multiply(h,i,mod) in
+    let r=p256_add(r,r,p) in let v=p256_multiply(u1,i,mod) in
+    let x=p256_sub(p256_sub(p256_square(r,mod),j,p),p256_add(v,v,p),p) in
+    let sj=p256_multiply(s1,j,mod) in let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_add(sj,sj,p),p) in
+    let zz=p256_sub(p256_sub(p256_square(p256_add(a.z,b.z,p),mod),z1z1,p),z2z2,p) in
+    P256Point { x=x,y=y,z=p256_multiply(zz,h,mod) }
+; Width-5 NAF digits of a scalar below 2^256: odd digits in -15..15, 257 positions.
+private fn p9_shift1(a:P9) -> P9
+  = P9 { l0=bit_or(shift_right(a.l0,1),shift_left(bit_and(a.l1,1),28)),l1=bit_or(shift_right(a.l1,1),shift_left(bit_and(a.l2,1),28)),
+      l2=bit_or(shift_right(a.l2,1),shift_left(bit_and(a.l3,1),28)),l3=bit_or(shift_right(a.l3,1),shift_left(bit_and(a.l4,1),28)),
+      l4=bit_or(shift_right(a.l4,1),shift_left(bit_and(a.l5,1),28)),l5=bit_or(shift_right(a.l5,1),shift_left(bit_and(a.l6,1),28)),
+      l6=bit_or(shift_right(a.l6,1),shift_left(bit_and(a.l7,1),28)),l7=bit_or(shift_right(a.l7,1),shift_left(bit_and(a.l8,1),28)),l8=shift_right(a.l8,1) }
+type P256Naf = { k:P9,digits:Arr i64 _ }
+private fn p256_naf_step(move state:P256Naf,i:i64) -> P256Naf
+  = let k=state.k in let low=bit_and(k.l0,31) in let digit=if bit_and(low,1)==0 then 0 else if low>=16 then low-32 else low in
+    let k=if digit==0 then k else p9_sub_raw(k,p9_small(digit)) in let digits=state.digits in
+    check i>=0 && i<len(digits) in P256Naf { k=p9_shift1(k),digits=set(digits,i,digit) }
+private fn p256_naf(scalar:P9) -> Arr i64 _
+  = let state=loop(i=0,state=P256Naf { k=scalar,digits=arr(j in 0..257) 0 }) while i<257 next(i+1,p256_naf_step(state,i)) yield state in state.digits
+type P256Odd = { p1:P256Point,p3:P256Point,p5:P256Point,p7:P256Point,p9:P256Point,p11:P256Point,p13:P256Point,p15:P256Point }
+private fn p256_odd_multiples(point:P256Point,mod:P256Mod) -> P256Odd
+  = let twice=p256_double(point,mod) in let p3=p256_add_general(twice,point,mod) in let p5=p256_add_general(twice,p3,mod) in
+    let p7=p256_add_general(twice,p5,mod) in let p9=p256_add_general(twice,p7,mod) in let p11=p256_add_general(twice,p9,mod) in
+    let p13=p256_add_general(twice,p11,mod) in
+    P256Odd { p1=point,p3=p3,p5=p5,p7=p7,p9=p9,p11=p11,p13=p13,p15=p256_add_general(twice,p13,mod) }
+private fn p256_odd_pick(table:P256Odd,index:i64) -> P256Point
+  = if index==0 then table.p1 else if index==1 then table.p3 else if index==2 then table.p5 else if index==3 then table.p7 else
+    if index==4 then table.p9 else if index==5 then table.p11 else if index==6 then table.p13 else table.p15
+type P256Sum = { point:P256Point,empty:bool }
+private fn p256_sum_add(total:P256Sum,b:P256Point,mod:P256Mod) -> P256Sum
+  = if total.empty then P256Sum { point=b,empty=false } else
+    let added=p256_add_general(total.point,b,mod) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
+private fn p256_sum_affine(total:P256Sum,b:P9Affine,mod:P256Mod) -> P256Sum
+  = if total.empty then P256Sum { point=P256Point { x=b.x,y=b.y,z=mod.one },empty=false } else
+    let added=p256_add_affine(total.point,b,mod) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
+private fn p256_verify_step(total:P256Sum,g:i64,q:i64,table:P256Odd,mod:P256Mod) -> P256Sum
+  = let doubled=if total.empty then total else P256Sum { point=p256_double(total.point,mod),empty=false } in
+    let with_g=if g==0 then doubled else let base=p9_generator(if g>0 then (g-1)/2 else (0-g-1)/2) in
+      p256_sum_affine(doubled,if g>0 then base else P9Affine { x=base.x,y=p256_negate(base.y,mod) },mod) in
+    if q==0 then with_g else let base=p256_odd_pick(table,if q>0 then (q-1)/2 else (0-q-1)/2) in
+      p256_sum_add(with_g,if q>0 then base else base with { y=p256_negate(base.y,mod) },mod)
+; u1*G + u2*Q by interleaved NAF digits.
+private fn p256_combination(u1:P9,u2:P9,point:P256Point,mod:P256Mod) -> P256Sum
+  = let g=p256_naf(u1) in let q=p256_naf(u2) in let table=p256_odd_multiples(point,mod) in
+    loop(i=256,total=P256Sum { point=p256_infinity(mod),empty=true }) while i>=0
+      next(i-1,check i>=0 && i<len(g) && i<len(q) in p256_verify_step(total,g[i],q[i],table,mod)) yield total
+; x(point) = r (mod n) without inverting z: X = r*Z^2, or (r+n)*Z^2 when r+n < p.
+private fn p256_x_matches(point:P256Point,r:P9,field:P256Mod,order:P256Mod) -> bool
+  = let zz=p256_square(point.z,field) in let x=p256_reduce(point.x,field.modulus) in
+    let direct=p256_reduce(p256_multiply(p256_montgomery(r,field),zz,field),field.modulus) in
+    let lifted=p9_add_raw(r,order.modulus) in
+    p256_is_zero(p9_sub_raw(x,direct))==1 ||
+      p9_negative(p9_sub_raw(lifted,field.modulus))==1 &&
+        p256_is_zero(p9_sub_raw(x,p256_reduce(p256_multiply(p256_montgomery(lifted,field),zz,field),field.modulus)))==1
+
+private fn p256_der_scalar(signature:Arr u8 n,node:DerNode) -> BytesResult
+  = let bytes=der_value(signature,node) in let count=len(bytes) in
+    if !node.ok || node.tag!=2 || count<1 || count>33 || str_byte(bytes,0)>=128 || count>1 && str_byte(bytes,0)==0 && str_byte(bytes,1)<128 || count==33 && str_byte(bytes,0)!=0 then bytes_error(74,"invalid ECDSA DER integer",0) else
+    bytes_ok(arr(i in 0..32) u8(if i+count<32 then 0 else str_byte(bytes,i+count-32)))
+private fn p256_der_encode(value:Arr u8 n) -> Arr u8 _
+  = check n==32 in let first=loop(i=0) while i<31 && str_byte(value,i)==0 next(i+1) yield i in
+    let tail=str_slice(value,first,n) in let positive=if str_byte(tail,0)>=128 then concat("\x00",tail) else tail in
+    concat("\x02",arr(i in 0..1) u8(len(positive)),positive)
+; ECDSA verification of a 32-byte big-endian digest (SHA-256, or the leftmost
+; 256 bits of a longer one) against a DER signature and an uncompressed key.
+fn ecdsa_p256_verify_digest32(public:Arr u8 n,digest:Arr u8 d,signature:Arr u8 k) -> bool
+  = let field=p256_mod(false) in
+    if d!=32 || k<8 || k>72 || !p256_point_valid(public,field) then false else
+    let seq=der_node(signature,0,k) in let first=der_node(signature,seq.body,seq.end) in let second=der_node(signature,first.end,seq.end) in
+    if !seq.ok || seq.tag!=48 || seq.end!=k || !first.ok || !second.ok || second.end!=seq.end then false else
+    let raw_r=p256_der_scalar(signature,first) in let raw_s=p256_der_scalar(signature,second) in
+    if !raw_r.ok || !raw_s.ok then false else
+    let r=p256_words(raw_r.value) in let s=p256_words(raw_s.value) in let order=p256_mod(true) in
+    if !p256_scalar_valid(r,order) || !p256_scalar_valid(s,order) then false else
+    let inverse=p256_inverse(p256_montgomery(s,order),order) in
+    let z=p256_reduce(p256_words(digest),order.modulus) in
+    let u1=p256_reduce(p256_multiply(inverse,z,order),order.modulus) in
+    let u2=p256_reduce(p256_multiply(inverse,r,order),order.modulus) in
+    let total=p256_combination(u1,u2,p256_point_decode(public,field),field) in
+    !total.empty && p256_x_matches(total.point,r,field,order)
+fn ecdsa_p256_verify_sha256(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool
+  = ecdsa_p256_verify_digest32(public,sha256(message),signature)
+private fn p256_sign_candidate(secret:P9,digest:P9,nonce:Arr u8 n,order:P256Mod,field:P256Mod) -> Arr u8 _
+  = check n==32 in let scalar=p256_words(nonce) in if !p256_scalar_valid(scalar,order) then "" else
+    let point=p256_affine(p256_scalar(p256_generator(field),scalar,field),field) in let r=p256_reduce(p256_normal(point.x,field),order.modulus) in
+    let mixed=p256_add(p256_montgomery(digest,order),p256_multiply(p256_montgomery(r,order),p256_montgomery(secret,order),order),order.modulus) in
+    let s=p256_normal(p256_multiply(p256_inverse(p256_montgomery(scalar,order),order),mixed,order),order) in
+    if p256_is_zero(r)==1 || p256_is_zero(s)==1 then "" else
+    let integers=concat(p256_der_encode(p9_bytes(r)),p256_der_encode(p9_bytes(s))) in concat("\x30",arr(i in 0..1) u8(len(integers)),integers)
+fn ecdsa_p256_sign_sha256(secret:Arr u8 n,message:Arr u8 m) -> BytesResult
+  = if n!=32 then bytes_error(22,"P-256 private key requires 32 bytes",0) else
+    let scalar=p256_words(secret) in let order=p256_mod(true) in
+    if !p256_scalar_valid(scalar,order) then bytes_error(22,"invalid P-256 private scalar",0) else
+    let digest=p256_reduce(p256_words(sha256(message)),order.modulus) in let context=concat(secret,p9_bytes(digest)) in
+    let zeros=arr(i in 0..32) u8(0) in let ones=arr(i in 0..32) u8(1) in
+    let key=hmac_sha256(zeros,concat(ones,"\x00",context)) in let value=hmac_sha256(key,ones) in
+    let key=hmac_sha256(key,concat(value,"\x01",context)) in let value=hmac_sha256(key,value) in let field=p256_mod(false) in
+    let result=loop(i=0,key=key,value=value,signature="") while i<16 && len(signature)==0 next(i+1,
+      hmac_sha256(key,concat(hmac_sha256(key,value),"\x00")),
+      let next_key=hmac_sha256(key,concat(hmac_sha256(key,value),"\x00")) in hmac_sha256(next_key,hmac_sha256(key,value)),
+      p256_sign_candidate(scalar,digest,hmac_sha256(key,value),order,field)) yield signature in
+    if len(result)==0 then bytes_error(74,"P-256 deterministic nonce retry limit",0) else bytes_ok(result)

@@ -1,0 +1,52 @@
+import "std:vec"
+import "std:io"
+
+type OwnedRows = { rows:Vec<Arr i64 _>, count:i64 }
+type NestedRows = { state:OwnedRows, label:Arr u8 _ }
+type DirectRows = { values:Arr i64 _ }
+fn direct_read(row:DirectRows) -> i64
+  = if len(row.values)==0 then 0 else check len(row.values)>0 in row.values[0]
+fn consume_parent(row:DirectRows,move parent:Arr DirectRows _) -> i64
+  = check len(parent)>0 in let changed=set(parent,0,DirectRows {values=arr(j in 0..1) 99}) in
+    direct_read(row)+len(changed)
+fn consume_length(move parent:Arr DirectRows _) -> i64 = len(parent)
+fn with_length(row:DirectRows,length:i64) -> i64 = direct_read(row)+length
+fn append_row(move state:OwnedRows,index:i64) -> OwnedRows
+  = if index<0 then state with { rows=vec_push(state.rows,arr(j in 0..1) j) } else
+    OwnedRows { rows=vec_push(state.rows,arr(j in 0..8) index+j), count=state.count+1 }
+fn ordinal_row(ordinal:i64) -> DirectRows = DirectRows {values=arr(i in 0..1) ordinal}
+fn exercise(n:i64{n>=1 && n<=100000}) -> i64
+  = let state=loop(i=0,state=OwnedRows {rows=vec_empty::<Arr i64 _>(),count=0}) while i<n
+      next(i+1,append_row(state,i)) yield state in
+    ; A fresh owned argument does not borrow the vector just because its scalar
+    ; ordinal was computed from that vector. Extending that read's lifetime
+    ; would force quadratic copying on each append.
+    let numbered=loop(i=0,out=vec_empty::<DirectRows>()) while i<n
+      next(i+1,vec_push(out,ordinal_row(vec_len(out)))) yield out in
+    let last=match vec_get(numbered,n-1) {Some(row)=>direct_read(row),None=> -1} in
+    check last==n-1 in
+    let nested=NestedRows {state=state,label="kept"} in
+    let checksum=sum(i in 0..1000) nested.state.count in
+    let buffers=OwnedRows {rows=vec_push(vec_empty::<Arr i64 _>(),arr(j in 0..2) j+10),count=0} in
+    let original=match vec_get(buffers.rows,0) {Some(value)=>value,None=>arr(j in 0..2) j} in
+    check len(original)>=2 in
+    let alias=original in let changed=set(original,0,original[1]) in
+    check len(changed)>=1 && len(alias)>=1 in
+    check changed[0]==11 in check alias[0]==10 in check checksum==1000*n in
+    let replacement=DirectRows {values=arr(j in 0..2) j+20} in
+    check len(replacement.values)>=2 in
+    let direct=set(replacement.values,0,replacement.values[1]) in
+    check len(direct)>=1 in
+    check direct[0]==21 in checksum
+effect fn main(n:i64{n>=1 && n<=100000}) -> unit
+  = let checksum=exercise(n) in
+    let items=arr(i in 0..n) DirectRows {values=arr(j in 0..8) i+j} in
+    let before=load_i64(runtime_state(),64) in
+    let total=sum(i in 0..n) check i>=0 && i<len(items) in direct_read(items[i]) in
+    let after=load_i64(runtime_state(),64) in check before==after && total==n*(n-1)/2 in
+    let parent=arr(i in 0..2) DirectRows {values=arr(j in 0..1) 10+i} in check len(parent)>0 in
+    let answer=consume_parent(parent[0],parent) in check answer==12 in
+    let second=arr(i in 0..2) DirectRows {values=arr(j in 0..1) 20+i} in check len(second)>0 in
+    let answer=with_length(second[0],consume_length(second)) in check answer==22 in
+    let requests=load_i64(runtime_state(),64) in let traffic=load_i64(runtime_state(),80) in
+    let printed=print_out(concat(int_text(checksum)," ",int_text(requests)," ",int_text(traffic),"\n")) in noop()

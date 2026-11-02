@@ -1,0 +1,201 @@
+import "std:der"
+import "std:rsa"
+import "std:p256"
+import "std:p384"
+import "std:dns"
+
+; sig_mode: 1 sha256WithRSAEncryption, 2 RSASSA-PSS SHA-256, 3 ecdsa-with-SHA256,
+; 4 ecdsa-with-SHA384, 5 sha384WithRSAEncryption, 6 sha512WithRSAEncryption,
+; 7 ecdsa-with-SHA512. Modes 8 (sha1WithRSAEncryption) and 9 (ecdsa-with-SHA1)
+; only let trust anchors with legacy self-signatures parse: x509_signed_by never
+; accepts them. ec_key holds an uncompressed SEC1 point: 65 bytes for P-256,
+; 97 bytes for P-384; ECDSA modes dispatch on the issuer's curve.
+
+type X509Pss = { valid:bool,seen:i64,previous:i64 }
+type X509OidSpan = { first:i64,last:i64 }
+type X509Extensions = { valid:bool,ca:bool,path_limit:i64,ku:bool,digital:bool,sign:bool,eku:bool,server:bool,san:Arr u8 _,seen:Arr X509OidSpan _ }
+sealed type Certificate = { valid:bool,der:Arr u8 _,tbs:Arr u8 _,issuer:Arr u8 _,subject:Arr u8 _,
+  key:RsaKey,ec_key:Arr u8 _,signature:Arr u8 _,sig_mode:i64,not_before:i64,not_after:i64,extensions:X509Extensions }
+
+private fn x509_null_or_absent(wire:Arr u8 n,at:i64,end:i64) -> bool
+  = if at==end then true else let node=der_node(wire,at,end) in node.ok && node.tag==5 && node.body==node.end && node.end==end
+private fn x509_sha_algorithm(wire:Arr u8 n,node:DerNode) -> bool
+  = let oid=der_node(wire,node.body,node.end) in node.ok && node.tag==48 && der_oid(wire,oid,"\x60\x86\x48\x01\x65\x03\x04\x02\x01") && x509_null_or_absent(wire,oid.end,node.end)
+private fn x509_pss_parameter(state:X509Pss,wire:Arr u8 n,node:DerNode) -> X509Pss
+  = let value=der_node(wire,node.body,node.end) in
+    let mask=if node.tag>=160 && node.tag<=163 then shift_left(1,node.tag-160) else 0 in
+    let general=node.ok && value.ok && value.end==node.end && mask!=0 && bit_and(state.seen,mask)==0 && node.tag>state.previous in
+    let good=if node.tag==160 then x509_sha_algorithm(wire,value) else if node.tag==161 then
+      let oid=der_node(wire,value.body,value.end) in let hash=der_node(wire,oid.end,value.end) in
+      value.tag==48 && der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x08") && hash.end==value.end && x509_sha_algorithm(wire,hash) else
+      let number=der_integer(wire,value,32) in number.ok && number.value==(if node.tag==162 then 32 else 1) in
+    X509Pss { valid=state.valid && general && good,seen=bit_or(state.seen,mask),previous=node.tag }
+private fn x509_signature_mode(wire:Arr u8 n,node:DerNode) -> i64
+  = let oid=der_node(wire,node.body,node.end) in
+    if !node.ok || node.tag!=48 || !oid.ok then 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0b") then if x509_null_or_absent(wire,oid.end,node.end) then 1 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\xce\x3d\x04\x03\x02") then if oid.end==node.end then 3 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\xce\x3d\x04\x03\x03") then if oid.end==node.end then 4 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0c") then if x509_null_or_absent(wire,oid.end,node.end) then 5 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0d") then if x509_null_or_absent(wire,oid.end,node.end) then 6 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\xce\x3d\x04\x03\x04") then if oid.end==node.end then 7 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x05") then if x509_null_or_absent(wire,oid.end,node.end) then 8 else 0 else
+    if der_oid(wire,oid,"\x2a\x86\x48\xce\x3d\x04\x01") then if oid.end==node.end then 9 else 0 else
+    if !der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0a") then 0 else
+      let params=der_node(wire,oid.end,node.end) in
+      let state=loop(at=params.body,state=X509Pss { valid=params.ok && params.tag==48 && params.end==node.end,seen=0,previous=159 }) while state.valid && at<params.end
+        next(der_node(wire,at,params.end).end,x509_pss_parameter(state,wire,der_node(wire,at,params.end))) yield state in
+      if state.valid && bit_and(state.seen,7)==7 then 2 else 0
+private fn x509_key(wire:Arr u8 n,node:DerNode) -> RsaKey
+  = let invalid=rsa_public("",0) in let algorithm=der_node(wire,node.body,node.end) in
+    let oid=der_node(wire,algorithm.body,algorithm.end) in let bits=der_node(wire,algorithm.end,node.end) in
+    if !node.ok || node.tag!=48 || !algorithm.ok || algorithm.tag!=48 || !der_oid(wire,oid,"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01") ||
+      !x509_null_or_absent(wire,oid.end,algorithm.end) || !bits.ok || bits.tag!=3 || bits.end!=node.end || str_byte(wire,bits.body)!=0 then invalid else
+      let rsa=der_node(wire,bits.body+1,bits.end) in let modulus=der_node(wire,rsa.body,rsa.end) in let exponent=der_node(wire,modulus.end,rsa.end) in
+      let e=der_integer(wire,exponent,2147483647) in let first=str_byte(wire,modulus.body) in
+      if !rsa.ok || rsa.tag!=48 || rsa.end!=bits.end || !modulus.ok || modulus.tag!=2 || first<0 || first>=128 ||
+        first==0 && (modulus.end-modulus.body<2 || str_byte(wire,modulus.body+1)<128) || !e.ok || exponent.end!=rsa.end then invalid else
+        rsa_public(str_slice(wire,modulus.body+(if first==0 then 1 else 0),modulus.end),e.value)
+private fn x509_ec_key(wire:Arr u8 n,node:DerNode) -> Arr u8 _
+  = let algorithm=der_node(wire,node.body,node.end) in let oid=der_node(wire,algorithm.body,algorithm.end) in
+    let curve=der_node(wire,oid.end,algorithm.end) in let bits=der_node(wire,algorithm.end,node.end) in
+    let wide=der_oid(wire,curve,"\x2b\x81\x04\x00\x22") in
+    if !node.ok || node.tag!=48 || !algorithm.ok || algorithm.tag!=48 ||
+      !der_oid(wire,oid,"\x2a\x86\x48\xce\x3d\x02\x01") || !(wide || der_oid(wire,curve,"\x2a\x86\x48\xce\x3d\x03\x01\x07")) || curve.end!=algorithm.end ||
+      !bits.ok || bits.tag!=3 || bits.end!=node.end || bits.end-bits.body!=(if wide then 98 else 66) || str_byte(wire,bits.body)!=0 then "" else
+      let public=str_slice(wire,bits.body+1,bits.end) in if (if wide then p384_public_valid(public) else p256_public_valid(public)) then public else ""
+private fn x509_decimal(text:Arr u8 n,at:i64,count:i64) -> i64
+  = loop(i=0,value=0,valid=true) while valid && i<count
+      next(i+1,value*10+str_byte(text,at+i)-48,str_byte(text,at+i)>=48 && str_byte(text,at+i)<=57) yield if valid then value else -1
+private fn x509_leap(year:i64) -> bool = year%4==0 && (year%100!=0 || year%400==0)
+private fn x509_month_days(month:i64,year:i64) -> i64
+  = if month==2 then if x509_leap(year) then 29 else 28 else if month==4 || month==6 || month==9 || month==11 then 30 else 31
+private fn x509_time(wire:Arr u8 n,node:DerNode) -> i64
+  = let text=der_value(wire,node) in let utc=node.tag==23 in let prefix=if utc then 2 else 4 in
+    let short=x509_decimal(text,0,prefix) in let year=if utc then (if short<50 then 2000+short else 1900+short) else short in
+    let month=x509_decimal(text,prefix,2) in let day=x509_decimal(text,prefix+2,2) in let hour=x509_decimal(text,prefix+4,2) in
+    let minute=x509_decimal(text,prefix+6,2) in let second=x509_decimal(text,prefix+8,2) in
+    if !node.ok || !(utc || node.tag==24) || len(text)!=prefix+11 || str_byte(text,prefix+10)!=90 || short<0 || year<1950 || year>9999 || month<1 || month>12 ||
+      day<1 || day>x509_month_days(month,year) || hour<0 || hour>23 || minute<0 || minute>59 || second<0 || second>59 then -9223372036854775807 else
+      let months=loop(i=1,days=0) while i<month next(i+1,days+x509_month_days(i,year)) yield days in
+      let y=year-1 in let days=y*365+y/4-y/100+y/400-719162+months+day-1 in days*86400+hour*3600+minute*60+second
+private fn x509_extensions_initial() -> X509Extensions
+  = X509Extensions { valid=true,ca=false,path_limit=-1,ku=false,digital=false,sign=false,eku=false,server=false,san="",seen=arr(i in 0..0) X509OidSpan { first=0,last=0 } }
+private fn x509_basic(state:X509Extensions,value:Arr u8 n) -> X509Extensions
+  = let sequence=der_node(value,0,n) in let first=der_node(value,sequence.body,sequence.end) in
+    let ca=first.ok && first.tag==1 && first.end-first.body==1 && str_byte(value,first.body)==255 in
+    let at=if first.ok && first.tag==1 then first.end else sequence.body in
+    let number=if at==sequence.end then int_ok(-1) else der_integer(value,der_node(value,at,sequence.end),8) in
+    let valid=sequence.ok && sequence.tag==48 && sequence.end==n && (first.tag!=1 || first.end-first.body==1 && (str_byte(value,first.body)==0 || ca)) && number.ok &&
+      (at==sequence.end || ca && der_node(value,at,sequence.end).end==sequence.end) in
+    state with { valid=state.valid && valid,ca=ca,path_limit=number.value }
+private fn x509_usage(state:X509Extensions,value:Arr u8 n) -> X509Extensions
+  = let bits=der_node(value,0,n) in let count=bits.end-bits.body in let unused=str_byte(value,bits.body) in let byte=str_byte(value,bits.body+1) in
+    let valid=bits.ok && bits.tag==3 && bits.end==n && count>=2 && count<=3 && unused>=0 && unused<=7 &&
+      bit_and(str_byte(value,bits.end-1),shift_left(1,unused)-1)==0 && (count!=3 || unused==7 && str_byte(value,bits.end-1)==128) && (byte!=0 || count==3) in
+    state with { valid=state.valid && valid,ku=true,digital=bit_and(byte,128)!=0,sign=bit_and(byte,4)!=0 }
+private fn x509_extended_usage(state:X509Extensions,value:Arr u8 n) -> X509Extensions
+  = let sequence=der_node(value,0,n) in
+    let result=loop(at=sequence.body,valid=sequence.ok && sequence.tag==48 && sequence.end==n && sequence.body<sequence.end,server=false) while valid && at<sequence.end
+      next(der_node(value,at,sequence.end).end,der_node(value,at,sequence.end).ok && der_node(value,at,sequence.end).tag==6,
+        server || der_oid(value,der_node(value,at,sequence.end),"\x2b\x06\x01\x05\x05\x07\x03\x01") || der_oid(value,der_node(value,at,sequence.end),"\x55\x1d\x25\0"))
+      yield IntResult { ok=valid,value=if server then 1 else 0,error=no_error() } in
+    state with { valid=state.valid && result.ok,eku=true,server=result.value==1 }
+private fn x509_extension(move state:X509Extensions,wire:Arr u8 n,extension:DerNode) -> X509Extensions
+  = let oid=der_node(wire,extension.body,extension.end) in let first=der_node(wire,oid.end,extension.end) in
+    let has_critical=first.ok && first.tag==1 in let critical=has_critical && str_byte(wire,first.body)==255 in
+    let value=if has_critical then der_node(wire,first.end,extension.end) else first in
+    let duplicate=loop(i=0,found=false) while !found && i<len(state.seen)
+      next(i+1,check i>=0 && i<len(state.seen) in str_equal(der_value(wire,oid),str_slice(wire,state.seen[i].first,state.seen[i].last))) yield found in
+    let valid=extension.ok && extension.tag==48 && oid.ok && oid.tag==6 && oid.end-oid.body<=64 && value.ok && value.tag==4 && value.end==extension.end && !duplicate && len(state.seen)<64 &&
+      (!has_critical || first.end-first.body==1 && (str_byte(wire,first.body)==0 || critical)) in
+    let state=state with { valid=state.valid && valid,seen=push(state.seen,X509OidSpan { first=oid.body,last=oid.end }) } in
+    if !state.valid then state else
+      if der_oid(wire,oid,"\x55\x1d\x13") then x509_basic(state,der_value(wire,value)) else
+      if der_oid(wire,oid,"\x55\x1d\x0f") then x509_usage(state,der_value(wire,value)) else
+      if der_oid(wire,oid,"\x55\x1d\x25") then x509_extended_usage(state,der_value(wire,value)) else
+      if der_oid(wire,oid,"\x55\x1d\x11") then
+        let san=der_value(wire,value) in let sequence=der_node(san,0,len(san)) in
+        let sane=loop(at=sequence.body,valid=sequence.ok && sequence.tag==48 && sequence.end==len(san) && sequence.body<sequence.end) while valid && at<sequence.end
+          next(der_node(san,at,sequence.end).end,der_node(san,at,sequence.end).ok) yield valid in state with { valid=sane,san=san } else
+      if critical then state with { valid=false } else state
+fn x509_parse(wire:Arr u8 n) -> Certificate
+  = let outer=der_node(wire,0,n) in let tbs=der_node(wire,outer.body,outer.end) in let algorithm=der_node(wire,tbs.end,outer.end) in let signature=der_node(wire,algorithm.end,outer.end) in
+    let version=der_node(wire,tbs.body,tbs.end) in let version_number=if version.tag==160 then der_integer(wire,der_node(wire,version.body,version.end),2) else int_ok(0) in
+    let serial=der_node(wire,if version.tag==160 then version.end else tbs.body,tbs.end) in let inner=der_node(wire,serial.end,tbs.end) in
+    let issuer=der_node(wire,inner.end,tbs.end) in let validity=der_node(wire,issuer.end,tbs.end) in let before=der_node(wire,validity.body,validity.end) in let after=der_node(wire,before.end,validity.end) in
+    let subject=der_node(wire,validity.end,tbs.end) in let spki=der_node(wire,subject.end,tbs.end) in let key=x509_key(wire,spki) in let ec=x509_ec_key(wire,spki) in
+    let mode=x509_signature_mode(wire,algorithm) in
+    let extension=loop(at=spki.end,state=x509_extensions_initial(),previous=128) while state.valid && at<tbs.end
+      next(der_node(wire,at,tbs.end).end,
+        let node=der_node(wire,at,tbs.end) in
+        if !node.ok || node.tag<=previous || !(node.tag==129 || node.tag==130 || node.tag==163) then state with { valid=false } else
+        if node.tag!=163 then state else
+          let sequence=der_node(wire,node.body,node.end) in
+          loop(i=sequence.body,ext=state with { valid=sequence.ok && sequence.tag==48 && sequence.end==node.end && version_number.value==2 }) while ext.valid && i<sequence.end
+            next(der_node(wire,i,sequence.end).end,x509_extension(ext,wire,der_node(wire,i,sequence.end))) yield ext,
+        der_node(wire,at,tbs.end).tag) yield state in
+    let low=x509_time(wire,before) in let high=x509_time(wire,after) in
+    Certificate { valid=n>0 && n<=65536 && der_tree(wire,outer,0) && outer.ok && outer.tag==48 && outer.end==n && tbs.ok && tbs.tag==48 && algorithm.ok && signature.ok && signature.tag==3 && signature.end==outer.end &&
+        signature.end-signature.body>=2 && str_byte(wire,signature.body)==0 && version_number.ok && (version.tag!=160 || der_node(wire,version.body,version.end).end==version.end) &&
+        serial.ok && serial.tag==2 && serial.end-serial.body>=1 && serial.end-serial.body<=20 && str_byte(wire,serial.body)<128 &&
+        !(serial.end-serial.body>1 && str_byte(wire,serial.body)==0 && str_byte(wire,serial.body+1)<128) && issuer.ok && issuer.tag==48 && subject.ok && subject.tag==48 && validity.ok && validity.tag==48 && after.end==validity.end &&
+        low != -9223372036854775807 && high>=low && (key.valid || len(ec)==65 || len(ec)==97) && mode!=0 && x509_signature_mode(wire,inner)==mode && extension.valid,
+      der=wire,tbs=der_encoded(wire,tbs),issuer=der_encoded(wire,issuer),subject=der_encoded(wire,subject),key=key,ec_key=ec,
+      signature=str_slice(wire,signature.body+1,signature.end),sig_mode=mode,not_before=low,not_after=high,extensions=extension }
+private fn x509_dns_match(pattern:Arr u8 n,hostname:Arr u8 m) -> bool
+  = let name=http_lower(pattern) in
+    if str_equal(name,hostname) then dns_hostname(name) else
+      if !str_starts(name,"*.") then false else
+        let suffix=str_slice(name,2,n) in let first=str_find(hostname,".") in
+        dns_hostname(suffix) && str_find(suffix,".").present && first.present && first.value>0 && str_equal(str_slice(hostname,first.value+1,m),suffix)
+fn x509_host(certificate:Certificate,hostname:Arr u8 n) -> bool
+  = let host=dns_normalize(hostname) in let ip=if str_equal(host,"localhost") then arr(i in 0..0) 0 else net_ipv4(host) in
+    let san=certificate.extensions.san in let sequence=der_node(san,0,len(san)) in
+    certificate.valid && loop(at=sequence.body,found=false,valid=sequence.ok) while valid && !found && at<sequence.end
+      next(der_node(san,at,sequence.end).end,
+        let node=der_node(san,at,sequence.end) in
+        if len(ip)==4 then node.tag==135 && str_equal(der_value(san,node),arr(i in 0..4) u8(if i<len(ip) then ip[i] else 0)) else node.tag==130 && dns_hostname(host) && x509_dns_match(der_value(san,node),host),
+        der_node(san,at,sequence.end).ok) yield found && valid
+private fn x509_signature(issuer:Certificate,mode:i64,message:Arr u8 n,signature:Arr u8 m) -> bool
+  = let wide=len(issuer.ec_key)==97 in
+    if mode==1 then rsa_verify_sha256(issuer.key,message,signature) else if mode==2 then rsa_verify_pss_sha256(issuer.key,message,signature) else
+    if mode==3 then (if wide then ecdsa_p384_verify_sha256(issuer.ec_key,message,signature) else ecdsa_p256_verify_sha256(issuer.ec_key,message,signature)) else
+    if mode==4 then (if wide then ecdsa_p384_verify_sha384(issuer.ec_key,message,signature) else ecdsa_p256_verify_sha384(issuer.ec_key,message,signature)) else
+    if mode==5 then rsa_verify_sha384(issuer.key,message,signature) else if mode==6 then rsa_verify_sha512(issuer.key,message,signature) else
+    if mode==7 then (if wide then ecdsa_p384_verify_sha512(issuer.ec_key,message,signature) else ecdsa_p256_verify_sha512(issuer.ec_key,message,signature)) else false
+private fn x509_signed_by(child:Certificate,parent:Certificate) -> bool
+  = child.valid && parent.valid && str_equal(child.issuer,parent.subject) && x509_signature(parent,child.sig_mode,child.tbs,child.signature)
+; TLS 1.3 CertificateVerify (RFC 8446 4.4.3) by a parsed leaf certificate's key. Schemes:
+; 1027 ecdsa_secp256r1_sha256 and 1283 ecdsa_secp384r1_sha384 (key curve must match),
+; 2052 rsa_pss_rsae_sha256 and 2053 rsa_pss_rsae_sha384. Anything else is rejected.
+fn x509_tls13_signature_valid(certificate:Certificate,scheme:i64,message:Arr u8 n,signature:Arr u8 m) -> bool
+  = let ec=len(certificate.ec_key) in certificate.valid &&
+    (if scheme==1027 then ec==65 && ecdsa_p256_verify_sha256(certificate.ec_key,message,signature) else
+     if scheme==1283 then ec==97 && ecdsa_p384_verify_sha384(certificate.ec_key,message,signature) else
+     if scheme==2052 then rsa_verify_pss_sha256(certificate.key,message,signature) else
+     if scheme==2053 then rsa_verify_pss_sha384(certificate.key,message,signature) else false)
+private fn x509_ca(certificate:Certificate,now:i64,below:i64) -> bool
+  = certificate.valid && certificate.not_before<=now && certificate.not_after>=now && certificate.extensions.ca &&
+    (!certificate.extensions.ku || certificate.extensions.sign) && (!certificate.extensions.eku || certificate.extensions.server) &&
+    (certificate.extensions.path_limit<0 || certificate.extensions.path_limit>=below)
+type X509Path = { valid:bool,trusted:bool }
+; chain[depth] is a trust anchor itself, or is issued by one that allows depth intermediates below it.
+private fn x509_anchored(certificate:Certificate,roots:Arr Certificate m,now:i64,depth:i64) -> bool
+  = loop(j=0,found=false) while !found && j<m
+      next(j+1,check j>=0 && j<m in
+        if str_equal(certificate.der,roots[j].der) then x509_ca(roots[j],now,if depth>0 then depth-1 else 0) else
+          str_equal(certificate.issuer,roots[j].subject) && x509_ca(roots[j],now,depth) && x509_signed_by(certificate,roots[j])) yield found
+; The ordered chain is followed from the leaf until the first certificate that is, or is issued
+; by, a trust anchor; certificates served after it (such as a cross-sign towards a root that is
+; no longer trusted) are ignored. Every link below that point is verified.
+fn x509_verify(chain:Arr Certificate n,roots:Arr Certificate m,hostname:Arr u8 k,now:i64) -> bool
+  = if n<1 || n>8 || m<1 || m>256 then false else check n>0 in
+    let leaf=chain[0] in
+    leaf.valid && x509_host(leaf,hostname) && leaf.not_before<=now && leaf.not_after>=now && !leaf.extensions.ca &&
+      (!leaf.extensions.ku || leaf.extensions.digital) && (!leaf.extensions.eku || leaf.extensions.server) &&
+    loop(i=0,path=X509Path { valid=true,trusted=false }) while path.valid && !path.trusted && i<n
+      next(i+1,
+        check i>=0 && i<n in let trusted=x509_anchored(chain[i],roots,now,i) in
+        X509Path { valid=trusted || i<n-1 && (check i+1<n in x509_ca(chain[i+1],now,i) && x509_signed_by(chain[i],chain[i+1])),trusted=trusted })
+      yield path.valid && path.trusted

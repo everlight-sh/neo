@@ -1,0 +1,12 @@
+; A direct ABI probe ensures the native Linux path really starts pool workers,
+; rather than silently taking its correct-but-slower sequential fallback.
+effect fn write_chunk(context: ptr, chunk: i64) -> unit
+  = store_i64(context, chunk * 8, chunk * chunk + 17)
+
+effect fn main() -> i64
+  = let output = ax_alloc(64) in let cleared = memset(output, i32(0), 64) in
+    let ran = ax_par_for_shared(8, addr(write_chunk), output) in
+    let workers = load_i64(runtime_state(), 1584) in
+    if workers <= 0 then -1 else
+      let total = loop(i = 0, s = 0) while i < 8 next(i + 1, s + load_i64(output, i * 8)) yield s in
+      let freed_output = ax_free(output,64) in total

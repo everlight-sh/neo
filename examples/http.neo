@@ -1,0 +1,219 @@
+; HTTP server with a compute endpoint.
+;   GET /            -> "Hello, World!"
+;   GET /smooth/N    -> 32 passes of a 3-point stencil over an N-element signal,
+;                       JSON {"n":N,"passes":32,"checksum":C}
+;   POST /nbody      -> body {"n":N,"steps":S}; runs the n-body model from
+;                       examples/nbody.neo and answers {"n":N,"steps":S,"energy":E}
+;   GET /page/N      -> server-side rendered HTML catalog with N rows, byte-identical
+;                       to what React's renderToString produces for bench/react/page.tsx
+; `serve(port, handle)` hands sockets, framing and connection scheduling to the
+; Neo runtime in runtime/http.neo. Everything here, including integer parsing, decimal formatting
+; and byte-array concatenation, is Neo, and every array access is proven in
+; range at compile time. Explicit `check` nodes remain as runtime checks.
+
+fn starts_with (a : Arr u8 n, b : Arr u8 m) -> bool
+  = m <= n && loop (i : i64{i >= 0} = 0, ok = true)
+                while ok && i < m
+                next (i + 1, a[i] == b[i])
+                yield ok
+
+; decimal digits of req from position p; -1 if there are none
+fn parse_int (req : Arr u8 n, p : i64{p >= 0}) -> i64
+  = loop (i : i64{i >= 0} = p, acc = 0, digits = 0)
+      while i < n && req[i] >= '0' && req[i] <= '9' && digits < 12
+      next (i + 1, acc * 10 + (i64(req[i]) - 48), digits + 1)
+      yield if digits == 0 then -1 else acc
+
+; v divided by 10, k times
+fn shift10 (v : i64, k : i64) -> i64
+  = loop (x = v, j = 0) while j < k next (x / 10, j + 1) yield x
+
+fn utoa (v : i64{v >= 0}) -> Arr u8 _
+  = let d = loop (x = v, d : i64{d >= 1} = 1) while x >= 10 next (x / 10, d + 1) yield d in
+    arr(i in 0..d) u8(48 + shift10(v, d - 1 - i) % 10)
+
+fn itoa (v : i64) -> Arr u8 _
+  = if v < 0 then cat("-", utoa(0 - v)) else utoa(v)
+
+fn cat (a : Arr u8 n, b : Arr u8 m) -> Arr u8 _
+  = arr(i in 0..n + m) if i < n then a[i] else b[i - n]
+
+fn stencil (xs : Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n)
+      if i == 0 || i + 1 == n then xs[i]
+      else (xs[i-1] + 2 * xs[i] + xs[i+1]) % 1000003
+
+fn checksum (n : i64{n > 0}, passes : i64{passes >= 0}) -> i64
+  = let ys = loop (a = arr(i in 0..n) (i * 2654435761) % 1000003, k = 0)
+               while k < passes
+               next (stencil(a), k + 1)
+               yield a in
+    sum(i in 0..n) ys[i]
+
+fn json_response (m : i64{m >= 1}) -> Arr u8 _
+  = let c = checksum(m, 32) in
+    let body = cat(cat("{\"n\":", itoa(m)), cat(",\"passes\":32,\"checksum\":", cat(itoa(c), "}"))) in
+    let clen = itoa(len(body)) in
+    cat(cat("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ", clen),
+        cat("\r\n\r\n", body))
+
+; ---- byte search: index of the first occurrence of needle in hay, or -1
+fn matches (hay : Arr u8 n, at : i64{at >= 0}, needle : Arr u8 m{at + m <= n}) -> bool
+  = loop (j : i64{j >= 0} = 0, ok = true)
+      while ok && j < m
+      next (j + 1, hay[at + j] == needle[j])
+      yield ok
+
+fn find (hay : Arr u8 n, needle : Arr u8 m) -> i64 {result >= -1}
+  = loop (i : i64{i >= 0} = 0, found : i64{found >= -1} = -1)
+      while found < 0 && i + m <= n
+      next (i + 1, if matches(hay, i, needle) then i else -1)
+      yield found
+
+; value of the integer JSON field `"key":` in req, or -1 when absent
+fn json_int (req : Arr u8 n, key : Arr u8 m) -> i64
+  = let p = find(req, key) in
+    if p < 0 then -1 else parse_int(req, p + m)
+
+; ---- fixed-point formatting of an f64 with 9 decimals
+fn pad9 (frac : i64{frac >= 0}) -> Arr u8 _
+  = arr(i in 0..9) u8(48 + shift10(frac, 8 - i) % 10)
+
+fn ftoa (v : f64) -> Arr u8 _
+  = let a = if v < 0.0 then 0.0 - v else v in
+    let ip = i64(a) in
+    let frac = i64((a - f64(ip)) * 1000000000.0 + 0.5) in
+    let ip2 = if frac >= 1000000000 then ip + 1 else ip in
+    let frac2 = if frac >= 1000000000 then 0 else frac in
+    let mag = check ip2 >= 0 && frac2 >= 0 in cat(cat(utoa(ip2), "."), pad9(frac2)) in
+    if v < 0.0 then cat("-", mag) else mag
+
+; ---- n-body (same model as examples/nbody.neo)
+type Body = { x : f64, y : f64, z : f64, vx : f64, vy : f64, vz : f64, m : f64 }
+type Vec3 = { x : f64, y : f64, z : f64 }
+
+fn init (n : i64{n >= 1}) -> Arr Body n
+  = arr(i in 0..n) Body { x = f64((i * 2654435761) % 1009) / 1009.0,
+                          y = f64((i * 40503) % 1013) / 1013.0,
+                          z = f64((i * 69069) % 1019) / 1019.0,
+                          vx = 0.0, vy = 0.0, vz = 0.0, m = 1.0 / f64(n) }
+
+fn accel (bs : Arr Body n, i : i64{0 <= i, i < n}) -> Vec3
+  = let xi = bs[i].x in let yi = bs[i].y in let zi = bs[i].z in
+    sum(j in 0..n)
+      let dx = bs[j].x - xi in let dy = bs[j].y - yi in let dz = bs[j].z - zi in
+      let d2 = dx * dx + dy * dy + dz * dz + 0.01 in
+      let inv = bs[j].m / (d2 * sqrt(d2)) in
+      Vec3 { x = dx * inv, y = dy * inv, z = dz * inv }
+
+fn kick (bs : Arr Body n, dt : f64) -> Arr Body n
+  = arr(i in 0..n) let a = accel(bs, i) in let b = bs[i] in
+      b with { vx = b.vx + a.x * dt, vy = b.vy + a.y * dt, vz = b.vz + a.z * dt }
+
+fn drift (bs : Arr Body n, dt : f64) -> Arr Body n
+  = arr(i in 0..n) let b = bs[i] in
+      b with { x = b.x + b.vx * dt, y = b.y + b.vy * dt, z = b.z + b.vz * dt }
+
+fn energy (bs : Arr Body n) -> f64
+  = sum(i in 0..n)
+      let b = bs[i] in
+      0.5 * b.m * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
+      - 0.5 * sum(j in 0..n)
+          if j == i then 0.0
+          else let dx = bs[j].x - b.x in let dy = bs[j].y - b.y in let dz = bs[j].z - b.z in
+               b.m * bs[j].m / sqrt(dx * dx + dy * dy + dz * dz + 0.01)
+
+fn simulate (n : i64{n >= 1}, steps : i64{steps >= 0}) -> f64
+  = let bs = loop (b = init(n), k = 0) while k < steps next (drift(kick(b, 0.001), 0.001), k + 1) yield b in
+    energy(bs)
+
+fn nbody_response (n : i64{n >= 1}, steps : i64{steps >= 0}) -> Arr u8 _
+  = let body = cat(cat(cat("{\"n\":", itoa(n)), cat(",\"steps\":", itoa(steps))),
+                   cat(cat(",\"energy\":", ftoa(simulate(n, steps))), "}")) in
+    let clen = itoa(len(body)) in
+    cat(cat("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ", clen),
+        cat("\r\n\r\n", body))
+
+; ---- HTML escaping, React's rules (& < > " '), fully proven: the buffer is 6x the input,
+;      the write cursor stays under 6 * i by invariant, and the exact length is a bounded sum.
+fn esc_width (c : u8) -> i64 {result >= 1, result <= 6}
+  = if c == '&' then 5 else if c == '<' || c == '>' then 4 else if c == '"' || c == '\'' then 6 else 1
+
+fn put (out : Arr u8 m, j : i64{j >= 0}, s : Arr u8 k{j + k <= m}) -> Arr u8 m
+  = loop (o = out, t : i64{t >= 0} = 0) while t < k next (set(o, j + t, s[t]), t + 1) yield o
+
+fn esc_char (out : Arr u8 m, j : i64{j >= 0, j + 6 <= m}, c : u8) -> Arr u8 m
+  = if c == '&' then put(out, j, "&amp;")
+    else if c == '<' then put(out, j, "&lt;")
+    else if c == '>' then put(out, j, "&gt;")
+    else if c == '"' then put(out, j, "&quot;")
+    else if c == '\'' then put(out, j, "&#x27;")
+    else set(out, j, c)
+
+fn escape (s : Arr u8 n) -> Arr u8 _
+  = let total = sum(i in 0..n) esc_width(s[i]) in
+    let buf = loop (o = arr(k in 0..6 * n) u8(32), i : i64{i >= 0, i <= n} = 0, j : i64{j >= 0, j <= 6 * i} = 0)
+                while i < n
+                next (esc_char(o, j, s[i]), i + 1, j + esc_width(s[i]))
+                yield o in
+    arr(k in 0..total) buf[k]
+
+; ---- the catalog page (see bench/react/page.tsx for the React original)
+fn word (k : i64) -> Arr u8 _
+  = let m = k % 8 in
+    if m == 0 then "Widget" else if m == 1 then "Gadget" else if m == 2 then "Gizmo" else if m == 3 then "Doohickey"
+    else if m == 4 then "Sprocket" else if m == 5 then "Flange" else if m == 6 then "Bracket" else "Grommet"
+
+fn adj (k : i64) -> Arr u8 _
+  = let m = k % 8 in
+    if m == 0 then "Deluxe" else if m == 1 then "Basic" else if m == 2 then "Pro" else if m == 3 then "Mini"
+    else if m == 4 then "Ultra" else if m == 5 then "Classic" else if m == 6 then "Eco" else "Max"
+
+fn row (i : i64{i >= 0}) -> Arr u8 _
+  = let dollars = (i * 37) % 1000 in
+    let stock = (i * 13) % 50 in
+    concat(if i % 2 == 1 then "<tr class=\"odd\"><td>" else "<tr class=\"even\"><td>",
+           utoa(i), "</td><td>", word(i), " ", adj(i * 7), "</td><td>$", utoa(dollars), ".99</td><td>", utoa(stock), "</td><td>",
+           if i % 5 == 0 then escape("Ben & Jerry's \"Special\" <limited>") else "-",
+           "</td></tr>")
+
+fn pad2 (v : i64{v >= 0, v < 100}) -> Arr u8 _ = if v < 10 then concat("0", utoa(v)) else utoa(v)
+
+fn page (n : i64{n >= 0}) -> Arr u8 _
+  = let rows = loop (acc = "", i : i64{i >= 0} = 0) while i < n next (concat(acc, row(i)), i + 1) yield acc in
+    let cents = sum(i in 0..n) ((i * 37) % 1000) * 100 + 99 in
+    concat("<!DOCTYPE html><html lang=\"en\"><head><title>Catalog</title></head><body><header><h1>Catalog</h1><p>",
+           utoa(n), " items</p></header><main><table><thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Note</th></tr></thead><tbody>",
+           rows, "</tbody></table></main><footer>Total: $", utoa(cents / 100), ".", pad2(cents % 100), "</footer></body></html>")
+
+fn page_response (n : i64{n >= 0}) -> Arr u8 _
+  = let body = page(n) in
+    let clen = itoa(len(body)) in
+    concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ", clen, "\r\n\r\n", body)
+
+fn handle (req : Arr u8 n) -> Arr u8 _
+  = if starts_with(req, "GET /page/") then
+      let m = parse_int(req, 10) in
+      if m < 1 || m > 1000 then
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 30\r\n\r\nusage: /page/N, 1 <= N <= 1000"
+      else page_response(m)
+    else if starts_with(req, "POST /nbody ") then
+      let m = json_int(req, "\"n\":") in
+      let steps = json_int(req, "\"steps\":") in
+      if m < 1 || m > 4096 || steps < 0 || steps > 1000 then
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 48\r\n\r\nusage: POST /nbody {\"n\":1..4096,\"steps\":0..1000}"
+      else nbody_response(m, steps)
+    else if starts_with(req, "GET /smooth/") then
+      let m = parse_int(req, 12) in
+      if m < 1 || m > 1000000 then
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 31\r\n\r\nusage: /smooth/N, 1 <= N <= 1e6"
+      else json_response(m)
+    else if starts_with(req, "GET / ") then
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!"
+    else if starts_with(req, "GET ") then
+      "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\n\r\nNot Found"
+    else
+      "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+
+effect fn main (port : i64{port > 0, port < 65536}) -> i64
+  = serve(port, handle)

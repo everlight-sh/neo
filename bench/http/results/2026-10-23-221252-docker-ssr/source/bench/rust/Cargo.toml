@@ -1,0 +1,46 @@
+[package]
+name = "axon-bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rayon = "1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "mandel"
+path = "src/mandel.rs"
+
+[[bin]]
+name = "stencil"
+path = "src/stencil.rs"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+
+[[bin]]
+name = "mandel_tuned"
+path = "src/mandel_tuned.rs"
+
+[[bin]]
+name = "http_std"
+path = "src/http_std.rs"
+
+[[bin]]
+name = "http_hyper"
+path = "src/http_hyper.rs"
+
+[[bin]]
+name = "nbody"
+path = "src/nbody.rs"
+
+[[bin]]
+name = "ssr_container"
+path = "src/ssr_container.rs"

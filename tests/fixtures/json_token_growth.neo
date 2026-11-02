@@ -1,0 +1,10 @@
+import "std:json"
+import "std:io"
+effect(fs,unsafe) fn main() -> unit
+  = let input=file_read(0,16777216) in let parsed=json_parse(input.value) in check parsed.ok in
+    let before=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let done=loop(count=0,total=0,keys=0,cursor=json_tokens(parsed.value)) while cursor.present next(count+1,
+      let atom=json_token_atom(cursor) in total+(if atom.integer then atom.value else 0),
+      keys+(if cursor.kind==7 && json_token_text_equal(cursor,"n") then 1 else 0),json_tokens_next(cursor)) yield
+      concat(int_text(count)," ",int_text(total)," ",int_text(keys)," ",int_text(load_i64(runtime_state(),64)-before)," ",int_text(load_i64(runtime_state(),80)-bytes)) in
+    let shown=print_out(done) in noop()

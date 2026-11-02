@@ -1,0 +1,6 @@
+; Explicit captures are ordinary owned values; no untracked stack environment.
+sealed type Closure<C,A,R> = { function:Fn(C,A)->R,capture:C }
+fn closure<C,A,R>(function:Fn(C,A)->R,capture:C) -> Closure<C,A,R>
+  = Closure::<C,A,R> { function=function,capture=capture }
+fn closure_apply<C,A,R>(callback:Closure<C,A,R>,argument:A) -> R
+  = let invoke=callback.function in invoke(callback.capture,argument)

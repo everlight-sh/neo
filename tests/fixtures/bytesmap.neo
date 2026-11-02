@@ -1,0 +1,23 @@
+import "std:bytesmap"
+import "std:collections"
+import "std:io"
+fn key_for(i:i64) -> Arr u8 _ = if i%257==0 then "" else concat("\0key",int_text(i%257))
+fn value_for(i:i64) -> Arr u8 _ = let size=i%80 in check size>=0 in concat(int_text(i),arr(j in 0..size) u8(j%251))
+fn score(value:OptionBytes) -> i64 = if !value.present then -1 else len(value.value)*31+sum(j in 0..len(value.value)) i64(value.value[j])
+fn aliases() -> bool
+  = let first=bytesmap_put(bytesmap_empty(7,9),"","empty") in
+    let changed=bytesmap_put(first,"","updated") in
+    let shorter=bytesmap_put(changed,"","x") in
+    let cleared=bytesmap_delete(shorter,"") in
+    let copied=bytesmap_compact(changed) in
+    let a=bytesmap_get(first,"") in let b=bytesmap_get(changed,"") in let c=bytesmap_get(shorter,"") in
+    let d=bytesmap_get(cleared,"") in let e=bytesmap_get(copied,"") in
+    a.present && str_equal(a.value,"empty") && b.present && str_equal(b.value,"updated") &&
+    c.present && str_equal(c.value,"x") && !d.present && e.present && str_equal(e.value,"updated") && bytesmap_len(cleared)==0
+effect(fs) fn main(n:i64{n>=0 && n<=100000}) -> unit
+  = check aliases() in
+    let result=loop(i=0,map=bytesmap_empty(123,456),checksum=0) while i<n
+      next(i+1,if i%5==0 then bytesmap_delete(map,key_for(i*73)) else bytesmap_put(map,key_for(i*73),value_for(i)),
+        checksum+score(bytesmap_get(map,key_for(i*31))))
+      yield concat(int_text(bytesmap_len(map))," ",int_text(checksum)," ",int_text(bytesmap_storage_bytes(map))) in
+    let printed=print_out(concat(result,"\n")) in noop()

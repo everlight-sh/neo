@@ -1,0 +1,52 @@
+import "std:io"
+type BorrowItem = { words:Arr i64 _,label:Arr u8 _ }
+type BorrowDatabase = { rows:Arr BorrowItem _,revision:i64 }
+effect(process) fn inspect(borrow db:BorrowDatabase) -> i64 = len(db.rows)+db.revision
+effect(process) fn copy_words(borrow item:BorrowItem) -> Arr i64 _ = item.words
+effect(process) fn copy_array<T>(borrow values:Arr T _) -> Arr T _ = values
+effect(process) fn modify(borrow old:BorrowItem,move current:BorrowItem) -> i64
+  = check len(current.words)>0 && len(old.words)>0 in
+    let changed=set(current.words,0,99) in check len(changed)>0 in old.words[0]+changed[0]
+effect(process) fn observe(borrow old:Arr i64 _,borrow changed:Arr i64 _) -> i64
+  = check len(old)>0 && len(changed)>0 in old[0]+changed[0]
+effect(process) fn first(borrow values:Arr i64 _) -> i64
+  = check len(values)>0 in values[0]
+fn inferred_read(values:Arr i64 n) -> i64 = sum(i in 0..n) values[i]
+fn inferred_mutation(values:Arr i64 n) -> i64
+  = check n>0 in let changed=set(values,0,99) in check len(changed)>0 in values[0]+changed[0]
+fn record_identity(item:BorrowItem) -> BorrowItem = item
+fn record_observe(item:BorrowItem) -> i64 = len(item.words)+len(item.label)
+fn empty_result(values:Arr i64 _) -> Arr i64 _ = arr(i in 0..0) 0
+fn scratch_cycle(count:i64) -> i64
+  = loop(i=0,buffer=arr(j in 0..32) j,empty=arr(j in 0..0) 0) while i<count
+      next(i+1,arr(j in 0..32) i+j,empty) yield (sum(j in 0..len(buffer)) check j>=0 && j<len(buffer) in buffer[j])+len(empty)
+effect fn main(n:i64{n>=1 && n<=10000}) -> unit
+  = let db=BorrowDatabase {rows=arr(i in 0..n) BorrowItem {words=arr(j in 0..8) i+j,label="row"},revision=7} in
+    let before=load_i64(runtime_state(),64) in
+    let checksum=loop(i=0,total=0) while i<1000 next(i+1,total+inspect(db)) yield total in
+    let after=load_i64(runtime_state(),64) in check before==after && checksum==1000*(n+7) in
+    let item=BorrowItem {words=arr(j in 0..2) j+10,label="alias"} in
+    let result=modify(item,item) in check result==109 in
+    let values=arr(j in 0..2) j+20 in
+    let result=observe(values,set(values,0,77)) in check result==97 in
+    let copied=copy_words(BorrowItem {words=arr(j in 0..2) j+30,label="temporary"}) in
+    let copied=copy_array(copied) in check len(copied)==2 && copied[0]==30 && copied[1]==31 in
+    let total=loop(i=0,total=0) while i<10000 next(i+1,total+first(arr(j in 0..16) i+j)) yield total in
+    check total==49995000 in
+    let stable=arr(i in 0..2) i+20 in let modified=inferred_mutation(stable) in check modified==119 && inferred_read(stable)==41 in
+    ; Slab free lists no longer maintain counts; inspect their heads and
+    ; verify the same cached block is reused across the complete read loop.
+    let cached_before=ptr_to_i64(load_ptr(runtime_state(),280))+ptr_to_i64(load_ptr(runtime_state(),536)) in
+    let scalar=loop(i=0,total=0) while i<10000 next(i+1,total+inferred_read(arr(j in 0..16) i+j)) yield total in
+    let cached_after=ptr_to_i64(load_ptr(runtime_state(),280))+ptr_to_i64(load_ptr(runtime_state(),536)) in
+    check scalar==801120000 && cached_after>0 && (cached_after==cached_before || cached_before==0) in
+    let discarded=loop(i=0,total=0) while i<10000 next(i+1,total+len(empty_result(arr(j in 0..32) i+j))) yield total in
+    let cached_discard=ptr_to_i64(load_ptr(runtime_state(),288))+ptr_to_i64(load_ptr(runtime_state(),544)) in check discarded==0 && cached_discard>0 in
+    let warmed=scratch_cycle(10000) in let slab_before=load_ptr(runtime_state(),24) in let private_before=load_ptr(runtime_state(),152) in
+    let repeated=scratch_cycle(10000) in let slab_after=load_ptr(runtime_state(),24) in let private_after=load_ptr(runtime_state(),152) in
+    check warmed==repeated && slab_before==slab_after && private_before==private_after in
+    let identity=function(record_identity) in let observe_record=function(record_observe) in
+    let retained=identity(BorrowItem {words=arr(i in 0..3) i+80,label="kept"}) in
+    check observe_record(retained)==7 && len(retained.words)==3 && retained.words[2]==82 in
+    let changed=retained with {words=set(retained.words,0,12)} in check len(changed.words)==3 && observe_record(changed)==7 && retained.words[0]==80 && changed.words[0]==12 in
+    let printed=print_out("borrow parameters OK\n") in noop()

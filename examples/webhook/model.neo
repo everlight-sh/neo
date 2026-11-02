@@ -1,0 +1,39 @@
+import "std:journal"
+
+type Job = { id: Arr u8 _, payload: Arr u8 _, attempts: i64, due: i64, done: bool, failed: bool }
+type Queue = { ok: bool, jobs: Arr Job _ }
+fn queue_empty () -> Queue = Queue { ok = true, jobs = arr(i in 0..0) Job { id = "", payload = "null", attempts = 0, due = 0, done = false, failed = false } }
+fn queue_find (queue: Queue, id: Arr u8 n) -> i64
+  = let jobs = queue.jobs in loop (i: i64{i >= 0} = 0, found = -1) while found < 0 && i < len(jobs)
+      next (i + 1, if str_equal(jobs[i].id, id) then i else -1) yield found
+fn queue_apply (queue: Queue, event: Json) -> Queue
+  = let id_field = json_get(event, "id") in let id = json_text(id_field.value) in
+    let operation = json_get(event, "op") in let op = json_text(operation.value) in
+    let enqueued = str_equal(op.value, "enqueue") in let found = queue_find(queue, id.value) in
+    let jobs = queue.jobs in
+    if !queue.ok || !id.ok || !queue_id_valid(id.value) || !op.ok || (!enqueued && found < 0) || (enqueued && found >= 0) ||
+      !(enqueued || str_equal(op.value, "attempt") || str_equal(op.value, "retry") || str_equal(op.value, "done") || str_equal(op.value, "failed")) then queue with { ok = false } else
+    let payload = json_get(event, "payload") in let attempt_field = json_get(event, "attempts") in let attempts = json_int(attempt_field.value) in
+    let due_field = json_get(event, "due") in let due = json_int(due_field.value) in
+    if (enqueued && !payload.present) || (!enqueued && (!attempts.ok || !due.ok || attempts.value < 0 || attempts.value > 1000 || due.value < 0 || due.value > 4611686018427387904)) then queue with { ok = false } else
+    let count = len(jobs) + (if enqueued && found < 0 then 1 else 0) in
+    Queue { ok = true, jobs = arr(i in 0..count)
+      if i == found || i == len(jobs) then
+        Job { id = id.value, payload = if enqueued then json_compact(payload.value.raw) else if i < len(jobs) then jobs[i].payload else "null",
+          attempts = if enqueued then 0 else attempts.value, due = if enqueued then 0 else due.value,
+          done = str_equal(op.value, "done"), failed = str_equal(op.value, "failed") }
+      else if i < len(jobs) then jobs[i] else Job { id = "", payload = "null", attempts = 0, due = 0, done = false, failed = false } }
+fn queue_replay (bytes: Arr u8 n) -> Queue
+  = loop (position = 0, queue = queue_empty()) while queue.ok && position < n
+      next (journal_line_end(bytes, position) + 1, queue_apply(queue, json_parse(str_slice(bytes, position, journal_line_end(bytes, position))).value)) yield queue
+fn queue_pick (queue: Queue, now: i64) -> i64
+  = let jobs = queue.jobs in loop (i: i64{i >= 0} = 0, found = -1) while found < 0 && i < len(jobs)
+      next (i + 1, if !jobs[i].done && !jobs[i].failed && jobs[i].due <= now then i else -1) yield found
+fn queue_event (operation: Arr u8 n, job: Job, attempts: i64, due: i64) -> Arr u8 _
+  = concat("{\"op\":", json_quote(operation), ",\"id\":", json_quote(job.id), ",\"attempts\":", int_text(attempts), ",\"due\":", int_text(due), "}")
+fn queue_json (queue: Queue) -> Arr u8 _
+  = let jobs = queue.jobs in loop (i: i64{i >= 0} = 0, out = "[") while i < len(jobs)
+      next (i + 1, concat(out, if i == 0 then "" else ",", "{\"id\":", json_quote(jobs[i].id), ",\"attempts\":", int_text(jobs[i].attempts),
+        ",\"status\":", json_quote(if jobs[i].done then "done" else if jobs[i].failed then "failed" else "pending"), "}")) yield concat(out, "]")
+fn queue_id_valid (id: Arr u8 n) -> bool
+  = n >= 1 && n <= 128 && loop (i: i64{i >= 0} = 0, valid = true) while valid && i < n next (i + 1, id[i] >= '!' && id[i] <= '~') yield valid

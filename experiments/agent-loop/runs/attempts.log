@@ -1,0 +1,164 @@
+=== 13:45:29 axonc check experiments/agent-loop/runs/runs.ax
+{
+  "ok": true,
+  "program": "f2a3f2d72a4a101f0169feed86ae82c8ebce7867a7aef3236e3baf825bbe15b7",
+  "functions": {
+    "count_runs": "ab1dd9e43287bcc90eb219fd942b5a7be88ba5559cd34100fa93df50e6b7d009",
+    "main": "ede34a38ceb8dc19c93c8d9d521079202efad7b46431965a619b8f1601522345"
+  },
+  "obligations": [
+    {
+      "id": 1,
+      "fn": "count_runs",
+      "node": "325f376ca292",
+      "pos": [
+        5,
+        37
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) initially (count := 1)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 2,
+      "fn": "count_runs",
+      "node": "325f376ca292",
+      "pos": [
+        5,
+        58
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 1) initially (i := 1)",
+      "normalised": "0 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 3,
+      "fn": "count_runs",
+      "node": "ccb5828a5d60",
+      "pos": [
+        7,
+        17
+      ],
+      "kind": "bounds",
+      "goal": "0 <= i && i < len(v)",
+      "normalised": "(-i <= 0 && i - n + 1 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 4,
+      "fn": "count_runs",
+      "node": "7abd016846c4",
+      "pos": [
+        7,
+        25
+      ],
+      "kind": "bounds",
+      "goal": "0 <= (i - 1) && (i - 1) < len(v)",
+      "normalised": "(-i + 1 <= 0 && i - n <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 5,
+      "fn": "count_runs",
+      "node": "ec94ce05e98d",
+      "pos": [
+        7,
+        13
+      ],
+      "kind": "invariant",
+      "goal": "(count >= 1) preserved (count := if (v[i] != v[(i - 1)]) then … else …)",
+      "normalised": "-⟨if#1⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 6,
+      "fn": "count_runs",
+      "node": "8b87ac36b8aa",
+      "pos": [
+        7,
+        60
+      ],
+      "kind": "invariant",
+      "goal": "(i >= 1) preserved (i := (i + 1))",
+      "normalised": "-i <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 7,
+      "fn": "count_runs",
+      "node": "58945588a82b",
+      "pos": [
+        4,
+        45
+      ],
+      "kind": "postcondition",
+      "goal": "(result >= 1)",
+      "normalised": "-⟨loop#2⟩ + 1 <= 0",
+      "status": "proven"
+    },
+    {
+      "id": 8,
+      "fn": "main",
+      "node": "58945588a82b",
+      "pos": [
+        10,
+        20
+      ],
+      "kind": "precondition",
+      "goal": "(n >= 1)",
+      "status": "checked",
+      "note": "program boundary: verified at argv parse"
+    },
+    {
+      "id": 9,
+      "fn": "main",
+      "node": "bacf2727aa65",
+      "pos": [
+        11,
+        34
+      ],
+      "kind": "division",
+      "goal": "3 != 0",
+      "normalised": "(4 <= 0 || -2 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 10,
+      "fn": "main",
+      "node": "f624c2050f15",
+      "pos": [
+        11,
+        39
+      ],
+      "kind": "division",
+      "goal": "5 != 0",
+      "normalised": "(6 <= 0 || -4 <= 0)",
+      "status": "proven"
+    },
+    {
+      "id": 11,
+      "fn": "main",
+      "node": "120f8d89545a",
+      "pos": [
+        11,
+        13
+      ],
+      "kind": "range",
+      "goal": "0 <= n",
+      "normalised": "-n <= 0",
+      "status": "proven"
+    }
+  ],
+  "summary": {
+    "obligations": 11,
+    "proven": 10,
+    "runtime_checks": 1,
+    "unproven": 0
+  }
+}
+=== exit 0
+=== 13:45:34 axonc build experiments/agent-loop/runs/runs.ax -o experiments/agent-loop/runs/runs
+axonc: experiments/agent-loop/runs/runs  graph f2a3f2d72a4a101f  obligations 10/11 proven, 1 runtime checks, 1 parallel regions, build miss
+=== exit 0

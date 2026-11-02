@@ -1,0 +1,45 @@
+CPU 0 siblings: 0-1 (sibling left idle); client and driver CPUs: 2,3; wrk -t2 -c64
+Mon Nov  2 11:16:37 AM UTC 2026
+cli exit 0
+== json-1M output 513500000 mismatches 0
+  Vif                                  187.1 ms (185.0-201.0)  cpu     186.3  peak RSS     1.9 MiB
+  Rust serde_json::Value               337.0 ms (333.9-346.7)  cpu     336.8  peak RSS     2.0 MiB
+  Go encoding/json                    1876.8 ms (1853.0-2079.5)  cpu    1876.5  peak RSS     8.5 MiB
+  Bun JSON.parse                       204.5 ms (199.2-253.4)  cpu     204.0  peak RSS    45.9 MiB
+  Zig std.json Value                   674.9 ms (663.2-715.5)  cpu     674.6  peak RSS     1.9 MiB
+  Zig std.json Value arena             624.3 ms (614.0-647.3)  cpu     624.0  peak RSS     1.9 MiB
+  Zig std.json typed                   352.1 ms (343.4-369.5)  cpu     351.8  peak RSS     1.9 MiB
+  Zig std.json typed arena             330.4 ms (324.6-351.3)  cpu     329.1  peak RSS     1.9 MiB
+  Zig std.json typed arena native      321.2 ms (313.4-346.4)  cpu     321.0  peak RSS     1.9 MiB
+== nbody-4096-10 output -0.8938489288152517 mismatches 0
+  Vif                                  376.2 ms (374.7-378.7)  cpu     375.9  peak RSS     1.9 MiB
+  Rust                                 686.0 ms (684.3-691.3)  cpu     685.7  peak RSS     2.6 MiB
+  Go                                  1190.1 ms (1188.2-1195.9)  cpu    1189.8  peak RSS     5.8 MiB
+  Bun                                  833.0 ms (822.3-860.1)  cpu     832.7  peak RSS    33.8 MiB
+  Zig                                  684.1 ms (682.4-688.1)  cpu     683.8  peak RSS     1.9 MiB
+  Zig native                           683.7 ms (681.8-685.4)  cpu     683.4  peak RSS     1.9 MiB
+Mon Nov  2 11:19:17 AM UTC 2026
+http exit 0
+validated Vif hello True pipelined True io_uring fds 1
+validated Rust hyper hello True pipelined True io_uring fds 0
+validated Go net/http hello True pipelined True io_uring fds 0
+validated Bun hello True pipelined True io_uring fds 0
+validated Zig http.zig default hello True pipelined False io_uring fds 0
+validated Zig http.zig 1+1 hello True pipelined False io_uring fds 0
+validated Zig std.http hello True pipelined True io_uring fds 0
+== hello
+  Vif                    req/s     110651 (109100-113913)  p50    558 p99    751 us  CPU/req 0.17+8.85  CPUs server 1.00 client 1.37  peak PSS 0.79 MiB (max 0.80)  peak RSS 0.79 MiB  procs 1 threads 1
+  Rust hyper             req/s      80358 (79696-81647)  p50    801 p99   1000 us  CPU/req 1.17+11.24  CPUs server 1.00 client 1.23  peak PSS 1.91 MiB (max 2.04)  peak RSS 3.88 MiB  procs 1 threads 2
+  Go net/http            req/s      54236 (53778-55222)  p50   1190 p99   2450 us  CPU/req 5.55+12.91  CPUs server 1.00 client 0.86  peak PSS 11.47 MiB (max 11.60)  peak RSS 11.47 MiB  procs 1 threads 3
+  Bun                    req/s      76375 (75270-77505)  p50    807 p99   1620 us  CPU/req 2.85+10.25  CPUs server 1.00 client 1.01  peak PSS 33.49 MiB (max 33.77)  peak RSS 35.83 MiB  procs 1 threads 3
+  Zig http.zig default   req/s      75913 (74907-77547)  p50    825 p99   2940 us  CPU/req 0.68+12.50  CPUs server 1.00 client 1.13  peak PSS 10.86 MiB (max 10.86)  peak RSS 12.34 MiB  procs 1 threads 34
+  Zig http.zig 1+1       req/s      57986 (55313-59130)  p50   1000 p99   3910 us  CPU/req 1.14+16.05  CPUs server 1.00 client 0.97  peak PSS 2.25 MiB (max 2.25)  peak RSS 3.73 MiB  procs 1 threads 3
+  Zig std.http           req/s      59293 (58628-59601)  p50   1080 p99   1940 us  CPU/req 0.93+15.94  CPUs server 1.00 client 1.11  peak PSS 18.00 MiB (max 18.00)  peak RSS 18.00 MiB  procs 1 threads 65
+== pipeline-16
+  Vif                    req/s    1448375 (1425684-1473079)  p50    459 p99      0 us  CPU/req 0.13+0.56  CPUs server 1.00 client 1.36  peak PSS 0.79 MiB (max 0.80)  peak RSS 0.79 MiB  procs 1 threads 1
+  Rust hyper             req/s     836490 (817912-846402)  p50    678 p99   1290 us  CPU/req 0.44+0.76  CPUs server 1.00 client 1.00  peak PSS 2.07 MiB (max 2.16)  peak RSS 4.04 MiB  procs 1 threads 2
+  Go net/http            req/s      63556 (62877-64615)  p50   9140 p99  25950 us  CPU/req 4.80+10.87  CPUs server 1.00 client 0.56  peak PSS 11.60 MiB (max 11.61)  peak RSS 11.60 MiB  procs 1 threads 3
+  Bun                    req/s      84471 (83283-85511)  p50   6610 p99  13010 us  CPU/req 2.49+9.31  CPUs server 1.00 client 0.68  peak PSS 33.97 MiB (max 34.17)  peak RSS 36.29 MiB  procs 1 threads 3
+  Zig std.http           req/s     101252 (99962-102567)  p50   5520 p99  11360 us  CPU/req 0.51+9.35  CPUs server 1.00 client 0.73  peak PSS 18.00 MiB (max 18.00)  peak RSS 18.00 MiB  procs 1 threads 65
+Mon Nov  2 11:46:36 AM UTC 2026
+ALL-DONE

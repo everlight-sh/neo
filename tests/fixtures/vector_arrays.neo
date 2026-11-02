@@ -1,0 +1,28 @@
+fn wide(a: Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n) if i < 3 || i + 2 >= n then a[i]
+    else (a[i-3] + 3 * a[i] + a[i+2]) % 1000003
+
+fn cross(a: Arr i64 n, b: Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n) if i == 0 || i + 1 == n then b[i]
+    else a[i-1] - b[i+1]
+
+fn shifted(a: Arr i64 n) -> Arr i64 n
+  = arr(i in -8..n-8) if i < -8 then 9223372036854775807 + a[i+8] else a[i+8] * 2
+
+fn floats(a: Arr i64 n) -> Arr f64 n
+  = arr(i in 0..n) f64(a[i]) * 0.5
+
+fn allocating(x: i64) -> i64
+  = let a = arr(i in 0..2) x + i in sum(i in 0..2) a[i]
+
+fn main(n: i64{n >= 0}, seed: i64, mode: i64) -> i64
+  = if mode == 1 then
+      let a = arr(i in 0..n) if i == 13 then seed + 1 else 0 in sum(i in 0..n) a[i]
+    else if mode == 2 then
+      let a = arr(i in 0..n) allocating(i) in sum(i in 0..n) a[i]
+    else if mode == 3 then
+      let a = arr(i in seed..seed+n) i % 17 in sum(i in 0..n) a[i]
+    else
+      let a = arr(i in 0..n) (seed + i) % 1000003 in
+      let b = wide(a) in let c = cross(a,b) in let d = shifted(c) in let f = floats(d) in
+      sum(i in 0..n) i64(f[i])

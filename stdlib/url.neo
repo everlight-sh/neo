@@ -1,0 +1,16 @@
+import "std:strings"
+fn url_unreserved(c:i64) -> bool = c>=65 && c<=90 || c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==46 || c==95 || c==126
+private fn url_digit(c:i64) -> i64 = if c>=48 && c<=57 then c-48 else if c>=65 && c<=70 then c-55 else if c>=97 && c<=102 then c-87 else -1
+fn url_encode(bytes:Arr u8 n,form:bool) -> Arr u8 _
+  = let hex="0123456789ABCDEF" in loop(i=0,out="") while i<n next(i+1,
+      check i>=0 && i<n in let c=i64(bytes[i]) in
+      if url_unreserved(c) then concat(out,str_slice(bytes,i,i+1)) else if form && c==32 then concat(out,"+") else
+        let high=c/16 in let low=c%16 in check high>=0 && high<16 && low>=0 && low<16 in concat(out,"%",arr(k in 0..2) if k==0 then hex[high] else hex[low])) yield out
+fn url_decode(bytes:Arr u8 n,form:bool) -> BytesResult
+  = loop(i=0,out="",valid=true) while valid && i<n next(i+(if str_byte(bytes,i)==37 then 3 else 1),
+      let c=str_byte(bytes,i) in if c==37 then
+        let high=url_digit(str_byte(bytes,i+1)) in let low=url_digit(str_byte(bytes,i+2)) in
+        if high<0 || low<0 then out else concat(out,arr(k in 0..1) u8(high*16+low)) else
+        concat(out,arr(k in 0..1) u8(if form && c==43 then 32 else c)),
+      str_byte(bytes,i)!=37 || url_digit(str_byte(bytes,i+1))>=0 && url_digit(str_byte(bytes,i+2))>=0)
+    yield if valid then bytes_ok(out) else bytes_error(22,"malformed percent escape",i)

@@ -1,0 +1,58 @@
+import "std:strings"
+
+; SHA-512 and SHA-384 (FIPS 180-4) with HMAC (RFC 2104). Words are exact
+; 64-bit patterns: additions wrap and shifts are logical. Messages are read in
+; place; only the final one or two padded blocks are copied.
+type Sha512State = { a:i64,b:i64,c:i64,d:i64,e:i64,f:i64,g:i64,h:i64 }
+private fn sha512_rotr(value:i64,bits:i64) -> i64 = bit_or(shift_right(value,bits),shift_left(value,64-bits))
+private fn sha512_small0(value:i64) -> i64 = bit_xor(bit_xor(sha512_rotr(value,1),sha512_rotr(value,8)),shift_right(value,7))
+private fn sha512_small1(value:i64) -> i64 = bit_xor(bit_xor(sha512_rotr(value,19),sha512_rotr(value,61)),shift_right(value,6))
+private fn sha512_round(s:Sha512State,word:i64,constant:i64) -> Sha512State
+  = let choose=bit_xor(bit_and(s.e,s.f),bit_and(bit_xor(s.e,-1),s.g)) in
+    let majority=bit_xor(bit_xor(bit_and(s.a,s.b),bit_and(s.a,s.c)),bit_and(s.b,s.c)) in
+    let sum0=bit_xor(bit_xor(sha512_rotr(s.a,28),sha512_rotr(s.a,34)),sha512_rotr(s.a,39)) in
+    let sum1=bit_xor(bit_xor(sha512_rotr(s.e,14),sha512_rotr(s.e,18)),sha512_rotr(s.e,41)) in
+    let first=wrapping_add(wrapping_add(wrapping_add(s.h,sum1),wrapping_add(choose,constant)),word) in let second=wrapping_add(sum0,majority) in
+    Sha512State { a=wrapping_add(first,second),b=s.a,c=s.b,d=s.c,e=wrapping_add(s.d,first),f=s.e,g=s.f,h=s.g }
+private fn sha512_word(s:Sha512State,index:i64) -> i64
+  = if index==0 then s.a else if index==1 then s.b else if index==2 then s.c else if index==3 then s.d else if index==4 then s.e else if index==5 then s.f else if index==6 then s.g else s.h
+private fn sha512_add(a:Sha512State,b:Sha512State) -> Sha512State
+  = Sha512State { a=wrapping_add(a.a,b.a),b=wrapping_add(a.b,b.b),c=wrapping_add(a.c,b.c),d=wrapping_add(a.d,b.d),
+      e=wrapping_add(a.e,b.e),f=wrapping_add(a.f,b.f),g=wrapping_add(a.g,b.g),h=wrapping_add(a.h,b.h) }
+private fn sha512_load(bytes:Arr u8 n,at:i64) -> i64 = byte_swap64(byte_read_le(bytes,at,8))
+private fn sha512_block(state:Sha512State,data:Arr u8 n,offset:i64) -> Sha512State
+  = check offset>=0 && offset<=n-128 in
+    let initial=arr(j in 0..80) if j>=16 then 0 else sha512_load(data,offset+j*8) in
+    let words=loop(i=16,words=initial) while i<80
+      next(i+1,check i>=16 && i<80 && len(words)==80 in
+        set(words,i,wrapping_add(wrapping_add(sha512_small1(words[i-2]),words[i-7]),wrapping_add(sha512_small0(words[i-15]),words[i-16])))) yield words in
+    let result=loop(i=0,s=state) while i<80
+      next(i+1,check i>=0 && i<len(words) in sha512_round(s,words[i],sha512_constant(i))) yield s in sha512_add(state,result)
+private fn sha512_tail(text:Arr u8 n,full:i64) -> Arr u8 _
+  = let rest=n-full*128 in let size=if rest<112 then 128 else 256 in let bits=n*8 in
+    arr(i in 0..size) if i<rest then u8(str_byte(text,full*128+i)) else if i==rest then u8(128) else
+      if i>=size-8 then u8(shift_right(bits,(size-1-i)*8)) else u8(0)
+private fn sha512_digest(text:Arr u8 n,initial:Sha512State,count:i64) -> Arr u8 _
+  = check n>=0 && n<=1152921504606846975 && count>=0 && count<=64 in
+    let full=n/128 in
+    let body=loop(i=0,state=initial) while i<full next(i+1,sha512_block(state,text,i*128)) yield state in
+    let tail=sha512_tail(text,full) in
+    let result=loop(i=0,state=body) while i<len(tail)/128 next(i+1,sha512_block(state,tail,i*128)) yield state in
+    arr(i in 0..count) u8(shift_right(sha512_word(result,i/8),(7-i%8)*8))
+private fn sha512_initial(data:Arr u8 n) -> Sha512State
+  = Sha512State { a=sha512_load(data,0),b=sha512_load(data,8),c=sha512_load(data,16),d=sha512_load(data,24),
+      e=sha512_load(data,32),f=sha512_load(data,40),g=sha512_load(data,48),h=sha512_load(data,56) }
+fn sha512(text:Arr u8 n) -> Arr u8 _
+  = sha512_digest(text,sha512_initial("\x6a\x09\xe6\x67\xf3\xbc\xc9\x08\xbb\x67\xae\x85\x84\xca\xa7\x3b\x3c\x6e\xf3\x72\xfe\x94\xf8\x2b\xa5\x4f\xf5\x3a\x5f\x1d\x36\xf1\x51\x0e\x52\x7f\xad\xe6\x82\xd1\x9b\x05\x68\x8c\x2b\x3e\x6c\x1f\x1f\x83\xd9\xab\xfb\x41\xbd\x6b\x5b\xe0\xcd\x19\x13\x7e\x21\x79"),64)
+fn sha384(text:Arr u8 n) -> Arr u8 _
+  = sha512_digest(text,sha512_initial("\xcb\xbb\x9d\x5d\xc1\x05\x9e\xd8\x62\x9a\x29\x2a\x36\x7c\xd5\x07\x91\x59\x01\x5a\x30\x70\xdd\x17\x15\x2f\xec\xd8\xf7\x0e\x59\x39\x67\x33\x26\x67\xff\xc0\x0b\x31\x8e\xb4\x4a\x87\x68\x58\x15\x11\xdb\x0c\x2e\x0d\x64\xf9\x8f\xa7\x47\xb5\x48\x1d\xbe\xfa\x4f\xa4"),48)
+private fn sha512_hmac(key:Arr u8 n,message:Arr u8 m,wide:bool) -> Arr u8 _
+  = let bounded=if n>128 then (if wide then sha512(key) else sha384(key)) else key in
+    let inner=arr(i in 0..128) u8(bit_xor(if i<len(bounded) then str_byte(bounded,i) else 0,54)) in
+    let outer=arr(i in 0..128) u8(bit_xor(if i<len(bounded) then str_byte(bounded,i) else 0,92)) in
+    if wide then sha512(concat(outer,sha512(concat(inner,message)))) else sha384(concat(outer,sha384(concat(inner,message))))
+fn hmac_sha512(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _ = sha512_hmac(key,message,true)
+fn hmac_sha384(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _ = sha512_hmac(key,message,false)
+
+private fn sha512_constant(index:i64) -> i64
+  = sha512_load("\x42\x8a\x2f\x98\xd7\x28\xae\x22\x71\x37\x44\x91\x23\xef\x65\xcd\xb5\xc0\xfb\xcf\xec\x4d\x3b\x2f\xe9\xb5\xdb\xa5\x81\x89\xdb\xbc\x39\x56\xc2\x5b\xf3\x48\xb5\x38\x59\xf1\x11\xf1\xb6\x05\xd0\x19\x92\x3f\x82\xa4\xaf\x19\x4f\x9b\xab\x1c\x5e\xd5\xda\x6d\x81\x18\xd8\x07\xaa\x98\xa3\x03\x02\x42\x12\x83\x5b\x01\x45\x70\x6f\xbe\x24\x31\x85\xbe\x4e\xe4\xb2\x8c\x55\x0c\x7d\xc3\xd5\xff\xb4\xe2\x72\xbe\x5d\x74\xf2\x7b\x89\x6f\x80\xde\xb1\xfe\x3b\x16\x96\xb1\x9b\xdc\x06\xa7\x25\xc7\x12\x35\xc1\x9b\xf1\x74\xcf\x69\x26\x94\xe4\x9b\x69\xc1\x9e\xf1\x4a\xd2\xef\xbe\x47\x86\x38\x4f\x25\xe3\x0f\xc1\x9d\xc6\x8b\x8c\xd5\xb5\x24\x0c\xa1\xcc\x77\xac\x9c\x65\x2d\xe9\x2c\x6f\x59\x2b\x02\x75\x4a\x74\x84\xaa\x6e\xa6\xe4\x83\x5c\xb0\xa9\xdc\xbd\x41\xfb\xd4\x76\xf9\x88\xda\x83\x11\x53\xb5\x98\x3e\x51\x52\xee\x66\xdf\xab\xa8\x31\xc6\x6d\x2d\xb4\x32\x10\xb0\x03\x27\xc8\x98\xfb\x21\x3f\xbf\x59\x7f\xc7\xbe\xef\x0e\xe4\xc6\xe0\x0b\xf3\x3d\xa8\x8f\xc2\xd5\xa7\x91\x47\x93\x0a\xa7\x25\x06\xca\x63\x51\xe0\x03\x82\x6f\x14\x29\x29\x67\x0a\x0e\x6e\x70\x27\xb7\x0a\x85\x46\xd2\x2f\xfc\x2e\x1b\x21\x38\x5c\x26\xc9\x26\x4d\x2c\x6d\xfc\x5a\xc4\x2a\xed\x53\x38\x0d\x13\x9d\x95\xb3\xdf\x65\x0a\x73\x54\x8b\xaf\x63\xde\x76\x6a\x0a\xbb\x3c\x77\xb2\xa8\x81\xc2\xc9\x2e\x47\xed\xae\xe6\x92\x72\x2c\x85\x14\x82\x35\x3b\xa2\xbf\xe8\xa1\x4c\xf1\x03\x64\xa8\x1a\x66\x4b\xbc\x42\x30\x01\xc2\x4b\x8b\x70\xd0\xf8\x97\x91\xc7\x6c\x51\xa3\x06\x54\xbe\x30\xd1\x92\xe8\x19\xd6\xef\x52\x18\xd6\x99\x06\x24\x55\x65\xa9\x10\xf4\x0e\x35\x85\x57\x71\x20\x2a\x10\x6a\xa0\x70\x32\xbb\xd1\xb8\x19\xa4\xc1\x16\xb8\xd2\xd0\xc8\x1e\x37\x6c\x08\x51\x41\xab\x53\x27\x48\x77\x4c\xdf\x8e\xeb\x99\x34\xb0\xbc\xb5\xe1\x9b\x48\xa8\x39\x1c\x0c\xb3\xc5\xc9\x5a\x63\x4e\xd8\xaa\x4a\xe3\x41\x8a\xcb\x5b\x9c\xca\x4f\x77\x63\xe3\x73\x68\x2e\x6f\xf3\xd6\xb2\xb8\xa3\x74\x8f\x82\xee\x5d\xef\xb2\xfc\x78\xa5\x63\x6f\x43\x17\x2f\x60\x84\xc8\x78\x14\xa1\xf0\xab\x72\x8c\xc7\x02\x08\x1a\x64\x39\xec\x90\xbe\xff\xfa\x23\x63\x1e\x28\xa4\x50\x6c\xeb\xde\x82\xbd\xe9\xbe\xf9\xa3\xf7\xb2\xc6\x79\x15\xc6\x71\x78\xf2\xe3\x72\x53\x2b\xca\x27\x3e\xce\xea\x26\x61\x9c\xd1\x86\xb8\xc7\x21\xc0\xc2\x07\xea\xda\x7d\xd6\xcd\xe0\xeb\x1e\xf5\x7d\x4f\x7f\xee\x6e\xd1\x78\x06\xf0\x67\xaa\x72\x17\x6f\xba\x0a\x63\x7d\xc5\xa2\xc8\x98\xa6\x11\x3f\x98\x04\xbe\xf9\x0d\xae\x1b\x71\x0b\x35\x13\x1c\x47\x1b\x28\xdb\x77\xf5\x23\x04\x7d\x84\x32\xca\xab\x7b\x40\xc7\x24\x93\x3c\x9e\xbe\x0a\x15\xc9\xbe\xbc\x43\x1d\x67\xc4\x9c\x10\x0d\x4c\x4c\xc5\xd4\xbe\xcb\x3e\x42\xb6\x59\x7f\x29\x9c\xfc\x65\x7e\x2a\x5f\xcb\x6f\xab\x3a\xd6\xfa\xec\x6c\x44\x19\x8c\x4a\x47\x58\x17",index*8)

@@ -1,0 +1,18 @@
+import "std:io"
+import "std:debug"
+type Pair = { a:Arr i64 _,b:Arr i64 _ }
+fn read(values:Arr i64 n) -> i64 = if n==0 then 0 else values[0]
+fn alias(values:Arr i64 n) -> Arr i64 _ = values
+fn changed(move values:Arr i64 n,index:i64,value:i64) -> Arr i64 n = check index>=0 && index<n in set(values,index,value)
+fn step(move pair:Pair,index:i64) -> Pair
+  = let a=pair.a in let b=pair.b in let x=read(a) in let y=read(b) in
+    Pair { a=changed(a,index,x+1),b=changed(b,index,y+1) }
+fn arrays(n:i64) -> i64
+  = check n>=1 in let start=arr(i in 0..n) i in let old=alias(start) in let modified=changed(start,0,99) in
+    check len(old)==n in check old[0]==0 && modified[0]==99 in
+    let pair=Pair { a=arr(i in 0..n) 0,b=arr(i in 0..n) 0 } in
+    let result=loop(i=0,state=pair) while i<n next(i+1,step(state,i)) yield state in
+    check len(result.a)==n && len(result.b)==n in sum(i in 0..n) result.a[i]+result.b[i]
+effect fn main(n:i64{n>=1 && n<=100000}) -> unit
+  = let value=arrays(n) in let requests=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let printed=print_out(concat(int_text(value)," ",int_text(requests)," ",int_text(bytes),"\n")) in noop()

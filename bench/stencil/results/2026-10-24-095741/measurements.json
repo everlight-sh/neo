@@ -1,0 +1,80 @@
+{
+  "started": "2026-10-24T09:57:41.694224+00:00",
+  "platform": "Linux-6.8.0-64-generic-aarch64-with-glibc2.39",
+  "directory": "/axon/bench/stencil/results/2026-10-24-095741",
+  "repeats": 21,
+  "warmups": 2,
+  "cases": [
+    [
+      1000000,
+      20
+    ],
+    [
+      1000031,
+      20
+    ],
+    [
+      65537,
+      100
+    ],
+    [
+      8000000,
+      20
+    ],
+    [
+      1000000,
+      1
+    ]
+  ],
+  "results": [],
+  "valid": false,
+  "versions": {
+    "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: aarch64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "go": "go version go1.25.1 linux/arm64",
+    "python": "Python 3.12.3"
+  },
+  "binary_sha256": {
+    "Axon": "e0a53cdaafd24d997e6f8eec12a64efba18c3d57cd6ffb8096a15bec19c5441f",
+    "Axon previous": "624a5f47e7a9405cdb1d0fde067894a34476eb35f6a2d8e742ca53e48cb47c11",
+    "Rust": "1713b55a741359d21b1d8088e7a7cd60f242750712283589246fea52c6cd8887",
+    "Go": "a50791d5aff7482abcd46e2e4159c3f5e47f301dc5fcaadd5dbce2dce6beefdd"
+  },
+  "binary_bytes": {
+    "Axon": 25520,
+    "Axon previous": 23512,
+    "Rust": 559984,
+    "Go": 2300760
+  },
+  "source_sha256": {
+    "bench/stencil/run.py": "4541f409ab65de1761a8077c74b97a1849a5bdc90ccca0feac4dc427b808bfd6",
+    "examples/stencil.ax": "cbca2e74762f565aafd845eb9b9a52b70270ee1a593db905a026cb6654b17eab",
+    "bench/rust/src/stencil.rs": "d56aa482732ac488939eb8e3ac8da63034094a107ca5c93fb8299c4f2cd8acf2",
+    "bench/rust/Cargo.toml": "50497b191ddf8475de269288b5f24267f17b092dc00eb9d22f683d6b16844f43",
+    "bench/rust/Cargo.lock": "b552d6ada0c71853f904396f61ccf2a73802b70dd9b533014fcebe268ba4c335",
+    "bench/go/stencil/main.go": "887ce949f6ffdaf62f39addfa020d58adcc84a1941ee037cb666515a9410e9e9",
+    "axonc/check.py": "daf51f757d978f07d3ea14eb1abbb27fe92eeb55f22e730cbb3e09a222ab4fba",
+    "axonc/linear.py": "950588b5b9bed2ab2daae6a63bec9a1d22fba796abe506fd2991baaa65a9f663",
+    "axonc/graph.py": "830eca356c016f1975bdd1b4f81fbb323348e033b2aa24fa77ba8e777fe6bdca",
+    "axonc/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "axonc/kernel_workers.py": "c7399c86051b542b5c36310ef7415d9a61e63775e6d7f5adb053f0a52f2c1ff1",
+    "axonc/llvm.py": "8a1e7557d2bfc599940325643e9ad4e4332b3f9f504f8fe139869427bbb2e709",
+    "axonc/ranges.py": "744200711fd2f2836d30043273b73b03f0d6b2876f1f2c9b92a078c0f4ebe097",
+    "axonc/cli.py": "3d6ccb00f9120b6caaa65959f615308dce02d219fa59cd6a97f999429ec2af43",
+    "axonc/vectorize.py": "96da36a10c9ca496c64669e3fd17e1239263fb4dac5bbaf847c0cb18198954fe",
+    "axonc/reference.py": "cec3787e71e74792e8f588610613c27b2c951be9510f6fdc0e36e0d4e744a295",
+    "axonc/syntax.py": "06f14511b1470b91403e70e26272d6a35aa9bfc11d0d193fcc3abc93d8220762",
+    "axonc/modules.py": "de12ff78c7d182fc7222670f315ac3048a2e467909483a92f807f74636395d8f",
+    "axonc/__main__.py": "cf7390a2508a0fcad4777a4a629fc5212ab655cb45845975995f835676a834e3",
+    "axonc/fold.py": "346892372c51cfe0e18b1409b3d83f1d7f6a595a9b5c0b6c6fcd97ed1730cde7",
+    "axonc/project.py": "fd613e42de0b7edbe888c9c9c22f4755799797d284d6270380984b8806980890",
+    "axonc/inline.py": "793d7f0675eb34ca5c631ecb553b2948f77e84e8d541d3f861eb053147580ad3",
+    "runtime/platform_macos.ax": "dcf8a2d23572274bcd0f3013a8c8793380e8dd4c96266cb4bbdfc1a2e90d5caf",
+    "runtime/platform_linux_x86_64.ax": "e26d83f381d4e515b72118395fdf0646e7da278b6181aa4a772600a5d4218aa3",
+    "runtime/core.ax": "c9cedef970402a87dc18be0aac4838d8ff6c1378fe5827fc2b53d1744fb35202",
+    "runtime/http.ax": "be7c5a4830742bfc74766ac0b731a7bbda48eaeced824048593edffdece09f0a",
+    "runtime/platform_linux.ax": "c494d2bbb1f5dc7dae41e82f7c407b4c121371275b6a7526c7cd4de3cb50a47c",
+    "runtime/http_linux.ax": "7bcd641373f2810cf1c902f4c14013bf3c0dc5a0d3bc35b1d3d5303ffe3fbbe1"
+  },
+  "failure": "KeyError('source_sha256')"
+}

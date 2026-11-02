@@ -1,0 +1,38 @@
+import "std:json"
+import "std:io"
+fn object_decode(text:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(json_hex(str_byte(text,i*2))*16+json_hex(str_byte(text,i*2+1)))
+fn object_value(value:Json) -> JsonEncodeValue
+  = if value.kind==1 then json_encode_null() else if value.kind==2 then json_encode_bool(json_bool(value).value) else
+    if value.kind==3 && json_int(value).ok then json_encode_int(json_int(value).value) else if value.kind==4 then json_encode_string(json_text(value).value) else json_encode_fragment(json_fragment(value))
+fn object_case(input:Json) -> Arr u8 _
+  = let names=json_array_values(json_get(input,"keys").value) in let values=json_array_values(json_get(input,"values").value) in
+    let raw_keys=json_get(input,"keyBytes") in
+    let source_keys=if raw_keys.present then json_array_values(raw_keys.value) else names in
+    let keys=arr(i in 0..len(source_keys)) check i>=0 && i<len(source_keys) in
+      if raw_keys.present then object_decode(json_text(source_keys[i]).value) else json_text(source_keys[i]).value in
+    let encoder=json_object_encoder(keys) in
+    let bad_string=json_get(input,"stringBytes") in let depth=json_get(input,"depth") in
+    let typed=if bad_string.present then arr(i in 0..1) json_encode_string(object_decode(json_text(bad_string.value).value)) else
+      if json_get(input,"missing").present then arr(i in 0..1) json_encode_fragment(json_fragment(json_none().value)) else
+      if depth.present then let count=json_int(depth.value).value in
+        let writer=loop(i=0,writer=json_writer()) while i<count next(i+1,json_writer_begin_array(writer)) yield writer in
+        let writer=if json_bool(json_get(input,"leaf").value).value then json_writer_int(writer,7) else writer in
+        let writer=loop(i=0,writer=writer) while i<count next(i+1,json_writer_end_array(writer)) yield writer in
+        let fragment=json_writer_fragment_finish(writer) in arr(i in 0..1) json_encode_fragment(fragment.value) else
+      arr(i in 0..len(values)) check i>=0 && i<len(values) in object_value(values[i]) in
+    let encoded=json_encode_object(encoder.value,typed) in
+    if !encoded.ok then "{\"ok\":false}" else
+    let parsed=json_parse(encoded.value.raw) in let materialized=json_fragment_json(encoded.value) in check parsed.ok && parsed.value.count==encoded.value.count && materialized.count==encoded.value.count in
+    let wrapped=json_writer_finish(json_writer_fragment(json_writer(),encoded.value)) in check wrapped.ok && str_equal(wrapped.value.raw,encoded.value.raw) in
+    concat("{\"ok\":true,\"value\":",encoded.value.raw,",\"count\":",int_text(encoded.value.count),"}")
+fn object_aliases() -> bool
+  = let source=concat("a","b") in let value=json_encode_string(source) in let changed=byte_write_le(source,0,255,1) in
+    let encoder=json_object_encoder(arr(i in 0..1) "key").value in let encoded=json_encode_object(encoder,arr(i in 0..1) value) in
+    let bytes=encoded.value.raw in let overwritten=byte_write_le(bytes,0,0,1) in
+    encoded.ok && str_equal(encoded.value.raw,"{\"key\":\"ab\"}") && str_byte(changed,0)==255 && str_byte(overwritten,0)==0 && json_parse(encoded.value.raw).ok
+effect(fs) fn main() -> unit
+  = check object_aliases() in let input=file_read(0,4194304) in let text=input.value in
+    let finished=loop(at=0) while at<len(text) next(
+      let line=str_find(str_slice(text,at,len(text)),"\n") in let end=if line.present then at+line.value else len(text) in
+      let result=object_case(json_parse(object_decode(str_slice(text,at,end))).value) in let shown=print_out(concat(result,"\n")) in end+1) yield at in noop()

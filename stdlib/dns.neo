@@ -1,0 +1,112 @@
+import "std:socket"
+import "std:random"
+
+type DnsName = { ok:bool, offset:i64, value:Arr u8 _ }
+type DnsRecord = { ok:bool, offset:i64, owner:Arr u8 _, kind:i64, data:Arr u8 _ }
+type DnsWire = { bytes:Arr u8 _, done:bool, error:i64 }
+fn dns_u16(bytes:Arr u8 n,at:i64) -> i64
+  = if at<0 || at>=n-1 then -1 else str_byte(bytes,at)*256+str_byte(bytes,at+1)
+fn dns_word(value:i64) -> Arr u8 _ = arr(i in 0..2) u8(if i==0 then value/256 else value%256)
+fn dns_normalize(host:Arr u8 n) -> Arr u8 _
+  = http_lower(if n>0 && str_byte(host,n-1)==46 then str_slice(host,0,n-1) else host)
+fn dns_hostname(host:Arr u8 n) -> bool
+  = n>0 && n<=253 && loop(i=0,size=0,valid=true) while valid && i<=n
+      next(i+1,if i==n || str_byte(host,i)==46 then 0 else size+1,
+        if i==n || str_byte(host,i)==46 then size>0 && size<=63 && str_byte(host,i-1)!=45 else
+          size<63 && (str_byte(host,i)>=97 && str_byte(host,i)<=122 || str_byte(host,i)>=48 && str_byte(host,i)<=57 || str_byte(host,i)==45 && size>0)) yield valid
+fn dns_question(host:Arr u8 n) -> Arr u8 _
+  = let labels=loop(i=0,start=0,out="") while i<=n
+      next(i+1,if i==n || str_byte(host,i)==46 then i+1 else start,
+        if i==n || str_byte(host,i)==46 then concat(out,arr(j in 0..1) u8(i-start),str_slice(host,start,i)) else out) yield out in
+    concat(labels,"\0\0\x01\0\x01")
+fn dns_name(wire:Arr u8 n,start:i64) -> DnsName
+  = loop(at=start,stop=0,steps=0,out="",valid=start>=12 && start<n,done=false) while valid && !done && steps<128
+      next(if str_byte(wire,at)==0 then at else if str_byte(wire,at)>=192 then (str_byte(wire,at)-192)*256+str_byte(wire,at+1) else at+1+str_byte(wire,at),
+        if stop!=0 then stop else if str_byte(wire,at)==0 then at+1 else if str_byte(wire,at)>=192 then at+2 else 0,
+        steps+1,
+        if str_byte(wire,at)>0 && str_byte(wire,at)<=63 then concat(out,if len(out)==0 then "" else ".",http_lower(str_slice(wire,at+1,at+1+str_byte(wire,at)))) else out,
+        if str_byte(wire,at)<0 then false else if str_byte(wire,at)==0 then true else
+          if str_byte(wire,at)>=192 then at+1<n && (str_byte(wire,at)-192)*256+str_byte(wire,at+1)>=12 && (str_byte(wire,at)-192)*256+str_byte(wire,at+1)<at else
+          str_byte(wire,at)<=63 && at+1+str_byte(wire,at)<n && len(out)+str_byte(wire,at)+1<=254,
+        str_byte(wire,at)==0)
+      yield DnsName { ok=valid && done && len(out)<=253, offset=stop, value=out }
+fn dns_record(wire:Arr u8 n,start:i64) -> DnsRecord
+  = let owner=dns_name(wire,start) in let at=owner.offset in
+    if !owner.ok || at<0 || at>n-10 then DnsRecord { ok=false,offset=n,owner="",kind=0,data="" } else
+      let size=dns_u16(wire,at+8) in let kind=dns_u16(wire,at) in let class=dns_u16(wire,at+2) in let end=at+10+size in
+      let alias=if kind==5 && class==1 then dns_name(wire,at+10) else DnsName { ok=true,offset=end,value="" } in
+      DnsRecord { ok=size>=0 && end<=n && alias.ok && alias.offset==end,offset=end,owner=owner.value,
+        kind=if class==1 then kind else 0,data=if kind==5 then alias.value else str_slice(wire,at+10,end) }
+fn dns_parse(wire:Arr u8 n,id:i64,host:Arr u8 m) -> BytesResult
+  = if n<12 || dns_u16(wire,0)!=id || bit_and(dns_u16(wire,2),32768)==0 || bit_and(dns_u16(wire,2),30720)!=0 then bytes_error(1,"invalid DNS response header",0) else
+    if bit_and(dns_u16(wire,2),512)!=0 then bytes_error(90,"DNS response requires TCP",0) else
+    if bit_and(dns_u16(wire,2),15)!=0 then bytes_error(2,"DNS server returned an error",0) else
+    let question=dns_name(wire,12) in let count=dns_u16(wire,6) in
+    if dns_u16(wire,4)!=1 || !question.ok || !str_equal(question.value,host) || dns_u16(wire,question.offset)!=1 || dns_u16(wire,question.offset+2)!=1 || count<0 || count>128 then
+      bytes_error(1,"invalid DNS response question or answer count",0) else
+    let rows=loop(i=0,at=question.offset+4,valid=true,records=arr(j in 0..0) DnsRecord { ok=false,offset=0,owner="",kind=0,data="" }) while valid && i<count
+      next(i+1,dns_record(wire,at).offset,dns_record(wire,at).ok,push(records,dns_record(wire,at))) yield
+        if valid then records else arr(j in 0..0) DnsRecord { ok=false,offset=0,owner="",kind=0,data="" } in
+    loop(step=0,name=host,done=false,result=bytes_error(2,"DNS name has no IPv4 address",0)) while !done && step<16
+      next(step+1,
+        loop(i=0,alias=name) while i<len(rows)
+          next(i+1,check i>=0 && i<len(rows) in if rows[i].kind==5 && str_equal(rows[i].owner,name) then rows[i].data else alias) yield alias,
+        loop(i=0,found=false) while !found && i<len(rows)
+          next(i+1,check i>=0 && i<len(rows) in rows[i].kind==1 && len(rows[i].data)==4 && str_equal(rows[i].owner,name)) yield found,
+        loop(i=0,address=result) while i<len(rows)
+          next(i+1,check i>=0 && i<len(rows) in if rows[i].kind==1 && len(rows[i].data)==4 && str_equal(rows[i].owner,name) then bytes_ok(rows[i].data) else address) yield address) yield result
+fn dns_address(bytes:Arr u8 n) -> Arr u8 _
+  = if n!=4 then "" else check n==4 in concat(int_text(i64(bytes[0])),".",int_text(i64(bytes[1])),".",int_text(i64(bytes[2])),".",int_text(i64(bytes[3])))
+effect(fs) fn dns_resolver() -> BytesResult
+  = let config=fs_read("/etc/resolv.conf") in if !config.ok then config else
+    loop(at=0,result=bytes_error(2,"no IPv4 nameserver in resolv.conf",0)) while !result.ok && at<len(config.value)
+      next(let rest=str_slice(config.value,at,len(config.value)) in let end=str_find(rest,"\n") in if end.present then at+end.value+1 else len(config.value),
+        let rest=str_slice(config.value,at,len(config.value)) in let end=str_find(rest,"\n") in let line=str_trim(if end.present then str_slice(rest,0,end.value) else rest) in
+        if !str_starts(line,"nameserver") || !(str_byte(line,10)==32 || str_byte(line,10)==9) then result else
+          let value=str_trim(str_slice(line,10,len(line))) in
+          let stop=loop(i=0) while i<len(value) && str_byte(value,i)!=32 && str_byte(value,i)!=9 && str_byte(value,i)!=35 next(i+1) yield i in
+          let server=str_slice(value,0,stop) in if len(net_ipv4(server))==4 then bytes_ok(server) else result) yield result
+effect(net,time) fn dns_udp_key(server:Arr u8 n,port:i64,query:Arr u8 m,deadline:i64,identity:i64) -> BytesResult
+  = let ip=net_ipv4(server) in if len(ip)!=4 || port<1 || port>65535 then bytes_error(22,"invalid IPv4 DNS server",0) else
+    let fd=rt_socket(2,2,0) in if fd<0 then bytes_error(5,"DNS socket failed",0) else
+      let flags=rt_nonblock(fd) in let address=stack_alloc(32) in let clear=memset(address,i32(0),32) in let family=rt_address(address) in
+      let high=store_u8(address,2,u8(port/256)) in let low=store_u8(address,3,u8(port%256)) in
+      let copied=loop(i=0) while i<4 next(check i>=0 && i<len(ip) in let stored=store_u8(address,4+i,u8(ip[i])) in i+1) yield i in
+      let connected=rt_connect(fd,address) in let sent=if flags>=0 && connected==0 then net_send_cancel(fd,query,deadline,identity) else int_error(5,"DNS connect failed",0) in
+      let result=if sent.ok then net_receive_cancel(fd,deadline,identity) else bytes_error(sent.error.code,sent.error.message,0) in
+      let closed=rt_close(fd) in result
+effect(net,time) fn dns_tcp_key(server:Arr u8 n,port:i64,query:Arr u8 m,deadline:i64,identity:i64) -> BytesResult
+  = using socket=tcp_connect_ipv4_key(server,port,deadline,identity) in let status=socket_status(socket) in
+    if !status.ok then bytes_error(status.error.code,status.error.message,0) else
+      let sent=net_send_cancel(rt_handle_fd(socket_identity(socket),2),concat(dns_word(m),query),deadline,identity) in if !sent.ok then bytes_error(sent.error.code,sent.error.message,0) else
+      loop(state=DnsWire { bytes="",done=false,error=0 }) while !state.done && state.error==0
+        next(dns_tcp_step_key(socket,state,deadline,identity))
+        yield if state.error!=0 then bytes_error(state.error,"DNS TCP response failed or truncated",0) else bytes_ok(str_slice(state.bytes,2,dns_u16(state.bytes,0)+2))
+effect(net,time) fn dns_tcp_step_key(socket:Socket,move state:DnsWire,deadline:i64,identity:i64) -> DnsWire
+  = let chunk=net_receive_cancel(rt_handle_fd(socket_identity(socket),2),deadline,identity) in
+    if !chunk.ok || len(chunk.value)==0 then state with { error=if chunk.ok then 5 else chunk.error.code } else
+      let wire=concat(state.bytes,chunk.value) in let size=dns_u16(wire,0) in
+      DnsWire { bytes=wire,done=len(wire)>=2 && len(wire)==size+2,
+        error=if len(wire)>65537 || len(wire)>=2 && len(wire)>size+2 then 27 else 0 }
+effect(net,time,process) fn dns_lookup_at_key(host:Arr u8 n,server:Arr u8 m,port:i64,deadline:i64,identity:i64) -> BytesResult
+  = if net_is_cancelled(identity) then bytes_error(125,"DNS cancelled",0) else let name=dns_normalize(host) in let literal=net_ipv4(name) in
+    if len(literal)==4 then bytes_ok(arr(i in 0..4) u8(if i<len(literal) then literal[i] else 0)) else
+    if !dns_hostname(name) then bytes_error(22,"invalid DNS hostname",0) else
+      let entropy=random_bytes(2) in if !entropy.ok then entropy else let id=dns_u16(entropy.value,0) in
+      let query=concat(dns_word(id),"\x01\0\0\x01\0\0\0\0\0\0",dns_question(name)) in
+      let wire=dns_udp_key(server,port,query,deadline,identity) in if !wire.ok then wire else
+      let parsed=dns_parse(wire.value,id,name) in if parsed.ok || parsed.error.code!=90 then parsed else
+        let tcp=dns_tcp_key(server,port,query,deadline,identity) in if !tcp.ok then tcp else dns_parse(tcp.value,id,name)
+effect(fs,net,time,process) fn dns_lookup_key(host:Arr u8 n,deadline:i64,identity:i64) -> BytesResult
+  = if net_is_cancelled(identity) then bytes_error(125,"DNS cancelled",0) else let name=dns_normalize(host) in let literal=net_ipv4(name) in if len(literal)==4 then bytes_ok(arr(i in 0..4) u8(if i<len(literal) then literal[i] else 0)) else
+    let resolver=dns_resolver() in if !resolver.ok then resolver else dns_lookup_at_key(name,resolver.value,53,deadline,identity)
+
+effect(net,time) fn dns_udp(server:Arr u8 n,port:i64,query:Arr u8 m,deadline:i64) -> BytesResult = dns_udp_key(server,port,query,deadline,0)
+effect(net,time) fn dns_tcp(server:Arr u8 n,port:i64,query:Arr u8 m,deadline:i64) -> BytesResult = dns_tcp_key(server,port,query,deadline,0)
+effect(net,time) fn dns_tcp_step(socket:Socket,move state:DnsWire,deadline:i64) -> DnsWire = dns_tcp_step_key(socket,state,deadline,0)
+effect(net,time,process) fn dns_lookup_at(host:Arr u8 n,server:Arr u8 m,port:i64,deadline:i64) -> BytesResult = dns_lookup_at_key(host,server,port,deadline,0)
+effect(fs,net,time,process) fn dns_lookup(host:Arr u8 n,deadline:i64) -> BytesResult = dns_lookup_key(host,deadline,0)
+effect(net,time,process) fn dns_lookup_at_cancel(host:Arr u8 n,server:Arr u8 m,port:i64,deadline:i64,cancellation:Cancellation) -> BytesResult
+  = dns_lookup_at_key(host,server,port,deadline,cancellation_identity(cancellation))
+effect(fs,net,time,process) fn dns_lookup_cancel(host:Arr u8 n,deadline:i64,cancellation:Cancellation) -> BytesResult
+  = dns_lookup_key(host,deadline,cancellation_identity(cancellation))

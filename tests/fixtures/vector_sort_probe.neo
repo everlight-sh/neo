@@ -1,0 +1,9 @@
+import "std:collections"
+import "std:json"
+fn item(mode:i64,index:i64,count:i64) -> i64
+  = if mode==0 then count-index else if mode==1 then (index*73+19)%101-50 else if mode==2 then if index%3==0 then -9223372036854775808 else if index%3==1 then 9223372036854775807 else 0 else index
+fn main(mode:i64,n:i64{n>=0 && n<=10000}) -> Arr u8 _
+  = let original=IntVector {values=arr(i in 0..n) item(mode,i,n)} in let sorted=vector_sort(original) in
+    let unchanged=loop(i=0,valid=true) while valid && i<n next(i+1,check i>=0 && i<len(original.values) in original.values[i]==item(mode,i,n)) yield valid in
+    check unchanged in
+    json_value_array(arr(i in 0..n) check i>=0 && i<len(sorted.values) in json_value_int(sorted.values[i])).value.raw
