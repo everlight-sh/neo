@@ -1,111 +1,60 @@
 import "std:sha256"
 
-; X25519 (RFC 7748). Field elements are records of ten signed limbs in radix
-; 2^25.5 (ref10's layout), so field operations allocate nothing; the unrolled
-; products come from tests/generate_crypto_fields.py. Products of carried limbs
-; stay below 2^62, so the wrapping operations are exact. The ladder swaps with
-; masks and runs a fixed 255 steps: no branch or address depends on the scalar.
-type XFe = { f0:i64,f1:i64,f2:i64,f3:i64,f4:i64,f5:i64,f6:i64,f7:i64,f8:i64,f9:i64 }
+; X25519 (RFC 7748). Field elements are records of five unsigned limbs in radix
+; 2^51, so field operations allocate nothing. Products are 128-bit columns of
+; hi and lo words (mul_high and wrapping_mul); the unrolled products come from
+; tests/generate_crypto_fields.py. Limbs below 2^53 keep every column below
+; 2^113. The ladder swaps with masks and runs a fixed 255 steps: no branch or
+; address depends on the scalar, and carries are compares LLVM lowers to adc.
+type XFe = { f0:i64,f1:i64,f2:i64,f3:i64,f4:i64 }
+type XWide = { hi:i64,lo:i64 }
 type XLadder = { x2:XFe,z2:XFe,x3:XFe,z3:XFe,swap:i64 }
-private fn xf_small(value:i64) -> XFe = XFe { f0=value,f1=0,f2=0,f3=0,f4=0,f5=0,f6=0,f7=0,f8=0,f9=0 }
+private fn xf_small(value:i64) -> XFe = XFe { f0=value,f1=0,f2=0,f3=0,f4=0 }
 private fn xf_add(a:XFe,b:XFe) -> XFe
-  = XFe { f0=a.f0+b.f0,f1=a.f1+b.f1,f2=a.f2+b.f2,f3=a.f3+b.f3,f4=a.f4+b.f4,f5=a.f5+b.f5,f6=a.f6+b.f6,f7=a.f7+b.f7,f8=a.f8+b.f8,f9=a.f9+b.f9 }
+  = XFe { f0=wrapping_add(a.f0,b.f0),f1=wrapping_add(a.f1,b.f1),f2=wrapping_add(a.f2,b.f2),f3=wrapping_add(a.f3,b.f3),f4=wrapping_add(a.f4,b.f4) }
+; a - b + 2p, nonnegative for b's limbs below 2^52 - 38.
 private fn xf_sub(a:XFe,b:XFe) -> XFe
-  = XFe { f0=a.f0-b.f0,f1=a.f1-b.f1,f2=a.f2-b.f2,f3=a.f3-b.f3,f4=a.f4-b.f4,f5=a.f5-b.f5,f6=a.f6-b.f6,f7=a.f7-b.f7,f8=a.f8-b.f8,f9=a.f9-b.f9 }
+  = XFe { f0=wrapping_sub(wrapping_add(a.f0,4503599627370458),b.f0),f1=wrapping_sub(wrapping_add(a.f1,4503599627370494),b.f1),
+      f2=wrapping_sub(wrapping_add(a.f2,4503599627370494),b.f2),f3=wrapping_sub(wrapping_add(a.f3,4503599627370494),b.f3),
+      f4=wrapping_sub(wrapping_add(a.f4,4503599627370494),b.f4) }
 ; bit is 0 or 1; returns a when 0 and b when 1.
 private fn xf_select(a:XFe,b:XFe,bit:i64) -> XFe
   = let m=0-bit in
     XFe { f0=bit_xor(a.f0,bit_and(bit_xor(a.f0,b.f0),m)),f1=bit_xor(a.f1,bit_and(bit_xor(a.f1,b.f1),m)),f2=bit_xor(a.f2,bit_and(bit_xor(a.f2,b.f2),m)),
-      f3=bit_xor(a.f3,bit_and(bit_xor(a.f3,b.f3),m)),f4=bit_xor(a.f4,bit_and(bit_xor(a.f4,b.f4),m)),f5=bit_xor(a.f5,bit_and(bit_xor(a.f5,b.f5),m)),
-      f6=bit_xor(a.f6,bit_and(bit_xor(a.f6,b.f6),m)),f7=bit_xor(a.f7,bit_and(bit_xor(a.f7,b.f7),m)),f8=bit_xor(a.f8,bit_and(bit_xor(a.f8,b.f8),m)),
-      f9=bit_xor(a.f9,bit_and(bit_xor(a.f9,b.f9),m)) }
-; generated: begin xf_carry
-private fn xf_carry(h0:i64,h1:i64,h2:i64,h3:i64,h4:i64,h5:i64,h6:i64,h7:i64,h8:i64,h9:i64) -> XFe
-  = let c=arithmetic_shift_right(wrapping_add(h0,33554432),26) in let h1=wrapping_add(h1,c) in let h0=wrapping_sub(h0,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h4,33554432),26) in let h5=wrapping_add(h5,c) in let h4=wrapping_sub(h4,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h1,16777216),25) in let h2=wrapping_add(h2,c) in let h1=wrapping_sub(h1,shift_left(c,25)) in
-    let c=arithmetic_shift_right(wrapping_add(h5,16777216),25) in let h6=wrapping_add(h6,c) in let h5=wrapping_sub(h5,shift_left(c,25)) in
-    let c=arithmetic_shift_right(wrapping_add(h2,33554432),26) in let h3=wrapping_add(h3,c) in let h2=wrapping_sub(h2,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h6,33554432),26) in let h7=wrapping_add(h7,c) in let h6=wrapping_sub(h6,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h3,16777216),25) in let h4=wrapping_add(h4,c) in let h3=wrapping_sub(h3,shift_left(c,25)) in
-    let c=arithmetic_shift_right(wrapping_add(h7,16777216),25) in let h8=wrapping_add(h8,c) in let h7=wrapping_sub(h7,shift_left(c,25)) in
-    let c=arithmetic_shift_right(wrapping_add(h4,33554432),26) in let h5=wrapping_add(h5,c) in let h4=wrapping_sub(h4,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h8,33554432),26) in let h9=wrapping_add(h9,c) in let h8=wrapping_sub(h8,shift_left(c,26)) in
-    let c=arithmetic_shift_right(wrapping_add(h9,16777216),25) in let h0=wrapping_add(h0,wrapping_mul(c,19)) in let h9=wrapping_sub(h9,shift_left(c,25)) in
-    let c=arithmetic_shift_right(wrapping_add(h0,33554432),26) in let h1=wrapping_add(h1,c) in let h0=wrapping_sub(h0,shift_left(c,26)) in
-    XFe { f0=h0,f1=h1,f2=h2,f3=h3,f4=h4,f5=h5,f6=h6,f7=h7,f8=h8,f9=h9 }
-; generated: end xf_carry
+      f3=bit_xor(a.f3,bit_and(bit_xor(a.f3,b.f3),m)),f4=bit_xor(a.f4,bit_and(bit_xor(a.f4,b.f4),m)) }
+; Unsigned a < b: the carry out of the addition that produced a from b.
+private fn xw_below(a:i64,b:i64) -> i64 = if bit_xor(a,shift_left(1,63))<bit_xor(b,shift_left(1,63)) then 1 else 0
+private fn xw_product(a:i64,b:i64) -> XWide = XWide { hi=mul_high(a,b),lo=wrapping_mul(a,b) }
+private fn xw_mac(w:XWide,a:i64,b:i64) -> XWide
+  = let lo=wrapping_add(w.lo,wrapping_mul(a,b)) in XWide { hi=wrapping_add(wrapping_add(w.hi,mul_high(a,b)),xw_below(lo,w.lo)),lo=lo }
+private fn xw_add(w:XWide,c:i64) -> XWide = let lo=wrapping_add(w.lo,c) in XWide { hi=wrapping_add(w.hi,xw_below(lo,w.lo)),lo=lo }
+private fn xw_shift51(w:XWide) -> i64 = bit_or(shift_left(w.hi,13),shift_right(w.lo,51))
+; generated: begin xf_reduce
+private fn xf_reduce(h0:XWide,h1:XWide,h2:XWide,h3:XWide,h4:XWide) -> XFe
+  = let h1=xw_add(h1,xw_shift51(h0)) in let h2=xw_add(h2,xw_shift51(h1)) in let h3=xw_add(h3,xw_shift51(h2)) in
+    let h4=xw_add(h4,xw_shift51(h3)) in let r0=wrapping_add(bit_and(h0.lo,2251799813685247),wrapping_mul(xw_shift51(h4),19)) in
+    XFe { f0=bit_and(r0,2251799813685247),f1=wrapping_add(bit_and(h1.lo,2251799813685247),shift_right(r0,51)),f2=bit_and(h2.lo,2251799813685247),f3=bit_and(h3.lo,2251799813685247),f4=bit_and(h4.lo,2251799813685247) }
+; generated: end xf_reduce
 ; generated: begin xf_mul
 private fn xf_mul(f:XFe,g:XFe) -> XFe
-  = let g1_19=wrapping_mul(g.f1,19) in
-    let g2_19=wrapping_mul(g.f2,19) in
-    let g3_19=wrapping_mul(g.f3,19) in
-    let g4_19=wrapping_mul(g.f4,19) in
-    let g5_19=wrapping_mul(g.f5,19) in
-    let g6_19=wrapping_mul(g.f6,19) in
-    let g7_19=wrapping_mul(g.f7,19) in
-    let g8_19=wrapping_mul(g.f8,19) in
-    let g9_19=wrapping_mul(g.f9,19) in
-    let f1_2=shift_left(f.f1,1) in
-    let f3_2=shift_left(f.f3,1) in
-    let f5_2=shift_left(f.f5,1) in
-    let f7_2=shift_left(f.f7,1) in
-    let f9_2=shift_left(f.f9,1) in
-    xf_carry(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f0),wrapping_mul(f1_2,g9_19)),wrapping_mul(f.f2,g8_19)),wrapping_mul(f3_2,g7_19)),wrapping_mul(f.f4,g6_19)),wrapping_mul(f5_2,g5_19)),wrapping_mul(f.f6,g4_19)),wrapping_mul(f7_2,g3_19)),wrapping_mul(f.f8,g2_19)),wrapping_mul(f9_2,g1_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f1),wrapping_mul(f.f1,g.f0)),wrapping_mul(f.f2,g9_19)),wrapping_mul(f.f3,g8_19)),wrapping_mul(f.f4,g7_19)),wrapping_mul(f.f5,g6_19)),wrapping_mul(f.f6,g5_19)),wrapping_mul(f.f7,g4_19)),wrapping_mul(f.f8,g3_19)),wrapping_mul(f.f9,g2_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f2),wrapping_mul(f1_2,g.f1)),wrapping_mul(f.f2,g.f0)),wrapping_mul(f3_2,g9_19)),wrapping_mul(f.f4,g8_19)),wrapping_mul(f5_2,g7_19)),wrapping_mul(f.f6,g6_19)),wrapping_mul(f7_2,g5_19)),wrapping_mul(f.f8,g4_19)),wrapping_mul(f9_2,g3_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f3),wrapping_mul(f.f1,g.f2)),wrapping_mul(f.f2,g.f1)),wrapping_mul(f.f3,g.f0)),wrapping_mul(f.f4,g9_19)),wrapping_mul(f.f5,g8_19)),wrapping_mul(f.f6,g7_19)),wrapping_mul(f.f7,g6_19)),wrapping_mul(f.f8,g5_19)),wrapping_mul(f.f9,g4_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f4),wrapping_mul(f1_2,g.f3)),wrapping_mul(f.f2,g.f2)),wrapping_mul(f3_2,g.f1)),wrapping_mul(f.f4,g.f0)),wrapping_mul(f5_2,g9_19)),wrapping_mul(f.f6,g8_19)),wrapping_mul(f7_2,g7_19)),wrapping_mul(f.f8,g6_19)),wrapping_mul(f9_2,g5_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f5),wrapping_mul(f.f1,g.f4)),wrapping_mul(f.f2,g.f3)),wrapping_mul(f.f3,g.f2)),wrapping_mul(f.f4,g.f1)),wrapping_mul(f.f5,g.f0)),wrapping_mul(f.f6,g9_19)),wrapping_mul(f.f7,g8_19)),wrapping_mul(f.f8,g7_19)),wrapping_mul(f.f9,g6_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f6),wrapping_mul(f1_2,g.f5)),wrapping_mul(f.f2,g.f4)),wrapping_mul(f3_2,g.f3)),wrapping_mul(f.f4,g.f2)),wrapping_mul(f5_2,g.f1)),wrapping_mul(f.f6,g.f0)),wrapping_mul(f7_2,g9_19)),wrapping_mul(f.f8,g8_19)),wrapping_mul(f9_2,g7_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f7),wrapping_mul(f.f1,g.f6)),wrapping_mul(f.f2,g.f5)),wrapping_mul(f.f3,g.f4)),wrapping_mul(f.f4,g.f3)),wrapping_mul(f.f5,g.f2)),wrapping_mul(f.f6,g.f1)),wrapping_mul(f.f7,g.f0)),wrapping_mul(f.f8,g9_19)),wrapping_mul(f.f9,g8_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f8),wrapping_mul(f1_2,g.f7)),wrapping_mul(f.f2,g.f6)),wrapping_mul(f3_2,g.f5)),wrapping_mul(f.f4,g.f4)),wrapping_mul(f5_2,g.f3)),wrapping_mul(f.f6,g.f2)),wrapping_mul(f7_2,g.f1)),wrapping_mul(f.f8,g.f0)),wrapping_mul(f9_2,g9_19)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,g.f9),wrapping_mul(f.f1,g.f8)),wrapping_mul(f.f2,g.f7)),wrapping_mul(f.f3,g.f6)),wrapping_mul(f.f4,g.f5)),wrapping_mul(f.f5,g.f4)),wrapping_mul(f.f6,g.f3)),wrapping_mul(f.f7,g.f2)),wrapping_mul(f.f8,g.f1)),wrapping_mul(f.f9,g.f0)))
+  = let g1=wrapping_mul(g.f1,19) in let g2=wrapping_mul(g.f2,19) in let g3=wrapping_mul(g.f3,19) in let g4=wrapping_mul(g.f4,19) in
+    xf_reduce(xw_mac(xw_mac(xw_mac(xw_mac(xw_product(f.f0,g.f0),f.f1,g4),f.f2,g3),f.f3,g2),f.f4,g1),
+      xw_mac(xw_mac(xw_mac(xw_mac(xw_product(f.f0,g.f1),f.f1,g.f0),f.f2,g4),f.f3,g3),f.f4,g2),
+      xw_mac(xw_mac(xw_mac(xw_mac(xw_product(f.f0,g.f2),f.f1,g.f1),f.f2,g.f0),f.f3,g4),f.f4,g3),
+      xw_mac(xw_mac(xw_mac(xw_mac(xw_product(f.f0,g.f3),f.f1,g.f2),f.f2,g.f1),f.f3,g.f0),f.f4,g4),
+      xw_mac(xw_mac(xw_mac(xw_mac(xw_product(f.f0,g.f4),f.f1,g.f3),f.f2,g.f2),f.f3,g.f1),f.f4,g.f0))
 ; generated: end xf_mul
 ; generated: begin xf_sq
 private fn xf_sq(f:XFe) -> XFe
-  = let d0=shift_left(f.f0,1) in
-    let d1=shift_left(f.f1,1) in
-    let d2=shift_left(f.f2,1) in
-    let d3=shift_left(f.f3,1) in
-    let d4=shift_left(f.f4,1) in
-    let d5=shift_left(f.f5,1) in
-    let d6=shift_left(f.f6,1) in
-    let d7=shift_left(f.f7,1) in
-    let d8=shift_left(f.f8,1) in
-    let d9=shift_left(f.f9,1) in
-    let s1=wrapping_mul(f.f1,19) in
-    let t1=wrapping_mul(f.f1,38) in
-    let s2=wrapping_mul(f.f2,19) in
-    let t2=wrapping_mul(f.f2,38) in
-    let s3=wrapping_mul(f.f3,19) in
-    let t3=wrapping_mul(f.f3,38) in
-    let s4=wrapping_mul(f.f4,19) in
-    let t4=wrapping_mul(f.f4,38) in
-    let s5=wrapping_mul(f.f5,19) in
-    let t5=wrapping_mul(f.f5,38) in
-    let s6=wrapping_mul(f.f6,19) in
-    let t6=wrapping_mul(f.f6,38) in
-    let s7=wrapping_mul(f.f7,19) in
-    let t7=wrapping_mul(f.f7,38) in
-    let s8=wrapping_mul(f.f8,19) in
-    let t8=wrapping_mul(f.f8,38) in
-    let s9=wrapping_mul(f.f9,19) in
-    let t9=wrapping_mul(f.f9,38) in
-    xf_carry(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(f.f0,f.f0),wrapping_mul(d1,t9)),wrapping_mul(d2,s8)),wrapping_mul(d3,t7)),wrapping_mul(d4,s6)),wrapping_mul(f.f5,t5)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f1),wrapping_mul(d2,s9)),wrapping_mul(d3,s8)),wrapping_mul(d4,s7)),wrapping_mul(d5,s6)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f2),wrapping_mul(f.f1,d1)),wrapping_mul(d3,t9)),wrapping_mul(d4,s8)),wrapping_mul(d5,t7)),wrapping_mul(f.f6,s6)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f3),wrapping_mul(d1,f.f2)),wrapping_mul(d4,s9)),wrapping_mul(d5,s8)),wrapping_mul(d6,s7)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f4),wrapping_mul(d1,d3)),wrapping_mul(f.f2,f.f2)),wrapping_mul(d5,t9)),wrapping_mul(d6,s8)),wrapping_mul(f.f7,t7)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f5),wrapping_mul(d1,f.f4)),wrapping_mul(d2,f.f3)),wrapping_mul(d6,s9)),wrapping_mul(d7,s8)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f6),wrapping_mul(d1,d5)),wrapping_mul(d2,f.f4)),wrapping_mul(f.f3,d3)),wrapping_mul(d7,t9)),wrapping_mul(f.f8,s8)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f7),wrapping_mul(d1,f.f6)),wrapping_mul(d2,f.f5)),wrapping_mul(d3,f.f4)),wrapping_mul(d8,s9)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f8),wrapping_mul(d1,d7)),wrapping_mul(d2,f.f6)),wrapping_mul(d3,d5)),wrapping_mul(f.f4,f.f4)),wrapping_mul(f.f9,t9)),
-      wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_mul(d0,f.f9),wrapping_mul(d1,f.f8)),wrapping_mul(d2,f.f7)),wrapping_mul(d3,f.f6)),wrapping_mul(d4,f.f5)))
+  = let d0=shift_left(f.f0,1) in let d1=shift_left(f.f1,1) in let s3=wrapping_mul(f.f3,19) in let s4=wrapping_mul(f.f4,19) in let t3=wrapping_mul(f.f3,38) in let t4=wrapping_mul(f.f4,38) in
+    xf_reduce(xw_mac(xw_mac(xw_product(f.f0,f.f0),f.f1,t4),f.f2,t3),
+      xw_mac(xw_mac(xw_product(d0,f.f1),f.f2,t4),f.f3,s3),
+      xw_mac(xw_mac(xw_product(d0,f.f2),f.f1,f.f1),f.f3,t4),
+      xw_mac(xw_mac(xw_product(d0,f.f3),d1,f.f2),f.f4,s4),
+      xw_mac(xw_mac(xw_product(d0,f.f4),d1,f.f3),f.f2,f.f2))
 ; generated: end xf_sq
 private fn xf_mul_small(f:XFe,k:i64) -> XFe
-  = xf_carry(wrapping_mul(f.f0,k),wrapping_mul(f.f1,k),wrapping_mul(f.f2,k),wrapping_mul(f.f3,k),wrapping_mul(f.f4,k),
-      wrapping_mul(f.f5,k),wrapping_mul(f.f6,k),wrapping_mul(f.f7,k),wrapping_mul(f.f8,k),wrapping_mul(f.f9,k))
+  = xf_reduce(xw_product(f.f0,k),xw_product(f.f1,k),xw_product(f.f2,k),xw_product(f.f3,k),xw_product(f.f4,k))
 private fn xf_sqn(f:XFe,n:i64) -> XFe = loop(i=0,f=f) while i<n next(i+1,xf_sq(f)) yield f
 ; z^(p-2) by ref10's addition chain: 254 squarings and 11 multiplications.
 private fn xf_invert(z:XFe) -> XFe
@@ -115,34 +64,30 @@ private fn xf_invert(z:XFe) -> XFe
     let z200=xf_mul(xf_sqn(z100,100),z100) in let z250=xf_mul(xf_sqn(z200,50),z50) in xf_mul(xf_sqn(z250,5),z11)
 ; generated: begin xf_unpack
 private fn xf_unpack(w0:i64,w1:i64,w2:i64,w3:i64) -> XFe
-  = XFe { f0=bit_and(w0,67108863),f1=bit_and(shift_right(w0,26),33554431),f2=bit_and(bit_or(shift_right(w0,51),shift_left(w1,13)),67108863),f3=bit_and(shift_right(w1,13),33554431),f4=bit_and(shift_right(w1,38),67108863),f5=bit_and(w2,33554431),f6=bit_and(shift_right(w2,25),67108863),f7=bit_and(bit_or(shift_right(w2,51),shift_left(w3,13)),33554431),f8=bit_and(shift_right(w3,12),67108863),f9=bit_and(shift_right(w3,38),33554431) }
+  = XFe { f0=bit_and(w0,2251799813685247),f1=bit_and(bit_or(shift_right(w0,51),shift_left(w1,13)),2251799813685247),f2=bit_and(bit_or(shift_right(w1,38),shift_left(w2,26)),2251799813685247),f3=bit_and(bit_or(shift_right(w2,25),shift_left(w3,39)),2251799813685247),f4=bit_and(shift_right(w3,12),2251799813685247) }
 ; generated: end xf_unpack
-; ref10 fe_tobytes: the unique representative below 2^255-19, as limbs within their widths.
+; One carry pass, the top carry folded back times 19 (donna-c64's fcontract_carry_full).
+private fn xf_carry_full(f:XFe) -> XFe
+  = let f1=wrapping_add(f.f1,shift_right(f.f0,51)) in let f2=wrapping_add(f.f2,shift_right(f1,51)) in
+    let f3=wrapping_add(f.f3,shift_right(f2,51)) in let f4=wrapping_add(f.f4,shift_right(f3,51)) in
+    XFe { f0=wrapping_add(bit_and(f.f0,2251799813685247),wrapping_mul(shift_right(f4,51),19)),f1=bit_and(f1,2251799813685247),
+      f2=bit_and(f2,2251799813685247),f3=bit_and(f3,2251799813685247),f4=bit_and(f4,2251799813685247) }
+; The unique representative below 2^255-19 (donna-c64's fcontract): after two carry
+; passes the value v is below 2^255; v+19 carried is (v mod p)+19, and adding
+; 2^255-19 then dropping bit 255 leaves v mod p.
 private fn xf_canonical(f:XFe) -> XFe
-  = let q=arithmetic_shift_right(wrapping_add(wrapping_mul(f.f9,19),16777216),25) in
-    let q=arithmetic_shift_right(f.f0+q,26) in let q=arithmetic_shift_right(f.f1+q,25) in let q=arithmetic_shift_right(f.f2+q,26) in
-    let q=arithmetic_shift_right(f.f3+q,25) in let q=arithmetic_shift_right(f.f4+q,26) in let q=arithmetic_shift_right(f.f5+q,25) in
-    let q=arithmetic_shift_right(f.f6+q,26) in let q=arithmetic_shift_right(f.f7+q,25) in let q=arithmetic_shift_right(f.f8+q,26) in
-    let q=arithmetic_shift_right(f.f9+q,25) in
-    let h0=f.f0+19*q in
-    let c=arithmetic_shift_right(h0,26) in let h1=f.f1+c in let h0=h0-shift_left(c,26) in
-    let c=arithmetic_shift_right(h1,25) in let h2=f.f2+c in let h1=h1-shift_left(c,25) in
-    let c=arithmetic_shift_right(h2,26) in let h3=f.f3+c in let h2=h2-shift_left(c,26) in
-    let c=arithmetic_shift_right(h3,25) in let h4=f.f4+c in let h3=h3-shift_left(c,25) in
-    let c=arithmetic_shift_right(h4,26) in let h5=f.f5+c in let h4=h4-shift_left(c,26) in
-    let c=arithmetic_shift_right(h5,25) in let h6=f.f6+c in let h5=h5-shift_left(c,25) in
-    let c=arithmetic_shift_right(h6,26) in let h7=f.f7+c in let h6=h6-shift_left(c,26) in
-    let c=arithmetic_shift_right(h7,25) in let h8=f.f8+c in let h7=h7-shift_left(c,25) in
-    let c=arithmetic_shift_right(h8,26) in let h9=f.f9+c in let h8=h8-shift_left(c,26) in
-    let h9=bit_and(h9,33554431) in
-    XFe { f0=h0,f1=h1,f2=h2,f3=h3,f4=h4,f5=h5,f6=h6,f7=h7,f8=h8,f9=h9 }
+  = let t=xf_carry_full(xf_carry_full(f)) in let t=xf_carry_full(t with { f0=wrapping_add(t.f0,19) }) in
+    let f0=wrapping_add(t.f0,2251799813685229) in let f1=wrapping_add(wrapping_add(t.f1,2251799813685247),shift_right(f0,51)) in
+    let f2=wrapping_add(wrapping_add(t.f2,2251799813685247),shift_right(f1,51)) in let f3=wrapping_add(wrapping_add(t.f3,2251799813685247),shift_right(f2,51)) in
+    let f4=wrapping_add(wrapping_add(t.f4,2251799813685247),shift_right(f3,51)) in
+    XFe { f0=bit_and(f0,2251799813685247),f1=bit_and(f1,2251799813685247),f2=bit_and(f2,2251799813685247),f3=bit_and(f3,2251799813685247),f4=bit_and(f4,2251799813685247) }
 ; generated: begin xf_words
 private fn xf_bytes(h:XFe) -> Arr u8 _
   = let out=arr(i in 0..32) u8(0) in
-    let out=byte_write_le(out,0,bit_or(bit_or(h.f0,shift_left(h.f1,26)),shift_left(h.f2,51)),8) in
-    let out=byte_write_le(out,8,bit_or(bit_or(shift_right(h.f2,13),shift_left(h.f3,13)),shift_left(h.f4,38)),8) in
-    let out=byte_write_le(out,16,bit_or(bit_or(h.f5,shift_left(h.f6,25)),shift_left(h.f7,51)),8) in
-    let out=byte_write_le(out,24,bit_or(bit_or(shift_right(h.f7,13),shift_left(h.f8,12)),shift_left(h.f9,38)),8) in out
+    let out=byte_write_le(out,0,bit_or(h.f0,shift_left(h.f1,51)),8) in
+    let out=byte_write_le(out,8,bit_or(shift_right(h.f1,13),shift_left(h.f2,38)),8) in
+    let out=byte_write_le(out,16,bit_or(shift_right(h.f2,26),shift_left(h.f3,25)),8) in
+    let out=byte_write_le(out,24,bit_or(shift_right(h.f3,39),shift_left(h.f4,12)),8) in out
 ; generated: end xf_words
 ; One ladder step (RFC 7748 section 5), after swapping in the next scalar bit.
 private fn xf_step(state:XLadder,x1:XFe,bit:i64) -> XLadder

@@ -4,9 +4,9 @@ Each module keeps its generated functions between `; generated: begin NAME`
 and `; generated: end NAME` lines; this script rewrites only those regions.
 Run it after changing a limb layout here, then rerun the crypto vector tests.
 
-  x25519.neo  GF(2^255-19), ten signed limbs in radix 2^25.5 (ref10's layout):
-              products of carried limbs stay below 2^62, so wrapping i64
-              arithmetic is exact.
+  x25519.neo  GF(2^255-19), five unsigned limbs in radix 2^51 with 128-bit
+              columns (hi and lo words, from wrapping_mul and mul_high):
+              limbs below 2^53 give columns below 2^113.
   p256.neo    Montgomery products modulo the P-256 prime and group order, nine
               unsigned 29-bit limbs, R = 2^261: a column holds at most 18
               products below 2^58, so every running sum stays below 2^63.
@@ -26,61 +26,38 @@ def add(terms):
 def mul(a, b): return f'wrapping_mul({a},{b})'
 
 # ---------------------------------------------------------------- X25519
-OFFSETS = [0, 26, 51, 77, 102, 128, 153, 179, 204, 230]
-def width(i): return 26 if i % 2 == 0 else 25
+OFFSETS = [0, 51, 102, 153, 204]
+def width(i): return 51
 FE = 'XFe'
 
-def xf_carry():
-    """ref10's carry chain: signed limbs bounded by 1.01*2^25 (even) / 2^24 (odd) after it."""
-    order = [0, 4, 1, 5, 2, 6, 3, 7, 4, 8, 9, 0]
-    lines = []
-    for k in order:
-        w = width(k); nxt = (k + 1) % 10
-        lines.append(f'let c=arithmetic_shift_right(wrapping_add(h{k},{1 << (w - 1)}),{w}) in '
-                     f'let h{nxt}=wrapping_add(h{nxt},{mul("c", 19) if k == 9 else "c"}) in let h{k}=wrapping_sub(h{k},shift_left(c,{w})) in')
-    body = '\n    '.join(lines)
-    fields = ','.join(f'f{i}=h{i}' for i in range(10))
-    params = ','.join(f'h{i}:i64' for i in range(10))
-    return (f'private fn xf_carry({params}) -> {FE}\n  = {body}\n    {FE} {{ {fields} }}')
+def wide_sum(terms):
+    """A 128-bit sum of 64x64-bit products, as nested XWide accumulations."""
+    (a, b), rest = terms[0], terms[1:]
+    out = f'xw_product({a},{b})'
+    for a, b in rest: out = f'xw_mac({out},{a},{b})'
+    return out
+
+def xf_reduce():
+    """Carries five 128-bit columns into limbs below 2^51 (f1 may exceed it by a few bits)."""
+    m = (1 << 51) - 1
+    return (f'private fn xf_reduce(h0:XWide,h1:XWide,h2:XWide,h3:XWide,h4:XWide) -> {FE}\n'
+            f'  = let h1=xw_add(h1,xw_shift51(h0)) in let h2=xw_add(h2,xw_shift51(h1)) in let h3=xw_add(h3,xw_shift51(h2)) in\n'
+            f'    let h4=xw_add(h4,xw_shift51(h3)) in let r0=wrapping_add(bit_and(h0.lo,{m}),{mul("xw_shift51(h4)", 19)}) in\n'
+            f'    {FE} {{ f0=bit_and(r0,{m}),f1=wrapping_add(bit_and(h1.lo,{m}),shift_right(r0,51)),f2=bit_and(h2.lo,{m}),'
+            f'f3=bit_and(h3.lo,{m}),f4=bit_and(h4.lo,{m}) }}')
 
 def xf_mul():
-    pre = []
-    for j in range(1, 10): pre.append(f'let g{j}_19={mul(f"g.f{j}", 19)} in')
-    for i in range(1, 10, 2): pre.append(f'let f{i}_2=shift_left(f.f{i},1) in')
-    hs = []
-    for k in range(10):
-        terms = []
-        for i in range(10):
-            j = (k - i) % 10
-            a = f'f{i}_2' if i % 2 == 1 and j % 2 == 1 else f'f.f{i}'
-            b = f'g{j}_19' if i + j >= 10 else f'g.f{j}'
-            terms.append(mul(a, b))
-        hs.append(add(terms))
-    args = ','.join(hs)
-    return (f'private fn xf_mul(f:{FE},g:{FE}) -> {FE}\n  = ' + '\n    '.join(pre) +
-            f'\n    xf_carry(' + ',\n      '.join(hs) + ')')
+    pre = ' '.join(f'let g{j}={mul(f"g.f{j}", 19)} in' for j in range(1, 5))
+    hs = [wide_sum([(f'f.f{i}', f'g{(k - i) % 5}' if i > k else f'g.f{k - i}') for i in range(5)]) for k in range(5)]
+    return f'private fn xf_mul(f:{FE},g:{FE}) -> {FE}\n  = {pre}\n    xf_reduce(' + ',\n      '.join(hs) + ')'
 
 def xf_sq():
-    pre = []
-    for i in range(10):
-        pre.append(f'let d{i}=shift_left(f.f{i},1) in')
-    for i in range(1, 10):
-        pre.append(f'let s{i}={mul(f"f.f{i}", 19)} in')
-        pre.append(f'let t{i}={mul(f"f.f{i}", 38)} in')
-    names = {1: 'f.f{}', 2: 'd{}', 19: 's{}', 38: 't{}'}
-    hs = []
-    for k in range(10):
-        terms = []
-        for i in range(10):
-            for j in range(i, 10):
-                if (i + j) % 10 != k: continue
-                c = (2 if i != j else 1) * (2 if i % 2 == 1 and j % 2 == 1 else 1) * (19 if i + j >= 10 else 1)
-                a = 'd{}'.format(i) if i != j else 'f.f{}'.format(i)
-                rest = c // (2 if i != j else 1)
-                terms.append(mul(a, names[rest].format(j)))
-        hs.append(add(terms))
-    return (f'private fn xf_sq(f:{FE}) -> {FE}\n  = ' + '\n    '.join(pre) +
-            f'\n    xf_carry(' + ',\n      '.join(hs) + ')')
+    pre = ('let d0=shift_left(f.f0,1) in let d1=shift_left(f.f1,1) in '
+           f'let s3={mul("f.f3", 19)} in let s4={mul("f.f4", 19)} in let t3={mul("f.f3", 38)} in let t4={mul("f.f4", 38)} in')
+    columns = [[('f.f0', 'f.f0'), ('f.f1', 't4'), ('f.f2', 't3')], [('d0', 'f.f1'), ('f.f2', 't4'), ('f.f3', 's3')],
+               [('d0', 'f.f2'), ('f.f1', 'f.f1'), ('f.f3', 't4')], [('d0', 'f.f3'), ('d1', 'f.f2'), ('f.f4', 's4')],
+               [('d0', 'f.f4'), ('d1', 'f.f3'), ('f.f2', 'f.f2')]]
+    return f'private fn xf_sq(f:{FE}) -> {FE}\n  = {pre}\n    xf_reduce(' + ',\n      '.join(map(wide_sum, columns)) + ')'
 
 def xf_unpack():
     """Little-endian 255-bit value (bit 255 already cleared) into unsigned limbs."""
@@ -299,7 +276,7 @@ def region(text, name, body):
 def main():
     path = ROOT / 'stdlib/x25519.neo'; text = path.read_text()
     w = xf_words()
-    text = region(text, 'xf_carry', xf_carry())
+    text = region(text, 'xf_reduce', xf_reduce())
     text = region(text, 'xf_mul', xf_mul())
     text = region(text, 'xf_sq', xf_sq())
     text = region(text, 'xf_unpack', xf_unpack())
