@@ -14,6 +14,10 @@ effect(net,time) fn tcp_connect_ipv4_key(host:Arr u8 n,port:i64,deadline:i64,ide
       let connected=if nonblocking<0 then -1 else rt_connect(fd,address) in
       let waited=if connected==0 then int_ok(1) else net_wait_cancel(fd,4,deadline,identity) in let ready=waited.ok in let error=if ready then rt_socket_error(fd) else waited.error.code in
       if !ready || error!=0 then let closed=rt_close(fd) in Socket { token=0-(if error>0 then error else 5) } else
+        ; TCP_NODELAY (IPPROTO_TCP 6, option 1): a small write after a small write,
+        ; such as a TLS Finished then the request, otherwise waits for the peer's
+        ; delayed ACK, about 40 ms on Linux.
+        let one=stack_alloc(8) in let set=store_i32(one,0,i32(1)) in let nodelay=rt_setsockopt(fd,6,1,one,4) in
         Socket { token=rt_handle_new(fd,2) }
 effect(net) fn socket_status(socket:Socket) -> IntResult
   = if socket.token<0 then int_error(0-socket.token,"socket connection failed",0) else

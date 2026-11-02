@@ -1,36 +1,164 @@
 import "std:strings"
 
 type Sha256State = { a:i64,b:i64,c:i64,d:i64,e:i64,f:i64,g:i64,h:i64 }
+; Sixteen message-schedule words of one block, oldest first.
+type ShaWords = { w0:i64,w1:i64,w2:i64,w3:i64,w4:i64,w5:i64,w6:i64,w7:i64,w8:i64,w9:i64,w10:i64,w11:i64,w12:i64,w13:i64,w14:i64,w15:i64 }
 fn crypto_equal(a:Arr u8 n,b:Arr u8 m) -> bool
   = loop(i=0,difference=bit_xor(n,m)) while i<n
       next(i+1,check i>=0 && i<n in bit_or(difference,bit_xor(i64(a[i]),if i<m then check i>=0 && i<m in i64(b[i]) else 0))) yield difference==0
 private fn sha_u32(value:i64) -> i64 = bit_and(value,4294967295)
-private fn sha_rotr(value:i64,bits:i64) -> i64 = sha_u32(bit_or(shift_right(value,bits),shift_left(value,32-bits)))
-private fn sha_small0(value:i64) -> i64 = bit_xor(bit_xor(sha_rotr(value,7),sha_rotr(value,18)),shift_right(value,3))
-private fn sha_small1(value:i64) -> i64 = bit_xor(bit_xor(sha_rotr(value,17),sha_rotr(value,19)),shift_right(value,10))
-private fn sha_round(s:Sha256State,word:i64,constant:i64) -> Sha256State
-  = let choose=bit_xor(bit_and(s.e,s.f),bit_and(bit_xor(s.e,4294967295),s.g)) in
-    let majority=bit_xor(bit_xor(bit_and(s.a,s.b),bit_and(s.a,s.c)),bit_and(s.b,s.c)) in
-    let sum0=bit_xor(bit_xor(sha_rotr(s.a,2),sha_rotr(s.a,13)),sha_rotr(s.a,22)) in
-    let sum1=bit_xor(bit_xor(sha_rotr(s.e,6),sha_rotr(s.e,11)),sha_rotr(s.e,25)) in
-    let first=sha_u32(s.h+sum1+choose+constant+word) in let second=sha_u32(sum0+majority) in
-    Sha256State { a=sha_u32(first+second),b=s.a,c=s.b,d=s.c,e=sha_u32(s.d+first),f=s.e,g=s.f,h=s.g }
+; Rotations and shifts take the low 32 bits of their input, so words may carry
+; garbage above bit 31 between them.
+private fn sha_rotr(value:i64,bits:i64) -> i64 = let low=sha_u32(value) in sha_u32(bit_or(shift_right(low,bits),shift_left(low,32-bits)))
+private fn sha_small0(value:i64) -> i64 = let low=sha_u32(value) in bit_xor(bit_xor(sha_rotr(low,7),sha_rotr(low,18)),shift_right(low,3))
+private fn sha_small1(value:i64) -> i64 = let low=sha_u32(value) in bit_xor(bit_xor(sha_rotr(low,17),sha_rotr(low,19)),shift_right(low,10))
 private fn sha_word(s:Sha256State,index:i64) -> i64
   = if index==0 then s.a else if index==1 then s.b else if index==2 then s.c else if index==3 then s.d else if index==4 then s.e else if index==5 then s.f else if index==6 then s.g else s.h
-private fn sha_add(a:Sha256State,b:Sha256State) -> Sha256State
-  = Sha256State { a=sha_u32(a.a+b.a),b=sha_u32(a.b+b.b),c=sha_u32(a.c+b.c),d=sha_u32(a.d+b.d),e=sha_u32(a.e+b.e),f=sha_u32(a.f+b.f),g=sha_u32(a.g+b.g),h=sha_u32(a.h+b.h) }
+; generated: begin sha_compress
+private inline fn sha_schedule(w:ShaWords) -> ShaWords
+  = let n0=wrapping_add(wrapping_add(wrapping_add(sha_small1(w.w14),w.w9),sha_small0(w.w1)),w.w0) in
+    let n1=wrapping_add(wrapping_add(wrapping_add(sha_small1(w.w15),w.w10),sha_small0(w.w2)),w.w1) in
+    let n2=wrapping_add(wrapping_add(wrapping_add(sha_small1(n0),w.w11),sha_small0(w.w3)),w.w2) in
+    let n3=wrapping_add(wrapping_add(wrapping_add(sha_small1(n1),w.w12),sha_small0(w.w4)),w.w3) in
+    let n4=wrapping_add(wrapping_add(wrapping_add(sha_small1(n2),w.w13),sha_small0(w.w5)),w.w4) in
+    let n5=wrapping_add(wrapping_add(wrapping_add(sha_small1(n3),w.w14),sha_small0(w.w6)),w.w5) in
+    let n6=wrapping_add(wrapping_add(wrapping_add(sha_small1(n4),w.w15),sha_small0(w.w7)),w.w6) in
+    let n7=wrapping_add(wrapping_add(wrapping_add(sha_small1(n5),n0),sha_small0(w.w8)),w.w7) in
+    let n8=wrapping_add(wrapping_add(wrapping_add(sha_small1(n6),n1),sha_small0(w.w9)),w.w8) in
+    let n9=wrapping_add(wrapping_add(wrapping_add(sha_small1(n7),n2),sha_small0(w.w10)),w.w9) in
+    let n10=wrapping_add(wrapping_add(wrapping_add(sha_small1(n8),n3),sha_small0(w.w11)),w.w10) in
+    let n11=wrapping_add(wrapping_add(wrapping_add(sha_small1(n9),n4),sha_small0(w.w12)),w.w11) in
+    let n12=wrapping_add(wrapping_add(wrapping_add(sha_small1(n10),n5),sha_small0(w.w13)),w.w12) in
+    let n13=wrapping_add(wrapping_add(wrapping_add(sha_small1(n11),n6),sha_small0(w.w14)),w.w13) in
+    let n14=wrapping_add(wrapping_add(wrapping_add(sha_small1(n12),n7),sha_small0(w.w15)),w.w14) in
+    let n15=wrapping_add(wrapping_add(wrapping_add(sha_small1(n13),n8),sha_small0(n0)),w.w15) in
+    ShaWords { w0=n0,w1=n1,w2=n2,w3=n3,w4=n4,w5=n5,w6=n6,w7=n7,w8=n8,w9=n9,w10=n10,w11=n11,w12=n12,w13=n13,w14=n14,w15=n15 }
+private inline fn sha_rounds0(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),1116352408),w.w0) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),1899447441),w.w1) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),3049323471),w.w2) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),3921009573),w.w3) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),961987163),w.w4) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),1508970993),w.w5) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),2453635748),w.w6) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),2870763221),w.w7) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds8(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),3624381080),w.w8) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),310598401),w.w9) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),607225278),w.w10) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),1426881987),w.w11) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),1925078388),w.w12) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),2162078206),w.w13) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),2614888103),w.w14) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),3248222580),w.w15) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds16(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),3835390401),w.w0) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),4022224774),w.w1) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),264347078),w.w2) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),604807628),w.w3) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),770255983),w.w4) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),1249150122),w.w5) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),1555081692),w.w6) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),1996064986),w.w7) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds24(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),2554220882),w.w8) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),2821834349),w.w9) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),2952996808),w.w10) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),3210313671),w.w11) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),3336571891),w.w12) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),3584528711),w.w13) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),113926993),w.w14) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),338241895),w.w15) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds32(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),666307205),w.w0) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),773529912),w.w1) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),1294757372),w.w2) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),1396182291),w.w3) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),1695183700),w.w4) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),1986661051),w.w5) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),2177026350),w.w6) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),2456956037),w.w7) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds40(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),2730485921),w.w8) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),2820302411),w.w9) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),3259730800),w.w10) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),3345764771),w.w11) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),3516065817),w.w12) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),3600352804),w.w13) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),4094571909),w.w14) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),275423344),w.w15) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds48(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),430227734),w.w0) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),506948616),w.w1) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),659060556),w.w2) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),883997877),w.w3) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),958139571),w.w4) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),1322822218),w.w5) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),1537002063),w.w6) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),1747873779),w.w7) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private inline fn sha_rounds56(s:Sha256State,w:ShaWords) -> Sha256State
+  = let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in
+    let t0=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em3,bit_xor(bit_xor(sha_rotr(e0,6),sha_rotr(e0,11)),sha_rotr(e0,25))),bit_xor(em2,bit_and(e0,bit_xor(em1,em2)))),1955562222),w.w8) in let a1=wrapping_add(wrapping_add(t0,bit_xor(bit_xor(sha_rotr(a0,2),sha_rotr(a0,13)),sha_rotr(a0,22))),bit_or(bit_and(a0,am1),bit_and(am2,bit_or(a0,am1)))) in let e1=wrapping_add(am3,t0) in
+    let t1=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em2,bit_xor(bit_xor(sha_rotr(e1,6),sha_rotr(e1,11)),sha_rotr(e1,25))),bit_xor(em1,bit_and(e1,bit_xor(e0,em1)))),2024104815),w.w9) in let a2=wrapping_add(wrapping_add(t1,bit_xor(bit_xor(sha_rotr(a1,2),sha_rotr(a1,13)),sha_rotr(a1,22))),bit_or(bit_and(a1,a0),bit_and(am1,bit_or(a1,a0)))) in let e2=wrapping_add(am2,t1) in
+    let t2=wrapping_add(wrapping_add(wrapping_add(wrapping_add(em1,bit_xor(bit_xor(sha_rotr(e2,6),sha_rotr(e2,11)),sha_rotr(e2,25))),bit_xor(e0,bit_and(e2,bit_xor(e1,e0)))),2227730452),w.w10) in let a3=wrapping_add(wrapping_add(t2,bit_xor(bit_xor(sha_rotr(a2,2),sha_rotr(a2,13)),sha_rotr(a2,22))),bit_or(bit_and(a2,a1),bit_and(a0,bit_or(a2,a1)))) in let e3=wrapping_add(am1,t2) in
+    let t3=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e0,bit_xor(bit_xor(sha_rotr(e3,6),sha_rotr(e3,11)),sha_rotr(e3,25))),bit_xor(e1,bit_and(e3,bit_xor(e2,e1)))),2361852424),w.w11) in let a4=wrapping_add(wrapping_add(t3,bit_xor(bit_xor(sha_rotr(a3,2),sha_rotr(a3,13)),sha_rotr(a3,22))),bit_or(bit_and(a3,a2),bit_and(a1,bit_or(a3,a2)))) in let e4=wrapping_add(a0,t3) in
+    let t4=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e1,bit_xor(bit_xor(sha_rotr(e4,6),sha_rotr(e4,11)),sha_rotr(e4,25))),bit_xor(e2,bit_and(e4,bit_xor(e3,e2)))),2428436474),w.w12) in let a5=wrapping_add(wrapping_add(t4,bit_xor(bit_xor(sha_rotr(a4,2),sha_rotr(a4,13)),sha_rotr(a4,22))),bit_or(bit_and(a4,a3),bit_and(a2,bit_or(a4,a3)))) in let e5=wrapping_add(a1,t4) in
+    let t5=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e2,bit_xor(bit_xor(sha_rotr(e5,6),sha_rotr(e5,11)),sha_rotr(e5,25))),bit_xor(e3,bit_and(e5,bit_xor(e4,e3)))),2756734187),w.w13) in let a6=wrapping_add(wrapping_add(t5,bit_xor(bit_xor(sha_rotr(a5,2),sha_rotr(a5,13)),sha_rotr(a5,22))),bit_or(bit_and(a5,a4),bit_and(a3,bit_or(a5,a4)))) in let e6=wrapping_add(a2,t5) in
+    let t6=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e3,bit_xor(bit_xor(sha_rotr(e6,6),sha_rotr(e6,11)),sha_rotr(e6,25))),bit_xor(e4,bit_and(e6,bit_xor(e5,e4)))),3204031479),w.w14) in let a7=wrapping_add(wrapping_add(t6,bit_xor(bit_xor(sha_rotr(a6,2),sha_rotr(a6,13)),sha_rotr(a6,22))),bit_or(bit_and(a6,a5),bit_and(a4,bit_or(a6,a5)))) in let e7=wrapping_add(a3,t6) in
+    let t7=wrapping_add(wrapping_add(wrapping_add(wrapping_add(e4,bit_xor(bit_xor(sha_rotr(e7,6),sha_rotr(e7,11)),sha_rotr(e7,25))),bit_xor(e5,bit_and(e7,bit_xor(e6,e5)))),3329325298),w.w15) in let a8=wrapping_add(wrapping_add(t7,bit_xor(bit_xor(sha_rotr(a7,2),sha_rotr(a7,13)),sha_rotr(a7,22))),bit_or(bit_and(a7,a6),bit_and(a5,bit_or(a7,a6)))) in let e8=wrapping_add(a4,t7) in
+    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }
+private fn sha_compress(s:Sha256State,w:ShaWords) -> Sha256State
+  = let r=s in
+    let r=sha_rounds0(r,w) in
+    let r=sha_rounds8(r,w) in
+    let w=sha_schedule(w) in
+    let r=sha_rounds16(r,w) in
+    let r=sha_rounds24(r,w) in
+    let w=sha_schedule(w) in
+    let r=sha_rounds32(r,w) in
+    let r=sha_rounds40(r,w) in
+    let w=sha_schedule(w) in
+    let r=sha_rounds48(r,w) in
+    let r=sha_rounds56(r,w) in
+    Sha256State { a=sha_u32(wrapping_add(s.a,r.a)),b=sha_u32(wrapping_add(s.b,r.b)),c=sha_u32(wrapping_add(s.c,r.c)),d=sha_u32(wrapping_add(s.d,r.d)),e=sha_u32(wrapping_add(s.e,r.e)),f=sha_u32(wrapping_add(s.f,r.f)),g=sha_u32(wrapping_add(s.g,r.g)),h=sha_u32(wrapping_add(s.h,r.h)) }
+; generated: end sha_compress
+; A big-endian word of the padded message: text, the 0x80 marker, zeros, and
+; the bit length in the last 8 bytes.
+private fn sha_pad_word(text:Arr u8 n,at:i64,padded:i64) -> i64
+  = check n<=1152921504606846975 in
+    loop(k=0,value=0) while k<4
+      next(k+1,let p=at+k in
+        let byte=if p>=0 && p<n then str_byte(text,p) else if p==n then 128 else if p>=padded-8 && p<padded then bit_and(shift_right(n*8,(padded-1-p)*8),255) else 0 in
+        bit_or(shift_left(value,8),byte)) yield value
+private fn sha_high(value:i64) -> i64 = shift_right(value,32)
 private fn sha_block(state:Sha256State,text:Arr u8 n,block:i64,padded:i64) -> Sha256State
-  = check n<=1152921504606846975 && block>=0 && block<=144115188075855870 && padded>=8 in
-    let initial=arr(j in 0..64) if j>=16 then 0 else
-      loop(k=0,value=0) while k<4
-        next(k+1,let at=block*64+j*4+k in
-          let byte=if at<n then check at>=0 && at<n in i64(text[at]) else if at==n then 128 else if at>=padded-8 then bit_and(shift_right(n*8,(padded-1-at)*8),255) else 0 in
-          value*256+byte) yield value in
-    let words=loop(i=16,words=initial) while i<64
-      next(i+1,check i>=16 && i<64 && len(words)==64 in
-        set(words,i,sha_u32(sha_small1(words[i-2])+words[i-7]+sha_small0(words[i-15])+words[i-16]))) yield words in
-    let result=loop(i=0,state=state) while i<64
-      next(i+1,check i>=0 && i<len(words) in sha_round(state,words[i],sha_constant(i))) yield state in sha_add(state,result)
+  = let at=block*64 in
+    let w=if at>=0 && at+64<=n then
+      let v0=byte_swap64(byte_read_le(text,at,8)) in let v1=byte_swap64(byte_read_le(text,at+8,8)) in
+      let v2=byte_swap64(byte_read_le(text,at+16,8)) in let v3=byte_swap64(byte_read_le(text,at+24,8)) in
+      let v4=byte_swap64(byte_read_le(text,at+32,8)) in let v5=byte_swap64(byte_read_le(text,at+40,8)) in
+      let v6=byte_swap64(byte_read_le(text,at+48,8)) in let v7=byte_swap64(byte_read_le(text,at+56,8)) in
+      ShaWords { w0=sha_high(v0),w1=sha_u32(v0),w2=sha_high(v1),w3=sha_u32(v1),w4=sha_high(v2),w5=sha_u32(v2),w6=sha_high(v3),w7=sha_u32(v3),
+        w8=sha_high(v4),w9=sha_u32(v4),w10=sha_high(v5),w11=sha_u32(v5),w12=sha_high(v6),w13=sha_u32(v6),w14=sha_high(v7),w15=sha_u32(v7) }
+    else ShaWords { w0=sha_pad_word(text,at,padded),w1=sha_pad_word(text,at+4,padded),w2=sha_pad_word(text,at+8,padded),w3=sha_pad_word(text,at+12,padded),
+      w4=sha_pad_word(text,at+16,padded),w5=sha_pad_word(text,at+20,padded),w6=sha_pad_word(text,at+24,padded),w7=sha_pad_word(text,at+28,padded),
+      w8=sha_pad_word(text,at+32,padded),w9=sha_pad_word(text,at+36,padded),w10=sha_pad_word(text,at+40,padded),w11=sha_pad_word(text,at+44,padded),
+      w12=sha_pad_word(text,at+48,padded),w13=sha_pad_word(text,at+52,padded),w14=sha_pad_word(text,at+56,padded),w15=sha_pad_word(text,at+60,padded) } in
+    sha_compress(state,w)
 fn sha256(text:Arr u8 n) -> Arr u8 _
   = check n<=1152921504606846975 in let padded=(n+72)/64*64 in
     let initial=Sha256State { a=1779033703,b=3144134277,c=1013904242,d=2773480762,e=1359893119,f=2600822924,g=528734635,h=1541459225 } in
@@ -53,6 +181,3 @@ fn hkdf_label(key:Arr u8 n,label:Arr u8 m,context:Arr u8 k,count:i64{count>=0 &&
     let header=arr(i in 0..3) u8(if i==0 then count/256 else if i==1 then count%256 else m+6) in
     hkdf_expand(key,concat(header,"tls13 ",label,arr(i in 0..1) u8(k),context),count)
 
-private fn sha_constant(index:i64) -> i64
-  = let data="\x42\x8a\x2f\x98\x71\x37\x44\x91\xb5\xc0\xfb\xcf\xe9\xb5\xdb\xa5\x39\x56\xc2\x5b\x59\xf1\x11\xf1\x92\x3f\x82\xa4\xab\x1c\x5e\xd5\xd8\x07\xaa\x98\x12\x83\x5b\x01\x24\x31\x85\xbe\x55\x0c\x7d\xc3\x72\xbe\x5d\x74\x80\xde\xb1\xfe\x9b\xdc\x06\xa7\xc1\x9b\xf1\x74\xe4\x9b\x69\xc1\xef\xbe\x47\x86\x0f\xc1\x9d\xc6\x24\x0c\xa1\xcc\x2d\xe9\x2c\x6f\x4a\x74\x84\xaa\x5c\xb0\xa9\xdc\x76\xf9\x88\xda\x98\x3e\x51\x52\xa8\x31\xc6\x6d\xb0\x03\x27\xc8\xbf\x59\x7f\xc7\xc6\xe0\x0b\xf3\xd5\xa7\x91\x47\x06\xca\x63\x51\x14\x29\x29\x67\x27\xb7\x0a\x85\x2e\x1b\x21\x38\x4d\x2c\x6d\xfc\x53\x38\x0d\x13\x65\x0a\x73\x54\x76\x6a\x0a\xbb\x81\xc2\xc9\x2e\x92\x72\x2c\x85\xa2\xbf\xe8\xa1\xa8\x1a\x66\x4b\xc2\x4b\x8b\x70\xc7\x6c\x51\xa3\xd1\x92\xe8\x19\xd6\x99\x06\x24\xf4\x0e\x35\x85\x10\x6a\xa0\x70\x19\xa4\xc1\x16\x1e\x37\x6c\x08\x27\x48\x77\x4c\x34\xb0\xbc\xb5\x39\x1c\x0c\xb3\x4e\xd8\xaa\x4a\x5b\x9c\xca\x4f\x68\x2e\x6f\xf3\x74\x8f\x82\xee\x78\xa5\x63\x6f\x84\xc8\x78\x14\x8c\xc7\x02\x08\x90\xbe\xff\xfa\xa4\x50\x6c\xeb\xbe\xf9\xa3\xf7\xc6\x71\x78\xf2" in
-    loop(j=0,value=0) while j<4 next(j+1,value*256+str_byte(data,index*4+j)) yield value

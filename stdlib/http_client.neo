@@ -74,6 +74,27 @@ private fn http_stream_take(move reader:HttpReader,count:i64) -> HttpReader
       chunk_left=if reader.mode==2 then reader.chunk_left-count else reader.chunk_left,
       framing=if reader.mode==2 && count==reader.chunk_left then 1 else reader.framing,
       done=reader.mode==1 && count==reader.remaining }
+; A response body so far plus its next chunk; the first chunk is used as it is.
+fn http_body_append(move out:Arr u8 n,chunk:Arr u8 m) -> Arr u8 _ = if n==0 then chunk else concat(out,chunk)
+private effect(net,time) fn http_read_into(fd:i64,raw:ptr,at:i64,size:i64,deadline:i64) -> IntResult
+  = if net_remaining(deadline)==0 then int_error(110,"HTTP read timed out",0) else
+    let count=rt_read(fd,ptr_add(raw,at),size-at) in
+    if count>0 then int_ok(at+count) else if count==0 then int_error(5,"truncated HTTP body",0) else
+    let code=i64(load_i32(rt_errno(),0)) in if code==4 then int_ok(at) else if code!=rt_again() then int_error(code,"HTTP read failed",0) else
+    if net_wait(fd,1,deadline) then int_ok(at) else int_error(110,"HTTP read timed out",0)
+; The rest of a Content-Length body from a plain socket, read into one buffer of
+; the announced size with reads as large as the socket has queued: one copy out
+; of the kernel and one into the result, instead of 16 KiB at a time through
+; the stream buffer. Any other reader is returned unchanged.
+effect(net,time) fn http_read_length_body(socket:Socket,move reader:HttpReader,deadline:i64) -> HttpReader
+  = let size=reader.remaining in let have=len(reader.buffer) in let fd=rt_handle_fd(socket_identity(socket),2) in
+    if !reader.ok || reader.done || reader.mode!=1 || size<=have || size>reader.limit-reader.total || fd<0 then reader else
+      let buffered=reader.buffer in let raw=ax_alloc(size) in let copied=memcpy(raw,data(buffered),have) in
+      let filled=loop(step=int_ok(have)) while step.ok && step.value<size next(http_read_into(fd,raw,step.value,size,deadline)) yield step in
+      let bytes=if filled.ok then check size>=0 in bytes_ok(view(raw,size)) else bytes_error(filled.error.code,filled.error.message,0) in
+      let released=ax_release(raw) in
+      if !bytes.ok then http_reader_error(reader,bytes.error.code,bytes.error.message) else
+        reader with { chunk=bytes.value,buffer="",total=reader.total+size,remaining=0,done=true }
 private effect(net,time) fn http_stream_step(socket:Socket,move reader:HttpReader,deadline:i64) -> HttpReader
   = if reader.mode==0 then reader with { done=true } else
     if reader.mode==1 && reader.remaining==0 then if len(reader.buffer)>0 then http_reader_error(reader,1,"excess HTTP body") else reader with { done=true } else
@@ -109,11 +130,11 @@ effect(fs,net,time,process) fn http_request(host:Arr u8 n,port:i64,method:Arr u8
     let address=dns_lookup(host,timer.value) in if !address.ok then net_error(address.error.code,address.error.message) else
     using socket=tcp_connect_ipv4(dns_address(address.value),port,timer.value) in
       let connected=socket_status(socket) in if !connected.ok then net_error(connected.error.code,connected.error.message) else
-      let reader=http_start(socket,method,path,concat(host,":",int_text(port)),body,timer.value,limit) in
+      let reader=http_read_length_body(socket,http_start(socket,method,path,concat(host,":",int_text(port)),body,timer.value,limit),timer.value) in
       loop(state=reader,out="") while state.ok && !state.done
-        next(http_read_next(socket,state,timer.value),concat(out,state.chunk)) yield
+        next(http_read_next(socket,state,timer.value),http_body_append(out,state.chunk)) yield
           if !state.ok then net_error(state.error.code,state.error.message) else
-            HttpResult { ok=true,status=state.status,body=concat(out,state.chunk),error=no_error() }
+            HttpResult { ok=true,status=state.status,body=http_body_append(out,state.chunk),error=no_error() }
 
 ; Optional transport callbacks let the same framing/parser run over TLS or
 ; cancellation-aware sockets. The capture record holds typed arena references.

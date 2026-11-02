@@ -10,6 +10,7 @@ Run it after changing a limb layout here, then rerun the crypto vector tests.
   p256.neo    Montgomery products modulo the P-256 prime and group order, nine
               unsigned 29-bit limbs, R = 2^261: a column holds at most 18
               products below 2^58, so every running sum stays below 2^63.
+  sha256.neo  the 64 SHA-256 rounds and message schedule, unrolled.
 """
 from pathlib import Path
 import re
@@ -131,6 +132,45 @@ def p9_mont():
     return (f'private fn p9_mont(a:{PF},b:{PF},m:{PF},inverse:i64) -> {PF}\n  = ' + '\n    '.join(lines) +
             f'\n    {PF} {{ {fields} }}')
 
+def p9_times_limb(q, limb):
+    """q*limb for a P-256 prime limb, as shifts: every limb is 0, 2^a or 2^a-2^b."""
+    if limb == 0: return None
+    if limb & (limb - 1) == 0: return f'shift_left({q},{limb.bit_length() - 1})'
+    high = limb.bit_length(); low = (1 << high) - limb
+    assert low & (low - 1) == 0, limb
+    low_term = q if low == 1 else f'shift_left({q},{low.bit_length() - 1})'
+    return f'wrapping_sub(shift_left({q},{high}),{low_term})'
+
+def p9_field(square):
+    """p9_mont specialised to the P-256 prime: -p^-1 mod 2^29 is 1, so each
+    quotient digit is the column's low limb, and the prime's limbs are sparse
+    sums of powers of two, so q*m needs shifts instead of multiplications.
+    Every term is the same nonnegative product as in p9_mont, so the bounds
+    are unchanged. The square adds each cross product once, doubled."""
+    s = LIMBS
+    m = [(P >> (BITS * i)) & MASK for i in range(s)]
+    assert (-pow(P, -1, 1 << BITS)) % (1 << BITS) == 1 and m[0] == MASK
+    lines = ['let acc=0 in']
+    if square: lines.append(' '.join(f'let d{j}=shift_left(a.l{j},1) in' for j in range(s - 1)))
+    for i in range(2 * s - 1):
+        terms = ['acc']
+        lo, hi = max(0, i - s + 1), min(i, s - 1)
+        for j in range(lo, hi + 1):
+            if not square: terms.append(mul(f'a.l{j}', f'b.l{i - j}'))
+            elif j < i - j: terms.append(mul(f'd{j}', f'a.l{i - j}'))
+            elif j == i - j: terms.append(mul(f'a.l{j}', f'a.l{j}'))
+            if j < i and i - j < s:
+                term = p9_times_limb(f'q{j}', m[i - j])
+                if term: terms.append(term)
+        lines.append(f'let acc={add(terms)} in')
+        if i < s:
+            lines.append(f'let q{i}=bit_and(acc,{MASK}) in let acc=wrapping_add(shift_right(acc,{BITS}),q{i}) in')
+        else:
+            lines.append(f'let r{i - s}=bit_and(acc,{MASK}) in let acc=shift_right(acc,{BITS}) in')
+    fields = ','.join(f'l{k}=r{k}' for k in range(s - 1)) + f',l{s - 1}=acc'
+    head = f'private fn p9_field_square(a:{PF}) -> {PF}' if square else f'private fn p9_field_mont(a:{PF},b:{PF}) -> {PF}'
+    return head + '\n  = ' + '\n    '.join(lines) + f'\n    {PF} {{ {fields} }}'
+
 def p9_norm():
     """Signed limbs to limbs 0..7 in [0,2^29) and a signed top limb."""
     lines = []
@@ -208,6 +248,48 @@ def affine_mul(k, p):
         p = affine_add(p, p); k >>= 1
     return out
 
+# ---------------------------------------------------------------- SHA-256
+SHA_K = [int(x, 16) for x in '''428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5 d807aa98 12835b01 243185be 550c7dc3
+72be5d74 80deb1fe 9bdc06a7 c19bf174 e49b69c1 efbe4786 0fc19dc6 240ca1cc 2de92c6f 4a7484aa 5cb0a9dc 76f988da 983e5152 a831c66d b00327c8
+bf597fc7 c6e00bf3 d5a79147 06ca6351 14292967 27b70a85 2e1b2138 4d2c6dfc 53380d13 650a7354 766a0abb 81c2c92e 92722c85 a2bfe8a1 a81a664b
+c24b8b70 c76c51a3 d192e819 d6990624 f40e3585 106aa070 19a4c116 1e376c08 2748774c 34b0bcb5 391c0cb3 4ed8aa4a 5b9cca4f 682e6ff3 748f82ee
+78a5636f 84c87814 8cc70208 90befffa a4506ceb bef9a3f7 c67178f2'''.split()]
+
+def sha_schedule():
+    """The next 16 message-schedule words from the previous 16 (w0 oldest)."""
+    word = lambda i: f'w.w{i}' if i < 16 else f'n{i - 16}'
+    lines = [f'let n{j}={add([f"sha_small1({word(j + 14)})", word(j + 9), f"sha_small0({word(j + 1)})", word(j)])} in' for j in range(16)]
+    return (f'private inline fn sha_schedule(w:ShaWords) -> ShaWords\n  = ' + '\n    '.join(lines) +
+            '\n    ShaWords { ' + ','.join(f'w{j}=n{j}' for j in range(16)) + ' }')
+
+def sha_rounds(base):
+    """Rounds base..base+7 as straight-line SSA over the working state."""
+    rot = lambda x, r: f'sha_rotr({x},{r})'
+    name = lambda v, i: f'{v}{i}' if i >= 0 else f'{v}m{-i}'
+    lines = ['let a0=s.a in let am1=s.b in let am2=s.c in let am3=s.d in let e0=s.e in let em1=s.f in let em2=s.g in let em3=s.h in']
+    for i in range(8):
+        a, b, c, d = (name('a', i - k) for k in range(4)); e, f, g, h = (name('e', i - k) for k in range(4))
+        lines.append(f'let t{i}={add([h, f"bit_xor(bit_xor({rot(e, 6)},{rot(e, 11)}),{rot(e, 25)})", f"bit_xor({g},bit_and({e},bit_xor({f},{g})))", str(SHA_K[base + i]), f"w.w{(base + i) % 16}"])} in '
+                     f'let a{i + 1}={add([f"t{i}", f"bit_xor(bit_xor({rot(a, 2)},{rot(a, 13)}),{rot(a, 22)})", f"bit_or(bit_and({a},{b}),bit_and({c},bit_or({a},{b})))"])} in '
+                     f'let e{i + 1}=wrapping_add({d},t{i}) in')
+    return (f'private inline fn sha_rounds{base}(s:Sha256State,w:ShaWords) -> Sha256State\n  = ' + '\n    '.join(lines) +
+            '\n    Sha256State { a=a8,b=a7,c=a6,d=a5,e=e8,f=e7,g=e6,h=e5 }')
+
+def sha_compress():
+    """All 64 rounds and the message schedule, unrolled in eight-round pieces
+    that are forced inline (one straight-line function would nest too deeply
+    for the parser). Words carry garbage above bit 31 (wrapping sums keep the
+    low 32 bits exact); every rotation and shift masks its input first, so each
+    compiles to a 32-bit rotate, and the chaining sums are masked at the end."""
+    assert len(SHA_K) == 64
+    steps = ['let r=s in']
+    for base in range(0, 64, 8):
+        if base and base % 16 == 0: steps.append('let w=sha_schedule(w) in')
+        steps.append(f'let r=sha_rounds{base}(r,w) in')
+    fields = ','.join(f'{k}=sha_u32(wrapping_add(s.{k},r.{k}))' for k in 'abcdefgh')
+    pieces = [sha_schedule()] + [sha_rounds(b) for b in range(0, 64, 8)]
+    return '\n'.join(pieces) + f'\nprivate fn sha_compress(s:Sha256State,w:ShaWords) -> Sha256State\n  = ' + '\n    '.join(steps) + f'\n    Sha256State {{ {fields} }}'
+
 # ---------------------------------------------------------------- regions
 def region(text, name, body):
     pattern = re.compile(rf'(; generated: begin {name}\n).*?(; generated: end {name}\n)', re.S)
@@ -227,13 +309,15 @@ def main():
     path = ROOT / 'stdlib/p256.neo'; text = path.read_text()
     if '; generated: begin p9_mont' not in text: return
     w = p9_words()
-    text = region(text, 'p9_mont', p9_mont())
+    text = region(text, 'p9_mont', p9_mont() + '\n' + p9_field(False) + '\n' + p9_field(True))
     text = region(text, 'p9_norm', p9_norm())
     text = region(text, 'p9_unpack', p9_unpack())
     text = region(text, 'p9_words', f'private fn p9_bytes(a:{PF}) -> Arr u8 _\n  = let out=arr(i in 0..32) u8(0) in\n    ' +
                   ' in\n    '.join(f'let out=byte_write_le(out,{8 * (3 - k)},byte_swap64({w[k]}),8)' for k in range(4)) + ' in out')
     text = region(text, 'p9_constants', p9_constants())
     path.write_text(text)
-    print('regenerated x25519.neo and p256.neo field arithmetic')
+    path = ROOT / 'stdlib/sha256.neo'; text = path.read_text()
+    path.write_text(region(text, 'sha_compress', sha_compress()))
+    print('regenerated x25519.neo, p256.neo and sha256.neo arithmetic')
 
 if __name__ == '__main__': main()

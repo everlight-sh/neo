@@ -12,13 +12,16 @@ private fn cc_word(bytes:Arr u8 n,offset:i64) -> i64 = byte_read_le(bytes,offset
 private fn cc_key(key:Arr u8 n,nonce:Arr u8 m) -> CcKey
   = CcKey { k0=cc_word(key,0),k1=cc_word(key,4),k2=cc_word(key,8),k3=cc_word(key,12),k4=cc_word(key,16),k5=cc_word(key,20),
       k6=cc_word(key,24),k7=cc_word(key,28),n0=cc_word(nonce,0),n1=cc_word(nonce,4),n2=cc_word(nonce,8) }
+; The a and c words of the working state carry garbage above bit 31 (they only
+; ever gain rotated words, so stay far below 2^63); each rotation masks its
+; own input, so it compiles to one 32-bit rotate wherever it occurs.
 private fn cc_rot(value:i64,bits:i64) -> i64
-  = bit_and(bit_or(shift_left(value,bits),shift_right(value,32-bits)),4294967295)
+  = let low=bit_and(value,4294967295) in bit_and(bit_or(shift_left(low,bits),shift_right(low,32-bits)),4294967295)
 private fn cc_quarter(a:i64,b:i64,c:i64,d:i64) -> Cc4
-  = let a=bit_and(a+b,4294967295) in let d=cc_rot(bit_xor(d,a),16) in
-    let c=bit_and(c+d,4294967295) in let b=cc_rot(bit_xor(b,c),12) in
-    let a=bit_and(a+b,4294967295) in let d=cc_rot(bit_xor(d,a),8) in
-    let c=bit_and(c+d,4294967295) in let b=cc_rot(bit_xor(b,c),7) in Cc4 { a=a,b=b,c=c,d=d }
+  = let a=wrapping_add(a,b) in let d=cc_rot(bit_xor(d,a),16) in
+    let c=wrapping_add(c,d) in let b=cc_rot(bit_xor(b,c),12) in
+    let a=wrapping_add(a,b) in let d=cc_rot(bit_xor(d,a),8) in
+    let c=wrapping_add(c,d) in let b=cc_rot(bit_xor(b,c),7) in Cc4 { a=a,b=b,c=c,d=d }
 ; A column round, then a diagonal round.
 private fn cc_double(s:CcBlock) -> CcBlock
   = let q0=cc_quarter(s.x0,s.x4,s.x8,s.x12) in let q1=cc_quarter(s.x1,s.x5,s.x9,s.x13) in
@@ -32,12 +35,12 @@ private fn cc_stream(key:CcKey,counter:i64) -> CcBlock
   = let initial=CcBlock { x0=1634760805,x1=857760878,x2=2036477234,x3=1797285236,x4=key.k0,x5=key.k1,x6=key.k2,x7=key.k3,
       x8=key.k4,x9=key.k5,x10=key.k6,x11=key.k7,x12=counter,x13=key.n0,x14=key.n1,x15=key.n2 } in
     let s=loop(i=0,s=initial) while i<10 next(i+1,cc_double(s)) yield s in
-    CcBlock { x0=bit_and(s.x0+initial.x0,4294967295),x1=bit_and(s.x1+initial.x1,4294967295),x2=bit_and(s.x2+initial.x2,4294967295),
-      x3=bit_and(s.x3+initial.x3,4294967295),x4=bit_and(s.x4+initial.x4,4294967295),x5=bit_and(s.x5+initial.x5,4294967295),
-      x6=bit_and(s.x6+initial.x6,4294967295),x7=bit_and(s.x7+initial.x7,4294967295),x8=bit_and(s.x8+initial.x8,4294967295),
-      x9=bit_and(s.x9+initial.x9,4294967295),x10=bit_and(s.x10+initial.x10,4294967295),x11=bit_and(s.x11+initial.x11,4294967295),
-      x12=bit_and(s.x12+initial.x12,4294967295),x13=bit_and(s.x13+initial.x13,4294967295),x14=bit_and(s.x14+initial.x14,4294967295),
-      x15=bit_and(s.x15+initial.x15,4294967295) }
+    CcBlock { x0=bit_and(wrapping_add(s.x0,initial.x0),4294967295),x1=bit_and(wrapping_add(s.x1,initial.x1),4294967295),x2=bit_and(wrapping_add(s.x2,initial.x2),4294967295),
+      x3=bit_and(wrapping_add(s.x3,initial.x3),4294967295),x4=bit_and(wrapping_add(s.x4,initial.x4),4294967295),x5=bit_and(wrapping_add(s.x5,initial.x5),4294967295),
+      x6=bit_and(wrapping_add(s.x6,initial.x6),4294967295),x7=bit_and(wrapping_add(s.x7,initial.x7),4294967295),x8=bit_and(wrapping_add(s.x8,initial.x8),4294967295),
+      x9=bit_and(wrapping_add(s.x9,initial.x9),4294967295),x10=bit_and(wrapping_add(s.x10,initial.x10),4294967295),x11=bit_and(wrapping_add(s.x11,initial.x11),4294967295),
+      x12=bit_and(wrapping_add(s.x12,initial.x12),4294967295),x13=bit_and(wrapping_add(s.x13,initial.x13),4294967295),x14=bit_and(wrapping_add(s.x14,initial.x14),4294967295),
+      x15=bit_and(wrapping_add(s.x15,initial.x15),4294967295) }
 private fn cc_pair(low:i64,high:i64) -> i64 = bit_or(low,shift_left(high,32))
 ; Eight keystream words as 64-bit little-endian pairs.
 private fn cc_lane(s:CcBlock,index:i64) -> i64
@@ -85,17 +88,17 @@ private fn poly_key(low:i64,high:i64) -> PolyKey
     PolyKey { r0=r0,r1=r1,r2=r2,r3=r3,r4=r4,s1=r1*5,s2=r2*5,s3=r3*5,s4=r4*5 }
 ; h = (h + block) * r, partially reduced; top is 1 for a full 16-byte block.
 private fn poly_block(h:PolyState,r:PolyKey,low:i64,high:i64,top:i64) -> PolyState
-  = let h0=h.a+bit_and(low,67108863) in let h1=h.b+bit_and(shift_right(low,26),67108863) in
-    let h2=h.c+bit_and(bit_or(shift_right(low,52),shift_left(high,12)),67108863) in
-    let h3=h.d+bit_and(shift_right(high,14),67108863) in let h4=h.e+bit_or(shift_right(high,40),shift_left(top,24)) in
+  = let h0=wrapping_add(h.a,bit_and(low,67108863)) in let h1=wrapping_add(h.b,bit_and(shift_right(low,26),67108863)) in
+    let h2=wrapping_add(h.c,bit_and(bit_or(shift_right(low,52),shift_left(high,12)),67108863)) in
+    let h3=wrapping_add(h.d,bit_and(shift_right(high,14),67108863)) in let h4=wrapping_add(h.e,bit_or(shift_right(high,40),shift_left(top,24))) in
     let d0=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r0),wrapping_mul(h1,r.s4)),wrapping_add(wrapping_mul(h2,r.s3),wrapping_mul(h3,r.s2))),wrapping_mul(h4,r.s1)) in
     let d1=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r1),wrapping_mul(h1,r.r0)),wrapping_add(wrapping_mul(h2,r.s4),wrapping_mul(h3,r.s3))),wrapping_mul(h4,r.s2)) in
     let d2=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r2),wrapping_mul(h1,r.r1)),wrapping_add(wrapping_mul(h2,r.r0),wrapping_mul(h3,r.s4))),wrapping_mul(h4,r.s3)) in
     let d3=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r3),wrapping_mul(h1,r.r2)),wrapping_add(wrapping_mul(h2,r.r1),wrapping_mul(h3,r.r0))),wrapping_mul(h4,r.s4)) in
     let d4=wrapping_add(wrapping_add(wrapping_add(wrapping_mul(h0,r.r4),wrapping_mul(h1,r.r3)),wrapping_add(wrapping_mul(h2,r.r2),wrapping_mul(h3,r.r1))),wrapping_mul(h4,r.r0)) in
-    let d1=d1+shift_right(d0,26) in let d2=d2+shift_right(d1,26) in let d3=d3+shift_right(d2,26) in let d4=d4+shift_right(d3,26) in
-    let a=bit_and(d0,67108863)+shift_right(d4,26)*5 in
-    PolyState { a=bit_and(a,67108863),b=bit_and(d1,67108863)+shift_right(a,26),c=bit_and(d2,67108863),d=bit_and(d3,67108863),e=bit_and(d4,67108863) }
+    let d1=wrapping_add(d1,shift_right(d0,26)) in let d2=wrapping_add(d2,shift_right(d1,26)) in let d3=wrapping_add(d3,shift_right(d2,26)) in let d4=wrapping_add(d4,shift_right(d3,26)) in
+    let a=wrapping_add(bit_and(d0,67108863),wrapping_mul(shift_right(d4,26),5)) in
+    PolyState { a=bit_and(a,67108863),b=wrapping_add(bit_and(d1,67108863),shift_right(a,26)),c=bit_and(d2,67108863),d=bit_and(d3,67108863),e=bit_and(d4,67108863) }
 ; The 16-byte blocks of text[at..at+count); a last partial block is padded with
 ; marker (1 for plain Poly1305) and zeros, and keeps top (1 for AEAD padding).
 private fn poly_tail(text:Arr u8 n,at:i64,count:i64,start:i64,marker:i64) -> i64

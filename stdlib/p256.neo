@@ -61,6 +61,81 @@ private fn p9_mont(a:P9,b:P9,m:P9,inverse:i64) -> P9
     let acc=wrapping_add(wrapping_add(acc,wrapping_mul(a.l8,b.l8)),wrapping_mul(q8,m.l8)) in
     let r7=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
     P9 { l0=r0,l1=r1,l2=r2,l3=r3,l4=r4,l5=r5,l6=r6,l7=r7,l8=acc }
+private fn p9_field_mont(a:P9,b:P9) -> P9
+  = let acc=0 in
+    let acc=wrapping_add(acc,wrapping_mul(a.l0,b.l0)) in
+    let q0=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q0) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l1)),wrapping_sub(shift_left(q0,29),q0)),wrapping_mul(a.l1,b.l0)) in
+    let q1=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q1) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l2)),wrapping_sub(shift_left(q0,29),q0)),wrapping_mul(a.l1,b.l1)),wrapping_sub(shift_left(q1,29),q1)),wrapping_mul(a.l2,b.l0)) in
+    let q2=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q2) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l3)),wrapping_sub(shift_left(q0,9),q0)),wrapping_mul(a.l1,b.l2)),wrapping_sub(shift_left(q1,29),q1)),wrapping_mul(a.l2,b.l1)),wrapping_sub(shift_left(q2,29),q2)),wrapping_mul(a.l3,b.l0)) in
+    let q3=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q3) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l4)),wrapping_mul(a.l1,b.l3)),wrapping_sub(shift_left(q1,9),q1)),wrapping_mul(a.l2,b.l2)),wrapping_sub(shift_left(q2,29),q2)),wrapping_mul(a.l3,b.l1)),wrapping_sub(shift_left(q3,29),q3)),wrapping_mul(a.l4,b.l0)) in
+    let q4=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q4) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l5)),wrapping_mul(a.l1,b.l4)),wrapping_mul(a.l2,b.l3)),wrapping_sub(shift_left(q2,9),q2)),wrapping_mul(a.l3,b.l2)),wrapping_sub(shift_left(q3,29),q3)),wrapping_mul(a.l4,b.l1)),wrapping_sub(shift_left(q4,29),q4)),wrapping_mul(a.l5,b.l0)) in
+    let q5=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q5) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l6)),shift_left(q0,18)),wrapping_mul(a.l1,b.l5)),wrapping_mul(a.l2,b.l4)),wrapping_mul(a.l3,b.l3)),wrapping_sub(shift_left(q3,9),q3)),wrapping_mul(a.l4,b.l2)),wrapping_sub(shift_left(q4,29),q4)),wrapping_mul(a.l5,b.l1)),wrapping_sub(shift_left(q5,29),q5)),wrapping_mul(a.l6,b.l0)) in
+    let q6=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q6) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l7)),wrapping_sub(shift_left(q0,29),shift_left(q0,21))),wrapping_mul(a.l1,b.l6)),shift_left(q1,18)),wrapping_mul(a.l2,b.l5)),wrapping_mul(a.l3,b.l4)),wrapping_mul(a.l4,b.l3)),wrapping_sub(shift_left(q4,9),q4)),wrapping_mul(a.l5,b.l2)),wrapping_sub(shift_left(q5,29),q5)),wrapping_mul(a.l6,b.l1)),wrapping_sub(shift_left(q6,29),q6)),wrapping_mul(a.l7,b.l0)) in
+    let q7=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q7) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l0,b.l8)),wrapping_sub(shift_left(q0,24),q0)),wrapping_mul(a.l1,b.l7)),wrapping_sub(shift_left(q1,29),shift_left(q1,21))),wrapping_mul(a.l2,b.l6)),shift_left(q2,18)),wrapping_mul(a.l3,b.l5)),wrapping_mul(a.l4,b.l4)),wrapping_mul(a.l5,b.l3)),wrapping_sub(shift_left(q5,9),q5)),wrapping_mul(a.l6,b.l2)),wrapping_sub(shift_left(q6,29),q6)),wrapping_mul(a.l7,b.l1)),wrapping_sub(shift_left(q7,29),q7)),wrapping_mul(a.l8,b.l0)) in
+    let q8=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q8) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l1,b.l8)),wrapping_sub(shift_left(q1,24),q1)),wrapping_mul(a.l2,b.l7)),wrapping_sub(shift_left(q2,29),shift_left(q2,21))),wrapping_mul(a.l3,b.l6)),shift_left(q3,18)),wrapping_mul(a.l4,b.l5)),wrapping_mul(a.l5,b.l4)),wrapping_mul(a.l6,b.l3)),wrapping_sub(shift_left(q6,9),q6)),wrapping_mul(a.l7,b.l2)),wrapping_sub(shift_left(q7,29),q7)),wrapping_mul(a.l8,b.l1)),wrapping_sub(shift_left(q8,29),q8)) in
+    let r0=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l2,b.l8)),wrapping_sub(shift_left(q2,24),q2)),wrapping_mul(a.l3,b.l7)),wrapping_sub(shift_left(q3,29),shift_left(q3,21))),wrapping_mul(a.l4,b.l6)),shift_left(q4,18)),wrapping_mul(a.l5,b.l5)),wrapping_mul(a.l6,b.l4)),wrapping_mul(a.l7,b.l3)),wrapping_sub(shift_left(q7,9),q7)),wrapping_mul(a.l8,b.l2)),wrapping_sub(shift_left(q8,29),q8)) in
+    let r1=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l3,b.l8)),wrapping_sub(shift_left(q3,24),q3)),wrapping_mul(a.l4,b.l7)),wrapping_sub(shift_left(q4,29),shift_left(q4,21))),wrapping_mul(a.l5,b.l6)),shift_left(q5,18)),wrapping_mul(a.l6,b.l5)),wrapping_mul(a.l7,b.l4)),wrapping_mul(a.l8,b.l3)),wrapping_sub(shift_left(q8,9),q8)) in
+    let r2=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l4,b.l8)),wrapping_sub(shift_left(q4,24),q4)),wrapping_mul(a.l5,b.l7)),wrapping_sub(shift_left(q5,29),shift_left(q5,21))),wrapping_mul(a.l6,b.l6)),shift_left(q6,18)),wrapping_mul(a.l7,b.l5)),wrapping_mul(a.l8,b.l4)) in
+    let r3=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l5,b.l8)),wrapping_sub(shift_left(q5,24),q5)),wrapping_mul(a.l6,b.l7)),wrapping_sub(shift_left(q6,29),shift_left(q6,21))),wrapping_mul(a.l7,b.l6)),shift_left(q7,18)),wrapping_mul(a.l8,b.l5)) in
+    let r4=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l6,b.l8)),wrapping_sub(shift_left(q6,24),q6)),wrapping_mul(a.l7,b.l7)),wrapping_sub(shift_left(q7,29),shift_left(q7,21))),wrapping_mul(a.l8,b.l6)),shift_left(q8,18)) in
+    let r5=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(a.l7,b.l8)),wrapping_sub(shift_left(q7,24),q7)),wrapping_mul(a.l8,b.l7)),wrapping_sub(shift_left(q8,29),shift_left(q8,21))) in
+    let r6=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(acc,wrapping_mul(a.l8,b.l8)),wrapping_sub(shift_left(q8,24),q8)) in
+    let r7=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    P9 { l0=r0,l1=r1,l2=r2,l3=r3,l4=r4,l5=r5,l6=r6,l7=r7,l8=acc }
+private fn p9_field_square(a:P9) -> P9
+  = let acc=0 in
+    let d0=shift_left(a.l0,1) in let d1=shift_left(a.l1,1) in let d2=shift_left(a.l2,1) in let d3=shift_left(a.l3,1) in let d4=shift_left(a.l4,1) in let d5=shift_left(a.l5,1) in let d6=shift_left(a.l6,1) in let d7=shift_left(a.l7,1) in
+    let acc=wrapping_add(acc,wrapping_mul(a.l0,a.l0)) in
+    let q0=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q0) in
+    let acc=wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l1)),wrapping_sub(shift_left(q0,29),q0)) in
+    let q1=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q1) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l2)),wrapping_sub(shift_left(q0,29),q0)),wrapping_mul(a.l1,a.l1)),wrapping_sub(shift_left(q1,29),q1)) in
+    let q2=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q2) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l3)),wrapping_sub(shift_left(q0,9),q0)),wrapping_mul(d1,a.l2)),wrapping_sub(shift_left(q1,29),q1)),wrapping_sub(shift_left(q2,29),q2)) in
+    let q3=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q3) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l4)),wrapping_mul(d1,a.l3)),wrapping_sub(shift_left(q1,9),q1)),wrapping_mul(a.l2,a.l2)),wrapping_sub(shift_left(q2,29),q2)),wrapping_sub(shift_left(q3,29),q3)) in
+    let q4=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q4) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l5)),wrapping_mul(d1,a.l4)),wrapping_mul(d2,a.l3)),wrapping_sub(shift_left(q2,9),q2)),wrapping_sub(shift_left(q3,29),q3)),wrapping_sub(shift_left(q4,29),q4)) in
+    let q5=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q5) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l6)),shift_left(q0,18)),wrapping_mul(d1,a.l5)),wrapping_mul(d2,a.l4)),wrapping_mul(a.l3,a.l3)),wrapping_sub(shift_left(q3,9),q3)),wrapping_sub(shift_left(q4,29),q4)),wrapping_sub(shift_left(q5,29),q5)) in
+    let q6=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q6) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l7)),wrapping_sub(shift_left(q0,29),shift_left(q0,21))),wrapping_mul(d1,a.l6)),shift_left(q1,18)),wrapping_mul(d2,a.l5)),wrapping_mul(d3,a.l4)),wrapping_sub(shift_left(q4,9),q4)),wrapping_sub(shift_left(q5,29),q5)),wrapping_sub(shift_left(q6,29),q6)) in
+    let q7=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q7) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d0,a.l8)),wrapping_sub(shift_left(q0,24),q0)),wrapping_mul(d1,a.l7)),wrapping_sub(shift_left(q1,29),shift_left(q1,21))),wrapping_mul(d2,a.l6)),shift_left(q2,18)),wrapping_mul(d3,a.l5)),wrapping_mul(a.l4,a.l4)),wrapping_sub(shift_left(q5,9),q5)),wrapping_sub(shift_left(q6,29),q6)),wrapping_sub(shift_left(q7,29),q7)) in
+    let q8=bit_and(acc,536870911) in let acc=wrapping_add(shift_right(acc,29),q8) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d1,a.l8)),wrapping_sub(shift_left(q1,24),q1)),wrapping_mul(d2,a.l7)),wrapping_sub(shift_left(q2,29),shift_left(q2,21))),wrapping_mul(d3,a.l6)),shift_left(q3,18)),wrapping_mul(d4,a.l5)),wrapping_sub(shift_left(q6,9),q6)),wrapping_sub(shift_left(q7,29),q7)),wrapping_sub(shift_left(q8,29),q8)) in
+    let r0=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d2,a.l8)),wrapping_sub(shift_left(q2,24),q2)),wrapping_mul(d3,a.l7)),wrapping_sub(shift_left(q3,29),shift_left(q3,21))),wrapping_mul(d4,a.l6)),shift_left(q4,18)),wrapping_mul(a.l5,a.l5)),wrapping_sub(shift_left(q7,9),q7)),wrapping_sub(shift_left(q8,29),q8)) in
+    let r1=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d3,a.l8)),wrapping_sub(shift_left(q3,24),q3)),wrapping_mul(d4,a.l7)),wrapping_sub(shift_left(q4,29),shift_left(q4,21))),wrapping_mul(d5,a.l6)),shift_left(q5,18)),wrapping_sub(shift_left(q8,9),q8)) in
+    let r2=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d4,a.l8)),wrapping_sub(shift_left(q4,24),q4)),wrapping_mul(d5,a.l7)),wrapping_sub(shift_left(q5,29),shift_left(q5,21))),wrapping_mul(a.l6,a.l6)),shift_left(q6,18)) in
+    let r3=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d5,a.l8)),wrapping_sub(shift_left(q5,24),q5)),wrapping_mul(d6,a.l7)),wrapping_sub(shift_left(q6,29),shift_left(q6,21))),shift_left(q7,18)) in
+    let r4=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d6,a.l8)),wrapping_sub(shift_left(q6,24),q6)),wrapping_mul(a.l7,a.l7)),wrapping_sub(shift_left(q7,29),shift_left(q7,21))),shift_left(q8,18)) in
+    let r5=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(wrapping_add(acc,wrapping_mul(d7,a.l8)),wrapping_sub(shift_left(q7,24),q7)),wrapping_sub(shift_left(q8,29),shift_left(q8,21))) in
+    let r6=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    let acc=wrapping_add(wrapping_add(acc,wrapping_mul(a.l8,a.l8)),wrapping_sub(shift_left(q8,24),q8)) in
+    let r7=bit_and(acc,536870911) in let acc=shift_right(acc,29) in
+    P9 { l0=r0,l1=r1,l2=r2,l3=r3,l4=r4,l5=r5,l6=r6,l7=r7,l8=acc }
 ; generated: end p9_mont
 ; generated: begin p9_norm
 private fn p9_norm(l0:i64,l1:i64,l2:i64,l3:i64,l4:i64,l5:i64,l6:i64,l7:i64,l8:i64) -> P9
@@ -142,8 +217,11 @@ private fn p256_add(a:P9,b:P9,modulus:P9) -> P9
   = let total=p9_add_raw(a,b) in let less=p9_sub_raw(total,p9_add_raw(modulus,modulus)) in p256_select(less,total,p9_negative(less))
 private fn p256_sub(a:P9,b:P9,modulus:P9) -> P9
   = let difference=p9_sub_raw(a,b) in p256_select(difference,p9_add_raw(difference,p9_add_raw(modulus,modulus)),p9_negative(difference))
-private fn p256_multiply(a:P9,b:P9,mod:P256Mod) -> P9 = p9_mont(a,b,mod.modulus,mod.inverse)
-private fn p256_square(a:P9,mod:P256Mod) -> P9 = p9_mont(a,a,mod.modulus,mod.inverse)
+; The prime is the only modulus whose Montgomery digit inverse is 1 (the order's
+; is not); its products use the specialised p9_field_* forms. The choice is
+; public, so the branch leaks nothing.
+private fn p256_multiply(a:P9,b:P9,mod:P256Mod) -> P9 = if mod.inverse==1 then p9_field_mont(a,b) else p9_mont(a,b,mod.modulus,mod.inverse)
+private fn p256_square(a:P9,mod:P256Mod) -> P9 = if mod.inverse==1 then p9_field_square(a) else p9_mont(a,a,mod.modulus,mod.inverse)
 private fn p256_montgomery(value:P9,mod:P256Mod) -> P9 = p9_mont(value,mod.r2,mod.modulus,mod.inverse)
 private fn p256_normal(value:P9,mod:P256Mod) -> P9 = p256_reduce(p9_mont(value,p9_small(1),mod.modulus,mod.inverse),mod.modulus)
 private fn p9_limb(a:P9,index:i64) -> i64
@@ -161,8 +239,14 @@ sealed type P256Point = { x:P9,y:P9,z:P9 }
 private fn p256_infinity(mod:P256Mod) -> P256Point = P256Point { x=p9_zero(),y=mod.one,z=p9_zero() }
 private fn p256_point_select(a:P256Point,b:P256Point,bit:i64) -> P256Point
   = P256Point { x=p256_select(a.x,b.x,bit),y=p256_select(a.y,b.y,bit),z=p256_select(a.z,b.z,bit) }
-private fn p256_double(a:P256Point,mod:P256Mod) -> P256Point
-  = let p=mod.modulus in
+; Point formulas, always over the field. neoc force-inlines small pure
+; functions: these stay inline in the two hot loops (p256_scalar and
+; p256_combination), which are kept out of line themselves, while the table
+; builds and the exceptional cases call the `_call` copies. Inlined at every
+; call site they made clang take minutes on TLS programs; called from the loops
+; they cost 15%. `cold` is how neoc spells noinline.
+private fn p256_double(a:P256Point) -> P256Point
+  = let mod=p9_field() in let p=mod.modulus in
     let delta=p256_square(a.z,mod) in let gamma=p256_square(a.y,mod) in let beta=p256_multiply(a.x,gamma,mod) in
     let alpha=p256_multiply(p256_sub(a.x,delta,p),p256_add(a.x,delta,p),mod) in let alpha=p256_add(p256_add(alpha,alpha,p),alpha,p) in
     let beta2=p256_add(beta,beta,p) in let beta4=p256_add(beta2,beta2,p) in let beta8=p256_add(beta4,beta4,p) in
@@ -171,22 +255,50 @@ private fn p256_double(a:P256Point,mod:P256Mod) -> P256Point
     let gamma2=p256_square(gamma,mod) in let gamma2=p256_add(gamma2,gamma2,p) in let gamma2=p256_add(gamma2,gamma2,p) in let gamma2=p256_add(gamma2,gamma2,p) in
     let y=p256_sub(p256_multiply(alpha,p256_sub(beta4,x,p),mod),gamma2,p) in P256Point { x=x,y=y,z=z }
 private fn p256_zero_value(a:P9,mod:P256Mod) -> i64 = p256_is_zero(p256_reduce(a,mod.modulus))
-; Complete for the ladder: doubling and infinity are selected with masks.
-private fn p256_point_add(a:P256Point,b:P256Point,mod:P256Mod) -> P256Point
-  = let p=mod.modulus in let zz1=p256_square(a.z,mod) in let zz2=p256_square(b.z,mod) in
+; The multiples 0P..15P of a point for the fixed window (0P is infinity).
+type P256Window = { p0:P256Point,p1:P256Point,p2:P256Point,p3:P256Point,p4:P256Point,p5:P256Point,p6:P256Point,p7:P256Point,
+  p8:P256Point,p9:P256Point,p10:P256Point,p11:P256Point,p12:P256Point,p13:P256Point,p14:P256Point,p15:P256Point }
+; Sum of a and b where either may be infinity (z = 0) but a != +-b, so the
+; doubling case never arises.
+private fn p256_add_distinct(a:P256Point,b:P256Point) -> P256Point
+  = let mod=p9_field() in let p=mod.modulus in let zz1=p256_square(a.z,mod) in let zz2=p256_square(b.z,mod) in
     let u1=p256_multiply(a.x,zz2,mod) in let u2=p256_multiply(b.x,zz1,mod) in
     let s1=p256_multiply(p256_multiply(a.y,b.z,mod),zz2,mod) in let s2=p256_multiply(p256_multiply(b.y,a.z,mod),zz1,mod) in
     let h=p256_sub(u2,u1,p) in let r=p256_sub(s2,s1,p) in let hh=p256_square(h,mod) in let hhh=p256_multiply(h,hh,mod) in let v=p256_multiply(u1,hh,mod) in
     let x=p256_sub(p256_sub(p256_square(r,mod),hhh,p),p256_add(v,v,p),p) in
     let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_multiply(s1,hhh,mod),p) in let z=p256_multiply(p256_multiply(h,a.z,mod),b.z,mod) in
-    let generic=P256Point { x=x,y=y,z=z } in
-    let combined=p256_point_select(generic,p256_double(a,mod),bit_and(p256_zero_value(h,mod),p256_zero_value(r,mod))) in
-    let combined=p256_point_select(combined,b,p256_zero_value(a.z,mod)) in p256_point_select(combined,a,p256_zero_value(b.z,mod))
-; Fixed 256 doublings and additions; the scalar only drives mask selections.
-private fn p256_scalar(point:P256Point,scalar:P9,mod:P256Mod) -> P256Point
-  = loop(i=255,out=p256_infinity(mod)) while i>=0 next(i-1,
-      let doubled=p256_double(out,mod) in let added=p256_point_add(doubled,point,mod) in
-      p256_point_select(doubled,added,p9_bit(scalar,i))) yield out
+    let combined=p256_point_select(P256Point { x=x,y=y,z=z },b,p256_zero_value(a.z,mod)) in p256_point_select(combined,a,p256_zero_value(b.z,mod))
+; Built from the public point alone: kP for k>=3 adds P to (k-1)P, never +-P.
+private fn p256_window(point:P256Point,mod:P256Mod) -> P256Window
+  = let p2=p256_double_call(point) in let p3=p256_add_distinct_call(p2,point) in let p4=p256_add_distinct_call(p3,point) in
+    let p5=p256_add_distinct_call(p4,point) in let p6=p256_add_distinct_call(p5,point) in let p7=p256_add_distinct_call(p6,point) in
+    let p8=p256_add_distinct_call(p7,point) in let p9=p256_add_distinct_call(p8,point) in let p10=p256_add_distinct_call(p9,point) in
+    let p11=p256_add_distinct_call(p10,point) in let p12=p256_add_distinct_call(p11,point) in let p13=p256_add_distinct_call(p12,point) in
+    let p14=p256_add_distinct_call(p13,point) in let p15=p256_add_distinct_call(p14,point) in
+    P256Window { p0=p256_infinity(mod),p1=point,p2=p2,p3=p3,p4=p4,p5=p5,p6=p6,p7=p7,p8=p8,p9=p9,p10=p10,p11=p11,p12=p12,p13=p13,p14=p14,p15=p15 }
+; 1 when the secret digit equals the public index k, else 0, without branching.
+private fn p256_digit_is(digit:i64,k:i64) -> i64 = let x=bit_xor(digit,k) in 1-shift_right(bit_or(x,wrapping_sub(0,x)),63)
+; Every entry is read; the digit only drives the masks.
+private fn p256_window_pick(t:P256Window,digit:i64) -> P256Point
+  = let r=p256_point_select(t.p0,t.p1,p256_digit_is(digit,1)) in let r=p256_point_select(r,t.p2,p256_digit_is(digit,2)) in
+    let r=p256_point_select(r,t.p3,p256_digit_is(digit,3)) in let r=p256_point_select(r,t.p4,p256_digit_is(digit,4)) in
+    let r=p256_point_select(r,t.p5,p256_digit_is(digit,5)) in let r=p256_point_select(r,t.p6,p256_digit_is(digit,6)) in
+    let r=p256_point_select(r,t.p7,p256_digit_is(digit,7)) in let r=p256_point_select(r,t.p8,p256_digit_is(digit,8)) in
+    let r=p256_point_select(r,t.p9,p256_digit_is(digit,9)) in let r=p256_point_select(r,t.p10,p256_digit_is(digit,10)) in
+    let r=p256_point_select(r,t.p11,p256_digit_is(digit,11)) in let r=p256_point_select(r,t.p12,p256_digit_is(digit,12)) in
+    let r=p256_point_select(r,t.p13,p256_digit_is(digit,13)) in let r=p256_point_select(r,t.p14,p256_digit_is(digit,14)) in
+    p256_point_select(r,t.p15,p256_digit_is(digit,15))
+private fn p256_digit(scalar:P9,window:i64) -> i64
+  = let at=window*4 in p9_bit(scalar,at)+2*p9_bit(scalar,at+1)+4*p9_bit(scalar,at+2)+8*p9_bit(scalar,at+3)
+; Fixed 4-bit window from the top: 64 rounds of four doublings and one masked
+; table add, the same for every scalar. For a scalar in [1,n-1] and a point of
+; order n, the running sum 16a·P never equals +-d·P for a digit d in 1..15
+; (that needs 16a = d or 16a + d = n), so additions never meet the doubling case.
+private cold fn p256_scalar(point:P256Point,scalar:P9,mod:P256Mod) -> P256Point
+  = let t=p256_window(point,mod) in
+    loop(i=63,out=p256_infinity(mod)) while i>=0 next(i-1,
+      let shifted=loop(j=0,acc=out) while j<4 next(j+1,p256_double(acc)) yield acc in
+      p256_add_distinct(shifted,p256_window_pick(t,p256_digit(scalar,i)))) yield out
 private fn p256_affine(point:P256Point,mod:P256Mod) -> P256Point
   = let inverse=p256_inverse(point.z,mod) in let square=p256_square(inverse,mod) in
     P256Point { x=p256_multiply(point.x,square,mod),y=p256_multiply(p256_multiply(point.y,square,mod),inverse,mod),z=mod.one }
@@ -221,30 +333,33 @@ fn p256_ecdh(secret:Arr u8 n,public:Arr u8 m) -> BytesResult
 ; (madd-2007-bl) and general addition (add-2007-bl) branch on the exceptional
 ; cases; a result at infinity has z = 0.
 private fn p256_negate(a:P9,mod:P256Mod) -> P9 = p256_sub(p9_zero(),a,mod.modulus)
-private fn p256_add_affine(a:P256Point,b:P9Affine,mod:P256Mod) -> P256Point
-  = let p=mod.modulus in let z1z1=p256_square(a.z,mod) in
+private fn p256_add_affine(a:P256Point,b:P9Affine) -> P256Point
+  = let mod=p9_field() in let p=mod.modulus in let z1z1=p256_square(a.z,mod) in
     let u2=p256_multiply(b.x,z1z1,mod) in let s2=p256_multiply(b.y,p256_multiply(a.z,z1z1,mod),mod) in
     let h=p256_sub(u2,a.x,p) in let r=p256_sub(s2,a.y,p) in
     if p256_zero_value(h,mod)==1 then
-      (if p256_zero_value(r,mod)==1 then p256_double(P256Point { x=b.x,y=b.y,z=mod.one },mod) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
+      (if p256_zero_value(r,mod)==1 then p256_double_call(P256Point { x=b.x,y=b.y,z=mod.one }) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
     let hh=p256_square(h,mod) in let i=p256_add(p256_add(hh,hh,p),p256_add(hh,hh,p),p) in let j=p256_multiply(h,i,mod) in
     let r=p256_add(r,r,p) in let v=p256_multiply(a.x,i,mod) in
     let x=p256_sub(p256_sub(p256_square(r,mod),j,p),p256_add(v,v,p),p) in
     let yj=p256_multiply(a.y,j,mod) in let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_add(yj,yj,p),p) in
     let z=p256_sub(p256_sub(p256_square(p256_add(a.z,h,p),mod),z1z1,p),hh,p) in P256Point { x=x,y=y,z=z }
-private fn p256_add_general(a:P256Point,b:P256Point,mod:P256Mod) -> P256Point
-  = let p=mod.modulus in let z1z1=p256_square(a.z,mod) in let z2z2=p256_square(b.z,mod) in
+private fn p256_add_general(a:P256Point,b:P256Point) -> P256Point
+  = let mod=p9_field() in let p=mod.modulus in let z1z1=p256_square(a.z,mod) in let z2z2=p256_square(b.z,mod) in
     let u1=p256_multiply(a.x,z2z2,mod) in let u2=p256_multiply(b.x,z1z1,mod) in
     let s1=p256_multiply(a.y,p256_multiply(b.z,z2z2,mod),mod) in let s2=p256_multiply(b.y,p256_multiply(a.z,z1z1,mod),mod) in
     let h=p256_sub(u2,u1,p) in let r=p256_sub(s2,s1,p) in
     if p256_zero_value(h,mod)==1 then
-      (if p256_zero_value(r,mod)==1 then p256_double(b,mod) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
+      (if p256_zero_value(r,mod)==1 then p256_double_call(b) else P256Point { x=mod.one,y=mod.one,z=p9_zero() }) else
     let h2=p256_add(h,h,p) in let i=p256_square(h2,mod) in let j=p256_multiply(h,i,mod) in
     let r=p256_add(r,r,p) in let v=p256_multiply(u1,i,mod) in
     let x=p256_sub(p256_sub(p256_square(r,mod),j,p),p256_add(v,v,p),p) in
     let sj=p256_multiply(s1,j,mod) in let y=p256_sub(p256_multiply(r,p256_sub(v,x,p),mod),p256_add(sj,sj,p),p) in
     let zz=p256_sub(p256_sub(p256_square(p256_add(a.z,b.z,p),mod),z1z1,p),z2z2,p) in
     P256Point { x=x,y=y,z=p256_multiply(zz,h,mod) }
+private cold fn p256_double_call(a:P256Point) -> P256Point = p256_double(a)
+private cold fn p256_add_distinct_call(a:P256Point,b:P256Point) -> P256Point = p256_add_distinct(a,b)
+private cold fn p256_add_general_call(a:P256Point,b:P256Point) -> P256Point = p256_add_general(a,b)
 ; Width-5 NAF digits of a scalar below 2^256: odd digits in -15..15, 257 positions.
 private fn p9_shift1(a:P9) -> P9
   = P9 { l0=bit_or(shift_right(a.l0,1),shift_left(bit_and(a.l1,1),28)),l1=bit_or(shift_right(a.l1,1),shift_left(bit_and(a.l2,1),28)),
@@ -260,28 +375,28 @@ private fn p256_naf(scalar:P9) -> Arr i64 _
   = let state=loop(i=0,state=P256Naf { k=scalar,digits=arr(j in 0..257) 0 }) while i<257 next(i+1,p256_naf_step(state,i)) yield state in state.digits
 type P256Odd = { p1:P256Point,p3:P256Point,p5:P256Point,p7:P256Point,p9:P256Point,p11:P256Point,p13:P256Point,p15:P256Point }
 private fn p256_odd_multiples(point:P256Point,mod:P256Mod) -> P256Odd
-  = let twice=p256_double(point,mod) in let p3=p256_add_general(twice,point,mod) in let p5=p256_add_general(twice,p3,mod) in
-    let p7=p256_add_general(twice,p5,mod) in let p9=p256_add_general(twice,p7,mod) in let p11=p256_add_general(twice,p9,mod) in
-    let p13=p256_add_general(twice,p11,mod) in
-    P256Odd { p1=point,p3=p3,p5=p5,p7=p7,p9=p9,p11=p11,p13=p13,p15=p256_add_general(twice,p13,mod) }
+  = let twice=p256_double_call(point) in let p3=p256_add_general_call(twice,point) in let p5=p256_add_general_call(twice,p3) in
+    let p7=p256_add_general_call(twice,p5) in let p9=p256_add_general_call(twice,p7) in let p11=p256_add_general_call(twice,p9) in
+    let p13=p256_add_general_call(twice,p11) in
+    P256Odd { p1=point,p3=p3,p5=p5,p7=p7,p9=p9,p11=p11,p13=p13,p15=p256_add_general_call(twice,p13) }
 private fn p256_odd_pick(table:P256Odd,index:i64) -> P256Point
   = if index==0 then table.p1 else if index==1 then table.p3 else if index==2 then table.p5 else if index==3 then table.p7 else
     if index==4 then table.p9 else if index==5 then table.p11 else if index==6 then table.p13 else table.p15
 type P256Sum = { point:P256Point,empty:bool }
 private fn p256_sum_add(total:P256Sum,b:P256Point,mod:P256Mod) -> P256Sum
   = if total.empty then P256Sum { point=b,empty=false } else
-    let added=p256_add_general(total.point,b,mod) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
+    let added=p256_add_general(total.point,b) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
 private fn p256_sum_affine(total:P256Sum,b:P9Affine,mod:P256Mod) -> P256Sum
   = if total.empty then P256Sum { point=P256Point { x=b.x,y=b.y,z=mod.one },empty=false } else
-    let added=p256_add_affine(total.point,b,mod) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
+    let added=p256_add_affine(total.point,b) in P256Sum { point=added,empty=p256_zero_value(added.z,mod)==1 }
 private fn p256_verify_step(total:P256Sum,g:i64,q:i64,table:P256Odd,mod:P256Mod) -> P256Sum
-  = let doubled=if total.empty then total else P256Sum { point=p256_double(total.point,mod),empty=false } in
+  = let doubled=if total.empty then total else P256Sum { point=p256_double(total.point),empty=false } in
     let with_g=if g==0 then doubled else let base=p9_generator(if g>0 then (g-1)/2 else (0-g-1)/2) in
       p256_sum_affine(doubled,if g>0 then base else P9Affine { x=base.x,y=p256_negate(base.y,mod) },mod) in
     if q==0 then with_g else let base=p256_odd_pick(table,if q>0 then (q-1)/2 else (0-q-1)/2) in
       p256_sum_add(with_g,if q>0 then base else base with { y=p256_negate(base.y,mod) },mod)
 ; u1*G + u2*Q by interleaved NAF digits.
-private fn p256_combination(u1:P9,u2:P9,point:P256Point,mod:P256Mod) -> P256Sum
+private cold fn p256_combination(u1:P9,u2:P9,point:P256Point,mod:P256Mod) -> P256Sum
   = let g=p256_naf(u1) in let q=p256_naf(u2) in let table=p256_odd_multiples(point,mod) in
     loop(i=256,total=P256Sum { point=p256_infinity(mod),empty=true }) while i>=0
       next(i-1,check i>=0 && i<len(g) && i<len(q) in p256_verify_step(total,g[i],q[i],table,mod)) yield total

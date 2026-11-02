@@ -73,21 +73,23 @@ private effect(fs,net,time,process) fn http_client_connect(arena:Arena,move clie
 
 ; One request and its whole response over io. retry: the connection failed
 ; before any response, as a kept-alive connection the server has closed does.
-private effect(net,time,process) fn http_exchange_io<C>(io:HttpIO<C>,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
+; plain is the socket when io reads it directly, for http_read_length_body.
+private effect(net,time,process) fn http_exchange_io<C>(io:HttpIO<C>,plain:Option<Ref<Socket>>,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
   = let reader=http_start_keepalive_io(io,method,path,host,body,deadline,limit,arr(i in 0..0) HttpHeader { name="",value="" }) in
     if !reader.ok then HttpOutcome { response=net_error(reader.error.code,reader.error.message),reusable=false,
       retry=reader.status==0 && (reader.error.code==5 || reader.error.code==32 || reader.error.code==104) } else
-    loop(state=reader,out="") while state.ok && !state.done next(http_read_next_io(io,state,deadline),concat(out,state.chunk))
+    let reader=match plain { None => reader, Some(socket) => http_read_length_body(borrow_ref(socket),reader,deadline) } in
+    loop(state=reader,out="") while state.ok && !state.done next(http_read_next_io(io,state,deadline),http_body_append(out,state.chunk))
       yield if !state.ok then HttpOutcome { response=net_error(state.error.code,state.error.message),reusable=false,retry=false }
-        else HttpOutcome { response=HttpResult { ok=true,status=state.status,body=concat(out,state.chunk),error=no_error() },
+        else HttpOutcome { response=HttpResult { ok=true,status=state.status,body=http_body_append(out,state.chunk),error=no_error() },
           reusable=http_reader_reusable(state),retry=false }
 private effect(net,time,process) fn http_client_exchange(client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
   = let host=concat(client.host,":",int_text(client.port)) in
     match client.socket {
       None => HttpOutcome { response=net_error(9,"HTTP client is not connected"),reusable=false,retry=false },
       Some(socket) => match client.session {
-        None => http_exchange_io(http_socket_transport(socket),method,path,host,body,deadline,limit),
-        Some(session) => http_exchange_io(http_tls_transport(socket,session),method,path,host,body,deadline,limit) } }
+        None => http_exchange_io(http_socket_transport(socket),Some::<Ref<Socket>>(socket),method,path,host,body,deadline,limit),
+        Some(session) => http_exchange_io(http_tls_transport(socket,session),None::<Ref<Socket>>(),method,path,host,body,deadline,limit) } }
 private effect(fs,net,time,process) fn http_client_attempt(arena:Arena,move client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpAttempt
   = let connected=if option_is_some(client.socket) then HttpConnect { client=client,ok=true,error=no_error() } else http_client_connect(arena,client,deadline) in
     if !connected.ok then HttpAttempt { client=connected.client,response=net_error(connected.error.code,connected.error.message),retry=false } else
