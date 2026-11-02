@@ -13,9 +13,9 @@ def main():
    binary=Path(tmp)/('bits-'+fold)
    subprocess.run([sys.executable,'-m','neoc','build','tests/fixtures/bitwise.neo','-o',str(binary)],cwd=ROOT,env={**os.environ,'NEO_FOLD':fold},capture_output=True,text=True,check=True);audit(binary)
    for a in values:
-    b=rng.choice(values);expected=[signed(a&b),signed(a|b),signed(a^b),signed(int.from_bytes((a%(1<<64)).to_bytes(8,'big'),'little')),127]
+    b=rng.choice(values);expected=[signed(a&b),signed(a|b),signed(a^b),signed(int.from_bytes((a%(1<<64)).to_bytes(8,'big'),'little')),signed(((a%(1<<64))*(b%(1<<64)))>>64),127]
     for mode,want in enumerate(expected):
      r=subprocess.run(RUNNER+[str(binary),str(mode),str(a),str(b)],capture_output=True,text=True,check=True,timeout=15)
      assert int(r.stdout)==want,(fold,mode,a,b,r.stdout,want)
-   print(f'PASS bitwise folding={fold}: {len(values)*5} high-bit/negative/random patterns',flush=True)
+   print(f'PASS bitwise folding={fold}: {len(values)*6} high-bit/negative/random patterns',flush=True)
 if __name__=='__main__':main()

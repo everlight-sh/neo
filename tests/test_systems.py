@@ -31,7 +31,7 @@ class SystemsTests(unittest.TestCase):
             checked('fn main(n:i64) -> i64 = loop(i=0,a=arr(j in 0..1) j) while i<n next(i+1,if len(a)>0 then push(a,a[len(a)]) else push(a,0)) yield len(a)')
 
     def test_bitwise_arity_and_operand_types(self):
-        for expression in ('bit_and(1)', 'bit_or(1,2,3)', 'bit_xor(1,2.0)', 'byte_swap64(1,2)', 'byte_swap64(1.0)'):
+        for expression in ('bit_and(1)', 'bit_or(1,2,3)', 'bit_xor(1,2.0)', 'byte_swap64(1,2)', 'byte_swap64(1.0)', 'mul_high(1)', 'mul_high(1,2.0)'):
             with self.subTest(expression=expression), self.assertRaises(CheckError):
                 checked('fn main()->i64='+expression)
 

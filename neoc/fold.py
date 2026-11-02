@@ -114,6 +114,9 @@ class Interp:
             if b == 'byte_swap64':
                 a=self.ev(e.args[0],env) % (1<<64)
                 return wrap(int.from_bytes(a.to_bytes(8,'little'),'big'))
+            if b == 'mul_high':
+                a,c=[self.ev(x,env) % (1<<64) for x in e.args]
+                return wrap((a*c)>>64)
             if b in ('shift_left','shift_right','arithmetic_shift_right'):
                 a,c=[self.ev(x,env) for x in e.args]
                 return wrap(a<<(c&63) if b=='shift_left' else ((a%(1<<64)) if b=='shift_right' else a)>>(c&63))

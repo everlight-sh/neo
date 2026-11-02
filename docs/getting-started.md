@@ -116,7 +116,8 @@ exclude inactive branches/lanes from traps. Invalid float-to-i64 casts trap.
 The trusted runtime retains wrapping word operations for allocator/memory policy.
 
 `bit_and`, `bit_or` and `bit_xor` take two i64 operands and preserve their exact
-64-bit patterns. `byte_swap64` reverses the eight bytes of an i64. Results use
+64-bit patterns. `byte_swap64` reverses the eight bytes of an i64. `mul_high(a,b)`
+is the high 64 bits of the unsigned 128-bit product of the two bit patterns. Results use
 the signed i64 interpretation; these operations do not imply arithmetic bounds.
 The constant folder, independent interpreter and native backend agree on these
 operations, including negative values and the sign bit.

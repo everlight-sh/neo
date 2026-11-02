@@ -80,7 +80,7 @@ def free_vars(e: S.Node) -> Set[str]:
         for c in S.children(n): go(c)
     go(e); return out
 
-BUILTINS = {"byte_read_le","byte_equal","count_trailing_zeros","byte_copy","byte_write_le","byte_slice","adopt","borrow_ref","ref_live","ref_release","ref_null","function", "function_null","set", "push", "sqrt", "serve", "serve_effect", "concat", 'wrapping_add','wrapping_sub','wrapping_mul','bit_and','bit_or','bit_xor','byte_swap64','shift_left','shift_right','arithmetic_shift_right','allocation_stats_enabled'}
+BUILTINS = {"byte_read_le","byte_equal","count_trailing_zeros","byte_copy","byte_write_le","byte_slice","adopt","borrow_ref","ref_live","ref_release","ref_null","function", "function_null","set", "push", "sqrt", "serve", "serve_effect", "concat", 'wrapping_add','wrapping_sub','wrapping_mul','bit_and','bit_or','bit_xor','byte_swap64','mul_high','shift_left','shift_right','arithmetic_shift_right','allocation_stats_enabled'}
 
 # Raw memory/FFI operations form the trusted systems boundary. They are only
 # available in effect functions, never in refinements or parallel comprehensions.
@@ -912,7 +912,7 @@ class Checker:
             if len(actual)!=2 or any(not isinstance(t,S.TArr) or t.elem!=S.U8 for t in actual):
                 self.err('byte_equal requires two byte arrays',e,f);return None
             e.builtin=e.name;e.borrowed_args={0,1};return S.BOOL
-        if e.name in ('wrapping_add','wrapping_sub','wrapping_mul','bit_and','bit_or','bit_xor','shift_left','shift_right','arithmetic_shift_right'):
+        if e.name in ('wrapping_add','wrapping_sub','wrapping_mul','mul_high','bit_and','bit_or','bit_xor','shift_left','shift_right','arithmetic_shift_right'):
             if len(e.args)!=2 or any(self.infer(a,env)!=S.I64 for a in e.args):
                 self.err(e.name+' requires two i64 arguments',e,f);return None
             e.builtin=e.name;return S.I64

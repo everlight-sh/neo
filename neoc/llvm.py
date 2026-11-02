@@ -1736,6 +1736,12 @@ class LLVMGen:
         if b == 'byte_swap64':
             a=self.gen(e.args[0],env,par)[0]
             return fb.ins(f'call i64 @llvm.bswap.i64({a})','i64'),None
+        if b == 'mul_high':
+            # High 64 bits of the unsigned 128-bit product (x86-64 mul, AArch64 umulh).
+            a,c=[self.gen(x,env,par)[0] for x in e.args]
+            x=fb.ins(f'zext {a} to i128','i128');y=fb.ins(f'zext {c} to i128','i128')
+            product=fb.ins(f'mul i128 {x.name}, {y.name}','i128')
+            return fb.ins(f'trunc i128 {fb.ins(f"lshr i128 {product.name}, 64","i128").name} to i64','i64'),None
         if b in ('shift_left','shift_right','arithmetic_shift_right'):
             a,c=[self.gen(x,env,par)[0] for x in e.args]
             count=fb.ins(f'and i64 {c.name}, 63','i64')

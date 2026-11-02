@@ -19,13 +19,13 @@ class ReferenceTests(unittest.TestCase):
         program=self.checked('fn main () -> i64 = wrapping_add(9223372036854775807,1)')
         self.assertEqual(Reference(program).call('main',[]),-(1<<63))
     def test_bit_patterns_match_independent_python_model(self):
-        program=self.checked('fn band(a:i64,b:i64)->i64=bit_and(a,b) fn bor(a:i64,b:i64)->i64=bit_or(a,b) fn bxor(a:i64,b:i64)->i64=bit_xor(a,b) fn swap(a:i64,b:i64)->i64=byte_swap64(a) fn main()->i64=0')
+        program=self.checked('fn band(a:i64,b:i64)->i64=bit_and(a,b) fn bor(a:i64,b:i64)->i64=bit_or(a,b) fn bxor(a:i64,b:i64)->i64=bit_xor(a,b) fn swap(a:i64,b:i64)->i64=byte_swap64(a) fn high(a:i64,b:i64)->i64=mul_high(a,b) fn main()->i64=0')
         reference=Reference(program);folder=Interp({f.name:f for f in program.fns})
         values=[0,1,-1,-(1<<63),(1<<63)-1,0x0102030405060708]
         signed=lambda n:(n+(1<<63))%(1<<64)-(1<<63)
         for a in values:
             for b in values:
-                expected=[signed(a&b),signed(a|b),signed(a^b),signed(int.from_bytes((a%(1<<64)).to_bytes(8,'big'),'little'))]
+                expected=[signed(a&b),signed(a|b),signed(a^b),signed(int.from_bytes((a%(1<<64)).to_bytes(8,'big'),'little')),signed(((a%(1<<64))*(b%(1<<64)))>>64)]
                 for function,want in zip(program.fns,expected):
                     self.assertEqual(reference.call(function.name,[a,b]),want)
                     self.assertEqual(folder.ev(function.body,{'a':a,'b':b}),want)

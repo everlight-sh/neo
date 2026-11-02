@@ -113,6 +113,8 @@ class Reference:
                 value=args[0]%(1<<64);out=0
                 for _ in range(8):out=(out<<8)|(value&255);value>>=8
                 return wrapping(out)
+            if node.name=='mul_high':
+                return wrapping(((args[0]%(1<<64))*(args[1]%(1<<64)))>>64)
             if node.name in ('shift_left','shift_right','arithmetic_shift_right'):
                 a,b=args
                 return wrapping(a<<(b&63) if node.name=='shift_left' else ((a%(1<<64)) if node.name=='shift_right' else a)>>(b&63))

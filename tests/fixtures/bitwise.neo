@@ -1,4 +1,4 @@
 fn constant() -> i64 = bit_xor(byte_swap64(-9223372036854775808),bit_and(-1,255))
 fn main(mode: i64, a: i64, b: i64) -> i64
   = if mode == 0 then bit_and(a,b) else if mode == 1 then bit_or(a,b)
-    else if mode == 2 then bit_xor(a,b) else if mode == 3 then byte_swap64(a) else constant()
+    else if mode == 2 then bit_xor(a,b) else if mode == 3 then byte_swap64(a) else if mode == 4 then mul_high(a,b) else constant()
