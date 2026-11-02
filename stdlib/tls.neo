@@ -90,7 +90,7 @@ private effect(net) fn tls_open_record(ctx:ptr,count:i64) -> TlsRecord
     if sequence<0 || sequence>=16777216 || count<0 || count>16640 then let consumed=tls_consume(ctx,count) in tls_bad_record(ctx,75,"TLS read key usage limit") else
       let size=tls_key_size(ctx) in let key=tls_bytes(ctx,96,size) in let iv=tls_bytes(ctx,144,12) in
       let aad=concat("\x17\x03\x03",tls_word(count)) in let protected=view(ptr_add(ctx,4101),count) in
-      let plaintext=if size!=16 then chacha20_poly1305_open(key,tls_nonce(iv,sequence),aad,protected) else aes128_gcm_open(key,tls_nonce(iv,sequence),aad,protected) in
+      let plaintext=if size!=16 then chacha20_poly1305_open(key,tls_nonce(iv,sequence),aad,protected) else aes128_gcm_open_fast(key,tls_nonce(iv,sequence),aad,protected) in
       let consumed=tls_consume(ctx,count) in
       if !plaintext.ok then tls_bad_record(ctx,74,"TLS record authentication failed") else
         let end=loop(at=len(plaintext.value)-1) while at>=0 && str_byte(plaintext.value,at)==0 next(at-1) yield at in
@@ -143,27 +143,29 @@ private effect(net,time) fn tls_send_record(socket:Socket,ctx:ptr,kind:i64,bytes
 ; 4-byte implicit salt. All use 16-byte tags and SHA-256.
 private effect(net) fn tls_key_size(ctx:ptr) -> i64 {result >= 16, result <= 32}
   = let suite=load_i64(ctx,232) in if suite==4865 || suite==49195 || suite==49199 then 16 else 32
-private fn tls_seal(size:i64,key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 k,plaintext:Arr u8 q) -> Arr u8 _
+private effect fn tls_seal(size:i64,key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 k,plaintext:Arr u8 q) -> Arr u8 _
   = if size!=16 then chacha20_poly1305_seal(key,nonce,aad,plaintext) else
-    let protected=aes128_gcm_seal(key,nonce,aad,plaintext) in protected.value
+    let protected=aes128_gcm_seal_fast(key,nonce,aad,plaintext) in protected.value
 private effect(net) fn tls_install(ctx:ptr,write_secret:Arr u8 n,read_secret:Arr u8 m) -> unit
   = let size=tls_key_size(ctx) in
     let a=tls_store(ctx,64,hkdf_label(write_secret,"key","",size)) in let b=tls_store(ctx,96,hkdf_label(read_secret,"key","",size)) in
     let c=tls_store(ctx,128,hkdf_label(write_secret,"iv","",12)) in let d=tls_store(ctx,144,hkdf_label(read_secret,"iv","",12)) in
     let e=store_i64(ctx,40,0) in store_i64(ctx,48,0)
-; Offers TLS 1.3 then TLS 1.2; ChaCha20-Poly1305 then AES-128-GCM (TLS 1.2: ECDSA then
-; RSA authentication), X25519 then P-256, uncompressed points, the extended master secret
-; and an empty renegotiation_info; `share` is one key_share entry (group, length, key)
-; and `cookie` an echoed cookie extension. secp384r1 is listed last only because TLS 1.2
-; servers require their ECDSA certificate's curve in supported_groups (RFC 8422 5.1); a
-; server that selects it for key exchange is rejected, as there is no P-384 ECDH here.
-private fn tls_client_hello(host:Arr u8 n,share:Arr u8 m,random:Arr u8 k,sid:Arr u8 q,cookie:Arr u8 c) -> Arr u8 _
+; Offers TLS 1.3 then TLS 1.2; AES-128-GCM first when the CPU has AES-NI (`aes`), otherwise
+; ChaCha20-Poly1305 first (TLS 1.2: ECDSA then RSA authentication), X25519 then P-256,
+; uncompressed points, the extended master secret and an empty renegotiation_info;
+; `share` is one key_share entry (group, length, key) and `cookie` an echoed cookie
+; extension. secp384r1 is listed last only because TLS 1.2 servers require their ECDSA
+; certificate's curve in supported_groups (RFC 8422 5.1); a server that selects it for
+; key exchange is rejected, as there is no P-384 ECDH here.
+private fn tls_client_hello(host:Arr u8 n,share:Arr u8 m,random:Arr u8 k,sid:Arr u8 q,cookie:Arr u8 c,aes:bool) -> Arr u8 _
   = let is_ip=len(net_ipv4(host))==4 && !str_equal(host,"localhost") in
     let sni=if is_ip then "" else tls_extension(0,concat(tls_word(n+3),"\0",tls_word(n),host)) in
     let extensions=concat(sni,tls_extension(43,"\x04\x03\x04\x03\x03"),tls_extension(10,"\0\x06\0\x1d\0\x17\0\x18"),
       tls_extension(13,"\0\x0e\x04\x03\x05\x03\x08\x04\x08\x05\x04\x01\x05\x01\x06\x01"),tls_extension(51,concat(tls_word(m),share)),
       tls_extension(16,"\0\x09\x08http/1.1"),tls_extension(11,"\x01\0"),tls_extension(23,""),tls_extension(65281,"\0"),cookie) in
-    tls_message(1,concat("\x03\x03",random,arr(i in 0..1) u8(q),sid,"\0\x0c\x13\x03\x13\x01\xcc\xa9\xcc\xa8\xc0\x2b\xc0\x2f\x01\0",tls_word(len(extensions)),extensions))
+    let suites=if aes then "\0\x0c\x13\x01\x13\x03\xc0\x2b\xc0\x2f\xcc\xa9\xcc\xa8\x01\0" else "\0\x0c\x13\x03\x13\x01\xcc\xa9\xcc\xa8\xc0\x2b\xc0\x2f\x01\0" in
+    tls_message(1,concat("\x03\x03",random,arr(i in 0..1) u8(q),sid,suites,tls_word(len(extensions)),extensions))
 private fn tls_retry_random() -> Arr u8 _
   = "\xcf\x21\xad\x74\xe5\x9a\x61\x11\xbe\x1d\x8c\x02\x1e\x65\xb8\x91\xc2\xa2\x11\x16\x7a\xbb\x8c\x5e\x07\x9e\x09\xe2\xc8\xa8\x33\x9c"
 ; The server's key_share: 32 bytes for X25519 (29), an uncompressed 65-byte point for P-256 (23).
@@ -213,7 +215,7 @@ private effect(net,time) fn tls_start(socket:Socket,ctx:ptr,host:Arr u8 n,first:
     if load_i64(ctx,32)!=0 then tls_start_error(71,"plaintext handshake messages followed HelloRetryRequest") else
     let public=if retry.group==23 then p256_public(secret) else bytes_ok(share) in if !public.ok then tls_start_error(public.error.code,public.error.message) else
     let cookie=if len(retry.cookie)==0 then "" else tls_extension(44,retry.cookie) in
-    let again=tls_client_hello(host,if retry.group==23 then concat("\0\x17\0\x41",public.value) else share,random,sid,cookie) in
+    let again=tls_client_hello(host,if retry.group==23 then concat("\0\x17\0\x41",public.value) else share,random,sid,cookie,aes_hardware()) in
     let sent=net_send_cancel(rt_handle_fd(socket_identity(socket),2),concat("\x16\x03\x03",tls_word(len(again)),again),deadline,load_i64(ctx,264)) in
     if !sent.ok then tls_start_error(sent.error.code,sent.error.message) else
     let server=tls_handshake_message(socket,ctx,false,deadline) in if !server.ok then tls_start_error(server.error.code,server.error.message) else
@@ -257,7 +259,7 @@ private fn tls12_prf(secret:Arr u8 n,label:Arr u8 m,seed:Arr u8 k,count:i64) -> 
 ; AES-128-GCM (RFC 5288) nonces are the 4-byte implicit salt and an explicit 8-byte part
 ; sent before the ciphertext (the sequence number here); ChaCha20-Poly1305 (RFC 7905)
 ; nonces are the 12-byte IV XOR the sequence number, with nothing explicit on the wire.
-private fn tls12_seal(size:i64,key:Arr u8 n,iv:Arr u8 m,sequence:i64,kind:i64,bytes:Arr u8 k) -> Arr u8 _
+private effect fn tls12_seal(size:i64,key:Arr u8 n,iv:Arr u8 m,sequence:i64,kind:i64,bytes:Arr u8 k) -> Arr u8 _
   = let seq=tls_seq8(sequence) in let aad=concat(seq,arr(i in 0..1) u8(kind),"\x03\x03",tls_word(k)) in
     let body=if size==16 then concat(seq,tls_seal(16,key,concat(str_slice(iv,0,4),seq),aad,bytes)) else tls_seal(size,key,tls_nonce(iv,sequence),aad,bytes) in
     concat(arr(i in 0..1) u8(kind),"\x03\x03",tls_word(len(body)),body)
@@ -277,7 +279,7 @@ private effect(net,time) fn tls12_receive(socket:Socket,ctx:ptr,deadline:i64) ->
     if count<explicit+16 then tls_bad_record(ctx,74,"TLS record authentication failed") else
       let key=tls_bytes(ctx,96,size) in let iv=tls_bytes(ctx,144,12) in
       let aad=concat(tls_seq8(sequence),arr(i in 0..1) u8(kind),"\x03\x03",tls_word(count-explicit-16)) in
-      let plaintext=if size==16 then aes128_gcm_open(key,concat(str_slice(iv,0,4),str_slice(record.bytes,0,8)),aad,str_slice(record.bytes,8,count))
+      let plaintext=if size==16 then aes128_gcm_open_fast(key,concat(str_slice(iv,0,4),str_slice(record.bytes,0,8)),aad,str_slice(record.bytes,8,count))
         else chacha20_poly1305_open(key,tls_nonce(iv,sequence),aad,record.bytes) in
       if !plaintext.ok then tls_bad_record(ctx,74,"TLS record authentication failed") else
       if len(plaintext.value)>16384 then tls_bad_record(ctx,71,"invalid TLS 1.2 record") else
@@ -395,7 +397,7 @@ private effect(net,time,process) fn tls_handshake(socket:Socket,ctx:ptr,host:Arr
     let secret=str_slice(entropy.value,0,32) in let public=x25519_public(secret) in
     if !public.ok then int_error(public.error.code,public.error.message,0) else
     let random=str_slice(entropy.value,32,64) in let sid=str_slice(entropy.value,64,96) in let p256_secret=str_slice(entropy.value,96,128) in
-    let share=concat("\0\x1d\0\x20",public.value) in let hello=tls_client_hello(host,share,random,sid,"") in
+    let share=concat("\0\x1d\0\x20",public.value) in let hello=tls_client_hello(host,share,random,sid,"",aes_hardware()) in
     let sent=net_send_cancel(rt_handle_fd(socket_identity(socket),2),concat("\x16\x03\x01",tls_word(len(hello)),hello),deadline,load_i64(ctx,264)) in if !sent.ok then sent else
     let first=tls_handshake_message(socket,ctx,false,deadline) in if !first.ok then int_error(first.error.code,first.error.message,0) else
     let start=tls_start(socket,ctx,host,first.value,hello,share,random,sid,p256_secret,deadline) in if !start.ok then int_error(start.error.code,start.error.message,0) else

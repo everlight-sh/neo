@@ -26,10 +26,14 @@ SITES = ['example.com', 'www.google.com', 'www.wikipedia.org', 'en.wikipedia.org
          'www.bbc.co.uk', 'www.lemonde.fr', 'stackoverflow.com', 'www.apple.com', 'www.microsoft.com', 'lightpanda.io']
 
 
-def certificates(root):
+def tls_language():
     spec = importlib.util.spec_from_file_location('tls_language', ROOT / 'tests' / 'tls_language.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
-    return module.certificates(root)
+    return module
+
+
+def certificates(root):
+    return tls_language().certificates(root)
 
 
 def free_port():
@@ -60,12 +64,15 @@ def main():
         r = subprocess.run(['python3', '-m', 'neoc', 'build', 'tests/fixtures/language_tls_web.neo', '-o', str(binary)],
                            cwd=ROOT, capture_output=True, text=True)
         assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-2000:])
-        cases = [('ChaCha20-Poly1305, X25519', [], 'suite=4867 group=29'),
+        # OpenSSL follows the client's order: AES-128-GCM first with AES-NI, else ChaCha20-Poly1305.
+        first = tls_language().default_suite(); name = 'AES-128-GCM' if first == 4865 else 'ChaCha20-Poly1305'
+        cases = [(f'{name}, X25519', [], f'suite={first} group=29'),
                  ('AES-128-GCM only', ['-ciphersuites', 'TLS_AES_128_GCM_SHA256'], 'suite=4865 group=29'),
-                 ('P-256 only: HelloRetryRequest', ['-groups', 'P-256'], 'suite=4867 group=23'),
+                 ('ChaCha20-Poly1305 only', ['-ciphersuites', 'TLS_CHACHA20_POLY1305_SHA256'], 'suite=4867 group=29'),
+                 ('P-256 only: HelloRetryRequest', ['-groups', 'P-256'], f'suite={first} group=23'),
                  ('P-256 and AES-128-GCM', ['-groups', 'P-256', '-ciphersuites', 'TLS_AES_128_GCM_SHA256'], 'suite=4865 group=23'),
-                 ('stateless cookie, X25519', ['-stateless'], 'suite=4867 group=29'),
-                 ('stateless cookie, P-256', ['-stateless', '-groups', 'P-256'], 'suite=4867 group=23')]
+                 ('stateless cookie, X25519', ['-stateless'], f'suite={first} group=29'),
+                 ('stateless cookie, P-256', ['-stateless', '-groups', 'P-256'], f'suite={first} group=23')]
         for name, options, expected in cases:
             proc, port = server(root, options)
             try:

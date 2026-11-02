@@ -25,6 +25,18 @@ def openssl(*args,data=None):
     return r.stdout
 
 
+def default_suite():
+    """The TLS 1.3 suite the client lists first: AES-128-GCM (4865) on x86-64 CPUs with AES-NI,
+    PCLMULQDQ and SSE4.1 (the client's aes_hardware()), otherwise ChaCha20-Poly1305 (4867)."""
+    import platform
+    if platform.machine().lower() not in ('x86_64', 'amd64'): return 4867
+    try: flags = set(next(line for line in open('/proc/cpuinfo') if line.startswith('flags')).split())
+    except (OSError, StopIteration):
+        r = subprocess.run(['sysctl', '-n', 'machdep.cpu.features'], capture_output=True, text=True)
+        flags = {flag.lower().replace('.', '_') for flag in r.stdout.split()}
+    return 4865 if {'aes', 'pclmulqdq', 'sse4_1', 'ssse3'} <= flags else 4867
+
+
 def certificates(root):
     openssl('req','-new','-x509','-newkey','rsa:2048','-nodes','-keyout',root/'ca.key','-out',root/'ca.pem','-subj','/CN=Neo Test Root','-days','2','-sha256',
         '-addext','basicConstraints=critical,CA:TRUE,pathlen:1','-addext','keyUsage=critical,keyCertSign,cRLSign')

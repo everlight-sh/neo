@@ -49,10 +49,14 @@ def openssl(*args, data=None):
     return r.stdout
 
 
-def certificates(root):
+def tls_language():
     spec = importlib.util.spec_from_file_location('tls_language', ROOT / 'tests' / 'tls_language.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
-    module.certificates(root)
+    return module
+
+
+def certificates(root):
+    tls_language().certificates(root)
     (root / 'extensions').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n'
                                      'subjectAltName=DNS:localhost,IP:127.0.0.1\n')
     openssl('req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-384', '-nodes', '-keyout', root / 'p384-leaf.key',
@@ -376,7 +380,7 @@ def main():
         # TLS 1.3 servers still negotiate TLS 1.3 from the same ClientHello.
         for leaf in ('rsa', 'p256'):
             with server(root, leaf, []) as port:
-                expect_ok(f'{leaf} TLS 1.3-capable server', client(port, leaf), version=772, suite=4867, group=29)
+                expect_ok(f'{leaf} TLS 1.3-capable server', client(port, leaf), version=772, suite=tls_language().default_suite(), group=29)
         with server(root, 'rsa', ['-ciphersuites', 'TLS_AES_128_GCM_SHA256', '-groups', 'P-256']) as port:
             expect_ok('TLS 1.3 with HelloRetryRequest to P-256', client(port, 'rsa'), version=772, suite=4865, group=23)
 
@@ -447,8 +451,8 @@ def main():
                                     ('TLS 1.2 ECDHE-RSA-AES128-GCM P-256, RSA-2048', 'rsa', ['-tls1_2', '-cipher', 'ECDHE-RSA-AES128-GCM-SHA256', '-groups', 'P-256']),
                                     ('TLS 1.2 ECDHE-ECDSA-AES128-GCM X25519, P-256', 'p256', ['-tls1_2', '-cipher', 'ECDHE-ECDSA-AES128-GCM-SHA256', '-groups', 'X25519']),
                                     ('TLS 1.2 ECDHE-ECDSA-CHACHA20 X25519, P-384', 'p384', ['-tls1_2', '-cipher', 'ECDHE-ECDSA-CHACHA20-POLY1305', '-groups', 'X25519']),
-                                    ('TLS 1.3 CHACHA20 X25519, RSA-2048 (comparison)', 'rsa', []),
-                                    ('TLS 1.3 CHACHA20 X25519, P-256 (comparison)', 'p256', [])]:
+                                    ('TLS 1.3 CHACHA20 X25519, RSA-2048 (comparison)', 'rsa', ['-ciphersuites', 'TLS_CHACHA20_POLY1305_SHA256']),
+                                    ('TLS 1.3 CHACHA20 X25519, P-256 (comparison)', 'p256', ['-ciphersuites', 'TLS_CHACHA20_POLY1305_SHA256'])]:
             samples = []
             with server(root, leaf, options) as port:
                 for _ in range(runs):
