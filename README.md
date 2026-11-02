@@ -1,7 +1,6 @@
 # Neo
 
-A programming language designed for AI agents rather than humans, with one goal: native code at least as fast as Rust, and parallel by
-default like Go.
+A programming language made for LLMs, with one goal: native code at least as fast as Rust, and parallel by default like Go.
 
 Pipeline, same shape as rustc:
 
