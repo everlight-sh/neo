@@ -3,176 +3,533 @@ import "std:sha512"
 import "std:der"
 import "std:p256"
 
-; Experimental ECDSA signature verification on NIST short-Weierstrass curves
-; with a=-3: P-384 with SHA-256/384/512 digests, and P-256 with digests other
-; than the SHA-256 path already provided by std:p256. Field and order values are
-; little-endian arrays of 30-bit limbs in Montgomery form. A fused operand
-; scanning product keeps every partial sum below 2^62 in exact i64 arithmetic.
-; Verification works only on public data, so it uses ordinary branches and is
-; not constant time. It has not been independently audited.
-type EcwMod = { modulus:Arr i64 _,r2:Arr i64 _,one:Arr i64 _,inverse:i64 }
-type EcwCurve = { field:EcwMod,order:EcwMod,b:Arr i64 _,gx:Arr i64 _,gy:Arr i64 _,size:i64 }
-type EcwPoint = { x:Arr i64 _,y:Arr i64 _,z:Arr i64 _ }
-type EcwCarry = { words:Arr i64 _,carry:i64 }
+; ECDSA signature verification on P-384 with SHA-256/384/512 digests, and on
+; P-256 with digests other than the SHA-256 path of std:p256 (which does the
+; P-256 arithmetic). Field and order values are records of six unsigned 64-bit
+; limbs (no allocation per operation) in Montgomery form with R = 2^384, fully
+; reduced between operations; tests/generate_p384_fields.py writes the
+; unrolled products and the constants. Limb arithmetic is exact: wrapping
+; sums with unsigned comparisons for carries, and wrapping_mul/mul_high for
+; the two words of each 128-bit product.
+; Verification works only on public data, so it uses ordinary branches, NAF
+; digits, precomputed odd multiples of the generator and a variable-time
+; inversion; it is not constant time. There is no P-384 signing or key
+; agreement here. It has not been independently audited.
+type P6 = { l0:i64,l1:i64,l2:i64,l3:i64,l4:i64,l5:i64 }
+type P6Carry = { value:P6,carry:i64 }
+; Product-scanning state: a signed three-word column accumulator c0..c2 (two's
+; complement), the quotient digits w0..w5 while reducing, then the low result
+; words.
+type P6Acc = { c0:i64,c1:i64,c2:i64,w0:i64,w1:i64,w2:i64,w3:i64,w4:i64,w5:i64 }
+type P384Affine = { x:P6,y:P6 }
+type P384Point = { x:P6,y:P6,z:P6 }
 
-private fn ecw_zero(count:i64) -> Arr i64 _ = check count>=0 && count<=32 in arr(i in 0..count) 0
-private fn ecw_limbs(bytes:Arr u8 n,count:i64) -> Arr i64 _
-  = check count>=0 && count<=32 in arr(i in 0..count) let low=i*30 in
-      bit_and(loop(q=low/8,value=0) while q<=(low+29)/8 next(q+1,
-        let byte=if q<n then str_byte(bytes,n-1-q) else 0 in
-        bit_or(value,if q*8>=low then shift_left(byte,q*8-low) else shift_right(byte,low-q*8))) yield value,1073741823)
-private fn ecw_bytes(words:Arr i64 n,count:i64) -> Arr u8 _
-  = check count>=0 && count<=128 in arr(i in 0..count) let bit=(count-1-i)*8 in let index=bit/30 in let offset=bit%30 in
-      let low=if index>=0 && index<n then words[index] else 0 in let high=if index+1>=0 && index+1<n then words[index+1] else 0 in
-      u8(bit_and(bit_or(shift_right(low,offset),shift_left(high,30-offset)),255))
-private fn ecw_is_zero(a:Arr i64 n) -> bool = loop(i=0,value=0) while i<n next(i+1,check i>=0 && i<n in bit_or(value,a[i])) yield value==0
-private fn ecw_equal(a:Arr i64 n,b:Arr i64 m) -> bool
-  = n==m && loop(i=0,same=true) while same && i<n next(i+1,check i>=0 && i<n && i<m in a[i]==b[i]) yield same
-private fn ecw_subtract(a:Arr i64 n,b:Arr i64 m) -> EcwCarry
-  = check n==m in loop(i=0,borrow=0,out=ecw_zero(n)) while i<n next(i+1,
-      check i>=0 && i<n in bit_and(arithmetic_shift_right(a[i]-b[i]-borrow,63),1),
-      check i>=0 && i<n && len(out)==n in set(out,i,bit_and(a[i]-b[i]-borrow,1073741823))) yield EcwCarry { words=out,carry=borrow }
-private fn ecw_sum(a:Arr i64 n,b:Arr i64 m) -> Arr i64 _
-  = check n==m in loop(i=0,carry=0,out=ecw_zero(n)) while i<n next(i+1,
-      check i>=0 && i<n in shift_right(a[i]+b[i]+carry,30),
-      check i>=0 && i<n && len(out)==n in set(out,i,bit_and(a[i]+b[i]+carry,1073741823))) yield out
-private fn ecw_reduce(a:Arr i64 n,modulus:Arr i64 m) -> Arr i64 _
-  = let difference=ecw_subtract(a,modulus) in if difference.carry==0 then difference.words else a
-private fn ecw_add(a:Arr i64 n,b:Arr i64 m,modulus:Arr i64 k) -> Arr i64 _ = ecw_reduce(ecw_sum(a,b),modulus)
-private fn ecw_sub(a:Arr i64 n,b:Arr i64 m,modulus:Arr i64 k) -> Arr i64 _
-  = let difference=ecw_subtract(a,b) in if difference.carry==0 then difference.words else
-    let words=difference.words in check len(words)==k in
-    loop(i=0,carry=0,out=ecw_zero(k)) while i<k next(i+1,
-      check i>=0 && i<k in shift_right(words[i]+modulus[i]+carry,30),
-      check i>=0 && i<k && len(out)==k in set(out,i,bit_and(words[i]+modulus[i]+carry,1073741823))) yield out
-; Montgomery product a*b/R mod m for a<R and b<m; the running value stays below 2m.
-private fn ecw_mul(a:Arr i64 n,b:Arr i64 m,mod:EcwMod) -> Arr i64 _
-  = let p=mod.modulus in let k=len(p) in check n==k && m==k && k>=2 && k<=32 && len(p)==k in
-    let t=loop(i=0,t=ecw_zero(k)) while i<k next(i+1,
-      check i>=0 && i<k && len(t)==k in
-      let ai=a[i] in let first=t[0]+ai*b[0] in
-      let factor=bit_and(bit_and(first,1073741823)*mod.inverse,1073741823) in
-      let row=loop(j=1,carry=shift_right(first+factor*p[0],30),row=t) while j<k next(j+1,
-          check j>=1 && j<k && len(row)==k in shift_right(row[j]+ai*b[j]+factor*p[j]+carry,30),
-          check j>=1 && j<k && len(row)==k in set(row,j-1,bit_and(row[j]+ai*b[j]+factor*p[j]+carry,1073741823))) yield EcwCarry { words=row,carry=carry } in
-      let words=row.words in check len(words)==k in set(words,k-1,row.carry)) yield t in
-    ecw_reduce(t,p)
-private fn ecw_power(value:Arr i64 _,exponent:Arr i64 n,mod:EcwMod) -> Arr i64 _
-  = loop(i=n*30-1,out=mod.one) while i>=0 next(i-1,
-      check i>=0 && i/30<n in let square=ecw_mul(out,out,mod) in
-      if bit_and(shift_right(exponent[i/30],i%30),1)==1 then ecw_mul(square,value,mod) else square) yield out
-private fn ecw_inverse(value:Arr i64 _,mod:EcwMod) -> Arr i64 _
-  = let count=len(mod.modulus) in check count>=1 && count<=32 in
-    ecw_power(value,ecw_subtract(mod.modulus,arr(i in 0..count) if i==0 then 2 else 0).words,mod)
-private fn ecw_mod(modulus:Arr u8 a,r2:Arr u8 b,one:Arr u8 c,inverse:i64,count:i64) -> EcwMod
-  = EcwMod { modulus=ecw_limbs(modulus,count),r2=ecw_limbs(r2,count),one=ecw_limbs(one,count),inverse=inverse }
-private fn ecw_curve(field:EcwMod,order:EcwMod,b:Arr u8 n,gx:Arr u8 m,gy:Arr u8 k) -> EcwCurve
-  = let count=len(field.modulus) in
-    EcwCurve { field=field,order=order,b=ecw_mul(ecw_limbs(b,count),field.r2,field),gx=ecw_mul(ecw_limbs(gx,count),field.r2,field),
-      gy=ecw_mul(ecw_limbs(gy,count),field.r2,field),size=n }
-private fn ecw_p384() -> EcwCurve
-  = ecw_curve(
-      ecw_mod("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff",
-        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x20\x00\x00\x00\x0f\xff\xff\xff\xe0\x00\x00\x00\x00\x00\x00\x00\x20\x00\x00\x00\x0f\xff\xff\xff\xe0\x00\x00\x00\x10\x00",
-        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x3f\xff\xff\xff\xff\xff\xff\xff\xc0\x00\x00\x00\x40",1,13),
-      ecw_mod("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc7\x63\x4d\x81\xf4\x37\x2d\xdf\x58\x1a\x0d\xb2\x48\xb0\xa7\x7a\xec\xec\x19\x6a\xcc\xc5\x29\x73",
-        "\x4e\xe0\x12\xb3\x9b\xf2\x13\xfb\x05\xb7\xa2\x82\x66\x89\x5d\x40\xd4\x91\x74\xaa\xb1\xcc\x5b\xf0\x1e\xef\x22\x44\xb7\x78\xa9\x77\x03\xc3\xaa\xa8\xe0\x3e\xba\xca\x01\x3e\x66\x2b\x46\x92\x2e\x28",
-        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0e\x27\x2c\x9f\x82\xf2\x34\x88\x29\xf9\x7c\x93\x6d\xd3\xd6\x21\x44\xc4\xf9\xa5\x4c\xce\xb5\xa3\x40",680516677,13),
-      "\xb3\x31\x2f\xa7\xe2\x3e\xe7\xe4\x98\x8e\x05\x6b\xe3\xf8\x2d\x19\x18\x1d\x9c\x6e\xfe\x81\x41\x12\x03\x14\x08\x8f\x50\x13\x87\x5a\xc6\x56\x39\x8d\x8a\x2e\xd1\x9d\x2a\x85\xc8\xed\xd3\xec\x2a\xef",
-      "\xaa\x87\xca\x22\xbe\x8b\x05\x37\x8e\xb1\xc7\x1e\xf3\x20\xad\x74\x6e\x1d\x3b\x62\x8b\xa7\x9b\x98\x59\xf7\x41\xe0\x82\x54\x2a\x38\x55\x02\xf2\x5d\xbf\x55\x29\x6c\x3a\x54\x5e\x38\x72\x76\x0a\xb7",
-      "\x36\x17\xde\x4a\x96\x26\x2c\x6f\x5d\x9e\x98\xbf\x92\x92\xdc\x29\xf8\xf4\x1d\xbd\x28\x9a\x14\x7c\xe9\xda\x31\x13\xb5\xf0\xb8\xc0\x0a\x60\xb1\xce\x1d\x7e\x81\x9d\x7a\x43\x1d\x7c\x90\xea\x0e\x5f")
-private fn ecw_p256() -> EcwCurve
-  = ecw_curve(
-      ecw_mod("\xff\xff\xff\xff\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff",
-        "\x4f\xff\xff\xff\xdf\xff\xff\xff\xff\xff\xff\xff\xef\xff\xff\xff\xbf\xff\xff\xff\xf0\x00\x00\x00\x00\x00\x00\x00\x30\x00\x00\x00",
-        "\x00\x00\x3f\xff\xff\xff\xbf\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00",1,9),
-      ecw_mod("\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xbc\xe6\xfa\xad\xa7\x17\x9e\x84\xf3\xb9\xca\xc2\xfc\x63\x25\x51",
-        "\x55\xab\xa8\x3a\xfc\x16\x48\x4a\x92\xb6\xbe\xc5\x96\x19\x07\x6a\x9e\xa8\xca\x2a\xe1\x30\x78\x5e\x01\x76\x44\x69\x48\x87\xac\x57",
-        "\x00\x00\x3f\xff\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x10\xc6\x41\x54\x96\x3a\x18\x5e\xc3\x11\x8d\x4f\x40\xe7\x36\xab\xc0\x00",771800143,9),
-      "\x5a\xc6\x35\xd8\xaa\x3a\x93\xe7\xb3\xeb\xbd\x55\x76\x98\x86\xbc\x65\x1d\x06\xb0\xcc\x53\xb0\xf6\x3b\xce\x3c\x3e\x27\xd2\x60\x4b",
-      "\x6b\x17\xd1\xf2\xe1\x2c\x42\x47\xf8\xbc\xe6\xe5\x63\xa4\x40\xf2\x77\x03\x7d\x81\x2d\xeb\x33\xa0\xf4\xa1\x39\x45\xd8\x98\xc2\x96",
-      "\x4f\xe3\x42\xe2\xfe\x1a\x7f\x9b\x8e\xe7\xeb\x4a\x7c\x0f\x9e\x16\x2b\xce\x33\x57\x6b\x31\x5e\xce\xcb\xb6\x40\x68\x37\xbf\x51\xf5")
+; 1 when a < b as unsigned 64-bit words, else 0.
+private fn p6_below(a:i64,b:i64) -> i64 = if bit_xor(a,-9223372036854775808)<bit_xor(b,-9223372036854775808) then 1 else 0
+; Adds the 128-bit product x*y to the accumulator.
+private fn p6_mac(s:P6Acc,x:i64,y:i64) -> P6Acc
+  = let lo=wrapping_mul(x,y) in let hi=mul_high(x,y) in
+    let c0=wrapping_add(s.c0,lo) in let t=wrapping_add(s.c1,hi) in let c1=wrapping_add(t,p6_below(c0,lo)) in
+    s with { c0=c0,c1=c1,c2=wrapping_add(s.c2,bit_or(p6_below(t,hi),p6_below(c1,t))) }
+private fn p6_mac2(s:P6Acc,x:i64,y:i64) -> P6Acc = p6_mac(p6_mac(s,x,y),x,y)
+; Adds or subtracts one word, or subtracts the two-word value hi*2^64+lo.
+private fn p6_add1(s:P6Acc,x:i64) -> P6Acc
+  = let c0=wrapping_add(s.c0,x) in let k=p6_below(c0,x) in let c1=wrapping_add(s.c1,k) in
+    s with { c0=c0,c1=c1,c2=wrapping_add(s.c2,p6_below(c1,k)) }
+private fn p6_sub1(s:P6Acc,x:i64) -> P6Acc
+  = let k=p6_below(s.c0,x) in s with { c0=wrapping_sub(s.c0,x),c1=wrapping_sub(s.c1,k),c2=wrapping_sub(s.c2,p6_below(s.c1,k)) }
+private fn p6_sub2(s:P6Acc,lo:i64,hi:i64) -> P6Acc
+  = let k=p6_below(s.c0,lo) in let t=wrapping_sub(s.c1,hi) in
+    s with { c0=wrapping_sub(s.c0,lo),c1=wrapping_sub(t,k),c2=wrapping_sub(s.c2,bit_or(p6_below(s.c1,hi),p6_below(t,k))) }
+; Adds q*m0, where q = c0*(-m^-1) mod 2^64: its low word cancels c0 (a carry
+; unless c0 is 0) and hi is its high word. The zero word is shifted out.
+private fn p6_fold(s:P6Acc,hi:i64) -> P6Acc
+  = let t=wrapping_add(hi,if s.c0==0 then 0 else 1) in let c1=wrapping_add(s.c1,t) in let c2=wrapping_add(s.c2,p6_below(c1,t)) in
+    s with { c0=c1,c1=c2,c2=arithmetic_shift_right(c2,63) }
+; generated: begin p6_carries
+private fn p6_add_carry(a:P6,b:P6) -> P6Carry
+  = let s0=wrapping_add(a.l0,b.l0) in let c=p6_below(s0,a.l0) in
+    let t=wrapping_add(a.l1,b.l1) in let s1=wrapping_add(t,c) in let c=bit_or(p6_below(t,a.l1),p6_below(s1,t)) in
+    let t=wrapping_add(a.l2,b.l2) in let s2=wrapping_add(t,c) in let c=bit_or(p6_below(t,a.l2),p6_below(s2,t)) in
+    let t=wrapping_add(a.l3,b.l3) in let s3=wrapping_add(t,c) in let c=bit_or(p6_below(t,a.l3),p6_below(s3,t)) in
+    let t=wrapping_add(a.l4,b.l4) in let s4=wrapping_add(t,c) in let c=bit_or(p6_below(t,a.l4),p6_below(s4,t)) in
+    let t=wrapping_add(a.l5,b.l5) in let s5=wrapping_add(t,c) in let c=bit_or(p6_below(t,a.l5),p6_below(s5,t)) in
+    P6Carry { value=P6 { l0=s0,l1=s1,l2=s2,l3=s3,l4=s4,l5=s5 },carry=c }
+private fn p6_sub_borrow(a:P6,b:P6) -> P6Carry
+  = let d0=wrapping_sub(a.l0,b.l0) in let c=p6_below(a.l0,b.l0) in
+    let t=wrapping_sub(a.l1,b.l1) in let d1=wrapping_sub(t,c) in let c=bit_or(p6_below(a.l1,b.l1),p6_below(t,c)) in
+    let t=wrapping_sub(a.l2,b.l2) in let d2=wrapping_sub(t,c) in let c=bit_or(p6_below(a.l2,b.l2),p6_below(t,c)) in
+    let t=wrapping_sub(a.l3,b.l3) in let d3=wrapping_sub(t,c) in let c=bit_or(p6_below(a.l3,b.l3),p6_below(t,c)) in
+    let t=wrapping_sub(a.l4,b.l4) in let d4=wrapping_sub(t,c) in let c=bit_or(p6_below(a.l4,b.l4),p6_below(t,c)) in
+    let t=wrapping_sub(a.l5,b.l5) in let d5=wrapping_sub(t,c) in let c=bit_or(p6_below(a.l5,b.l5),p6_below(t,c)) in
+    P6Carry { value=P6 { l0=d0,l1=d1,l2=d2,l3=d3,l4=d4,l5=d5 },carry=c }
+; generated: end p6_carries
+; a when bit is 0, b when bit is 1 (public data only: LLVM lowers this to
+; conditional moves, but nothing secret is selected in this module).
+private fn p6_select(a:P6,b:P6,bit:i64) -> P6 = if bit==1 then b else a
+private fn p6_mask(a:P6,m:i64) -> P6
+  = P6 { l0=bit_and(a.l0,m),l1=bit_and(a.l1,m),l2=bit_and(a.l2,m),l3=bit_and(a.l3,m),l4=bit_and(a.l4,m),l5=bit_and(a.l5,m) }
+; The product's low words (w0..w4, c0) plus c1*2^384 are below twice the
+; modulus: one conditional subtraction reduces them.
+private fn p6_final(s:P6Acc,m:P6) -> P6
+  = let t=P6 { l0=s.w0,l1=s.w1,l2=s.w2,l3=s.w3,l4=s.w4,l5=s.c0 } in let d=p6_sub_borrow(t,m) in
+    p6_select(t,d.value,bit_or(s.c1,bit_xor(d.carry,1)))
+; generated: begin p6_products
+private inline fn p6_field_mul1(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l0,b.l4) in
+    let s=p6_mac(s,a.l1,b.l3) in
+    let s=p6_mac(s,a.l2,b.l2) in
+    let s=p6_mac(s,a.l3,b.l1) in
+    let s=p6_mac(s,a.l4,b.l0) in
+    let s=p6_sub2(s,shift_left(s.w3,32),shift_right(s.w3,32)) in
+    let s=p6_sub1(s,s.w2) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w4=q } in
+    let s=p6_mac(s,a.l0,b.l5) in
+    let s=p6_mac(s,a.l1,b.l4) in
+    let s=p6_mac(s,a.l2,b.l3) in
+    let s=p6_mac(s,a.l3,b.l2) in
+    let s=p6_mac(s,a.l4,b.l1) in
+    let s=p6_mac(s,a.l5,b.l0) in
+    let s=p6_sub2(s,shift_left(s.w4,32),shift_right(s.w4,32)) in
+    let s=p6_sub1(s,s.w3) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w5=q } in
+    s
+private inline fn p6_field_mul2(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l1,b.l5) in
+    let s=p6_mac(s,a.l2,b.l4) in
+    let s=p6_mac(s,a.l3,b.l3) in
+    let s=p6_mac(s,a.l4,b.l2) in
+    let s=p6_mac(s,a.l5,b.l1) in
+    let s=p6_sub2(s,shift_left(s.w5,32),shift_right(s.w5,32)) in
+    let s=p6_sub1(s,s.w4) in
+    let s=p6_add1(s,s.w0) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w0=s.c0 } in
+    let s=p6_mac(s,a.l2,b.l5) in
+    let s=p6_mac(s,a.l3,b.l4) in
+    let s=p6_mac(s,a.l4,b.l3) in
+    let s=p6_mac(s,a.l5,b.l2) in
+    let s=p6_sub1(s,s.w5) in
+    let s=p6_add1(s,s.w1) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w1=s.c0 } in
+    s
+private inline fn p6_field_mul3(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l3,b.l5) in
+    let s=p6_mac(s,a.l4,b.l4) in
+    let s=p6_mac(s,a.l5,b.l3) in
+    let s=p6_add1(s,s.w2) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w2=s.c0 } in
+    let s=p6_mac(s,a.l4,b.l5) in
+    let s=p6_mac(s,a.l5,b.l4) in
+    let s=p6_add1(s,s.w3) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w3=s.c0 } in
+    let s=p6_mac(s,a.l5,b.l5) in
+    let s=p6_add1(s,s.w4) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w4=s.c0 } in
+    s
+private fn p6_field_mul(a:P6,b:P6) -> P6
+  = let s=P6Acc { c0=0,c1=0,c2=0,w0=0,w1=0,w2=0,w3=0,w4=0,w5=0 } in
+    let s=p6_mac(s,a.l0,b.l0) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w0=q } in
+    let s=p6_mac(s,a.l0,b.l1) in
+    let s=p6_mac(s,a.l1,b.l0) in
+    let s=p6_sub2(s,shift_left(s.w0,32),shift_right(s.w0,32)) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w1=q } in
+    let s=p6_mac(s,a.l0,b.l2) in
+    let s=p6_mac(s,a.l1,b.l1) in
+    let s=p6_mac(s,a.l2,b.l0) in
+    let s=p6_sub2(s,shift_left(s.w1,32),shift_right(s.w1,32)) in
+    let s=p6_sub1(s,s.w0) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w2=q } in
+    let s=p6_mac(s,a.l0,b.l3) in
+    let s=p6_mac(s,a.l1,b.l2) in
+    let s=p6_mac(s,a.l2,b.l1) in
+    let s=p6_mac(s,a.l3,b.l0) in
+    let s=p6_sub2(s,shift_left(s.w2,32),shift_right(s.w2,32)) in
+    let s=p6_sub1(s,s.w1) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w3=q } in
+    let s=p6_field_mul1(a,b,s) in
+    let s=p6_field_mul2(a,b,s) in
+    let s=p6_field_mul3(a,b,s) in
+    p6_final(p6_add1(s,s.w5),P6 { l0=4294967295,l1=-4294967296,l2=-2,l3=-1,l4=-1,l5=-1 })
+private inline fn p6_field_square1(a:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac2(s,a.l0,a.l4) in
+    let s=p6_mac2(s,a.l1,a.l3) in
+    let s=p6_mac(s,a.l2,a.l2) in
+    let s=p6_sub2(s,shift_left(s.w3,32),shift_right(s.w3,32)) in
+    let s=p6_sub1(s,s.w2) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w4=q } in
+    let s=p6_mac2(s,a.l0,a.l5) in
+    let s=p6_mac2(s,a.l1,a.l4) in
+    let s=p6_mac2(s,a.l2,a.l3) in
+    let s=p6_sub2(s,shift_left(s.w4,32),shift_right(s.w4,32)) in
+    let s=p6_sub1(s,s.w3) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w5=q } in
+    s
+private inline fn p6_field_square2(a:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac2(s,a.l1,a.l5) in
+    let s=p6_mac2(s,a.l2,a.l4) in
+    let s=p6_mac(s,a.l3,a.l3) in
+    let s=p6_sub2(s,shift_left(s.w5,32),shift_right(s.w5,32)) in
+    let s=p6_sub1(s,s.w4) in
+    let s=p6_add1(s,s.w0) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w0=s.c0 } in
+    let s=p6_mac2(s,a.l2,a.l5) in
+    let s=p6_mac2(s,a.l3,a.l4) in
+    let s=p6_sub1(s,s.w5) in
+    let s=p6_add1(s,s.w1) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w1=s.c0 } in
+    s
+private inline fn p6_field_square3(a:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac2(s,a.l3,a.l5) in
+    let s=p6_mac(s,a.l4,a.l4) in
+    let s=p6_add1(s,s.w2) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w2=s.c0 } in
+    let s=p6_mac2(s,a.l4,a.l5) in
+    let s=p6_add1(s,s.w3) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w3=s.c0 } in
+    let s=p6_mac(s,a.l5,a.l5) in
+    let s=p6_add1(s,s.w4) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w4=s.c0 } in
+    s
+private fn p6_field_square(a:P6) -> P6
+  = let s=P6Acc { c0=0,c1=0,c2=0,w0=0,w1=0,w2=0,w3=0,w4=0,w5=0 } in
+    let s=p6_mac(s,a.l0,a.l0) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w0=q } in
+    let s=p6_mac2(s,a.l0,a.l1) in
+    let s=p6_sub2(s,shift_left(s.w0,32),shift_right(s.w0,32)) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w1=q } in
+    let s=p6_mac2(s,a.l0,a.l2) in
+    let s=p6_mac(s,a.l1,a.l1) in
+    let s=p6_sub2(s,shift_left(s.w1,32),shift_right(s.w1,32)) in
+    let s=p6_sub1(s,s.w0) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w2=q } in
+    let s=p6_mac2(s,a.l0,a.l3) in
+    let s=p6_mac2(s,a.l1,a.l2) in
+    let s=p6_sub2(s,shift_left(s.w2,32),shift_right(s.w2,32)) in
+    let s=p6_sub1(s,s.w1) in
+    let q=wrapping_add(s.c0,shift_left(s.c0,32)) in let s=p6_fold(s,wrapping_sub(shift_right(q,32),p6_below(shift_left(q,32),q))) with { w3=q } in
+    let s=p6_field_square1(a,s) in
+    let s=p6_field_square2(a,s) in
+    let s=p6_field_square3(a,s) in
+    p6_final(p6_add1(s,s.w5),P6 { l0=4294967295,l1=-4294967296,l2=-2,l3=-1,l4=-1,l5=-1 })
+private inline fn p6_order_mul1(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l0,b.l4) in
+    let s=p6_mac(s,a.l1,b.l3) in
+    let s=p6_mac(s,a.l2,b.l2) in
+    let s=p6_mac(s,a.l3,b.l1) in
+    let s=p6_mac(s,a.l4,b.l0) in
+    let s=p6_mac(s,s.w3,6348401684107011962) in
+    let s=p6_mac(s,s.w2,-4079331616924160545) in
+    let s=p6_sub1(s,s.w1) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w4=q } in
+    let s=p6_mac(s,a.l0,b.l5) in
+    let s=p6_mac(s,a.l1,b.l4) in
+    let s=p6_mac(s,a.l2,b.l3) in
+    let s=p6_mac(s,a.l3,b.l2) in
+    let s=p6_mac(s,a.l4,b.l1) in
+    let s=p6_mac(s,a.l5,b.l0) in
+    let s=p6_mac(s,s.w4,6348401684107011962) in
+    let s=p6_mac(s,s.w3,-4079331616924160545) in
+    let s=p6_sub1(s,s.w2) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w5=q } in
+    s
+private inline fn p6_order_mul2(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l1,b.l5) in
+    let s=p6_mac(s,a.l2,b.l4) in
+    let s=p6_mac(s,a.l3,b.l3) in
+    let s=p6_mac(s,a.l4,b.l2) in
+    let s=p6_mac(s,a.l5,b.l1) in
+    let s=p6_mac(s,s.w5,6348401684107011962) in
+    let s=p6_mac(s,s.w4,-4079331616924160545) in
+    let s=p6_sub1(s,s.w3) in
+    let s=p6_add1(s,s.w0) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w0=s.c0 } in
+    let s=p6_mac(s,a.l2,b.l5) in
+    let s=p6_mac(s,a.l3,b.l4) in
+    let s=p6_mac(s,a.l4,b.l3) in
+    let s=p6_mac(s,a.l5,b.l2) in
+    let s=p6_mac(s,s.w5,-4079331616924160545) in
+    let s=p6_sub1(s,s.w4) in
+    let s=p6_add1(s,s.w1) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w1=s.c0 } in
+    s
+private inline fn p6_order_mul3(a:P6,b:P6,s:P6Acc) -> P6Acc
+  = let s=p6_mac(s,a.l3,b.l5) in
+    let s=p6_mac(s,a.l4,b.l4) in
+    let s=p6_mac(s,a.l5,b.l3) in
+    let s=p6_sub1(s,s.w5) in
+    let s=p6_add1(s,s.w2) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w2=s.c0 } in
+    let s=p6_mac(s,a.l4,b.l5) in
+    let s=p6_mac(s,a.l5,b.l4) in
+    let s=p6_add1(s,s.w3) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w3=s.c0 } in
+    let s=p6_mac(s,a.l5,b.l5) in
+    let s=p6_add1(s,s.w4) in
+    let s=s with { c0=s.c1,c1=s.c2,c2=arithmetic_shift_right(s.c2,63),w4=s.c0 } in
+    s
+private fn p6_order_mul(a:P6,b:P6) -> P6
+  = let s=P6Acc { c0=0,c1=0,c2=0,w0=0,w1=0,w2=0,w3=0,w4=0,w5=0 } in
+    let s=p6_mac(s,a.l0,b.l0) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w0=q } in
+    let s=p6_mac(s,a.l0,b.l1) in
+    let s=p6_mac(s,a.l1,b.l0) in
+    let s=p6_mac(s,s.w0,6348401684107011962) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w1=q } in
+    let s=p6_mac(s,a.l0,b.l2) in
+    let s=p6_mac(s,a.l1,b.l1) in
+    let s=p6_mac(s,a.l2,b.l0) in
+    let s=p6_mac(s,s.w1,6348401684107011962) in
+    let s=p6_mac(s,s.w0,-4079331616924160545) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w2=q } in
+    let s=p6_mac(s,a.l0,b.l3) in
+    let s=p6_mac(s,a.l1,b.l2) in
+    let s=p6_mac(s,a.l2,b.l1) in
+    let s=p6_mac(s,a.l3,b.l0) in
+    let s=p6_mac(s,s.w2,6348401684107011962) in
+    let s=p6_mac(s,s.w1,-4079331616924160545) in
+    let s=p6_sub1(s,s.w0) in
+    let q=wrapping_mul(s.c0,7986114184663260229) in let s=p6_fold(s,mul_high(q,-1374695839762142861)) with { w3=q } in
+    let s=p6_order_mul1(a,b,s) in
+    let s=p6_order_mul2(a,b,s) in
+    let s=p6_order_mul3(a,b,s) in
+    p6_final(p6_add1(s,s.w5),P6 { l0=-1374695839762142861,l1=6348401684107011962,l2=-4079331616924160545,l3=-1,l4=-1,l5=-1 })
+; generated: end p6_products
+; generated: begin p6_constants
+private fn p6_prime() -> P6 = P6 { l0=4294967295,l1=-4294967296,l2=-2,l3=-1,l4=-1,l5=-1 }
+private fn p6_order() -> P6 = P6 { l0=-1374695839762142861,l1=6348401684107011962,l2=-4079331616924160545,l3=-1,l4=-1,l5=-1 }
+private fn p6_field_r2() -> P6 = P6 { l0=-8589934591,l1=8589934592,l2=-8589934592,l3=8589934592,l4=1,l5=0 }
+private fn p6_order_r2() -> P6 = P6 { l0=3256554584917936553,l1=-54744796168018919,l2=-4882385527837808313,l3=-3166794598585787195,l4=4589268600508278933,l5=902107514168524577 }
+private fn p6_field_one() -> P6 = P6 { l0=-4294967295,l1=4294967295,l2=1,l3=0,l4=0,l5=0 }
+private fn p6_curve_b() -> P6 = P6 { l0=581395848458481100,l1=-636786727019859220,l2=8643006485390950958,l3=-2074105615313827102,l4=-5320121202432139116,l5=-3672666480684580871 }
+private fn p384_generator_bytes(index:i64) -> Arr u8 _
+  = if index==0 then "\x28\xb5\xc0\x49\x66\x75\xd0\x3d\x38\xce\xd6\xa0\xe2\x78\xe3\x20\x6e\x4d\x1b\x54\xfc\x3a\x9c\x87\xff\x0e\xa3\x59\x84\x86\x54\x64\x2b\xde\x4e\x61\x23\xf7\x2f\x81\x13\x15\x9e\x29\xc2\xad\x3a\x4d\xfe\xa4\x03\x4b\xad\x3d\x04\x23\xac\xa9\xb4\x7b\xbf\xa8\xbf\xa1\x50\xb0\x83\x2e\x56\xe7\xad\x8b\xd9\xff\xf4\x68\x19\x52\xc3\xc6\x40\xa8\x69\x39\x26\x02\x80\xdd\xe9\xc5\x15\x5a\xc2\xab\x78\x2b" else
+    if index==1 then "\x73\x40\xdc\xc1\xe6\xdb\xe4\x05\x9c\x77\x4f\xf0\xff\xa9\x4e\xc5\xf0\xcc\x70\xa1\xe9\x34\x20\x6b\x3e\x6c\x1c\xd5\x32\xd7\x48\x3a\x70\xa4\x3a\x26\x2d\x7e\x6f\xe3\xac\xc3\xc1\xe7\x68\xfe\x83\xd2\x57\xe1\x4e\xc0\x21\x48\x28\x7e\x6d\xe3\xe0\x7a\xa7\x89\xd7\x92\x46\x74\xf6\x4e\xc0\x63\x26\x13\xb4\xd0\xe1\xd2\x5a\x2d\x01\x68\x39\xb3\x02\x51\xb1\x68\xdb\xf6\xaf\x92\x32\x98\xfc\x65\x54\x46" else
+    if index==2 then "\xdf\xf0\xf1\x68\xba\x5e\x59\xbb\x66\x34\x87\xcc\xcb\xc0\x85\xc1\x3b\x70\x3c\x29\xb5\xb1\x1e\x7f\xe6\x05\xcc\xaa\xf5\x2c\xdb\x60\xc6\xe4\xe8\xe2\x87\xb9\x76\xc6\xfb\x8f\x17\x1d\xb1\x26\xbb\xe1\x21\xfa\x73\x70\xa0\x4b\x69\x2b\x66\x45\xf3\x72\x2e\x6e\xc1\x22\x99\x5b\xc3\x01\x31\x1b\xb6\x80\x11\x04\x2c\x98\xaf\x7f\x23\x4b\x6d\x23\xde\x24\x40\x94\xc5\xe6\xa3\xe4\x09\xe2\xd6\xc9\xb1\x4d" else
+    if index==3 then "\x2b\x22\x69\x7d\xd1\xb9\x13\xdf\xb1\x74\x47\x87\x5f\x41\xe6\x4c\x95\xaa\x1f\x21\xf8\xdc\x1e\x73\xed\x53\x97\x65\xd1\x15\x42\x5f\x55\xdf\xb2\x9d\x58\xdb\x93\xf8\x5b\x02\x89\x1c\x81\x9f\x2c\x93\x1e\xa6\x06\x77\x20\xb2\x96\x09\x79\x1c\x64\xa8\xd5\x49\x53\x13\x44\x08\x13\x50\x6f\xd7\xaa\x65\x80\xf7\xff\x01\x04\x7c\xf3\x0f\x06\x07\x3b\x69\x8e\x23\x7f\xf5\x3e\x9b\x6c\xaf\xb6\x16\x0a\xd9" else
+    if index==4 then "\x2f\xb9\x53\x23\x0e\x20\x5d\x2f\xf9\xe4\xd7\x3f\x29\x87\x5d\xe3\x5d\x74\x6d\xa9\x33\x48\x09\x26\x3f\xff\xbf\x3c\xc1\x1d\x35\xdc\x6a\x4d\xd5\xda\xc6\x64\xd4\x26\x6a\x6c\x63\x53\x1d\x1d\xab\x5c\xb0\xc0\x8e\xb1\x72\x30\x81\xf2\x2f\xaa\x42\xd7\x70\xe2\x77\x37\xc2\xa7\x3c\x03\xc7\x61\xf0\x27\xd8\xd0\xea\x68\xcc\xac\xec\xa6\x54\xa7\x69\xee\xf4\x29\x94\x7d\xc6\xf5\xe8\x31\x34\x63\x70\xe7" else
+    if index==5 then "\x7d\x8c\x8b\xb6\x19\x8b\x70\xc7\xba\x7a\x37\x44\x7c\x07\x32\x45\x4f\xd6\xda\x6c\x70\x67\xcc\x0d\x02\x66\x7b\x14\x56\xbf\xb8\x01\x79\x1d\x56\xf0\x85\x98\xd8\xf8\x37\xc4\xa9\x7b\xfc\xe9\x19\x9c\x25\xba\xc4\xbd\x46\xb1\x4e\x76\x83\x4b\x14\xac\x6b\xe4\x4f\x60\x80\xe7\x77\x8a\x29\x13\xe8\x3c\x2e\x68\x9e\xfe\x36\x0f\x07\x2e\x7a\x28\x53\x3a\x0c\x1d\x82\x41\x18\xf9\x33\x35\x9f\x2f\xa6\x9a" else
+    if index==6 then "\xfb\xbd\xcc\x75\x7e\xeb\x7a\x9b\x95\x9a\x74\xf6\xc5\x28\x5e\xb2\xae\xd4\xb7\x33\x46\x8e\x7a\x8a\x56\xbd\xc1\xd9\xa8\x03\x52\xdb\x97\xdf\x22\xed\x65\x72\x65\xd2\x94\x3c\xf2\x8c\xe1\x56\x1c\xb5\x2d\x81\x3d\x6c\x59\x94\xd3\xf4\xc2\xe0\xca\x87\x1a\x8f\xe8\xd8\xe3\x0f\x4d\xcf\x48\x2a\x9a\x78\x60\x8d\xc3\xfe\x2d\xac\xfe\xb7\xc3\x0e\x49\x3b\x1c\xbd\xfd\x81\xe1\x79\x69\xcc\xb7\xad\x17\x46" else
+    if index==7 then "\xa9\xf4\x09\x47\x88\xd8\x6a\x44\xd8\xab\x3d\xec\xe2\x10\x72\x2b\x34\x7b\xe0\x50\x95\xf1\xcc\x83\x75\x30\x9b\x78\x17\x09\x50\x59\x93\x59\x08\xeb\xd4\x1f\xc0\x0f\x6b\x02\x03\x49\x6f\xd2\x62\xfb\xbb\x89\xe9\x6f\x9d\xcc\x09\x23\x86\xd5\x4b\x14\xbd\x9c\x60\x61\x0c\x61\x06\xde\xa0\xd3\x23\x4b\x70\xf4\x98\xd8\x66\x28\xdc\xdd\x97\x57\x0c\x40\x41\xfc\x33\x87\x16\x27\xbc\xd0\xfe\xc6\x68\x5a" else
+    if index==8 then "\xd0\x3c\x4a\x4b\x30\xe1\x03\x89\x3e\xf4\xf1\x8f\x4c\xea\xa4\x3e\x0d\xa1\x55\xf6\x2a\x3f\xfc\xe6\xfc\xfe\x4f\x52\x7d\x73\xe3\x7b\x5e\x45\x30\x53\x55\x28\x69\x9f\x70\xce\x75\xe4\x6e\x16\x4f\x52\x55\xf0\x12\x6c\xcd\x69\xcc\x3f\xda\xc0\xb9\xd5\xff\xb6\x23\x4e\x83\xf1\x6b\x33\x93\x69\xce\x49\x4a\x50\x54\x4a\x85\x6d\x7d\xf8\x7a\x67\xc2\xb3\xf1\x5d\xeb\x25\xc9\x64\xb1\x55\x6f\x98\x37\xac" else
+    if index==9 then "\x08\x4c\xa8\xba\x4a\xed\xa2\x82\x12\xc9\xa8\x41\x5f\xcc\xc4\x22\x5e\xad\x4a\x15\x3b\x9c\x10\xca\x8e\x53\x38\xfc\x98\x12\x89\x23\xae\x02\x98\x53\x9c\x63\xb6\xb3\x06\xd7\x90\x03\x45\x1f\x0f\xfa\xd0\x21\xdc\xb0\x5d\x8e\xb7\x46\xac\x2e\xda\xc3\x3c\x2d\xc7\xa8\x43\xf6\xf2\x6f\x78\xb3\x70\x91\xc3\x30\x7f\xb6\x9b\x79\x5a\x3f\x72\xb6\x64\x82\x77\xdc\xd1\x15\x64\x77\x57\xe9\x23\x7b\xd4\xa1" else
+    if index==10 then "\x2f\xce\x22\x04\x51\x5e\x26\x08\x21\x9e\x2f\xdd\x96\xd4\xe0\x88\x5d\xf7\x77\x61\xa0\x8a\x12\x30\x69\xbe\x9e\xbd\x62\xab\x59\x2e\x37\xe5\xf0\x5d\x6c\x0f\x1a\x1b\xb5\x12\xc0\xda\x26\xc6\x16\xab\xe7\x5d\x8c\x00\x4b\x21\x14\x80\xea\x7b\xf1\x38\x9e\x0a\x74\xaa\x98\x90\x14\x8a\x49\xbb\x2e\x26\x59\xcd\x27\x85\x1e\x11\x54\xb4\x17\x58\xea\xac\x5a\xd1\x6a\x26\xba\xcc\x53\x13\x41\x4f\x82\x21" else
+    if index==11 then "\x3b\x68\xe3\x12\x4d\xe7\xb4\xd1\xf6\x8e\x9b\x56\x0b\xd2\x0e\x99\x18\x0a\x9c\x42\x25\xdd\xd3\xb9\x83\x17\x35\x2a\xab\xb8\x75\x1c\xf0\x32\x54\x90\x2b\xca\xe4\x61\x24\xf2\xa8\xee\x69\x6a\x82\x80\xad\xab\x52\xec\x6b\x3a\xc3\x7f\x13\x48\x5e\xa6\xf0\xa3\xcc\x0b\xbe\xce\x27\xa5\x32\xa1\xd8\x7a\x7e\x2c\xf2\xea\x50\x89\x13\xf0\xc1\x18\x67\x56\x37\x24\x2d\x28\x59\x25\x21\xe2\x0d\xcb\xfc\x9d" else
+    if index==12 then "\x83\x3b\xce\x58\x27\x72\x93\x1e\x36\xfb\xb3\x3c\xfa\x0d\x28\xbb\x4a\x17\xbe\xe2\xd2\xf3\xd0\x57\x1e\xbe\x8a\x20\x99\x1b\xd5\x9b\x24\x80\x24\xde\x50\xab\x09\x38\x31\x73\xbb\xa5\x2c\x6e\x9c\xc2\x05\x4f\x12\x61\x2e\xfd\x44\x99\x91\xe3\x09\x90\x4e\xbc\xcc\x83\xcc\xa3\x24\x94\x05\x8f\x62\x01\x44\x43\x8e\xea\x1d\xf5\xa2\xd6\x6e\xc9\xeb\x4c\x3d\x1a\x3e\xda\xdc\x09\x78\xe9\x42\xfb\xe6\x1f" else
+    if index==13 then "\xe4\x66\x7d\x46\xd2\x82\x44\xa0\x1d\x29\x78\x4d\x93\x12\x19\xcf\xf9\x96\x23\x48\x68\x41\x0d\x8e\xd0\x14\x8f\xd1\xd5\xe2\x28\x72\xfe\x58\x6a\x9c\x50\x8d\x7e\x2f\xec\x5a\x3e\x37\x0e\x78\xca\xe8\xf8\xe9\x68\x1b\xd6\xd1\xaa\x42\xf4\xf8\xe2\x69\xf5\xd7\xa6\x58\xea\x1b\xda\x31\xfe\xad\x79\xd7\x85\x5a\xc8\x38\x06\x54\x26\x7d\xdf\x3c\x4d\xd4\x95\x71\xe6\x67\xd7\x4e\x13\xc5\x0b\x0a\x82\x17" else
+    if index==14 then "\x70\x14\x02\xd3\xc5\x6a\x9d\x01\xd6\x43\x04\x78\x66\x6b\x84\x25\x47\x76\xc9\x55\xed\x15\x3c\xce\x0f\xeb\x3f\x0e\x49\x2d\xc2\x3d\xe4\x26\xdf\xa7\xcb\xb7\x65\x20\x1f\xea\x7c\x18\xe8\x0a\xb0\xc8\xd3\xde\x5d\x86\xa0\x84\x52\x1a\xe2\x3d\xc8\x20\x49\x16\x3c\x29\xb3\x51\xe8\xcc\x26\x8d\x17\xab\xfb\x05\x45\x40\x0b\xb1\x6d\x8e\x33\x20\xc8\x90\x71\x7e\xf5\xf6\x6c\xf1\x77\x59\x01\x1c\x2a\x1d" else
+    if index==15 then "\xa4\x06\x89\x7c\x31\x89\x9c\xa3\xe6\x1e\x82\x9e\xdd\xec\xe7\xb6\xe6\x4f\xdf\xf0\x40\x83\xcf\x2e\x65\x49\xc1\x53\xc9\x7d\x2f\xd4\x85\x82\xba\xe3\xa3\x51\xfb\x1a\xd1\x05\x33\x0a\x04\xc4\x07\x6c\xda\xc1\x7f\x12\x88\x32\xb8\xda\x08\x4b\x4c\x37\x9b\x69\x0a\xbc\xdd\x20\xeb\x42\xab\x9b\x2a\x40\x1c\x7a\x5a\x04\x4f\x46\xdd\xd7\xc4\xec\xbe\x36\x6d\x0d\x3d\x5b\x9d\xa1\x98\x63\x75\x3e\x5a\x47" else
+    if index==16 then "\x63\xba\xb3\x2f\x38\x3a\x33\x61\x86\x3c\x94\x5b\x9d\x0d\x33\xdf\xaf\xf3\x5e\x95\xee\xc7\xc7\xbb\xfb\x9e\xf0\x60\xc1\x1f\x63\xda\x00\xc4\xd5\x41\x26\x62\xaf\x68\x9d\x3e\x83\x6c\xa4\x97\x9e\xcc\x76\x5e\x62\x3a\x8e\x3e\xd7\x7f\x5e\xe5\x09\xc2\x24\x61\xbf\x13\x91\x0b\xb9\x48\xea\x7c\x46\x08\xba\x0a\x6f\xbb\xb9\x6e\x41\x8a\x72\x10\xc3\xb8\xa1\x93\xcc\x6f\xd7\xda\x57\x90\x61\x2b\xfd\xa7" else
+    if index==17 then "\x9b\xec\x20\x37\x43\xb5\xa5\x58\xb4\x2f\x7c\x2d\xd5\x00\x38\xbb\x0a\xbd\xe6\xdd\x20\x86\x50\x4a\xfd\x83\x25\xa0\x73\x62\xf1\x65\x23\x85\xc7\x4f\xe3\xd8\x2b\x83\xc6\x7b\x41\xe9\x75\x9f\x14\xd6\x2a\xb5\xee\x3d\xe9\x26\xb0\xfe\x56\x09\x5e\xa5\x88\x80\xe1\x0c\xa2\x92\x80\x98\x98\x89\x01\x50\xee\x5e\xf3\x28\xab\x9f\xf1\x22\x5c\xd3\xcc\x52\x7f\x87\x8a\xac\x26\x3f\xe2\x30\xd8\x8a\x3a\xb1" else
+    if index==18 then "\xa3\x61\x4f\xe4\x7d\xd5\x02\x02\xf2\x0e\x63\xb5\x4b\x70\x27\x40\x5d\x4a\xb5\xf5\xdf\xe2\x29\xa1\x86\x2b\x48\x97\x75\x0a\xb6\xac\x14\x71\xf2\x7e\xe8\xed\x61\x92\xb5\x58\xfc\xde\xf3\x28\xba\x1e\x9e\x58\xe5\x8b\xc9\xc0\x91\x6c\xee\x4b\x59\x14\xd5\x43\x16\x2f\x34\xa0\x2c\x5d\x43\x12\xa9\x2e\x1f\x7d\x04\x94\xa8\x49\x06\xb5\x37\xa3\x8c\x63\xb5\xcb\x4f\x28\x85\xbf\x85\xfe\xb7\x07\x0e\xfa" else
+    if index==19 then "\x42\x0e\x6e\x50\x80\x4f\x89\x7d\x46\x2c\x3d\x8e\x4a\x24\x84\xd9\x6f\x00\x7f\x2b\x64\xdf\x7e\x6d\x30\x62\x9b\xde\x6d\xcd\xa1\x36\x65\x06\x6c\xb7\x40\x50\x98\xc9\xc2\x1f\x9b\xb8\xd6\xf4\x7d\x58\x7a\xae\x71\x6a\x47\x38\x06\x4c\x47\x47\x29\xe8\xb3\x0a\x2b\x7b\xb8\x53\x31\xb5\x3a\x55\x5c\x34\xe2\x9f\x6d\x43\x53\xe4\x46\xb6\x40\x03\xd6\x1c\x5f\x35\x95\x1a\xfb\x68\x49\x07\x28\xc1\x7b\x2d" else
+    if index==20 then "\x4c\xd1\xa6\xbc\x87\x8e\x14\xad\x1e\x20\x6a\x45\x4d\xd2\xdf\x41\xf3\x68\x0d\xa8\x33\x29\xa8\x73\x35\xa0\x2c\x85\x8d\x6c\x74\x89\xae\x71\xfd\x95\x88\x77\xbc\xe3\x5d\x24\x92\xda\x2c\xcd\x64\x87\xe2\x23\xeb\x82\x47\x2c\xfe\xa2\x6e\x9d\x3c\x0f\xe0\x62\xc7\x5a\x31\x6f\x64\x21\xe1\x0c\x86\x57\x9a\x58\x9f\x4f\xc3\xd6\xc9\xbd\x2e\x27\x93\xd1\xc7\x52\x99\x67\xc5\xf1\x18\xeb\x2e\x70\xea\x82" else
+    if index==21 then "\x44\x6d\x84\x00\x55\x93\xfa\x37\x8c\xbc\x78\x05\xc5\x2f\x11\x09\x3d\x94\xc4\x39\xb2\xf5\xd9\xda\x86\xbd\x6d\x41\xf0\xf5\x14\x73\x56\xfb\xfe\x01\xa9\x95\xf0\x5c\x93\xb3\xda\x22\xad\x8b\x17\x35\xa7\xf1\xba\x36\x1b\xfc\x79\xcf\x98\x54\x9e\x74\x2d\xe4\x7e\x1b\xbb\x14\xe3\xed\xa9\x8a\xe7\xbc\xdf\x28\x06\xbd\xf6\xe0\xf8\xaa\x48\xf9\xcb\x15\x94\xb0\x74\xa9\x78\x2b\x63\xc9\x63\x1f\x3f\x8f" else
+    if index==22 then "\x5b\xda\xdd\x4f\x56\x11\xc4\xd4\x12\x91\xad\x73\xc6\x65\xaf\xd4\x59\x8f\xeb\x39\xbb\xe0\xe8\xff\x13\xcf\x6f\x8d\x0e\x0c\x04\xb0\x99\xb5\x2b\x1f\xc6\xc0\xe1\x99\x05\x34\xac\xb2\x58\xc8\x94\x9c\x5d\xd8\xee\x6e\xd7\x78\x88\x8f\x3f\xca\xfc\x51\x43\xf5\xb2\x62\x18\x69\xb5\xe5\xa9\x44\x3b\xeb\x93\x4e\x23\xb7\x76\x66\xf9\x16\x9e\xf1\x2a\xbd\x22\x77\x47\x17\x85\xa4\x83\xdb\x79\x29\xeb\x42" else
+    if index==23 then "\xca\x68\xc6\xf0\x7d\x8f\x88\x6f\x6c\xc6\x0d\x5f\x78\x88\xc7\x65\xa0\x07\x5b\x5f\x12\x85\xb1\xbf\xd0\xac\x78\xd8\xf7\xbf\x0a\x78\x50\xf9\x0c\x57\xb1\x21\x4f\x50\x71\x33\x23\xda\xc5\x37\x5b\xea\xd1\x7e\x43\x22\xbd\xe8\x7a\x48\xb7\xf9\x9c\x24\x58\x17\x70\x9c\xff\x34\xfb\x98\xa8\x62\x65\xf8\x91\xfc\xe0\x65\xa2\xa1\xee\xdf\x23\xfc\x20\x2e\x91\x06\xf0\xee\x8b\x2a\xa7\xdf\xc7\xfe\x9d\xac" else
+    if index==24 then "\xc6\x36\x71\x69\xef\x3a\x5c\xfa\xb8\x6f\xea\xa5\x63\xaf\xa5\x8e\xa4\x65\xe3\x42\x65\x15\x69\xa6\x86\x33\x6e\x5b\x11\x6c\xc5\x47\x56\x3f\xa0\xce\x2b\x83\x97\x11\x9e\xea\xe4\x50\xb2\x0b\x47\x0b\x12\x57\xb2\x13\x43\xc7\x13\x31\x48\x7d\x49\xd2\x4e\x17\x6c\x8d\xe8\xeb\xc9\x49\xee\x86\x44\xfc\xd3\xbd\x82\x7f\xd5\xed\x87\x24\x2f\xbe\x57\x5b\x41\x64\x1e\x77\xdb\x2b\x8b\xe2\x18\xc5\x1c\x2d" else
+    if index==25 then "\x8d\xac\x70\x20\xc7\xca\x4c\x2c\xb8\x22\x4a\xec\xca\xc0\x47\x19\xd9\x78\x5a\x8c\x59\xfb\xe0\xa5\xe7\x4d\xa8\x41\xd2\xe8\x4a\x46\x27\xbc\xaa\xda\xe9\x16\xba\x3d\x3c\xcb\x35\x4f\x50\x4a\x63\x16\x4f\xc8\x6e\xb1\xf9\x8b\xc1\xad\x35\xdd\x59\x73\x7e\x06\x4d\x32\xf0\x43\x05\x57\xc3\xc0\xea\xda\x36\x7d\x88\x3c\x00\x40\x22\x0b\x0d\x1a\x3f\x37\xe2\x89\x94\xc6\x97\x0d\xaa\xcb\x7d\x04\x8b\x51" else
+    if index==26 then "\xef\x49\xde\xfb\xc6\xdd\x1b\x3b\xcc\x15\x09\x8a\x26\x7c\xed\xda\xa2\x22\x04\x0f\x61\x10\x01\x0b\x16\x4b\xc5\xa7\x74\x5c\x48\xcf\xe2\xaa\xc3\x15\xe6\xc4\x2e\x64\xea\x83\xf3\xe0\x10\x8f\xba\xa8\x01\x85\x61\x95\xb4\x54\x20\x2a\x8b\xfa\x9e\x08\x42\x64\xec\xeb\x3e\xa8\x2f\x4e\x9a\xa1\x86\x57\x63\x99\x06\x39\xd1\x1a\xc7\xd2\xe2\x65\x17\x48\x9a\x3d\xc9\xad\x85\x94\xcc\x7e\xeb\xe3\xf2\xed" else
+    if index==27 then "\x67\x33\x9f\x06\x60\x5f\xab\xbc\x3c\xec\x18\x17\xbc\x22\x66\xfd\xd6\x42\xa1\xe3\x67\x78\xfb\xa4\xb3\xae\x5f\x08\xbf\xd8\x78\x60\x4f\x55\xf4\x60\xda\xbf\x5c\xfa\x08\xd4\x0c\x69\xd1\xd5\xfc\xb3\x84\x78\x1f\x28\x7d\xee\xbd\x4e\xa7\x63\x0a\x18\xaa\x23\xaf\x82\x61\x9f\x07\x3d\x7c\x10\xe3\x8d\xf8\x34\x23\xbe\xcb\xb5\xc6\x17\x06\xfa\xd0\x97\x39\xe7\x91\x6a\xd4\xee\xce\x14\x73\x25\x60\x74" else
+    if index==28 then "\x5c\x86\x7f\xf9\x1c\xa6\x4b\xb1\x0d\x8b\x4b\x69\xc1\xe4\xba\x73\x62\xbf\x4b\xac\xdf\x67\x49\xa1\xe0\x46\xf4\x9b\x50\xd1\x9d\x1e\xef\xce\x99\x1c\xeb\xf3\x52\xc0\x89\xc1\x78\x7a\xa0\x7f\x4d\x81\x5d\xb0\x74\xab\x83\xa4\x01\xa1\x65\x7b\x73\xa1\x58\xc2\x88\x77\x3c\xa1\x09\xe8\xb7\xba\x60\x0d\x5b\x1d\xc8\x73\xc4\x7b\x42\x8f\xfc\xc1\x52\x29\x55\x30\xe1\xd2\x63\xdf\x26\x4b\x9a\x3b\x82\x0a" else
+    if index==29 then "\xc9\x64\xbf\x27\xe2\x7c\x46\xaf\x4c\x97\x29\xf9\x97\x68\xca\xdf\x38\x27\x32\x5c\x59\x3b\x47\x64\x15\xe3\xd0\x1e\xcf\x17\xa9\x96\xb9\x4d\xe6\x0d\x5b\x43\x03\x37\x46\xb6\x67\x92\x67\x39\xa0\x9b\xbe\x2f\x52\x3a\xae\x2a\x0c\xdf\xf0\xef\x35\xb3\x41\xb7\xbd\x41\x03\x97\x05\x7b\xdd\x2e\xcf\xac\xce\x3c\x46\x28\x30\x4b\xb3\x6f\x19\xca\xe3\xd9\x0b\xba\xd9\x96\xc1\x55\x46\x50\x12\x6f\x33\xff" else
+    if index==30 then "\xe0\xa6\x60\xfc\xd3\x1f\xda\x48\xe8\x41\x22\x22\x34\x5a\xfb\x54\x80\xe0\x2a\x77\x4f\xe3\x35\x60\xd0\x82\x29\x33\xf2\x7f\xf7\x5f\xfd\x51\xfe\x00\x73\x46\x66\x23\x06\xa0\x6b\xef\x49\xa0\x3e\xc9\x66\x12\x38\x7d\x17\xf1\x40\x66\xac\xf4\xe9\x6a\xcd\x32\x4d\x39\xeb\x03\xd3\x70\x53\x88\xa7\xe6\x67\x57\x27\xe5\xff\x19\xda\x0d\x23\x6d\x46\x01\x72\xc7\xa6\xb0\x29\x98\xc6\x1f\x45\x11\xcc\xc4" else
+    "\xc0\x89\xed\xaa\xd7\xe6\xc0\xc5\x96\x18\x9a\x14\xd6\xea\xe8\x6c\x8f\x9f\x94\x8c\x45\xf7\x50\x7a\xaa\x71\x2b\x6e\xf7\x35\x7e\xcd\x7a\x9f\x04\x9a\x51\x9e\x15\xf6\x1e\x2d\xe5\xf1\xb0\xf0\x9b\x1c\x80\x2c\x20\x18\xf5\xc1\xb6\x3b\x1a\x7b\xcd\x1e\x62\x5f\x3a\x8d\x19\x7f\xd1\x88\xe8\x34\xb0\x3b\x8d\x04\xd4\x97\x49\xbd\x89\xdc\x22\xdf\x35\x37\x8e\x7b\xaf\xf5\xe8\x89\xa6\xa0\x12\x37\xbb\x52"
+; generated: end p6_constants
+private fn p384_generator(index:i64) -> P384Affine
+  = let t=p384_generator_bytes(index) in check len(t)==96 in
+    P384Affine { x=P6 { l0=byte_read_le(t,0,8),l1=byte_read_le(t,8,8),l2=byte_read_le(t,16,8),l3=byte_read_le(t,24,8),l4=byte_read_le(t,32,8),l5=byte_read_le(t,40,8) },
+      y=P6 { l0=byte_read_le(t,48,8),l1=byte_read_le(t,56,8),l2=byte_read_le(t,64,8),l3=byte_read_le(t,72,8),l4=byte_read_le(t,80,8),l5=byte_read_le(t,88,8) } }
+private fn p6_zero() -> P6 = P6 { l0=0,l1=0,l2=0,l3=0,l4=0,l5=0 }
+private fn p6_small(value:i64) -> P6 = P6 { l0=value,l1=0,l2=0,l3=0,l4=0,l5=0 }
+private fn p6_is_zero(a:P6) -> bool = bit_or(bit_or(bit_or(a.l0,a.l1),bit_or(a.l2,a.l3)),bit_or(a.l4,a.l5))==0
+private fn p6_equal(a:P6,b:P6) -> bool
+  = p6_is_zero(P6 { l0=bit_xor(a.l0,b.l0),l1=bit_xor(a.l1,b.l1),l2=bit_xor(a.l2,b.l2),l3=bit_xor(a.l3,b.l3),l4=bit_xor(a.l4,b.l4),l5=bit_xor(a.l5,b.l5) })
+private fn p6_less(a:P6,m:P6) -> bool = p6_sub_borrow(a,m).carry==1
+; Values below m: (a+b) mod m and (a-b) mod m.
+private fn p6_add_mod(a:P6,b:P6,m:P6) -> P6
+  = let total=p6_add_carry(a,b) in let less=p6_sub_borrow(total.value,m) in p6_select(total.value,less.value,bit_or(total.carry,bit_xor(less.carry,1)))
+private fn p6_sub_mod(a:P6,b:P6,m:P6) -> P6
+  = let difference=p6_sub_borrow(a,b) in p6_add_carry(difference.value,p6_mask(m,wrapping_sub(0,difference.carry))).value
+; a mod m for a below 2m.
+private fn p6_reduce(a:P6,m:P6) -> P6 = let less=p6_sub_borrow(a,m) in p6_select(a,less.value,bit_xor(less.carry,1))
+private fn p6_fadd(a:P6,b:P6) -> P6 = p6_add_mod(a,b,p6_prime())
+private fn p6_fsub(a:P6,b:P6) -> P6 = p6_sub_mod(a,b,p6_prime())
+; Big-endian 48 bytes to limbs, and back.
+private fn p6_words(bytes:Arr u8 n) -> P6
+  = check n==48 in P6 { l0=byte_swap64(byte_read_le(bytes,40,8)),l1=byte_swap64(byte_read_le(bytes,32,8)),l2=byte_swap64(byte_read_le(bytes,24,8)),
+      l3=byte_swap64(byte_read_le(bytes,16,8)),l4=byte_swap64(byte_read_le(bytes,8,8)),l5=byte_swap64(byte_read_le(bytes,0,8)) }
+private fn p6_bytes(a:P6) -> Arr u8 _
+  = let out=arr(i in 0..48) u8(0) in
+    let out=byte_write_le(out,40,byte_swap64(a.l0),8) in let out=byte_write_le(out,32,byte_swap64(a.l1),8) in
+    let out=byte_write_le(out,24,byte_swap64(a.l2),8) in let out=byte_write_le(out,16,byte_swap64(a.l3),8) in
+    let out=byte_write_le(out,8,byte_swap64(a.l4),8) in let out=byte_write_le(out,0,byte_swap64(a.l5),8) in out
+private fn p6_shift1(a:P6) -> P6
+  = P6 { l0=bit_or(shift_right(a.l0,1),shift_left(a.l1,63)),l1=bit_or(shift_right(a.l1,1),shift_left(a.l2,63)),
+      l2=bit_or(shift_right(a.l2,1),shift_left(a.l3,63)),l3=bit_or(shift_right(a.l3,1),shift_left(a.l4,63)),
+      l4=bit_or(shift_right(a.l4,1),shift_left(a.l5,63)),l5=shift_right(a.l5,1) }
 
-private fn ecw_infinity(mod:EcwMod) -> EcwPoint = EcwPoint { x=mod.one,y=mod.one,z=ecw_zero(len(mod.modulus)) }
-; Jacobian doubling for a=-3 (dbl-2001-b); the point at infinity (z=0) stays at infinity.
-private fn ecw_double(a:EcwPoint,mod:EcwMod) -> EcwPoint
-  = let p=mod.modulus in
-    let delta=ecw_mul(a.z,a.z,mod) in let gamma=ecw_mul(a.y,a.y,mod) in let beta=ecw_mul(a.x,gamma,mod) in
-    let alpha=ecw_mul(ecw_sub(a.x,delta,p),ecw_add(a.x,delta,p),mod) in let alpha=ecw_add(ecw_add(alpha,alpha,p),alpha,p) in
-    let beta2=ecw_add(beta,beta,p) in let beta4=ecw_add(beta2,beta2,p) in let beta8=ecw_add(beta4,beta4,p) in
-    let x=ecw_sub(ecw_mul(alpha,alpha,mod),beta8,p) in
-    let yz=ecw_add(a.y,a.z,p) in let z=ecw_sub(ecw_sub(ecw_mul(yz,yz,mod),gamma,p),delta,p) in
-    let gamma2=ecw_mul(gamma,gamma,mod) in let gamma2=ecw_add(gamma2,gamma2,p) in let gamma4=ecw_add(gamma2,gamma2,p) in let gamma8=ecw_add(gamma4,gamma4,p) in
-    let y=ecw_sub(ecw_mul(alpha,ecw_sub(beta4,x,p),mod),gamma8,p) in EcwPoint { x=x,y=y,z=z }
-; Jacobian addition, with the cheaper mixed form when b is affine (z=1).
-private fn ecw_point_add(a:EcwPoint,b:EcwPoint,mod:EcwMod) -> EcwPoint
-  = if ecw_is_zero(a.z) then b else if ecw_is_zero(b.z) then a else
-    let p=mod.modulus in let affine=ecw_equal(b.z,mod.one) in
-    let zz1=ecw_mul(a.z,a.z,mod) in let zz2=if affine then mod.one else ecw_mul(b.z,b.z,mod) in
-    let u1=if affine then a.x else ecw_mul(a.x,zz2,mod) in let u2=ecw_mul(b.x,zz1,mod) in
-    let s1=if affine then a.y else ecw_mul(ecw_mul(a.y,b.z,mod),zz2,mod) in let s2=ecw_mul(ecw_mul(b.y,a.z,mod),zz1,mod) in
-    let h=ecw_sub(u2,u1,p) in let r=ecw_sub(s2,s1,p) in
-    if ecw_is_zero(h) then (if ecw_is_zero(r) then ecw_double(a,mod) else ecw_infinity(mod)) else
-    let hh=ecw_mul(h,h,mod) in let hhh=ecw_mul(h,hh,mod) in let v=ecw_mul(u1,hh,mod) in
-    let x=ecw_sub(ecw_sub(ecw_mul(r,r,mod),hhh,p),ecw_add(v,v,p),p) in
-    let y=ecw_sub(ecw_mul(r,ecw_sub(v,x,p),mod),ecw_mul(s1,hhh,mod),p) in
-    let z=if affine then ecw_mul(h,a.z,mod) else ecw_mul(ecw_mul(h,a.z,mod),b.z,mod) in EcwPoint { x=x,y=y,z=z }
-private fn ecw_bit(words:Arr i64 n,index:i64) -> i64
-  = let at=index/30 in if index<0 || at>=n then 0 else check at>=0 && at<n in bit_and(shift_right(words[at],index%30),1)
-; u1*G + u2*Q by simultaneous double-and-add (Shamir's trick) over a four-entry table.
-private fn ecw_combine(g:EcwPoint,q:EcwPoint,u1:Arr i64 _,u2:Arr i64 _,mod:EcwMod,bits:i64) -> EcwPoint
-  = let both=ecw_point_add(g,q,mod) in
-    loop(i=bits-1,out=ecw_infinity(mod)) while i>=0 next(i-1,
-      let doubled=if ecw_is_zero(out.z) then out else ecw_double(out,mod) in let pick=ecw_bit(u1,i)+2*ecw_bit(u2,i) in
-      if pick==0 then doubled else ecw_point_add(doubled,if pick==1 then g else if pick==2 then q else both,mod)) yield out
-private fn ecw_point_valid(public:Arr u8 n,curve:EcwCurve) -> bool
-  = let size=curve.size in let mod=curve.field in let p=mod.modulus in let count=len(p) in
-    if size<1 || n!=1+2*size || str_byte(public,0)!=4 then false else
-    let x=ecw_limbs(str_slice(public,1,1+size),count) in let y=ecw_limbs(str_slice(public,1+size,n),count) in
-    if ecw_subtract(x,p).carry!=1 || ecw_subtract(y,p).carry!=1 then false else
-    let mx=ecw_mul(x,mod.r2,mod) in let my=ecw_mul(y,mod.r2,mod) in
-    let x3=ecw_mul(ecw_mul(mx,mx,mod),mx,mod) in let triple=ecw_add(ecw_add(mx,mx,p),mx,p) in
-    ecw_equal(ecw_mul(my,my,mod),ecw_add(ecw_sub(x3,triple,p),curve.b,p))
-private fn ecw_point_decode(public:Arr u8 n,curve:EcwCurve) -> EcwPoint
-  = let size=curve.size in let mod=curve.field in let count=len(mod.modulus) in
-    EcwPoint { x=ecw_mul(ecw_limbs(str_slice(public,1,1+size),count),mod.r2,mod),y=ecw_mul(ecw_limbs(str_slice(public,1+size,n),count),mod.r2,mod),z=mod.one }
-private fn ecw_scalar(signature:Arr u8 n,node:DerNode,size:i64) -> BytesResult
+; a^-1 mod n by the binary extended Euclidean algorithm. It branches on the
+; value, which is public (the signature's s). Invariants: x1*a = u and
+; x2*a = v (mod n); the loop ends at u = 0 with v = gcd(a,n) = 1.
+type P6Gcd = { u:P6,v:P6,x1:P6,x2:P6,steps:i64 }
+type P6Odd = { value:P6,x:P6 }
+; x/2 mod n for x below n.
+private fn p6_order_half(x:P6) -> P6
+  = if bit_and(x.l0,1)==0 then p6_shift1(x) else
+    let wide=p6_add_carry(x,p6_order()) in let half=p6_shift1(wide.value) in half with { l5=bit_or(half.l5,shift_left(wide.carry,63)) }
+; Divides a nonzero value by its factors of two, and x by as many (mod n).
+private fn p6_order_odd(value:P6,x:P6) -> P6Odd
+  = loop(value=value,x=x) while bit_and(value.l0,1)==0 next(p6_shift1(value),p6_order_half(x)) yield P6Odd { value=value,x=x }
+private fn p6_gcd_step(state:P6Gcd) -> P6Gcd
+  = let a=p6_order_odd(state.u,state.x1) in let b=p6_order_odd(state.v,state.x2) in let difference=p6_sub_borrow(a.value,b.value) in
+    if difference.carry==0 then P6Gcd { u=difference.value,v=b.value,x1=p6_sub_mod(a.x,b.x,p6_order()),x2=b.x,steps=state.steps+1 } else
+    P6Gcd { u=a.value,v=p6_sub_borrow(b.value,a.value).value,x1=a.x,x2=p6_sub_mod(b.x,a.x,p6_order()),steps=state.steps+1 }
+; For a in [1,n-1]: a^-1 in Montgomery form. Each step shrinks u*v by at least
+; a factor of two (768 bits in all), so 800 steps are never reached; zero is
+; returned if they were.
+private fn p6_order_inverse(a:P6) -> P6
+  = let state=loop(state=P6Gcd { u=a,v=p6_order(),x1=p6_small(1),x2=p6_zero(),steps=0 }) while !p6_is_zero(state.u) && state.steps<800
+      next(p6_gcd_step(state)) yield state in
+    if p6_is_zero(state.u) then p6_order_mul(state.x2,p6_order_r2()) else p6_zero()
+
+; Point formulas over the field, in Jacobian coordinates (a = -3); a point at
+; infinity has z = 0. neoc force-inlines small pure functions: these stay
+; inline in the hot loop (p384_combination), which is kept out of line itself,
+; while the table build and the exceptional cases call the `_call` copies (see
+; the note above p256_double). The products are out-of-line calls.
+private fn p384_infinity() -> P384Point = P384Point { x=p6_field_one(),y=p6_field_one(),z=p6_zero() }
+; dbl-2001-b.
+private fn p384_double(a:P384Point) -> P384Point
+  = let delta=p6_field_square(a.z) in let gamma=p6_field_square(a.y) in let beta=p6_field_mul(a.x,gamma) in
+    let alpha=p6_field_mul(p6_fsub(a.x,delta),p6_fadd(a.x,delta)) in let alpha=p6_fadd(p6_fadd(alpha,alpha),alpha) in
+    let beta2=p6_fadd(beta,beta) in let beta4=p6_fadd(beta2,beta2) in let beta8=p6_fadd(beta4,beta4) in
+    let x=p6_fsub(p6_field_square(alpha),beta8) in
+    let yz=p6_fadd(a.y,a.z) in let z=p6_fsub(p6_fsub(p6_field_square(yz),gamma),delta) in
+    let gamma2=p6_field_square(gamma) in let gamma2=p6_fadd(gamma2,gamma2) in let gamma2=p6_fadd(gamma2,gamma2) in let gamma2=p6_fadd(gamma2,gamma2) in
+    let y=p6_fsub(p6_field_mul(alpha,p6_fsub(beta4,x)),gamma2) in P384Point { x=x,y=y,z=z }
+; Mixed addition of an affine point (madd-2007-bl, with Z3 = 2*Z1*H) for a not at infinity.
+private fn p384_add_affine(a:P384Point,b:P384Affine) -> P384Point
+  = let z1z1=p6_field_square(a.z) in
+    let u2=p6_field_mul(b.x,z1z1) in let s2=p6_field_mul(b.y,p6_field_mul(a.z,z1z1)) in
+    let h=p6_fsub(u2,a.x) in let r=p6_fsub(s2,a.y) in
+    if p6_is_zero(h) then
+      (if p6_is_zero(r) then p384_double_call(P384Point { x=b.x,y=b.y,z=p6_field_one() }) else p384_infinity()) else
+    let hh=p6_field_square(h) in let i=p6_fadd(p6_fadd(hh,hh),p6_fadd(hh,hh)) in let j=p6_field_mul(h,i) in
+    let r=p6_fadd(r,r) in let v=p6_field_mul(a.x,i) in
+    let x=p6_fsub(p6_fsub(p6_field_square(r),j),p6_fadd(v,v)) in
+    let yj=p6_field_mul(a.y,j) in let y=p6_fsub(p6_field_mul(r,p6_fsub(v,x)),p6_fadd(yj,yj)) in
+    let zh=p6_field_mul(a.z,h) in P384Point { x=x,y=y,z=p6_fadd(zh,zh) }
+; General addition (add-2007-bl, with Z3 = Z1*Z2*2H) for a and b not at infinity.
+private fn p384_add_general(a:P384Point,b:P384Point) -> P384Point
+  = let z1z1=p6_field_square(a.z) in let z2z2=p6_field_square(b.z) in
+    let u1=p6_field_mul(a.x,z2z2) in let u2=p6_field_mul(b.x,z1z1) in
+    let s1=p6_field_mul(a.y,p6_field_mul(b.z,z2z2)) in let s2=p6_field_mul(b.y,p6_field_mul(a.z,z1z1)) in
+    let h=p6_fsub(u2,u1) in let r=p6_fsub(s2,s1) in
+    if p6_is_zero(h) then
+      (if p6_is_zero(r) then p384_double_call(b) else p384_infinity()) else
+    let h2=p6_fadd(h,h) in let i=p6_field_square(h2) in let j=p6_field_mul(h,i) in
+    let r=p6_fadd(r,r) in let v=p6_field_mul(u1,i) in
+    let x=p6_fsub(p6_fsub(p6_field_square(r),j),p6_fadd(v,v)) in
+    let sj=p6_field_mul(s1,j) in let y=p6_fsub(p6_field_mul(r,p6_fsub(v,x)),p6_fadd(sj,sj)) in
+    P384Point { x=x,y=y,z=p6_field_mul(p6_field_mul(a.z,b.z),h2) }
+private cold fn p384_double_call(a:P384Point) -> P384Point = p384_double(a)
+private cold fn p384_add_general_call(a:P384Point,b:P384Point) -> P384Point = p384_add_general(a,b)
+
+; Width-w NAF digits of a scalar below 2^384: odd digits below 2^(w-1) in
+; absolute value, 385 positions. A positive digit clears the low bits; a
+; negative one adds up to the next multiple of 2^w (no overflow: scalars are
+; below n < 2^384-64).
+type P384Naf = { k:P6,digits:Arr i64 _ }
+private fn p384_naf_step(move state:P384Naf,i:i64,width:i64) -> P384Naf
+  = let k=state.k in let low=bit_and(k.l0,shift_left(1,width)-1) in
+    let digit=if bit_and(low,1)==0 then 0 else if low>=shift_left(1,width-1) then low-shift_left(1,width) else low in
+    let k=if digit==0 then k else if digit>0 then k with { l0=wrapping_sub(k.l0,digit) } else p6_add_carry(k,p6_small(0-digit)).value in
+    let digits=state.digits in check i>=0 && i<len(digits) in P384Naf { k=p6_shift1(k),digits=set(digits,i,digit) }
+private fn p384_naf(scalar:P6,width:i64) -> Arr i64 _
+  = let state=loop(i=0,state=P384Naf { k=scalar,digits=arr(j in 0..385) 0 }) while i<385 next(i+1,p384_naf_step(state,i,width)) yield state in state.digits
+type P384Odd = { p1:P384Point,p3:P384Point,p5:P384Point,p7:P384Point,p9:P384Point,p11:P384Point,p13:P384Point,p15:P384Point }
+private fn p384_odd_multiples(point:P384Point) -> P384Odd
+  = let twice=p384_double_call(point) in let p3=p384_add_general_call(twice,point) in let p5=p384_add_general_call(twice,p3) in
+    let p7=p384_add_general_call(twice,p5) in let p9=p384_add_general_call(twice,p7) in let p11=p384_add_general_call(twice,p9) in
+    let p13=p384_add_general_call(twice,p11) in
+    P384Odd { p1=point,p3=p3,p5=p5,p7=p7,p9=p9,p11=p11,p13=p13,p15=p384_add_general_call(twice,p13) }
+private fn p384_odd_pick(table:P384Odd,index:i64) -> P384Point
+  = if index==0 then table.p1 else if index==1 then table.p3 else if index==2 then table.p5 else if index==3 then table.p7 else
+    if index==4 then table.p9 else if index==5 then table.p11 else if index==6 then table.p13 else table.p15
+type P384Sum = { point:P384Point,empty:bool }
+private fn p384_sum_add(total:P384Sum,b:P384Point) -> P384Sum
+  = if total.empty then P384Sum { point=b,empty=false } else
+    let added=p384_add_general(total.point,b) in P384Sum { point=added,empty=p6_is_zero(added.z) }
+private fn p384_sum_affine(total:P384Sum,b:P384Affine) -> P384Sum
+  = if total.empty then P384Sum { point=P384Point { x=b.x,y=b.y,z=p6_field_one() },empty=false } else
+    let added=p384_add_affine(total.point,b) in P384Sum { point=added,empty=p6_is_zero(added.z) }
+private fn p384_verify_step(total:P384Sum,g:i64,q:i64,table:P384Odd) -> P384Sum
+  = let doubled=if total.empty then total else P384Sum { point=p384_double(total.point),empty=false } in
+    let with_g=if g==0 then doubled else let base=p384_generator(if g>0 then (g-1)/2 else (0-g-1)/2) in
+      p384_sum_affine(doubled,if g>0 then base else P384Affine { x=base.x,y=p6_fsub(p6_zero(),base.y) }) in
+    if q==0 then with_g else let base=p384_odd_pick(table,if q>0 then (q-1)/2 else (0-q-1)/2) in
+      p384_sum_add(with_g,if q>0 then base else base with { y=p6_fsub(p6_zero(),base.y) })
+; u1*G + u2*Q by interleaved NAF digits: width 7 for the fixed generator
+; table, width 5 for the table of Q built here.
+private cold fn p384_combination(u1:P6,u2:P6,point:P384Point) -> P384Sum
+  = let g=p384_naf(u1,7) in let q=p384_naf(u2,5) in let table=p384_odd_multiples(point) in
+    loop(i=384,total=P384Sum { point=p384_infinity(),empty=true }) while i>=0
+      next(i-1,check i>=0 && i<len(g) && i<len(q) in p384_verify_step(total,g[i],q[i],table)) yield total
+; x(point) = r (mod n) without inverting z: X = r*Z^2, or (r+n)*Z^2 when r+n < p.
+private fn p384_x_matches(point:P384Point,r:P6) -> bool
+  = let zz=p6_field_square(point.z) in
+    p6_equal(point.x,p6_field_mul(p6_field_mul(r,p6_field_r2()),zz)) ||
+      (let wide=p6_add_carry(r,p6_order()) in wide.carry==0 && p6_less(wide.value,p6_prime()) &&
+        p6_equal(point.x,p6_field_mul(p6_field_mul(wide.value,p6_field_r2()),zz)))
+
+; Uncompressed SEC1 point (0x04 || X || Y, 97 bytes) with coordinates below p on the curve.
+private fn p384_point_valid(public:Arr u8 n) -> bool
+  = if n!=97 || str_byte(public,0)!=4 then false else
+    let x=p6_words(str_slice(public,1,49)) in let y=p6_words(str_slice(public,49,97)) in
+    if !p6_less(x,p6_prime()) || !p6_less(y,p6_prime()) then false else
+    let mx=p6_field_mul(x,p6_field_r2()) in let my=p6_field_mul(y,p6_field_r2()) in
+    let x3=p6_field_mul(p6_field_square(mx),mx) in let triple=p6_fadd(p6_fadd(mx,mx),mx) in
+    p6_equal(p6_field_square(my),p6_fadd(p6_fsub(x3,triple),p6_curve_b()))
+private fn p384_point_decode(public:Arr u8 n) -> P384Point
+  = check n==97 in P384Point { x=p6_field_mul(p6_words(str_slice(public,1,49)),p6_field_r2()),
+      y=p6_field_mul(p6_words(str_slice(public,49,97)),p6_field_r2()),z=p6_field_one() }
+private fn p384_scalar_valid(value:P6) -> bool = !p6_is_zero(value) && p6_less(value,p6_order())
+private fn p384_der_scalar(signature:Arr u8 n,node:DerNode) -> BytesResult
   = let bytes=der_value(signature,node) in let count=len(bytes) in
-    if !node.ok || node.tag!=2 || size<1 || size>66 || count<1 || count>size+1 || str_byte(bytes,0)>=128 || count>1 && str_byte(bytes,0)==0 && str_byte(bytes,1)<128 ||
-      count==size+1 && str_byte(bytes,0)!=0 then bytes_error(74,"invalid ECDSA DER integer",0) else
-    check size>=1 && size<=66 in bytes_ok(arr(i in 0..size) u8(if i+count<size then 0 else str_byte(bytes,i+count-size)))
-; ECDSA verification (FIPS 186-5 6.4.2) of a DER signature over a precomputed digest.
-; The digest is truncated to the order length; the curves here have whole-byte orders.
-private fn ecw_verify(curve:EcwCurve,public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool
-  = let size=curve.size in let field=curve.field in let order=curve.order in let count=len(field.modulus) in
-    if m<1 || m>64 || k<8 || k>2*size+8 || !ecw_point_valid(public,curve) then false else
-    let seq=der_node(signature,0,k) in let first=der_node(signature,seq.body,seq.end) in let second=der_node(signature,first.end,seq.end) in
-    if !seq.ok || seq.tag!=48 || seq.end!=k || !first.ok || !second.ok || second.end!=seq.end then false else
-    let raw_r=ecw_scalar(signature,first,size) in let raw_s=ecw_scalar(signature,second,size) in
-    if !raw_r.ok || !raw_s.ok then false else
-    let r=ecw_limbs(raw_r.value,count) in let s=ecw_limbs(raw_s.value,count) in
-    if ecw_is_zero(r) || ecw_is_zero(s) || ecw_subtract(r,order.modulus).carry!=1 || ecw_subtract(s,order.modulus).carry!=1 then false else
-    let z=ecw_reduce(ecw_limbs(str_slice(digest,0,if m<size then m else size),count),order.modulus) in
-    ; w is s^-1 in Montgomery form, so a product with a plain value yields a plain value.
-    let w=ecw_inverse(ecw_mul(s,order.r2,order),order) in
-    let u1=ecw_mul(z,w,order) in let u2=ecw_mul(r,w,order) in
-    let point=ecw_combine(EcwPoint { x=curve.gx,y=curve.gy,z=field.one },ecw_point_decode(public,curve),u1,u2,field,size*8) in
-    if ecw_is_zero(point.z) then false else
-    ; Compare x/z^2 mod n with r without an inversion: x == r*z^2, or x == (r+n)*z^2 when r+n < p.
-    let zz=ecw_mul(point.z,point.z,field) in
-    ecw_equal(point.x,ecw_mul(ecw_mul(r,field.r2,field),zz,field)) ||
-      (let wide=ecw_sum(r,order.modulus) in ecw_subtract(wide,field.modulus).carry==1 && ecw_equal(point.x,ecw_mul(ecw_mul(wide,field.r2,field),zz,field)))
+    if !node.ok || node.tag!=2 || count<1 || count>49 || str_byte(bytes,0)>=128 || count>1 && str_byte(bytes,0)==0 && str_byte(bytes,1)<128 ||
+      count==49 && str_byte(bytes,0)!=0 then bytes_error(74,"invalid ECDSA DER integer",0) else
+    bytes_ok(arr(i in 0..48) u8(if i+count<48 then 0 else str_byte(bytes,i+count-48)))
+; The leftmost 384 bits of the digest (FIPS 186-5 6.4.2); a shorter digest is
+; its own value, left-padded with zeros.
+private fn p384_digest_bytes(digest:Arr u8 m) -> Arr u8 _
+  = let take=if m<48 then m else 48 in arr(i in 0..48) u8(if i<48-take then 0 else str_byte(digest,i-(48-take)))
 
 ; Uncompressed SEC1 point (0x04 || X || Y, 97 bytes) on P-384, coordinates below p.
-fn p384_public_valid(public:Arr u8 n) -> bool = ecw_point_valid(public,ecw_p384())
-fn ecdsa_p384_verify_digest(public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool = ecw_verify(ecw_p384(),public,digest,signature)
+fn p384_public_valid(public:Arr u8 n) -> bool = p384_point_valid(public)
+; ECDSA verification (FIPS 186-5 6.4.2) of a DER signature over a precomputed digest.
+fn ecdsa_p384_verify_digest(public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool
+  = if m<1 || m>64 || k<8 || k>104 || !p384_point_valid(public) then false else
+    let seq=der_node(signature,0,k) in let first=der_node(signature,seq.body,seq.end) in let second=der_node(signature,first.end,seq.end) in
+    if !seq.ok || seq.tag!=48 || seq.end!=k || !first.ok || !second.ok || second.end!=seq.end then false else
+    let raw_r=p384_der_scalar(signature,first) in let raw_s=p384_der_scalar(signature,second) in
+    if !raw_r.ok || !raw_s.ok then false else
+    let r=p6_words(raw_r.value) in let s=p6_words(raw_s.value) in
+    if !p384_scalar_valid(r) || !p384_scalar_valid(s) then false else
+    ; w is s^-1 in Montgomery form, so its product with a plain value is plain.
+    let w=p6_order_inverse(s) in
+    let z=p6_reduce(p6_words(p384_digest_bytes(digest)),p6_order()) in
+    let total=p384_combination(p6_order_mul(z,w),p6_order_mul(r,w),p384_point_decode(public)) in
+    !total.empty && p384_x_matches(total.point,r)
 fn ecdsa_p384_verify_sha384(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha384(message),signature)
 fn ecdsa_p384_verify_sha256(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha256(message),signature)
 fn ecdsa_p384_verify_sha512(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p384_verify_digest(public,sha512(message),signature)
 ; P-256 (65-byte uncompressed key) with a digest other than SHA-256, e.g. ecdsa-with-SHA384 certificates.
-; P-256 digests of 32 bytes or more use their leftmost 256 bits (FIPS 186-5
-; 6.4.2) and the dedicated std:p256 verifier.
+; Digests of 32 bytes or more use their leftmost 256 bits (FIPS 186-5 6.4.2);
+; a shorter digest is its own value, left-padded with zeros. Both go to the
+; std:p256 verifier.
 fn ecdsa_p256_verify_digest(public:Arr u8 n,digest:Arr u8 m,signature:Arr u8 k) -> bool
-  = if m>=32 then ecdsa_p256_verify_digest32(public,str_slice(digest,0,32),signature) else ecw_verify(ecw_p256(),public,digest,signature)
+  = if m>=32 then ecdsa_p256_verify_digest32(public,str_slice(digest,0,32),signature) else
+    m>=1 && ecdsa_p256_verify_digest32(public,arr(i in 0..32) u8(if i<32-m then 0 else str_byte(digest,i-(32-m))),signature)
 fn ecdsa_p256_verify_sha384(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p256_verify_digest(public,sha384(message),signature)
 fn ecdsa_p256_verify_sha512(public:Arr u8 n,message:Arr u8 m,signature:Arr u8 k) -> bool = ecdsa_p256_verify_digest(public,sha512(message),signature)

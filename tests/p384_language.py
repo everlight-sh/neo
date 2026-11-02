@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Native P-384 (and generic P-256) ECDSA verification vs Python integers and standard Go crypto/ecdsa.
+"""Native P-384 (and P-256 through std:p384) ECDSA verification vs Python integers and standard Go crypto/ecdsa.
 
-1. Montgomery field/order arithmetic of std:p384 for both curves against Python integers.
+1. Montgomery field/order arithmetic of std:p384 (six 64-bit limbs) against Python integers.
 2. Public-key validation against Go (off-curve points, coordinates >= p, wrong encodings).
 3. Differential ECDSA verification: Go signs with SHA-256/384/512 or raw digests; every
    valid, mutated, wrong-key, high-s, out-of-range and malformed DER case is verified by
@@ -29,16 +29,18 @@ HASHES = {0: 'digest', 1: 'sha256', 2: 'sha384', 3: 'sha512'}
 
 FIELD_MAIN = '''
 import "std:io"
+; Records: [order u8][op u8][a 48][b 48]; each result is 48 big-endian bytes.
+; op 0 a*b, 1 a+b, 2 a-b, 3 a^-1 (order only), 4 a mod m, 5 a*a (field only).
 type FieldBatch = { at:i64,out:Arr u8 _ }
+fn field_mul(order:i64,a:P6,b:P6) -> P6 = if order==1 then p6_order_mul(a,b) else p6_field_mul(a,b)
 fn field_step(move state:FieldBatch,input:Arr u8 n) -> FieldBatch
-  = let at=state.at in let curve=if str_byte(input,at)==1 then ecw_p384() else ecw_p256() in
-    let mod=if str_byte(input,at+1)==1 then curve.order else curve.field in let op=str_byte(input,at+2) in
-    let size=curve.size in let count=len(mod.modulus) in check count>=1 && count<=32 in
-    let a=ecw_mul(ecw_limbs(str_slice(input,at+3,at+3+size),count),mod.r2,mod) in
-    let b=ecw_mul(ecw_limbs(str_slice(input,at+3+size,at+3+2*size),count),mod.r2,mod) in
-    let result=if op==0 then ecw_mul(a,b,mod) else if op==1 then ecw_add(a,b,mod.modulus) else if op==2 then ecw_sub(a,b,mod.modulus) else
-      if op==3 then ecw_inverse(a,mod) else a in
-    FieldBatch { at=at+3+2*size,out=concat(state.out,ecw_bytes(ecw_mul(result,arr(i in 0..count) if i==0 then 1 else 0,mod),size)) }
+  = let at=state.at in let order=str_byte(input,at) in let op=str_byte(input,at+1) in
+    let m=if order==1 then p6_order() else p6_prime() in let r2=if order==1 then p6_order_r2() else p6_field_r2() in
+    let a=field_mul(order,p6_words(str_slice(input,at+2,at+50)),r2) in
+    let b=field_mul(order,p6_words(str_slice(input,at+50,at+98)),r2) in
+    let result=if op==0 then field_mul(order,a,b) else if op==1 then p6_add_mod(a,b,m) else if op==2 then p6_sub_mod(a,b,m) else
+      if op==3 then p6_order_inverse(field_mul(order,a,p6_small(1))) else if op==5 then p6_field_square(a) else a in
+    FieldBatch { at=at+98,out=concat(state.out,p6_bytes(field_mul(order,result,p6_small(1)))) }
 effect(fs,process) fn main() -> unit
   = let raw=file_read(0,4194304) in check raw.ok in let input=raw.value in
     let batch=loop(state=FieldBatch { at=0,out="" }) while state.at<len(input) next(field_step(state,input)) yield state in
@@ -81,22 +83,25 @@ def main():
         subprocess.run(['go', 'build', '-trimpath', '-o', str(oracle), 'tests/p384_oracle.go'], cwd=ROOT,
                        env={**os.environ, 'GOWORK': 'off', 'CGO_ENABLED': '0'}, capture_output=True, check=True)
 
-        # 1. Field and order arithmetic.
+        # 1. P-384 field and order arithmetic.
         records = []; expected = []
-        for bits, c in CURVES.items():
-            size = c['size']
-            for order, m in ((0, c['p']), (1, c['n'])):
-                pairs = [(0, 0), (1, 1), (m - 1, m - 1), (m - 2, 2), (2**(bits - 1), m - 1)] + [(rng.randrange(m), rng.randrange(m)) for _ in range(60)]
-                for index, (a, b) in enumerate(pairs):
-                    ops = [(0, a * b % m), (1, (a + b) % m), (2, (a - b) % m)] + ([(3, pow(a, -1, m))] if a and index < 20 else [])
-                    for op, value in ops:
-                        records.append(bytes([c['code'], order, op]) + a.to_bytes(size, 'big') + b.to_bytes(size, 'big')); expected.append(value.to_bytes(size, 'big'))
-                for a in (m, m + 1, 2**bits - 1, rng.randrange(m, 2**bits)):
-                    records.append(bytes([c['code'], order, 4]) + a.to_bytes(size, 'big') + bytes(size)); expected.append((a % m).to_bytes(size, 'big'))
+        c = CURVES[384]; size = c['size']; word = 2**64 - 1
+        for order, m in ((0, c['p']), (1, c['n'])):
+            # Limb boundaries, carries through all-ones words, values next to m and 2^384, and random values.
+            edges = [0, 1, 2, m - 1, m - 2, 2**383, 2**383 - 1, m >> 1, (m + 1) >> 1, 2**384 % m, 2**768 % m] + \
+                    [(1 << (64 * k)) % m for k in range(1, 6)] + [((1 << (64 * k)) - 1) % m for k in range(1, 7)] + \
+                    [m - (1 << (64 * k)) for k in range(1, 6)] + [word << (64 * k) for k in range(5)]
+            pairs = [(a, b) for a in edges for b in edges[:12]] + [(rng.randrange(m), rng.randrange(m)) for _ in range(400)]
+            for index, (a, b) in enumerate(pairs):
+                ops = [(0, a * b % m), (1, (a + b) % m), (2, (a - b) % m)] + ([(3, pow(a, -1, m))] if order and a and index % 8 == 0 else [(5, a * a % m)] if not order else [])
+                for op, value in ops:
+                    records.append(bytes([order, op]) + a.to_bytes(size, 'big') + b.to_bytes(size, 'big')); expected.append(value.to_bytes(size, 'big'))
+            for a in (m, m + 1, 2**384 - 1, rng.randrange(m, 2**384)):
+                records.append(bytes([order, 4]) + a.to_bytes(size, 'big') + bytes(size)); expected.append((a % m).to_bytes(size, 'big'))
         p = subprocess.run(RUNNER + [str(field)], input=b''.join(records), capture_output=True, timeout=300)
         assert p.returncode == 0, p.stderr
         assert p.stdout == b''.join(expected), 'field arithmetic mismatch'
-        print(f'PASS P-384/P-256 30-bit-limb Montgomery field and order arithmetic: {len(records)} mul/add/sub/inverse/reduction cases vs Python integers', flush=True)
+        print(f'PASS P-384 64-bit-limb Montgomery field and order arithmetic: {len(records)} mul/square/add/sub/inverse/reduction cases vs Python integers', flush=True)
 
         def go(cases):
             r = subprocess.run([str(oracle)], input=''.join(json.dumps(case) + '\n' for case in cases), capture_output=True, text=True, timeout=300)
@@ -181,7 +186,7 @@ def main():
             if want is not None: assert accepted == want, ('unexpected', bits, HASHES[h], sig.hex(), accepted)
             counts[accepted] += 1
         per_curve = {b: sum(1 for c in cases if c[0] == b) for b in (384, 256, 'std256')}
-        print(f'PASS ECDSA differential vs Go crypto/ecdsa: {len(cases)} verifications (P-384 {per_curve[384]}, P-256 generic {per_curve[256]}, std:p256 {per_curve["std256"]}); '
+        print(f'PASS ECDSA differential vs Go crypto/ecdsa: {len(cases)} verifications (P-384 {per_curve[384]}, P-256 via std:p384 {per_curve[256]}, std:p256 {per_curve["std256"]}); '
               f'{counts[True]} accepted, {counts[False]} rejected incl. bit flips, wrong keys/messages, high-s, r/s out of range and malformed DER; batch {elapsed:.2f}s', flush=True)
 
         # 4. Timing: one valid P-384/SHA-384 verification repeated (odd runs alter the message and fail at the final comparison).
