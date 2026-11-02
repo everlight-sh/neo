@@ -111,6 +111,12 @@ SYSTEMS = {
        (("u8", S.U8), ("i32", S.I32), ("i64", S.I64), ("ptr", S.PTR))},
     **{f"store_{n}": ([S.PTR, S.I64, t], S.UNIT) for n, t in
        (("u8", S.U8), ("i32", S.I32), ("i64", S.I64), ("ptr", S.PTR))},
+    # x86-64 AES-NI and PCLMULQDQ. A 128-bit block is two i64 halves, low
+    # (bytes 0-7) and high (bytes 8-15), little-endian. aes_hardware() says
+    # whether this CPU has them; the others are valid only when it is true.
+    "aes_hardware": ([], S.BOOL),
+    **{name: ([S.I64] * 4, S.I64) for name in ("aes_round_low", "aes_round_high", "aes_final_round_low", "aes_final_round_high")},
+    **{name: ([S.I64, S.I64], S.I64) for name in ("carryless_mul_low", "carryless_mul_high")},
     "invoke_region": ([S.PTR, S.PTR, S.I64], S.UNIT),
     "invoke_finalizer": ([S.PTR,S.PTR],S.UNIT),
     "handler_call": ([S.PTR, S.PTR, S.I64], S.TArr(S.U8, "_")),
@@ -352,7 +358,7 @@ class Checker:
         def effects(node):
             out = set()
             if isinstance(node, S.Call):
-                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float') or node.name in ('addr','data','view'): out.add('unsafe')
+                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float','aes_hardware') or node.name in ('addr','data','view'): out.add('unsafe')
                 signature=getattr(node,'indirect_signature',None)
                 if signature is not None:out |= set(signature.capabilities or ())
                 else:out |= self.required_caps.get(node.name,set())
@@ -940,7 +946,7 @@ class Checker:
             self.oblige(env, "size", cmp(">=", self.to_lin(e.args[1], env), Lin.num(0)), e, "view length >= 0", ["check length >= 0 in …"])
             e.builtin = "view"; return S.TArr(S.U8, self.to_lin(e.args[1], env))
         if e.name in SYSTEMS:
-            if e.name not in ('float_bits','bits_float'): self.require_effect(e, env, {'unsafe'})
+            if e.name not in ('float_bits','bits_float'): self.require_effect(e, env, set() if e.name=='aes_hardware' else {'unsafe'})
             pts, ret = SYSTEMS[e.name]
             if len(e.args) != len(pts) or any(self.infer(a, env) != t for a, t in zip(e.args, pts)):
                 self.err(f"{e.name} expects ({', '.join(map(str, pts))})", e, f); return None

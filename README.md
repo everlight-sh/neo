@@ -364,6 +364,12 @@ The kernel boundary additionally exposes `syscall6`, `fork_syscall`,
 memory operations. Those primitives generate LLVM instructions/assembly;
 they do not embed another language's runtime. Darwin's raw syscall ABI is
 platform-specific, and its required loader dependency remains explicit.
+On x86-64, `aes_round_low/high`, `aes_final_round_low/high` and
+`carryless_mul_low/high` are AESENC, AESENCLAST and PCLMULQDQ on 128-bit
+values held as two i64 halves; functions using them, and the callers they are
+inlined into, are compiled with those target features. `aes_hardware()` says
+whether the CPU has them (it needs an effect function but not `unsafe`). On
+other targets it is false and the instructions trap.
 They do not prove pointer validity, lifetimes, callback signatures or foreign
 contracts. `data(array)` borrows a named byte array (or a static literal);
 the pointer must not outlive or invalidate that storage. `view(ptr, length)`

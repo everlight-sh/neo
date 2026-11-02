@@ -59,6 +59,36 @@ class Slot:
 
 RUNTIME_LIBCALLS=frozenset({'memcpy','memmove','memset','memcmp','bcmp','bzero','calloc','memset_pattern16'})
 
+# x86-64 AES-NI and carry-less multiply builtins. Functions that use them, and
+# callers they are force-inlined into, are compiled with X86_CRYPTO_FEATURES;
+# aes_hardware() checks the same features with CPUID before such code runs.
+X86_CRYPTO = ('aes_round_low','aes_round_high','aes_final_round_low','aes_final_round_high','carryless_mul_low','carryless_mul_high')
+X86_CRYPTO_FEATURES = '"target-features"="+aes,+pclmul,+sse4.1"'
+X86_CRYPTO_HEAD = [
+    'declare <2 x i64> @llvm.x86.aesni.aesenc(<2 x i64>, <2 x i64>)', 'declare <2 x i64> @llvm.x86.aesni.aesenclast(<2 x i64>, <2 x i64>)',
+    'declare <2 x i64> @llvm.x86.pclmulqdq(<2 x i64>, <2 x i64>, i8 immarg)',
+    '@ax_aes_state = internal global i8 0',
+    # CPUID leaf 1 ECX: AES (25), SSE4.1 (19), SSSE3 (9), PCLMULQDQ (1); cached as 1 (no) or 2 (yes).
+    'define internal i1 @ax_aes_hardware() {', 'entry:', '  %known = load atomic i8, ptr @ax_aes_state monotonic, align 1',
+    '  %ready = icmp ne i8 %known, 0', '  br i1 %ready, label %done, label %probe',
+    'probe:', '  %r = call { i32, i32, i32, i32 } asm "cpuid", "={ax},={bx},={cx},={dx},0,2,~{dirflag},~{fpsr},~{flags}"(i32 1, i32 0)',
+    '  %ecx = extractvalue { i32, i32, i32, i32 } %r, 2', '  %bits = and i32 %ecx, 34079234', '  %has = icmp eq i32 %bits, 34079234',
+    '  %state = select i1 %has, i8 2, i8 1', '  store atomic i8 %state, ptr @ax_aes_state monotonic, align 1', '  br label %done',
+    'done:', '  %final = phi i8 [ %known, %entry ], [ %state, %probe ]', '  %yes = icmp eq i8 %final, 2', '  ret i1 %yes', '}', '']
+
+def x86_crypto_functions(fns, inlined):
+    """Functions whose bodies, after forced inlining, contain x86 crypto builtins."""
+    def calls(node, out):
+        if isinstance(node, S.Call): out.add(node.name)
+        for child in S.children(node): calls(child, out)
+        return out
+    called = {f.name: calls(f.body, set()) for f in fns if not f.external}
+    found = {name for name, names in called.items() if names & set(X86_CRYPTO)}
+    while True:
+        more = {name for name, names in called.items() if name not in found and names & found & inlined}
+        if not more: return found
+        found |= more
+
 def lty(t) -> str:
     if isinstance(t,S.TRef):return "{ i64, i64 }"
     if isinstance(t,S.TFn):return "ptr"
@@ -458,6 +488,7 @@ class LLVMGen:
         self.region_counters = {}
         self.literal_inlined = set()
         self.small_pure_inlined = set()
+        self.x86_crypto_used = self.crypto_trap_used = False
         # Else-if chains over one scalar lower to an LLVM switch (NEO_SWITCH=0 disables).
         self.switches = [] if switches else None
         self.unique_flags = unique_flags
@@ -536,6 +567,8 @@ class LLVMGen:
         return self.byte_consts[b]
 
     def program(self) -> str:
+        self.x86_crypto_fns = x86_crypto_functions(self.fns, self.forced_inline | self.small_pure_inlined | self.literal_inlined) \
+            if self.triple.startswith('x86_64') else set()
         for f in self.fns:
             if f.external or getattr(f,'precompiled',False): continue
             for mode in (("seq",) if f.effect or f.exported else ("par", "seq")):
@@ -668,6 +701,8 @@ class LLVMGen:
         head += [f'declare {{ <{k} x i64>, <{k} x i1> }} @llvm.s{op}.with.overflow.v{k}i64(<{k} x i64>, <{k} x i64>)' for op in ('add','sub','mul')]
         from .kernel_workers import assembly
         head += assembly(self.triple)
+        if self.x86_crypto_used: head += X86_CRYPTO_HEAD
+        if self.crypto_trap_used: head.append('declare void @llvm.trap()')
         for f in self.fns:
             if f.external:
                 pts = [lty(p.ty) for p in f.params] + (["..."] if f.variadic else [])
@@ -717,6 +752,7 @@ class LLVMGen:
         if trusted and f.name in RUNTIME_LIBCALLS: policy+='"no-builtins" '
         # Profiling builds keep frame pointers so samplers can attribute callers.
         if os.environ.get('NEO_FRAME_POINTERS')=='1': policy+='"frame-pointer"="all" '
+        if f.name in getattr(self,'x86_crypto_fns',()): policy+=X86_CRYPTO_FEATURES+' '
         fb = FuncBuilder(f"; {f.name}  graph:{self.fn_hashes.get(f.name, '')[:16]}\n"
                          f"define {'internal ' if not f.exported else ''}{'noalias align 16 ' if fresh else ''}{return_type(f.ret)} {self.fname(f, mode)}({params}) {policy.rstrip()}")
         self.fb, self.mode, self.fn = fb, mode, f
@@ -1767,6 +1803,26 @@ class LLVMGen:
             if not self.triple.startswith(('arm64','aarch64')):raise ValueError(b+' requires an ARM64 target')
             instruction='isb\\0Amrs $0, cntvct_el0' if b=='counter_ticks' else 'mrs $0, cntfrq_el0'
             return fb.ins(f'call i64 asm sideeffect "{instruction}", "=r,~{{memory}}"()','i64'),None
+        if b == 'aes_hardware':
+            if not self.triple.startswith('x86_64'): return Val('false','i1'),None
+            self.x86_crypto_used=True
+            return fb.ins('call i1 @ax_aes_hardware()','i1'),None
+        if b in X86_CRYPTO:
+            args=[self.gen(a,env,False)[0] for a in e.args]
+            if not self.triple.startswith('x86_64'):
+                self.crypto_trap_used=True;fb.emit('call void @llvm.trap()');return Val('0','i64'),None
+            self.x86_crypto_used=True
+            def block(low,high):
+                v=fb.ins(f'insertelement <2 x i64> poison, {low}, i32 0','<2 x i64>')
+                return fb.ins(f'insertelement <2 x i64> {v.name}, {high}, i32 1','<2 x i64>')
+            if b.startswith('carryless'):
+                x,y=[fb.ins(f'insertelement <2 x i64> zeroinitializer, {a}, i32 0','<2 x i64>') for a in args]
+                r=fb.ins(f'call <2 x i64> @llvm.x86.pclmulqdq(<2 x i64> {x.name}, <2 x i64> {y.name}, i8 0)','<2 x i64>')
+            else:
+                state,key=block(args[0],args[1]),block(args[2],args[3])
+                op='aesenclast' if 'final' in b else 'aesenc'
+                r=fb.ins(f'call <2 x i64> @llvm.x86.aesni.{op}(<2 x i64> {state.name}, <2 x i64> {key.name})','<2 x i64>')
+            return fb.ins(f'extractelement <2 x i64> {r.name}, i32 {1 if b.endswith("high") else 0}','i64'),None
         if b == 'spawn_thread':
             args = [self.gen(a,env,False)[0] for a in e.args]
             return fb.ins('call i64 @ax_spawn_thread('+', '.join(map(str,args))+')','i64'),None
