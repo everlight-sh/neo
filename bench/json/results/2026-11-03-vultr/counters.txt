@@ -1,0 +1,17 @@
+# perf stat -e instructions:u,cycles:u, one run each, pinned to CPU 1: build, program, instructions, cycles.
+# Arguments as in x86.py: document_decoder 1000000, orders_decoder 1000 1000, library_bench 0 1000000, orders_json 1000 1000.
+before document_decoder 2700297404 480033129
+after document_decoder 2077165557 379077699
+before orders_decoder 1923315705 331644237
+after orders_decoder 1482189960 287995967
+before library_bench 4012973528 739820489
+after library_bench 2847012406 515995652
+before orders_json 3987318901 707746389
+after orders_json 3948122914 769511321
+
+# orders_json 1000 1000 cycles:u, five more alternating runs (before, after)
+699662124 694528819
+700086561 693023609
+698798669 696433091
+703037244 696468344
+726753843 696206523

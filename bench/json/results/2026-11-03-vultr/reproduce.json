@@ -1,0 +1,924 @@
+{
+ "cpu": "1",
+ "warmup": 2,
+ "rounds": 5,
+ "seed": 20261103,
+ "started": 1793661959.7853181,
+ "cases": {
+  "doc-typed": {
+   "expected": "513500000",
+   "argv": {
+    "Neo before": [
+     "/root/before/document_decoder",
+     "1000000"
+    ],
+    "Neo after": [
+     "/root/after/document_decoder",
+     "1000000"
+    ],
+    "Rust serde typed": [
+     "/root/rust/typed_json",
+     "doc-typed",
+     "1000000"
+    ],
+    "Rust serde Value": [
+     "/root/rust/typed_json",
+     "doc-value",
+     "1000000"
+    ],
+    "Zig typed arena": [
+     "/root/zig-baseline/bin/json",
+     "doc-typed-arena",
+     "1000000"
+    ],
+    "Zig typed arena native": [
+     "/root/zig-native/bin/json",
+     "doc-typed-arena",
+     "1000000"
+    ]
+   },
+   "runs": {
+    "Neo before": [
+     {
+      "round": 0,
+      "wall_ms": 119.017795,
+      "user_ms": 109.99999999999987,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 117.424405,
+      "user_ms": 109.99999999999943,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 117.527272,
+      "user_ms": 110.00000000000031,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 118.062949,
+      "user_ms": 120.00000000000011,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 116.799601,
+      "user_ms": 119.99999999999922,
+      "sys_ms": 0.0
+     }
+    ],
+    "Neo after": [
+     {
+      "round": 0,
+      "wall_ms": 117.137247,
+      "user_ms": 109.99999999999987,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 117.347012,
+      "user_ms": 110.00000000000031,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 117.315084,
+      "user_ms": 120.00000000000011,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 119.9364,
+      "user_ms": 120.00000000000011,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 117.138818,
+      "user_ms": 119.99999999999922,
+      "sys_ms": 0.0
+     }
+    ],
+    "Rust serde typed": [
+     {
+      "round": 0,
+      "wall_ms": 163.104391,
+      "user_ms": 169.99999999999994,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 163.265856,
+      "user_ms": 169.99999999999994,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 175.496033,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 9.999999999999998
+     },
+     {
+      "round": 3,
+      "wall_ms": 164.779102,
+      "user_ms": 169.99999999999994,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 164.342069,
+      "user_ms": 160.00000000000014,
+      "sys_ms": 0.0
+     }
+    ],
+    "Rust serde Value": [
+     {
+      "round": 0,
+      "wall_ms": 324.549731,
+      "user_ms": 330.00000000000006,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 390.61702,
+      "user_ms": 389.99999999999966,
+      "sys_ms": 10.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 328.157666,
+      "user_ms": 320.0000000000003,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 330.184163,
+      "user_ms": 330.00000000000006,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 327.01216,
+      "user_ms": 320.0000000000003,
+      "sys_ms": 10.000000000000002
+     }
+    ],
+    "Zig typed arena": [
+     {
+      "round": 0,
+      "wall_ms": 294.826932,
+      "user_ms": 300.0000000000003,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 300.372757,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 301.44629,
+      "user_ms": 299.99999999999983,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 301.954244,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 298.806794,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     }
+    ],
+    "Zig typed arena native": [
+     {
+      "round": 0,
+      "wall_ms": 290.481646,
+      "user_ms": 290.00000000000006,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 305.700801,
+      "user_ms": 299.99999999999983,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 292.479839,
+      "user_ms": 290.00000000000006,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 297.586748,
+      "user_ms": 289.99999999999915,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 290.089624,
+      "user_ms": 290.00000000000006,
+      "sys_ms": 0.0
+     }
+    ]
+   }
+  },
+  "orders-typed": {
+   "expected": "34327000",
+   "argv": {
+    "Neo before": [
+     "/root/before/orders_decoder",
+     "1000",
+     "1000"
+    ],
+    "Neo after": [
+     "/root/after/orders_decoder",
+     "1000",
+     "1000"
+    ],
+    "Rust serde typed": [
+     "/root/rust/typed_json",
+     "orders-typed",
+     "1000"
+    ],
+    "Zig typed arena": [
+     "/root/zig-baseline/bin/json",
+     "orders-typed-arena",
+     "1000"
+    ],
+    "Zig typed arena native": [
+     "/root/zig-native/bin/json",
+     "orders-typed-arena",
+     "1000"
+    ]
+   },
+   "runs": {
+    "Neo before": [
+     {
+      "round": 0,
+      "wall_ms": 81.436238,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 82.518987,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 81.443107,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 80.722938,
+      "user_ms": 70.00000000000028,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 82.472146,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     }
+    ],
+    "Neo after": [
+     {
+      "round": 0,
+      "wall_ms": 82.273958,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 81.931508,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 81.565297,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 80.530837,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 80.498928,
+      "user_ms": 80.00000000000007,
+      "sys_ms": 0.0
+     }
+    ],
+    "Rust serde typed": [
+     {
+      "round": 0,
+      "wall_ms": 93.939747,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 9.999999999999995
+     },
+     {
+      "round": 1,
+      "wall_ms": 94.029176,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 94.150556,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 92.990528,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 94.026466,
+      "user_ms": 89.99999999999986,
+      "sys_ms": 0.0
+     }
+    ],
+    "Zig typed arena": [
+     {
+      "round": 0,
+      "wall_ms": 195.329549,
+      "user_ms": 189.9999999999995,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 196.849955,
+      "user_ms": 190.00000000000128,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 196.748934,
+      "user_ms": 200.00000000000108,
+      "sys_ms": 10.000000000000009
+     },
+     {
+      "round": 3,
+      "wall_ms": 193.984486,
+      "user_ms": 199.9999999999993,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 199.365291,
+      "user_ms": 199.9999999999993,
+      "sys_ms": 0.0
+     }
+    ],
+    "Zig typed arena native": [
+     {
+      "round": 0,
+      "wall_ms": 219.439857,
+      "user_ms": 220.00000000000063,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 207.663026,
+      "user_ms": 209.9999999999991,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 210.218534,
+      "user_ms": 209.9999999999991,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 205.852026,
+      "user_ms": 199.9999999999993,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 207.382393,
+      "user_ms": 210.00000000000085,
+      "sys_ms": 0.0
+     }
+    ]
+   }
+  },
+  "doc-dynamic": {
+   "expected": "513500000",
+   "argv": {
+    "Neo before": [
+     "/root/before/library_bench",
+     "0",
+     "1000000"
+    ],
+    "Neo after": [
+     "/root/after/library_bench",
+     "0",
+     "1000000"
+    ],
+    "Bun JSON.parse": [
+     "bun",
+     "/root/axon/bench/usability/bun.ts",
+     "parse",
+     "1000000"
+    ],
+    "Rust serde_json::Value": [
+     "/root/rust/usability",
+     "parse",
+     "1000000"
+    ],
+    "Go encoding/json": [
+     "/root/go-bin/json",
+     "1000000"
+    ],
+    "Zig Value": [
+     "/root/zig-baseline/bin/json",
+     "doc-value",
+     "1000000"
+    ],
+    "Zig typed arena": [
+     "/root/zig-baseline/bin/json",
+     "doc-typed-arena",
+     "1000000"
+    ],
+    "Zig typed arena native": [
+     "/root/zig-native/bin/json",
+     "doc-typed-arena",
+     "1000000"
+    ]
+   },
+   "runs": {
+    "Neo before": [
+     {
+      "round": 0,
+      "wall_ms": 197.428878,
+      "user_ms": 200.00000000000284,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 190.911666,
+      "user_ms": 190.00000000000128,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 179.581496,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 178.587084,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 178.187025,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     }
+    ],
+    "Neo after": [
+     {
+      "round": 0,
+      "wall_ms": 180.916994,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 211.345345,
+      "user_ms": 210.00000000000085,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 179.842811,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 179.66311,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 181.623616,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 0.0
+     }
+    ],
+    "Bun JSON.parse": [
+     {
+      "round": 0,
+      "wall_ms": 182.95715,
+      "user_ms": 160.00000000000014,
+      "sys_ms": 30.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 185.098092,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 20.000000000000018
+     },
+     {
+      "round": 2,
+      "wall_ms": 183.023972,
+      "user_ms": 160.00000000000014,
+      "sys_ms": 19.99999999999999
+     },
+     {
+      "round": 3,
+      "wall_ms": 184.526574,
+      "user_ms": 159.9999999999966,
+      "sys_ms": 19.99999999999996
+     },
+     {
+      "round": 4,
+      "wall_ms": 187.398236,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 20.000000000000018
+     }
+    ],
+    "Rust serde_json::Value": [
+     {
+      "round": 0,
+      "wall_ms": 311.54466,
+      "user_ms": 310.0000000000023,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 305.089559,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 306.908215,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 302.496151,
+      "user_ms": 299.99999999999716,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 321.873515,
+      "user_ms": 329.9999999999983,
+      "sys_ms": 0.0
+     }
+    ],
+    "Go encoding/json": [
+     {
+      "round": 0,
+      "wall_ms": 1717.092482,
+      "user_ms": 1710.000000000001,
+      "sys_ms": 10.000000000000009
+     },
+     {
+      "round": 1,
+      "wall_ms": 1703.874258,
+      "user_ms": 1679.9999999999998,
+      "sys_ms": 19.99999999999999
+     },
+     {
+      "round": 2,
+      "wall_ms": 1751.181675,
+      "user_ms": 1739.9999999999984,
+      "sys_ms": 20.000000000000018
+     },
+     {
+      "round": 3,
+      "wall_ms": 1685.330991,
+      "user_ms": 1679.9999999999998,
+      "sys_ms": 10.000000000000009
+     },
+     {
+      "round": 4,
+      "wall_ms": 1735.541402,
+      "user_ms": 1719.9999999999989,
+      "sys_ms": 10.000000000000009
+     }
+    ],
+    "Zig Value": [
+     {
+      "round": 0,
+      "wall_ms": 625.34237,
+      "user_ms": 619.9999999999975,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 605.958122,
+      "user_ms": 609.9999999999994,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 634.992695,
+      "user_ms": 630.0000000000025,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 617.045998,
+      "user_ms": 609.9999999999994,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 618.655842,
+      "user_ms": 620.0000000000045,
+      "sys_ms": 0.0
+     }
+    ],
+    "Zig typed arena": [
+     {
+      "round": 0,
+      "wall_ms": 301.846791,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 328.953777,
+      "user_ms": 329.9999999999983,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 301.393316,
+      "user_ms": 300.0000000000007,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 300.475648,
+      "user_ms": 300.00000000000426,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 300.821754,
+      "user_ms": 289.99999999999915,
+      "sys_ms": 10.000000000000009
+     }
+    ],
+    "Zig typed arena native": [
+     {
+      "round": 0,
+      "wall_ms": 294.181751,
+      "user_ms": 289.99999999999915,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 295.135206,
+      "user_ms": 299.99999999999716,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 289.401932,
+      "user_ms": 289.99999999999915,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 290.027005,
+      "user_ms": 280.00000000000114,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 289.490593,
+      "user_ms": 289.99999999999915,
+      "sys_ms": 0.0
+     }
+    ]
+   }
+  },
+  "orders-dynamic": {
+   "expected": "34327000",
+   "argv": {
+    "Neo before": [
+     "/root/before/orders_json",
+     "1000",
+     "1000"
+    ],
+    "Neo after": [
+     "/root/after/orders_json",
+     "1000",
+     "1000"
+    ],
+    "Rust serde_json::Value": [
+     "/root/rust/typed_json",
+     "orders-value",
+     "1000"
+    ],
+    "Zig Value": [
+     "/root/zig-baseline/bin/json",
+     "orders-value",
+     "1000"
+    ],
+    "Zig Value arena": [
+     "/root/zig-baseline/bin/json",
+     "orders-value-arena",
+     "1000"
+    ]
+   },
+   "runs": {
+    "Neo before": [
+     {
+      "round": 0,
+      "wall_ms": 173.742615,
+      "user_ms": 169.9999999999946,
+      "sys_ms": 10.000000000000009
+     },
+     {
+      "round": 1,
+      "wall_ms": 172.507873,
+      "user_ms": 169.9999999999946,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 185.373568,
+      "user_ms": 190.00000000000483,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 172.46084,
+      "user_ms": 169.9999999999946,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 172.162668,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 0.0
+     }
+    ],
+    "Neo after": [
+     {
+      "round": 0,
+      "wall_ms": 172.940706,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 172.037704,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 194.209787,
+      "user_ms": 189.99999999999773,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 176.221236,
+      "user_ms": 179.99999999999972,
+      "sys_ms": 9.999999999999787
+     },
+     {
+      "round": 4,
+      "wall_ms": 172.440419,
+      "user_ms": 170.0000000000017,
+      "sys_ms": 0.0
+     }
+    ],
+    "Rust serde_json::Value": [
+     {
+      "round": 0,
+      "wall_ms": 342.414403,
+      "user_ms": 340.0000000000034,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 343.855891,
+      "user_ms": 339.9999999999963,
+      "sys_ms": 10.000000000000009
+     },
+     {
+      "round": 2,
+      "wall_ms": 347.813244,
+      "user_ms": 350.0000000000014,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 343.127564,
+      "user_ms": 339.9999999999963,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 345.800968,
+      "user_ms": 339.9999999999963,
+      "sys_ms": 0.0
+     }
+    ],
+    "Zig Value": [
+     {
+      "round": 0,
+      "wall_ms": 994.21341,
+      "user_ms": 539.9999999999991,
+      "sys_ms": 449.99999999999994
+     },
+     {
+      "round": 1,
+      "wall_ms": 989.304687,
+      "user_ms": 500.0,
+      "sys_ms": 480.0
+     },
+     {
+      "round": 2,
+      "wall_ms": 995.057568,
+      "user_ms": 500.0,
+      "sys_ms": 500.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 987.598538,
+      "user_ms": 510.0000000000051,
+      "sys_ms": 470.00000000000017
+     },
+     {
+      "round": 4,
+      "wall_ms": 985.761768,
+      "user_ms": 500.0,
+      "sys_ms": 490.0000000000002
+     }
+    ],
+    "Zig Value arena": [
+     {
+      "round": 0,
+      "wall_ms": 408.001253,
+      "user_ms": 410.0000000000037,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 1,
+      "wall_ms": 404.580459,
+      "user_ms": 400.0000000000057,
+      "sys_ms": 9.999999999999787
+     },
+     {
+      "round": 2,
+      "wall_ms": 403.452295,
+      "user_ms": 399.9999999999986,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 3,
+      "wall_ms": 406.617908,
+      "user_ms": 400.0000000000057,
+      "sys_ms": 0.0
+     },
+     {
+      "round": 4,
+      "wall_ms": 409.175554,
+      "user_ms": 409.9999999999966,
+      "sys_ms": 0.0
+     }
+    ]
+   }
+  }
+ },
+ "finished": 1793662014.9935195
+}
