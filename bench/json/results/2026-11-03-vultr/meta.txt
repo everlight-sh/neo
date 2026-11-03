@@ -1,0 +1,54 @@
+## lscpu
+CPU(s):                                  2
+Model name:                              AMD EPYC-Genoa Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      1
+Socket(s):                               1
+L1d cache:                               32 KiB (1 instance)
+L2 cache:                                1 MiB (1 instance)
+L3 cache:                                32 MiB (1 instance)
+NUMA node0 CPU(s):                       0,1
+
+## os
+Ubuntu 24.04.5 LTS
+6.8.0-146-generic
+always [madvise] never
+
+## toolchains
+Ubuntu clang version 18.1.3 (1ubuntu1)
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+go version go1.25.14 linux/amd64
+bun 1.4.4 1.4.4+38afee6c8
+0.17.0
+Python 3.12.3
+
+## sources
+cc0183908aa5c2950c3133df1c0d751ed683c70f3c1c41ce575d54ef774b2351  /root/head.tgz
+917fdd31ec0c2fd2ab5dd91bb63823d214b23729eb2cd6b015c7df0bad3e18e5  /root/base.tgz
+
+## binaries
+39be15c9de2ad58efd0630304009b7123524fd9f4a17290a6d829474420175b5  /root/before/document_decoder
+a5d186a55879c20173cae9035b3c7f7c83ce8786d3c942037075c22e36e1c291  /root/before/library_bench
+e345f33ae1571be525cebf786907ac1e9dc523942ef1b5ee3a976723efdc9305  /root/before/orders_decoder
+2cf0ca069bb1aca56c5262027503f7538ffaa540d528ea00ec51ad6393d882bb  /root/before/orders_json
+52eaf8ed14c4e34c303025eb82efc0598a4ba0434b3a3e13926bf3b3d8460974  /root/after/document_decoder
+7f2833512cea51ba3586dc40c7bccd36d14c745624836c07e18d33137580caa3  /root/after/library_bench
+f889d1822d2d7696ab325c36f43ba3ca3fe568f5c4e998efa5ea6415641430c4  /root/after/orders_decoder
+ec9e59380ec9a4e6ff6a811b588276e189dd7c3bd436d243706dfdcd78b5b377  /root/after/orders_json
+199feddd3263aabdbec0809781b2deb20a068172b19fc95ec29ae0d192de2350  /root/rust/typed_json
+6f11d4bf2f8cbd518cb37aff3c8591313900f05edb2afa9ef294abc3d591a0b9  /root/rust/usability
+e0e324539fb68270db3d41ed0b1c35166444afcd67b7628c8dcc2437d0e62d56  /root/go-bin/json
+16f7fbd4a4cbd8e75a77e9d94b35bec66c6f5314ebb1b47e853ea5c42f816ed2  /root/zig-baseline/bin/json
+556954d94f7ad721893fb3cede4b53685e1e68cc5ec9755cf21c0688865e8c9b  /root/zig-native/bin/json
+10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235  /usr/local/bin/bun
+
+## harness
+dc9550972bcfa5a53a4ab88832789b18e0dcaafc9a6fcde52a0e8a02d0ae31e2  /root/x86.py
+0101d3468970b91bd4814223d765a035923ceb7bbdf7185b1611eb580a42ebd5  /root/axon/bench/usability/bun.ts
+cd757d4825b9a0dff9bd8b4178feaad75881e1bcf24c8b3e173fa53da259afc7  /root/axon/bench/rust/src/typed_json.rs
+6019bcb41e3f5aa0b95d701ce8f807b322872bb21a88c92f3f4b588f6e6bd18a  /root/axon/bench/rust/src/usability.rs
+d6d663ea8696e15e2fe10a4674502052b14dbd783d46e74923ad35c89d6321a0  /root/axon/bench/core/json.go
+b007ab6c893f7de80c401ac12cebae751963c9e727c40031d1939c682a17a241  /root/axon/bench/zig/json.zig
+
