@@ -7,7 +7,9 @@ NEO_DEV lists labels whose builds use --dev; one tree under two labels
 (NEO_TREES=release=DIR,dev=DIR NEO_DEV=dev) compares the two profiles.
 
 The cap leaves most programs' IR byte-identical; these are the ones it
-changes that do measurable work:
+changes that do measurable work, followed by orders_json, library_bench and
+the compute kernels (mandel, stencil, nbody, sieve), which a lower cap could
+reach:
   orders_stages  bench/core/orders_stages.neo, modes 2 (four json_get lookups
                  per order) and 3 (lookups plus reads), 1,000 orders x 1,000.
   json-cli       examples/json-cli filtering and sorting 200,000 records.
@@ -17,6 +19,9 @@ changes that do measurable work:
   p384           tests/fixtures/language_p384.neo verifying one P-384/SHA-384
                  signature (made with openssl) 200 times; odd runs alter the
                  message, as in tests/p384_language.py.
+  library_bench  examples/library_bench.neo, modes 0 (parse a small JSON
+                 document, three lookups) and 1 (text, vector and map helpers),
+                 1,000,000 iterations each.
 Each round runs every tree once per case, alternating which tree goes first.
 Outputs must match between trees. Clients and the server share CPU 0, as in
 bench/fetch. REUSE_BUILDS=1 keeps binaries a previous run built.
@@ -32,13 +37,19 @@ spec = importlib.util.spec_from_file_location('fetch_run', FETCH / 'run.py')
 fetch = importlib.util.module_from_spec(spec); spec.loader.exec_module(fetch)  # certificates, free_port
 
 OUT = WORK / 'runtime'
+# Compute kernels at the runtime benchmarks' sizes (stencil iterated longer),
+# one worker on CPU 1.
+KERNELS = {'mandel': ['1200', '1200', '300'], 'stencil': ['1000000', '200'], 'nbody': ['4096', '10'], 'sieve': ['100000000']}
+ONE = dict(os.environ, NEO_THREADS='1')
 
 
 def build():
     if os.environ.get('REUSE_BUILDS') == '1' and (OUT / 'server').exists(): return
     for label, tree in TREES:
         for path, name in (('bench/core/orders_stages.neo', 'orders'), ('examples/json-cli/main.neo', 'json-cli'),
-                           ('bench/fetch/fetch.neo', 'fetch'), ('tests/fixtures/language_p384.neo', 'p384')):
+                           ('bench/fetch/fetch.neo', 'fetch'), ('tests/fixtures/language_p384.neo', 'p384'),
+                           *((f'examples/{k}.neo', k) for k in KERNELS), ('bench/core/orders_json.neo', 'orders_json'),
+                           ('examples/library_bench.neo', 'library_bench')):
             profile = ['--dev'] if label in os.environ.get('NEO_DEV', '').split(',') else []
             subprocess.run(['./neo', 'build', path, '-o', str(OUT / f'{label}-{name}'), *profile], cwd=tree, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(['go', 'build', '-o', str(OUT / 'server'), './server'], cwd=FETCH / 'go', check=True,
@@ -53,9 +64,9 @@ def build():
     (OUT / 'p384.record').write_bytes(bytes([1, 2, len(public)]) + public + bytes([len(signature)]) + signature + len(message).to_bytes(2, 'big') + message)
 
 
-def timed(argv):
+def timed(argv, env=None):
     started = time.perf_counter()
-    r = subprocess.run(argv, capture_output=True, check=True)
+    r = subprocess.run(argv, capture_output=True, check=True, env=env)
     return time.perf_counter() - started, r.stdout
 
 
@@ -87,6 +98,11 @@ def main():
             'https new connection (us/request)': lambda label: https(label, '/hello', 300, 13, '0'),
             'https keep-alive 1 MiB (us/request)': lambda label: https(label, '/1m', 50, 1 << 20, '1'),
             'p384 verify x200 (s)': lambda label: p384(label),
+            'orders_json 1000 x1000 (s)': lambda label: timed([str(OUT / f'{label}-orders_json'), '1000', '1000']),
+            'library_bench documents x1M (s)': lambda label: timed([str(OUT / f'{label}-library_bench'), '0', '1000000']),
+            'library_bench collections x1M (s)': lambda label: timed([str(OUT / f'{label}-library_bench'), '1', '1000000']),
+            **{f'{k} {" ".join(args)} (s)': (lambda k, args: lambda label: timed(['taskset', '-c', '1', str(OUT / f'{label}-{k}'), *args], ONE))(k, args)
+               for k, args in KERNELS.items()},
         }
         result = {'rounds': rounds, 'cases': {}}
         for case in cases: cases[case](TREES[0][0])  # warm-up

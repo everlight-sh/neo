@@ -420,6 +420,7 @@ neoc/kernel_workers.py Linux raw-clone stack switch for allocation-free regions
 neoc/fold.py     compile-time evaluation of pure calls with literal arguments
 neoc/inline.py   inlining of concat-producing calls, concat flattening
 neoc/cli.py      build / check / graph, build cache
+neoc/quick.py    unchanged rebuilds answered from a record before the compiler loads
 runtime/core.neo  allocator/free lists, memory operations, formatting, fork scheduling
 runtime/http.neo multicore connection assignment, HTTP framing and response batches
 runtime/http_linux.neo persistent Linux epoll registrations and ready-event dispatch

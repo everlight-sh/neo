@@ -4,9 +4,9 @@ Diagnostics are JSON: an agent reads them, discharges or checks each
 obligation, and resubmits. Builds are cached by program hash.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, shutil, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, subprocess, sys, time
 import platform as host_platform
-from . import legacy, syntax as S
+from . import legacy, quick, syntax as S
 from .graph import hash_program, program_hash
 from .check import Checker, CheckError
 from .elaborate import ElaborationError
@@ -81,6 +81,9 @@ def build(args, want_binary=True):
     from .llvm import LLVMGen
     from . import linear
     started = time.monotonic()
+    # Taken before anything the full cache key reads, so a record never
+    # outlives what built its binary.
+    quick_key = quick.key(args.file, getattr(args, 'dev', False), getattr(args, 'opt_level', None), args.allow_unproven)
     # The dev profile trades run time for build time: LLVM -O1 and no policy
     # inlining (constant-argument and small pure helpers); `inline fn` stays.
     profile = 'dev' if getattr(args, 'dev', False) else 'release'
@@ -106,8 +109,16 @@ def build(args, want_binary=True):
     fns, fn_hashes = load(args.file,target=target)
     parse_seconds = time.monotonic() - started
     for path,text in sorted(fns.sources.items()): h.update(path.encode()); h.update(text.encode())
+    # Module prefixes come from the nearest package manifest and appear in symbols.
+    h.update(repr(sorted(fns.module_prefixes.items())).encode())
     cache_key = h.hexdigest()
     outdir = os.path.join(os.path.dirname(os.path.abspath(args.file)), legacy.build_dir(args.file))
+    def remember(report):
+        entry = quick.resolved(args.file)
+        if library_cache or quick.folder(entry) != outdir: return
+        # A record only saves time later; failing to write one never fails a build.
+        try: quick.remember(quick_key, entry, fns, cache_key, report)
+        except (OSError, KeyError, TypeError, ValueError): pass
     os.makedirs(outdir, exist_ok=True)
     metadata = os.path.join(outdir, cache_key+'.json')
     binpath = os.path.join(outdir, cache_key+'.bin')
@@ -117,7 +128,7 @@ def build(args, want_binary=True):
             cached = json.load(open(metadata))
             if cached['binary_sha256'] == hashlib.sha256(open(binpath,'rb').read()).hexdigest():
                 cached['build'] = {'cache':'hit','graph':cached['program'][:16], 'total_seconds':round(time.monotonic()-started,4)}
-                cached['binary'] = out; publish(binpath,out); return cached
+                cached['binary'] = out; publish(binpath,out); remember(cached); return cached
         except (OSError,ValueError,KeyError): pass
     stage = time.monotonic()
     prepared=None
@@ -256,16 +267,10 @@ def build(args, want_binary=True):
     with open(metadata_stage,'w') as file: json.dump(report,file)
     os.replace(metadata_stage,metadata)
     publish(binpath,out)
+    remember(report)
     return report
 
-def publish(source, destination):
-    """Publish a fresh inode; never overwrite a mapped macOS executable."""
-    destination = os.path.abspath(destination)
-    os.makedirs(os.path.dirname(destination),exist_ok=True)
-    fd,stage = tempfile.mkstemp(prefix='.neo-publish-',dir=os.path.dirname(destination));os.close(fd)
-    try: shutil.copy2(source,stage);os.replace(stage,destination)
-    finally:
-        if os.path.exists(stage): os.unlink(stage)
+publish = quick.publish
 
 def cmd_build(args):
     report = build(args)

@@ -294,3 +294,162 @@ Here everything outside clang is most of the remaining time: about 5.5 s of the 
 | `probe.log` | parent-commit cold builds and the same IR through clang alone (EPYC-Genoa) |
 | `expansion-tls.log`, `expansion-large.log` | clang time of the TLS fixture and the large program under several bounds and -O levels, with the first version of the cut rule (EPYC-Genoa) |
 | `ci.log` | the CI run |
+
+## Round 2, 2026-11-03: unchanged rebuilds and a lower inlining cap
+
+Measured on a third temporary box of the same plan (`voc-c-2c-4gb-50s-amd`, AMD EPYC-Milan, two SMT threads of one core), with the same software as above. The box was destroyed afterwards. "Neo before" is `e1f7239`, the end of round 1. "Neo after" is `3286c07` (the commit below) with `003726f` (harness only). Nothing above this section was re-measured or changed.
+
+| Target | Before | After | Met? |
+|---|---:|---:|---|
+| no-op rebuild under 0.1 s: hello | 0.265 s | 0.048 s | yes |
+| TLS fixture | 1.084 s | 0.059 s | yes |
+| HTTPS client | 1.233 s | 0.061 s | yes |
+| large program | 0.856 s | 0.070 s | yes |
+| lower inlining cap moving the TLS fixture's release build toward 3×, without run-time loss | 28.63 s (1.56×) | 131,072: 25.98 s (1.72×); 65,536: 20.61 s (2.17×) | **no**: both caps slow JSON-heavy code by 4–17%, so the default is unchanged |
+
+### 4. Unchanged rebuilds without parsing (`3286c07`)
+
+An unchanged rebuild used to compute the full cache key, which hashes every source text the program reads, and so it parsed and resolved the whole import graph first. It also started clang twice (`clang --version`, `-print-target-triple`). That is the 0.26–1.23 s above.
+
+Every build now leaves a record beside its cached binary (`neoc/quick.py`). The record holds a hash of each source text the build read, each import as written with the file it resolved to, and the package manifest that named each module. A record is found by a key made of what is known before parsing:
+
+- the resolved entry path;
+- the compiler's own sources and location (the full key already hashed every `neoc/*.py`);
+- the clang that `PATH` finds: path, real path, size, modification and change times, inode;
+- the profile, `--opt-level`, `--allow-unproven`, the platform and machine;
+- every `NEO_*` and `AXON_*` variable, which covers `NEO_TARGET`, `--target`, the inlining and folding switches and anything added later.
+
+`neo build` and `neo run` look up a record before importing the rest of the compiler. On a hit, every recorded import must still resolve to the same file, every source text must hash the same, the nearest manifest of every module must be the same file with the same text, and the cached binary must still have the recorded SHA-256. Then the binary is published as before, and the same report or summary line a cache hit prints is printed, with `"quick": true` in `--report`'s `build` section. Anything else takes the full path, whose cache key stays the authority:
+
+- an argument the lookup does not know (`--no-cache`, `--emit-llvm`, `--library-cache`, human diagnostics);
+- programs with `pkg:` imports, whose resolution reads the lock file and the package trees;
+- `NEO_QUICK=0`.
+
+Writing the records turned up a gap in the full key. Module symbol prefixes come from the nearest `neo.toml`, and the key did not cover them, so adding or renaming a manifest above a module could give a stale hit. The key now includes them.
+
+`tests/quick_rebuilds.py` (now part of `./neo test`) checks that the quick answer matches the full path's hit, byte for byte apart from timing. It then checks that each of these takes the full path and rebuilds when needed:
+
+- an edited import;
+- an import symlink pointed at another file, then back (a full-path hit);
+- a new and then a renamed `neo.toml` above the modules;
+- `--dev`, `--opt-level 1`, `NEO_INLINE_BUDGET` and `NEO_FOLD`, each with its own record;
+- another `--target`;
+- another clang earlier on `PATH`, and the same clang edited in place;
+- a comment appended to a compiler source, then removed (a full-path hit);
+- a damaged cached binary;
+- a package with a `pkg:` import.
+
+### No-op rebuilds
+
+`bench/compile/noop.py`: one untimed build per pair, then 20 shuffled rounds of the unchanged rebuild alone. Wall seconds are measured from the parent process around the whole command, including the `neo` shell launcher. Median, with the range over the 20 rounds:
+
+| Program | Neo before | Neo after | Neo after, no `--report` | Rust release | Go |
+|---|---:|---:|---:|---:|---:|
+| hello | 0.265 (0.252–0.286) | 0.048 (0.045–0.053) | 0.048 (0.045–0.057) | 0.041 (0.038–0.046) | 0.041 (0.034–0.066) |
+| HTTP server | 0.288 (0.273–0.306) | 0.049 (0.047–0.058) | 0.048 (0.046–0.058) | 0.051 (0.048–0.158) | 0.075 (0.063–0.171) |
+| JSON | 0.596 (0.569–0.616) | 0.053 (0.052–0.065) | 0.051 (0.049–0.062) | 0.043 (0.041–0.047) | 0.046 (0.040–0.066) |
+| N-body | 0.271 (0.258–0.282) | 0.048 (0.045–0.049) | 0.048 (0.046–0.056) | 0.044 (0.041–0.048) | 0.045 (0.038–0.257) |
+| HTTPS client | 1.233 (1.192–1.350) | 0.061 (0.059–0.065) | 0.058 (0.056–0.071) | 0.074 (0.071–0.101) | 0.073 (0.061–0.126) |
+| TLS fixture | 1.084 (1.044–1.125) | 0.059 (0.057–0.068) | 0.056 (0.053–0.062) | – | – |
+| large | 0.856 (0.830–0.882) | 0.070 (0.068–0.074) | 0.067 (0.064–0.075) | – | – |
+
+The before column is the same tree as round 1's "Neo after" noop column, measured on another box. The two agree within 0.04 s.
+
+Neo's unchanged rebuild is now at most 0.011 s slower than the faster of Rust and Go (JSON: 0.053 s against Rust's 0.043 s). It is faster than both for the HTTP server and the HTTPS client. Zig is left out, because `zig build-exe` keeps no output cache (see above).
+
+Where the 0.05 s goes, as medians of 15 runs on the box:
+
+| | hello | TLS fixture | HTTPS client | large |
+|---|---:|---:|---:|---:|
+| `./neo build P -o OUT` | 0.046 | 0.055 | 0.057 | 0.067 |
+| `python3 -m neoc build P -o OUT` | 0.029 | 0.038 | 0.040 | 0.051 |
+| `python3 -c pass` | 0.014 | 0.014 | 0.014 | 0.014 |
+
+- The shell launcher costs 16 ms. Most of that is its own Python start-up to check the version (`recent()` in `./neo`).
+- Python's own start-up costs 14 ms.
+- The lookup costs the rest: 15 ms for hello, and 37 ms for the large program. For the large program, the lookup hashes 30 source files (385 KiB) and loads a 0.9 MB record, most of which is the `--report` text, kept pre-rendered.
+
+Most of the launcher's 16 ms would go if the version check moved into Python itself. That was not needed to meet the target.
+
+### A lower inlining cap: measured, not adopted
+
+The TLS fixture's release build missed 3× in round 1 because of clang -O3 on a few very large functions. Lowering `NEO_INLINE_EXPANSION` from its default of 262,144 IR lines shrinks them further. Two lower caps were measured with the final cut rule, as three trees that differ only in the default (`INLINE_EXPANSION` in `neoc/cli.py`).
+
+Generated code (`bench/compile/ir_snapshot.py`, the 114 corpus programs, x86-64 Linux):
+
+- **131,072:** 91 programs are byte-identical to the default's IR and 23 change. The 23 are the 15 that the default bound already changes, plus 8 more: orders_json, the JSON program (`examples/library_bench.neo`), bitset, hashmap_entry, map_inline_keys, stdlib, json_access_probe and json_tokens.
+- **65,536:** 35 change. On top of the 23, these change too: agent_libraries, agent_utilities, byte_equal, bytesmap, json_views, json_writer_growth, AES, collections, crypto, P-256, SHA-512 and utf8_ranges.
+- The compute kernels (mandel, stencil, nbody, sieve) are unchanged at both caps.
+- The IR text changes by only a few dozen bytes per program. The cut removes inlining markers, and the expansion itself happens inside clang.
+
+Cold release builds, in wall seconds:
+
+| Program | 262,144 (default) | 131,072 | 65,536 | Round 1 before |
+|---|---:|---:|---:|---:|
+| TLS fixture (`run.py`, median of 3) | 28.63 | 25.98 | 20.61 | 44.67 |
+| of which clang compile | 23.62 | 20.97 | 15.47 | – |
+| speed-up over round 1 before | 1.56× | 1.72× | 2.17× | – |
+| HTTPS client (`breakdown.py`, one build) | 36.87 | 34.37 | 28.57 | 53.02 |
+| large program (`breakdown.py`, one build) | 153.0 | 106.9 | 81.4 | 640.4 |
+
+The front end stays at 4.9 s for the TLS fixture whatever the cap. Its binary shrinks from 1.50 MB to 1.41 MB, then 1.09 MB. A 3× TLS build (14.9 s) is not reached even at 65,536. With the front end at 4.9 s, it would need clang's compile under 10 s, against 15.5 s at 65,536.
+
+Run time (`bench/compile/runtime_check.py`, 7 interleaved rounds, medians; release builds of the three trees on this box; the compute kernels with one worker on CPU 1):
+
+| Case | 262,144 | 131,072 | Change | 65,536 | Change |
+|---|---:|---:|---:|---:|---:|
+| orders_stages mode 2 (s) | 0.1761 | 0.1733 | -1.6% | 0.1743 | -1.0% |
+| orders_stages mode 3 (s) | 0.1856 | 0.1933 | **+4.1%** | 0.1925 | **+3.7%** |
+| json-cli 200k records (s) | 0.3777 | 0.3927 | +4.0% | 0.4429 | **+17.3%** |
+| https new connection (us/request) | 1271 | 1267 | -0.4% | 1258 | -1.1% |
+| https keep-alive 1 MiB (us/request) | 3633 | 3624 | -0.3% | 3657 | +0.7% |
+| p384 verify x200 (s) | 0.4399 | 0.4431 | +0.7% | 0.4422 | +0.5% |
+| orders_json 1000 x1000 (s) | 0.1899 | 0.1928 | +1.5% | 0.1969 | +3.7% |
+| library_bench documents x1M (s) | 0.0996 | 0.1057 | **+6.2%** | 0.1087 | **+9.2%** |
+| library_bench collections x1M (s) | 0.0421 | 0.0428 | +1.6% | 0.0427 | +1.4% |
+| mandel 1200 1200 300 (s) | 0.1427 | 0.1429 | +0.1% | 0.1426 | -0.1% |
+| stencil 1000000 200 (s) | 0.2490 | 0.2501 | +0.5% | 0.2483 | -0.3% |
+| nbody 4096 10 (s) | 0.3772 | 0.3755 | -0.4% | 0.3776 | +0.1% |
+| sieve 100000000 (s) | 0.4367 | 0.4394 | +0.6% | 0.4353 | -0.3% |
+
+Changes in bold are ones where every sample is slower than every sample at the default. For orders_stages mode 3, for example, the default ranges over 0.183–0.189 s, and 131,072 over 0.190–0.213 s. The compute kernels' IR is identical at all three caps, so their rows only show the noise of the method.
+
+**Decision: the default stays at 262,144.** Both lower caps make JSON-heavy code measurably slower:
+
+- At 131,072:
+  - orders_stages mode 3 is 4.1% slower, and library_bench's document mode 6.2% slower. For both, every sample is slower than every sample at the default.
+  - json-cli is 4.0% slower and orders_json 1.5% slower.
+- At 65,536: json-cli is 17% slower, again with no overlap.
+
+The TLS-heavy cases (new-connection handshakes, 1 MiB transfers, P-384) and the compute kernels are within noise at both caps.
+
+`--report`'s `inline_expansion_cuts` shows the cause:
+
+- The lower caps leave per-record loop bodies as calls: json-cli's `record_valid` and `record_score`, and library_bench's `library_document`.
+- They also leave `json_int` and `json_array_values` as calls.
+- These are the callees that the rule never cuts at the default, because callees under 1/16 of the bound are exempt. That threshold drops with the cap: 16,384 lines at the default, 4,096 at 65,536.
+
+A follow-up would keep that threshold at 16,384 while lowering the bound, or exempt callees that sit inside loops. That changes the cut rule in `neoc/llvm.py` and needs this study again, so it was left for a later round.
+
+### CI
+
+With the final tree on this box:
+
+- `./neo test`: 37 native cases, 0 failed. All 60 integration scripts passed, including `quick_rebuilds.py`.
+- The `verify.yml` steps all passed: `bun install`, freestanding smoke, reproducible release, language-freestanding.
+- After the documentation edits, `./neo test --unit-only` was run again on the committed files, with the doc tests: 37 native cases, 6 of them doc tests, 0 failed (`unit.log`).
+
+### Raw data
+
+`bench/compile/results/2026-11-03-round2/`:
+
+| File | Contents |
+|---|---|
+| `noop.json` | every no-op sample, 20 rounds |
+| `post2.log` | the box's log for this section, including the launcher split |
+| `ir-c256.json`, `ir-c128.json`, `ir-c64.json` | IR snapshots at each cap |
+| `captls.json` | `run.py` on the TLS fixture at each cap |
+| `capbreak.json` | `breakdown.py` on the TLS fixture, HTTPS client and large program at each cap |
+| `caprt.json` | the run-time check at each cap |
+| `ci.log` | the CI run |
+| `unit.log` | `./neo test --unit-only` on the committed files, after the documentation edits |

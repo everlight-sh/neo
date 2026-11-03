@@ -1,0 +1,171 @@
+STEP cargo-fetch rc 0
+round 0 done
+round 1 done
+round 2 done
+round 3 done
+round 4 done
+round 5 done
+round 6 done
+round 7 done
+round 8 done
+round 9 done
+round 10 done
+round 11 done
+round 12 done
+round 13 done
+round 14 done
+round 15 done
+round 16 done
+round 17 done
+round 18 done
+round 19 done
+hello         Neo before                   0.2649 s  (0.2519-0.2855)
+hello         Neo before (no --report)     0.2658 s  (0.2524-0.2753)
+hello         Neo after                    0.0475 s  (0.0453-0.0529)
+hello         Neo after (no --report)      0.0477 s  (0.0451-0.0566)
+hello         Rust                         0.0405 s  (0.0381-0.0459)
+hello         Go                           0.0414 s  (0.0345-0.0662)
+http          Neo before                   0.2877 s  (0.2729-0.3058)
+http          Neo before (no --report)     0.2822 s  (0.2692-0.3160)
+http          Neo after                    0.0485 s  (0.0468-0.0582)
+http          Neo after (no --report)      0.0481 s  (0.0462-0.0584)
+http          Rust                         0.0507 s  (0.0477-0.1577)
+http          Go                           0.0751 s  (0.0634-0.1708)
+json          Neo before                   0.5957 s  (0.5694-0.6165)
+json          Neo before (no --report)     0.5855 s  (0.5669-0.6110)
+json          Neo after                    0.0533 s  (0.0520-0.0646)
+json          Neo after (no --report)      0.0512 s  (0.0492-0.0624)
+json          Rust                         0.0429 s  (0.0408-0.0471)
+json          Go                           0.0461 s  (0.0397-0.0663)
+nbody         Neo before                   0.2714 s  (0.2584-0.2819)
+nbody         Neo before (no --report)     0.2719 s  (0.2596-0.2788)
+nbody         Neo after                    0.0475 s  (0.0450-0.0494)
+nbody         Neo after (no --report)      0.0477 s  (0.0457-0.0558)
+nbody         Rust                         0.0437 s  (0.0412-0.0482)
+nbody         Go                           0.0448 s  (0.0375-0.2568)
+https-client  Neo before                   1.2334 s  (1.1921-1.3497)
+https-client  Neo before (no --report)     1.2187 s  (1.1794-1.2695)
+https-client  Neo after                    0.0607 s  (0.0588-0.0649)
+https-client  Neo after (no --report)      0.0584 s  (0.0557-0.0712)
+https-client  Rust                         0.0742 s  (0.0708-0.1011)
+https-client  Go                           0.0731 s  (0.0613-0.1264)
+tls-fixture   Neo before                   1.0843 s  (1.0442-1.1254)
+tls-fixture   Neo before (no --report)     1.0583 s  (1.0200-1.1120)
+tls-fixture   Neo after                    0.0587 s  (0.0568-0.0684)
+tls-fixture   Neo after (no --report)      0.0557 s  (0.0525-0.0616)
+large         Neo before                   0.8558 s  (0.8296-0.8821)
+large         Neo before (no --report)     0.8381 s  (0.8017-0.8880)
+large         Neo after                    0.0701 s  (0.0675-0.0743)
+large         Neo after (no --report)      0.0668 s  (0.0637-0.0752)
+NOOP-DONE
+STEP noop rc 0
+SPLIT examples/hello.neo launcher 0.0457 python -m neoc 0.0291 python -c pass 0.014 python -S -c pass 0.0074
+SPLIT tests/fixtures/language_tls.neo launcher 0.0545 python -m neoc 0.0377 python -c pass 0.0138 python -S -c pass 0.0074
+SPLIT bench/fetch/fetch.neo launcher 0.057 python -m neoc 0.0399 python -c pass 0.0139 python -S -c pass 0.0072
+SPLIT compiler/src/main.neo launcher 0.0671 python -m neoc 0.0509 python -c pass 0.0142 python -S -c pass 0.0076
+STEP split rc 0
+114 programs x targets, front-end seconds 379.3
+STEP ir-c256 rc 0
+114 programs x targets, front-end seconds 378.1
+CHANGED bench/core/orders_json.neo@x86_64-unknown-linux-gnu 1105493 1105457
+CHANGED bench/core/orders_stages.neo@x86_64-unknown-linux-gnu 1133608 1133596
+CHANGED bench/fetch/fetch.neo@x86_64-unknown-linux-gnu 13692074 13692002
+CHANGED compiler/src/main.neo@x86_64-unknown-linux-gnu 46816512 46816356
+CHANGED examples/library_bench.neo@x86_64-unknown-linux-gnu 1559785 1559773
+CHANGED tests/fixtures/agent_transport.neo@x86_64-unknown-linux-gnu 11226090 11226018
+CHANGED tests/fixtures/bitset.neo@x86_64-unknown-linux-gnu 1355971 1355935
+CHANGED tests/fixtures/hashmap_entry.neo@x86_64-unknown-linux-gnu 2284443 2284395
+CHANGED tests/fixtures/http_keepalive.neo@x86_64-unknown-linux-gnu 13193321 13193249
+CHANGED tests/fixtures/json_access_probe.neo@x86_64-unknown-linux-gnu 1373573 1373549
+CHANGED tests/fixtures/json_construct_probe.neo@x86_64-unknown-linux-gnu 2122965 2122953
+CHANGED tests/fixtures/json_field_decoder.neo@x86_64-unknown-linux-gnu 1708006 1707994
+CHANGED tests/fixtures/json_object_encoder.neo@x86_64-unknown-linux-gnu 2182191 2182179
+CHANGED tests/fixtures/json_tokens.neo@x86_64-unknown-linux-gnu 1436578 1436566
+CHANGED tests/fixtures/json_writer_probe.neo@x86_64-unknown-linux-gnu 2068200 2068176
+CHANGED tests/fixtures/language_p384.neo@x86_64-unknown-linux-gnu 2283633 2283609
+CHANGED tests/fixtures/language_tls.neo@x86_64-unknown-linux-gnu 8579474 8579402
+CHANGED tests/fixtures/language_tls12.neo@x86_64-unknown-linux-gnu 10549103 10549031
+CHANGED tests/fixtures/language_tls_web.neo@x86_64-unknown-linux-gnu 10436707 10436635
+CHANGED tests/fixtures/language_x509.neo@x86_64-unknown-linux-gnu 3898698 3898674
+CHANGED tests/fixtures/map_inline_keys.neo@x86_64-unknown-linux-gnu 1061813 1061801
+CHANGED tests/fixtures/stdlib.neo@x86_64-unknown-linux-gnu 1682213 1682201
+CHANGED tests/fixtures/x509_web.neo@x86_64-unknown-linux-gnu 4985335 4985323
+91 unchanged, 23 changed
+STEP ir-c128 rc 0
+114 programs x targets, front-end seconds 381.7
+CHANGED bench/core/orders_json.neo@x86_64-unknown-linux-gnu 1105493 1105457
+CHANGED bench/core/orders_stages.neo@x86_64-unknown-linux-gnu 1133608 1133596
+CHANGED bench/fetch/fetch.neo@x86_64-unknown-linux-gnu 13692074 13691870
+CHANGED compiler/src/main.neo@x86_64-unknown-linux-gnu 46816512 46816104
+CHANGED examples/library_bench.neo@x86_64-unknown-linux-gnu 1559785 1559773
+CHANGED tests/fixtures/agent_libraries.neo@x86_64-unknown-linux-gnu 2790064 2790052
+CHANGED tests/fixtures/agent_transport.neo@x86_64-unknown-linux-gnu 11226090 11225886
+CHANGED tests/fixtures/agent_utilities.neo@x86_64-unknown-linux-gnu 1659330 1659318
+CHANGED tests/fixtures/bitset.neo@x86_64-unknown-linux-gnu 1355971 1355923
+CHANGED tests/fixtures/byte_equal.neo@x86_64-unknown-linux-gnu 1118057 1118045
+CHANGED tests/fixtures/bytesmap.neo@x86_64-unknown-linux-gnu 886124 886112
+CHANGED tests/fixtures/hashmap_entry.neo@x86_64-unknown-linux-gnu 2284443 2284371
+CHANGED tests/fixtures/http_keepalive.neo@x86_64-unknown-linux-gnu 13193321 13193117
+CHANGED tests/fixtures/json_access_probe.neo@x86_64-unknown-linux-gnu 1373573 1373549
+CHANGED tests/fixtures/json_construct_probe.neo@x86_64-unknown-linux-gnu 2122965 2122905
+CHANGED tests/fixtures/json_field_decoder.neo@x86_64-unknown-linux-gnu 1708006 1707946
+CHANGED tests/fixtures/json_object_encoder.neo@x86_64-unknown-linux-gnu 2182191 2182155
+CHANGED tests/fixtures/json_tokens.neo@x86_64-unknown-linux-gnu 1436578 1436530
+CHANGED tests/fixtures/json_views.neo@x86_64-unknown-linux-gnu 1370797 1370773
+CHANGED tests/fixtures/json_writer_growth.neo@x86_64-unknown-linux-gnu 1457917 1457905
+CHANGED tests/fixtures/json_writer_probe.neo@x86_64-unknown-linux-gnu 2068200 2068164
+CHANGED tests/fixtures/language_aes.neo@x86_64-unknown-linux-gnu 553579 553567
+CHANGED tests/fixtures/language_collections.neo@x86_64-unknown-linux-gnu 1335659 1335635
+CHANGED tests/fixtures/language_crypto.neo@x86_64-unknown-linux-gnu 1893996 1893984
+CHANGED tests/fixtures/language_p256.neo@x86_64-unknown-linux-gnu 1651511 1651499
+CHANGED tests/fixtures/language_p384.neo@x86_64-unknown-linux-gnu 2283633 2283573
+CHANGED tests/fixtures/language_sha512.neo@x86_64-unknown-linux-gnu 454550 454526
+CHANGED tests/fixtures/language_tls.neo@x86_64-unknown-linux-gnu 8579474 8579270
+CHANGED tests/fixtures/language_tls12.neo@x86_64-unknown-linux-gnu 10549103 10548899
+CHANGED tests/fixtures/language_tls_web.neo@x86_64-unknown-linux-gnu 10436707 10436503
+CHANGED tests/fixtures/language_x509.neo@x86_64-unknown-linux-gnu 3898698 3898638
+CHANGED tests/fixtures/map_inline_keys.neo@x86_64-unknown-linux-gnu 1061813 1061789
+CHANGED tests/fixtures/stdlib.neo@x86_64-unknown-linux-gnu 1682213 1682177
+CHANGED tests/fixtures/utf8_ranges.neo@x86_64-unknown-linux-gnu 1026408 1026396
+CHANGED tests/fixtures/x509_web.neo@x86_64-unknown-linux-gnu 4985335 4985275
+79 unchanged, 35 changed
+STEP ir-c64 rc 0
+round 0 tls-fixture   Neo c128       cold    25.83s noop    0.06s incremental    25.85s
+round 0 tls-fixture   Neo c64        cold    20.65s noop    0.06s incremental    20.51s
+round 0 tls-fixture   Neo c256       cold    28.15s noop    0.06s incremental    28.50s
+round 1 tls-fixture   Neo c128       cold    26.03s noop    0.06s incremental    26.16s
+round 1 tls-fixture   Neo c64        cold    20.20s noop    0.06s incremental    20.57s
+round 1 tls-fixture   Neo c256       cold    28.63s noop    0.07s incremental    28.11s
+round 2 tls-fixture   Neo c128       cold    25.98s noop    0.06s incremental    25.91s
+round 2 tls-fixture   Neo c64        cold    20.61s noop    0.06s incremental    20.91s
+round 2 tls-fixture   Neo c256       cold    29.09s noop    0.06s incremental    28.45s
+COMPILE-BENCH-DONE
+STEP captls rc 0
+{"program": "https-client", "impl": "Neo c256", "wall": 36.872, "parse_seconds": 1.0783, "check_seconds": 1.6143, "prove_seconds": 1.0171, "optimize_seconds": 0.1707, "lower_seconds": 2.4504, "llvm_seconds": 31.1838, "compile_seconds": 31.1487, "link_seconds": 0.0351, "total_seconds": 36.5428, "optimizer_seconds": 16.54, "codegen_seconds": 17.612, "ir_lines": 336582, "inline_expansion_cuts": 3}
+{"program": "https-client", "impl": "Neo c128", "wall": 34.367, "parse_seconds": 1.0725, "check_seconds": 1.6318, "prove_seconds": 1.0276, "optimize_seconds": 0.1702, "lower_seconds": 2.4222, "llvm_seconds": 28.6966, "compile_seconds": 28.6614, "link_seconds": 0.0352, "total_seconds": 34.0253, "optimizer_seconds": 15.096, "codegen_seconds": 16.407, "ir_lines": 336582, "inline_expansion_cuts": 9}
+{"program": "https-client", "impl": "Neo c64", "wall": 28.573, "parse_seconds": 1.049, "check_seconds": 1.6365, "prove_seconds": 1.0361, "optimize_seconds": 0.1712, "lower_seconds": 2.3914, "llvm_seconds": 22.9333, "compile_seconds": 22.8973, "link_seconds": 0.036, "total_seconds": 28.2179, "optimizer_seconds": 12.326, "codegen_seconds": 12.741, "ir_lines": 336582, "inline_expansion_cuts": 20}
+{"program": "tls-fixture", "impl": "Neo c256", "wall": 28.576, "parse_seconds": 0.8784, "check_seconds": 1.5163, "prove_seconds": 0.9234, "optimize_seconds": 0.1657, "lower_seconds": 2.035, "llvm_seconds": 23.6343, "compile_seconds": 23.6017, "link_seconds": 0.0326, "total_seconds": 28.2683, "optimizer_seconds": 12.652, "codegen_seconds": 12.823, "ir_lines": 214681, "inline_expansion_cuts": 3}
+{"program": "tls-fixture", "impl": "Neo c128", "wall": 25.76, "parse_seconds": 0.8642, "check_seconds": 1.5184, "prove_seconds": 0.9305, "optimize_seconds": 0.1516, "lower_seconds": 2.0005, "llvm_seconds": 20.8907, "compile_seconds": 20.8582, "link_seconds": 0.0324, "total_seconds": 25.4579, "optimizer_seconds": 11.185, "codegen_seconds": 11.812, "ir_lines": 214681, "inline_expansion_cuts": 9}
+{"program": "tls-fixture", "impl": "Neo c64", "wall": 20.74, "parse_seconds": 0.8752, "check_seconds": 1.5577, "prove_seconds": 0.9472, "optimize_seconds": 0.1541, "lower_seconds": 2.0225, "llvm_seconds": 15.8012, "compile_seconds": 15.7688, "link_seconds": 0.0324, "total_seconds": 20.4408, "optimizer_seconds": 8.494, "codegen_seconds": 8.927, "ir_lines": 214681, "inline_expansion_cuts": 20}
+{"program": "large", "impl": "Neo c256", "wall": 153.013, "parse_seconds": 0.6439, "check_seconds": 0.8664, "prove_seconds": 0.4382, "optimize_seconds": 0.0666, "lower_seconds": 3.324, "llvm_seconds": 147.7137, "compile_seconds": 147.6631, "link_seconds": 0.0506, "total_seconds": 152.7111, "optimizer_seconds": 79.136, "codegen_seconds": 76.265, "ir_lines": 1012106, "inline_expansion_cuts": 11}
+{"program": "large", "impl": "Neo c128", "wall": 106.87, "parse_seconds": 0.6671, "check_seconds": 0.9215, "prove_seconds": 0.4553, "optimize_seconds": 0.0737, "lower_seconds": 3.3329, "llvm_seconds": 101.5026, "compile_seconds": 101.4581, "link_seconds": 0.0445, "total_seconds": 106.576, "optimizer_seconds": 54.991, "codegen_seconds": 54.57, "ir_lines": 1012106, "inline_expansion_cuts": 24}
+{"program": "large", "impl": "Neo c64", "wall": 81.377, "parse_seconds": 0.6461, "check_seconds": 0.8568, "prove_seconds": 0.4334, "optimize_seconds": 0.0691, "lower_seconds": 3.264, "llvm_seconds": 76.1708, "compile_seconds": 76.1309, "link_seconds": 0.0399, "total_seconds": 81.0836, "optimizer_seconds": 41.791, "codegen_seconds": 39.439, "ir_lines": 1012106, "inline_expansion_cuts": 45}
+BREAKDOWN-DONE
+STEP capbreak rc 0
+2026/11/03 03:32:23 http: TLS handshake error from 127.0.0.1:37188: EOF
+orders_stages mode 2 (s) c256 0.1761 c128 0.1733 c64 0.1743
+orders_stages mode 3 (s) c256 0.1856 c128 0.1933 c64 0.1925
+json-cli 200k records (s) c256 0.3777 c128 0.3927 c64 0.4429
+https new connection (us/request) c256 1271 c128 1267 c64 1258
+https keep-alive 1 MiB (us/request) c256 3633 c128 3624 c64 3657
+p384 verify x200 (s) c256 0.4399 c128 0.4431 c64 0.4422
+orders_json 1000 x1000 (s) c256 0.1899 c128 0.1928 c64 0.1969
+library_bench documents x1M (s) c256 0.09957 c128 0.1057 c64 0.1087
+library_bench collections x1M (s) c256 0.04213 c128 0.04279 c64 0.04272
+mandel 1200 1200 300 (s) c256 0.1427 c128 0.1429 c64 0.1426
+stencil 1000000 200 (s) c256 0.249 c128 0.2501 c64 0.2483
+nbody 4096 10 (s) c256 0.3772 c128 0.3755 c64 0.3776
+sieve 100000000 (s) c256 0.4367 c128 0.4394 c64 0.4353
+RUNTIME-CHECK-DONE
+STEP caprt rc 0
+POST2-DONE

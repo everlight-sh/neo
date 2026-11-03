@@ -43,7 +43,13 @@ python3 bench/compile/summarize.py results.json
   IR through clang with `-ftime-report` to split its compile into the LLVM
   optimizer and code generation.
 - `runtime_check.py`: run time, before and after, of the programs whose
-  generated code the inline expansion cap changes.
+  generated code the inline expansion cap changes, plus orders_json and the
+  compute kernels.
+- `noop.py OUT.json ROUNDS`: unchanged rebuilds only, many rounds, Neo trees
+  (with and without `--report`) against Rust and Go.
+- `ir_snapshot.py ROOT OUT.json [BASE.json]`: the SHA-256 of the LLVM IR each
+  corpus program lowers to, without clang; with a base snapshot it lists the
+  programs whose IR changed. `NEO_INLINE_EXPANSION=N` compares caps.
 - `zig/build.zig`: `zig build-exe` never caches its output, so `run.py`'s
   unchanged Zig rebuild compiles everything again. `zig build NAME
   -Doptimize=ReleaseFast` measures the cached case.

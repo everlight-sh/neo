@@ -212,6 +212,14 @@ Cached builds verify source/dependency/compiler/options/target hashes and the
 cached executable's content hash. Artifact publication is atomic, including
 concurrent builds and rebuilding an executable already running on macOS.
 
+An unchanged rebuild does not parse. Each build records, beside its cached
+executable, a hash of every source it read, the file each import resolved to and
+the package manifest that named each module. A later `neo build` or `neo run`
+with the same entry, compiler, clang, flags and `NEO_*` variables publishes the
+cached executable when all of those still match, and otherwise takes the full
+path. Programs with `pkg:` imports always take the full path. `NEO_QUICK=0`
+turns the lookup off.
+
 On ARM64 Linux with Clang/lld and QEMU installed:
 
 ```sh
