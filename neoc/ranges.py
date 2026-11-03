@@ -107,9 +107,14 @@ class Analysis:
         self.fns = {f.name: f for f in fns if not f.external and not f.effect and not getattr(f,'precompiled',False)}
         self.inputs = {name: None for name in self.fns}
         self.outputs = {name: None for name in self.fns}
-        self.nodes = {}
+        self.nodes, self.reads, self.pushes = {}, {}, []
         self.round = 0
         self.generic_roots = set(generic_roots)
+
+    def push(self, name, args):
+        old = self.inputs[name]
+        combine = widen if self.round >= 8 else join
+        self.inputs[name] = args if old is None else [combine(a, b) for a, b in zip(old, args)]
 
     def root(self, f):
         if f.name in self.inputs: self.inputs[f.name] = [TOP] * len(f.params)
@@ -126,15 +131,30 @@ class Analysis:
                         if callback is not None: self.root(callback)
                 for child in S.children(e): scan(child)
             scan(f.body)
+        # A body's evaluation depends only on its inputs and the callee outputs
+        # it reads. When neither changed since the last round, its recorded
+        # node intervals and callee inputs are replayed instead: the same
+        # joins, in the same order, as evaluating it again.
+        memo = {}
         for self.round in range(64):
             before = repr((self.inputs, self.outputs))
-            self.nodes = {}
+            nodes = {}
             for name, f in self.fns.items():
                 args = self.inputs[name]
                 if args is None: continue
-                value = self.eval(f.body, dict(zip((p.name for p in f.params), args)))
                 combine = widen if self.round >= 8 else join
+                last = memo.get(name)
+                if last is not None and last[0] == args and all(self.outputs[c] == v for c, v in last[1].items()):
+                    _, _, local, pushes, value = last
+                    for callee, given in pushes: self.push(callee, given)
+                else:
+                    self.nodes, self.reads, self.pushes = {}, {}, []
+                    value = self.eval(f.body, dict(zip((p.name for p in f.params), args)))
+                    local = self.nodes
+                    memo[name] = (list(args), self.reads, local, self.pushes, value)
+                for node, interval in local.items(): nodes[node] = join(nodes.get(node), interval)
                 self.outputs[name] = combine(self.outputs[name], value)
+            self.nodes = nodes
             if before == repr((self.inputs, self.outputs)):
                 return {node: value for node, value in self.nodes.items() if value is not None}
         return {}  # Refuse optimization if the abstract interpretation did not converge.
@@ -213,10 +233,9 @@ class Analysis:
                 return bits(builtin, args, e.args)
             if e.name not in self.fns: return TOP
             if any(a is None for a in args): return None
-            old = self.inputs[e.name]
-            combine = widen if self.round >= 8 else join
-            self.inputs[e.name] = args if old is None else [combine(a, b) for a, b in zip(old, args)]
-            return self.outputs[e.name]
+            self.push(e.name, args); self.pushes.append((e.name, args))
+            value = self.reads[e.name] = self.outputs[e.name]
+            return value
         for child in S.children(e): ev(child)
         return TOP
 

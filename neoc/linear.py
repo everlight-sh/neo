@@ -19,10 +19,11 @@ def exact_number(value):
 
 class Lin:
     """Linear expression: sum(coef * var) + const, exact rationals."""
-    __slots__ = ("terms", "const")
+    __slots__ = ("terms", "const", "integer")
     def __init__(self, terms: Optional[Dict[str, Fraction]] = None, const=0):
         self.terms = {k: exact_number(v) for k, v in (terms or {}).items() if v != 0}
         self.const = exact_number(const)
+        self.integer = None  # integer_constraint's answer, once asked
     @staticmethod
     def var(name: str) -> "Lin": return Lin({name: 1})
     @staticmethod
@@ -145,41 +146,63 @@ def primitive_constraint(terms, constant):
     return terms, constant
 
 
+# Answers by constraint set: FM's answer, its limit included, does not depend
+# on the order of the constraints or on duplicates among them.
+DECIDED: Dict[frozenset, Optional[bool]] = {}
+
+def keyed(terms, constant):
+    return terms, constant, (frozenset(terms.items()), constant)
+
 def fm_unsat(cons: List[Lin]) -> Optional[bool]:
     """True if the conjunction of lin<=0 is unsatisfiable over the rationals
     (hence over the integers). False if satisfiable over rationals. None if
     the search blew up."""
-    cons = [integer_constraint(c) for c in cons]
+    for c in cons:
+        if c.integer is None: c.integer = keyed(*integer_constraint(c))
+    cons = [c.integer for c in cons]
+    query = frozenset(c[2] for c in cons)
+    if query in DECIDED: return DECIDED[query]
+    if len(DECIDED) > 1 << 16: DECIDED.clear()
+    answer = DECIDED[query] = eliminate(cons)
+    return answer
+
+def eliminate(cons) -> Optional[bool]:
+    """Fourier-Motzkin over (terms, constant, key) integer constraints."""
     while True:
         # constant contradictions / drop trivial
         keep = []; seen = set()
         counts = {}
-        for terms, constant in cons:
+        for c in cons:
+            terms = c[0]
             if not terms:
-                if constant > 0: return True
+                if c[1] > 0: return True
             else:
-                key = (tuple(sorted(terms.items())), constant)
-                if key in seen: continue
-                seen.add(key); keep.append((terms, constant))
+                if c[2] in seen: continue
+                seen.add(c[2]); keep.append(c)
                 for variable, coefficient in terms.items():
-                    count = counts.setdefault(variable, [0, 0])
+                    count = counts.get(variable)
+                    if count is None: count = counts[variable] = [0, 0]
                     count[coefficient < 0] += 1
         cons = keep
         if not cons: return False
         # pick the variable with the fewest pos*neg combinations
         v = min(counts, key=lambda name: (counts[name][0] * counts[name][1] - sum(counts[name]), name))
-        pos = [c for c in cons if c[0].get(v, 0) > 0]
-        negs = [c for c in cons if c[0].get(v, 0) < 0]
-        rest = [c for c in cons if v not in c[0]]
-        new = rest
+        pos = []; negs = []; new = []
+        for c in cons:
+            coefficient = c[0].get(v, 0)
+            if coefficient > 0: pos.append(c)
+            elif coefficient < 0: negs.append(c)
+            else: new.append(c)
+        others = [({name: value for name, value in q[0].items() if name != v}, -q[0][v], q[1]) for q in negs]
         for p in pos:
-            for q in negs:
-                # p: a*v + P <= 0 (a>0)  ;  q: -b*v + Q <= 0 (b>0)
-                a, b = p[0][v], -q[0][v]
-                terms = {name: value * b for name, value in p[0].items() if name != v}
-                for name, value in q[0].items():
-                    if name != v: terms[name] = terms.get(name, 0) + value * a
-                new.append(primitive_constraint(terms, p[1] * b + q[1] * a))
+            # p: a*v + P <= 0 (a>0)  ;  q: -b*v + Q <= 0 (b>0)
+            a = p[0][v]
+            scaled = [(name, value) for name, value in p[0].items() if name != v]
+            for q_terms, b, q_constant in others:
+                terms = {name: value * b for name, value in scaled}
+                for name, value in q_terms.items(): terms[name] = terms.get(name, 0) + value * a
+                terms, constant = primitive_constraint(terms, p[1] * b + q_constant * a)
+                new.append((terms, constant, (frozenset(terms.items()), constant)))
                 if len(new)>FM_LIMIT:return None
         if len(new) > FM_LIMIT: return None
         cons = new
