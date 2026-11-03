@@ -18,6 +18,8 @@ effect fn rt_word_wait(p:ptr,expected:i64,milliseconds:i64) -> i64
 effect fn rt_munmap (p : ptr, n : i64) -> i64 = syscall6(215, ptr_to_i64(p), n, 0, 0, 0, 0)
 ; madvise(MADV_HUGEPAGE): large private blocks ask for transparent huge pages.
 effect fn rt_advise_huge (p : ptr, n : i64) -> i64 = syscall6(233, ptr_to_i64(p), n, 14, 0, 0, 0)
+; madvise(MADV_POPULATE_WRITE, Linux 5.14+): fault a fresh block in with one call. Older kernels fail it harmlessly.
+effect fn rt_populate (p : ptr, n : i64) -> i64 = syscall6(233, ptr_to_i64(p), n, 23, 0, 0, 0)
 effect fn rt_getpid () -> i64 = syscall6(172, 0, 0, 0, 0, 0, 0)
 effect fn rt_getppid () -> i64 = syscall6(173, 0, 0, 0, 0, 0, 0)
 effect fn rt_socket (domain : i64, kind : i64, protocol : i64) -> i64 = rt_cloexec(rt_result(syscall6(198, domain, kind, protocol, 0, 0, 0)))

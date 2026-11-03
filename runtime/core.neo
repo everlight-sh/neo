@@ -154,12 +154,18 @@ effect fn rt_map_kind(bytes:i64,is_private:bool) -> ptr
     if address<0 then let failed=ax_trap(data("mmap failed\0")) in null() else ptr_from_i64(address)
 effect fn rt_map(bytes:i64) -> ptr = rt_map_kind(bytes,false)
 ; A mapped block of class k: the parked block when it has that class, else a
-; fresh mapping; large private managed blocks get the huge page advice.
+; fresh mapping; large private managed blocks get the huge page advice. With
+; one worker, a fresh large private block is also faulted in over its
+; requested bytes (which the new array writes next anyway) by one
+; MADV_POPULATE_WRITE call instead of one page fault per 4 KiB page when
+; huge pages are off. Several workers fault their own chunks in parallel.
 cold effect fn rt_large_block(bytes:i64,capacity:i64,k:i64,is_private:bool) -> ptr
   = let state=runtime_state() in let at=if is_private then 144 else 136 in let parked=load_ptr(state,at) in
-    let block=if parked!=null() && load_i64(parked,-8)/4==k then let taken=store_ptr(state,at,null()) in ptr_add(parked,-16)
+    let reused=parked!=null() && load_i64(parked,-8)/4==k in
+    let block=if reused then let taken=store_ptr(state,at,null()) in ptr_add(parked,-16)
       else rt_map_kind(capacity+16,is_private) in
-    let advised=if is_private && k>=18 then rt_advise_block(block,bytes) else noop() in block
+    let advised=if is_private && k>=18 then rt_advise_block(block,bytes) else noop() in
+    let populated=if is_private && k>=18 && !reused && rt_threads()==1 then rt_populate(block,bytes+16) else 0 in block
 ; Raw allocations preserve their cross-fork shared mapping contract. Managed
 ; arrays use private pages with one numeric worker; multiple workers retain
 ; shared pages for the allocating fork dispatcher. A program whose parallel
