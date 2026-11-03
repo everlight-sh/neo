@@ -1,0 +1,24 @@
+; Incremental SHA-256 (sha256_absorb, sha256_finish) against one-shot sha256 over
+; growing messages, as a TLS transcript grows. Run by `neo test`.
+import "std:sha256"
+
+fn message(n:i64) -> Arr u8 _ = if n<=0 then "" else arr(i in 0..n) u8((i*131+7)%256)
+
+; Digests every prefix of a 300-byte message whose length is a multiple of step,
+; absorbing from one running state, and compares each with sha256.
+fn prefixes_match(step:i64) -> bool
+  = let text=message(300) in
+    loop(n=0,running=sha256_start(),ok=true) while ok && n<=300
+      next(n+step,let prefix=str_slice(text,0,n) in sha256_absorb(running,prefix),
+        let prefix=str_slice(text,0,n) in let absorbed=sha256_absorb(running,prefix) in str_equal(sha256_finish(absorbed,prefix),sha256(prefix)))
+      yield ok
+
+fn test_every_prefix() -> bool = prefixes_match(1)
+fn test_block_steps() -> bool = prefixes_match(64) && prefixes_match(55) && prefixes_match(56) && prefixes_match(119)
+fn test_known_digest() -> bool
+  = let text="abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" in let running=sha256_absorb(sha256_start(),str_slice(text,0,30)) in
+    str_equal(sha256_finish(sha256_absorb(running,text),text),"\x24\x8d\x6a\x61\xd2\x06\x38\xb8\xe5\xc0\x26\x93\x0c\x3e\x60\x39\xa3\x3c\xe4\x59\x64\xff\x21\x67\xf6\xec\xed\xd4\x19\xdb\x06\xc1")
+; A running state ahead of a shorter text falls back to hashing all of it.
+fn test_shorter_text() -> bool
+  = let running=sha256_absorb(sha256_start(),message(200)) in str_equal(sha256_finish(running,message(10)),sha256(message(10)))
+    && str_equal(sha256_finish(sha256_absorb(running,message(70)),message(70)),sha256(message(70)))

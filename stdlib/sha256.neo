@@ -164,6 +164,24 @@ fn sha256(text:Arr u8 n) -> Arr u8 _
     let initial=Sha256State { a=1779033703,b=3144134277,c=1013904242,d=2773480762,e=1359893119,f=2600822924,g=528734635,h=1541459225 } in
     let result=loop(i=0,state=initial) while i<padded/64 next(i+1,sha_block(state,text,i,padded)) yield state in
     arr(i in 0..32) u8(shift_right(sha_word(result,i/4),(3-i%4)*8))
+; SHA-256 of a message that grows by appending, such as a TLS transcript: the state
+; after the message's first `blocks` 64-byte blocks. sha256_absorb compresses the
+; whole blocks text adds; sha256_finish pads and digests text from there, so digests
+; of successive prefixes of one message compress each block once. text must start
+; with the bytes absorbed so far.
+type Sha256Running = { state:Sha256State,blocks:i64 }
+fn sha256_start() -> Sha256Running
+  = Sha256Running { state=Sha256State { a=1779033703,b=3144134277,c=1013904242,d=2773480762,e=1359893119,f=2600822924,g=528734635,h=1541459225 },blocks=0 }
+fn sha256_absorb(running:Sha256Running,text:Arr u8 n) -> Sha256Running
+  = check n<=1152921504606846975 in let padded=(n+72)/64*64 in
+    let from=if running.blocks<0 || running.blocks>n/64 then sha256_start() else running in
+    let state=loop(i=from.blocks,state=from.state) while i<n/64 next(i+1,sha_block(state,text,i,padded)) yield state in
+    Sha256Running { state=state,blocks=n/64 }
+fn sha256_finish(running:Sha256Running,text:Arr u8 n) -> Arr u8 _
+  = check n<=1152921504606846975 in let padded=(n+72)/64*64 in
+    if running.blocks<0 || running.blocks>n/64 then sha256(text) else
+    let result=loop(i=running.blocks,state=running.state) while i<padded/64 next(i+1,sha_block(state,text,i,padded)) yield state in
+    arr(i in 0..32) u8(shift_right(sha_word(result,i/4),(3-i%4)*8))
 fn hmac_sha256(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _
   = let bounded=if n>64 then sha256(key) else key in
     let inner=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,54)) in
