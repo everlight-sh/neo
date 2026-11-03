@@ -1214,6 +1214,11 @@ class LLVMGen:
     def store_elem(self, arr: Val, idx: Val, t: S.TArr, v: Val):
         fb = self.fb
         ptrs = self.elem_ptrs(arr, idx, t)
+        # A bool element is stored as its byte: LLVM's loop idiom pass finds no
+        # memset in i1 stores, so a constant bool fill otherwise stores 4 bytes
+        # per instruction. Loads stay i1: as bytes, LLVM vectorizes a bool count
+        # by widening through unpack chains, which ran 2x slower on SSE2.
+        if t.elem == S.BOOL: fb.store(fb.ins(f'zext {v} to i8', 'i8'), ptrs[0][2].name); return
         if not isinstance(t.elem, S.TRec): fb.store(self.pack_storage(v,t.elem), ptrs[0][2].name); return
         for k, fty, p in ptrs:
             ft=t.elem.fields[k][1]
