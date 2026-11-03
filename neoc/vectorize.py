@@ -39,6 +39,25 @@ def array_width(triple):
     """Lanes per vector of an array comprehension (see VecGen), as sum_width."""
     return 2 if triple.startswith(('aarch64', 'arm64')) and 'apple' not in triple else ARRAY_LANES
 
+def neon_native(body, gen, depth=0):
+    """Every i64 operation of an eligible body has a NEON instruction.
+
+    NEON has no 64-bit vector multiply or divide, and LLVM scalarizes those
+    lane by lane. Multiplying by a power of two is a shift, and a bounded
+    remainder is compares and subtractions (LLVMGen.bounded_remainder).
+    """
+    if depth > 4: return False
+    for e in _walk(body):
+        if isinstance(e, S.Bin) and e.ty == S.I64:
+            if e.op == '*' and not any(isinstance(x, S.Num) and x.value > 0 and x.value & (x.value - 1) == 0 for x in (e.left, e.right)): return False
+            if e.op == '/' or (e.op == '%' and not gen.remainder_bounded(e)): return False
+        if isinstance(e, S.Call) and not getattr(e, 'builtin', None) and not neon_native(gen.fn_map[e.name].body, gen, depth + 1): return False
+    return True
+
+def _walk(e):
+    yield e
+    for child in S.children(e): yield from _walk(child)
+
 def work_cost(e):
     """Conservative scheduling estimate; calls/loops keep default granularity.
 

@@ -1229,14 +1229,20 @@ class LLVMGen:
         return acc
 
     # ------------------------------------------------------------ expressions
+    def remainder_bounded(self, e):
+        """bounded_remainder applies: a positive constant divisor and a dividend under 8x it."""
+        bounds = self.value_ranges.get(id(e.left))
+        if not bounds or not isinstance(e.right, S.Num) or e.right.value <= 0: return False
+        lo, hi = bounds
+        return not (lo == Ranges.MIN or max(abs(lo), abs(hi)) >= e.right.value * 8 or e.right.value * 8 > Ranges.MAX)
+
     def bounded_remainder(self, e, a, b, lanes=1):
         """Strength-reduce small, statically bounded signed remainders."""
+        if not self.remainder_bounded(e): return None
         bounds = self.value_ranges.get(id(e.left))
-        if not bounds or not isinstance(e.right, S.Num) or e.right.value <= 0: return None
         d = e.right.value
         lo, hi = bounds
         limit = max(abs(lo), abs(hi))
-        if lo == Ranges.MIN or limit >= d * 8 or d * 8 > Ranges.MAX: return None
         fb = self.fb
         negative = None
         value = a
@@ -2251,9 +2257,13 @@ class LLVMGen:
         reads = []
         # NEON holds two i64 lanes and has no 64-bit vector multiply: forced
         # 4-lane i64 array bodies ran 2.8x slower than the scalar loop, which
-        # LLVM's own cost model still vectorizes where it pays. f64 is kept.
-        array_types = (S.F64,) if self.triple.startswith(('aarch64','arm64')) else (S.I64, S.F64)
-        varr = not is_sum and self.vectorize and e.ty.elem in array_types and VZ.eligible(e.body,self.fn_map,array_var=e.var,reads=reads,allow_libraries=library_body)
+        # LLVM's own cost model still vectorizes where it pays. Linux AArch64
+        # builds array vectors from single registers, so i64 bodies whose every
+        # operation NEON has natively are vectorized there; Darwin keeps f64.
+        arm = self.triple.startswith(('aarch64','arm64'))
+        array_types = (S.I64, S.F64) if not arm or VZ.ARRAY_WIDTH == 2 else (S.F64,)
+        varr = not is_sum and self.vectorize and e.ty.elem in array_types and VZ.eligible(e.body,self.fn_map,array_var=e.var,reads=reads,allow_libraries=library_body) \
+            and (not arm or e.ty.elem != S.I64 or VZ.neon_native(e.body,self))
         if vec: self.vector_sums.append({"fn": self.fn.name, "node": e.hash[:12], "pos": list(e.pos), "lanes": VZ.K})
         if varr: self.vector_arrays.append({"fn": self.fn.name, "node": e.hash[:12], "pos": list(e.pos), "lanes": VZ.ARRAY_LANES, 'reads':sorted(set(reads))})
         if not par:
