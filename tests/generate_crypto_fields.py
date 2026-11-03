@@ -7,9 +7,9 @@ Run it after changing a limb layout here, then rerun the crypto vector tests.
   x25519.neo  GF(2^255-19), five unsigned limbs in radix 2^51 with 128-bit
               columns (hi and lo words, from wrapping_mul and mul_high):
               limbs below 2^53 give columns below 2^113.
-  p256.neo    Montgomery products modulo the P-256 prime and group order, nine
-              unsigned 29-bit limbs, R = 2^261: a column holds at most 18
-              products below 2^58, so every running sum stays below 2^63.
+  p256.neo    Montgomery products modulo the P-256 prime and group order, four
+              unsigned 64-bit limbs, R = 2^256, by product scanning into a
+              three-word column (wrapping_mul and mul_high per product).
   sha256.neo  the 64 SHA-256 rounds and message schedule, unrolled.
 """
 from pathlib import Path
@@ -85,128 +85,81 @@ def xf_words():
     return words
 
 # ---------------------------------------------------------------- P-256
-LIMBS, BITS = 9, 29
-MASK = (1 << BITS) - 1
-PF = 'P9'
-
-def p9_mont():
-    """Finely integrated product scanning: a*b/R mod m for a,b < 4m, result < 2m."""
-    s = LIMBS
-    lines = ['let acc=0 in']
-    for i in range(2 * s - 1):
-        terms = ['acc']
-        lo, hi = max(0, i - s + 1), min(i, s - 1)
-        for j in range(lo, hi + 1):
-            terms.append(mul(f'a.l{j}', f'b.l{i - j}'))
-            if j < i and i - j < s: terms.append(mul(f'q{j}', f'm.l{i - j}'))
-        lines.append(f'let acc={add(terms)} in')
-        if i < s:
-            lines.append(f'let q{i}=bit_and(wrapping_mul(bit_and(acc,{MASK}),inverse),{MASK}) in')
-            lines.append(f'let acc=shift_right(wrapping_add(acc,wrapping_mul(q{i},m.l0)),{BITS}) in')
-        else:
-            lines.append(f'let r{i - s}=bit_and(acc,{MASK}) in let acc=shift_right(acc,{BITS}) in')
-    fields = ','.join(f'l{k}=r{k}' for k in range(s - 1)) + f',l{s - 1}=acc'
-    return (f'private fn p9_mont(a:{PF},b:{PF},m:{PF},inverse:i64) -> {PF}\n  = ' + '\n    '.join(lines) +
-            f'\n    {PF} {{ {fields} }}')
-
-def p9_times_limb(q, limb):
-    """q*limb for a P-256 prime limb, as shifts: every limb is 0, 2^a or 2^a-2^b."""
-    if limb == 0: return None
-    if limb & (limb - 1) == 0: return f'shift_left({q},{limb.bit_length() - 1})'
-    high = limb.bit_length(); low = (1 << high) - limb
-    assert low & (low - 1) == 0, limb
-    low_term = q if low == 1 else f'shift_left({q},{low.bit_length() - 1})'
-    return f'wrapping_sub(shift_left({q},{high}),{low_term})'
-
-def p9_field(square):
-    """p9_mont specialised to the P-256 prime: -p^-1 mod 2^29 is 1, so each
-    quotient digit is the column's low limb, and the prime's limbs are sparse
-    sums of powers of two, so q*m needs shifts instead of multiplications.
-    Every term is the same nonnegative product as in p9_mont, so the bounds
-    are unchanged. The square adds each cross product once, doubled."""
-    s = LIMBS
-    m = [(P >> (BITS * i)) & MASK for i in range(s)]
-    assert (-pow(P, -1, 1 << BITS)) % (1 << BITS) == 1 and m[0] == MASK
-    lines = ['let acc=0 in']
-    if square: lines.append(' '.join(f'let d{j}=shift_left(a.l{j},1) in' for j in range(s - 1)))
-    for i in range(2 * s - 1):
-        terms = ['acc']
-        lo, hi = max(0, i - s + 1), min(i, s - 1)
-        for j in range(lo, hi + 1):
-            if not square: terms.append(mul(f'a.l{j}', f'b.l{i - j}'))
-            elif j < i - j: terms.append(mul(f'd{j}', f'a.l{i - j}'))
-            elif j == i - j: terms.append(mul(f'a.l{j}', f'a.l{j}'))
-            if j < i and i - j < s:
-                term = p9_times_limb(f'q{j}', m[i - j])
-                if term: terms.append(term)
-        lines.append(f'let acc={add(terms)} in')
-        if i < s:
-            lines.append(f'let q{i}=bit_and(acc,{MASK}) in let acc=wrapping_add(shift_right(acc,{BITS}),q{i}) in')
-        else:
-            lines.append(f'let r{i - s}=bit_and(acc,{MASK}) in let acc=shift_right(acc,{BITS}) in')
-    fields = ','.join(f'l{k}=r{k}' for k in range(s - 1)) + f',l{s - 1}=acc'
-    head = f'private fn p9_field_square(a:{PF}) -> {PF}' if square else f'private fn p9_field_mont(a:{PF},b:{PF}) -> {PF}'
-    return head + '\n  = ' + '\n    '.join(lines) + f'\n    {PF} {{ {fields} }}'
-
-def p9_norm():
-    """Signed limbs to limbs 0..7 in [0,2^29) and a signed top limb."""
-    lines = []
-    for k in range(LIMBS - 1):
-        lines.append(f'let c=arithmetic_shift_right(l{k},{BITS}) in let l{k}=bit_and(l{k},{MASK}) in let l{k + 1}=wrapping_add(l{k + 1},c) in')
-    params = ','.join(f'l{k}:i64' for k in range(LIMBS))
-    fields = ','.join(f'l{k}=l{k}' for k in range(LIMBS))
-    return f'private fn p9_norm({params}) -> {PF}\n  = ' + '\n    '.join(lines) + f'\n    {PF} {{ {fields} }}'
-
-def p9_unpack():
-    """Four little-endian 64-bit words (bits 0..255) into nine 29-bit limbs."""
-    out = []
-    for i in range(LIMBS):
-        off = i * BITS; k, s = divmod(off, 64)
-        expr = f'shift_right(w{k},{s})' if s else f'w{k}'
-        if s + BITS > 64 and k + 1 < 4: expr = f'bit_or({expr},shift_left(w{k + 1},{64 - s}))'
-        out.append(f'l{i}=bit_and({expr},{MASK})')
-    return f'private fn p9_unpack(w0:i64,w1:i64,w2:i64,w3:i64) -> {PF}\n  = {PF} {{ ' + ','.join(out) + ' }'
-
-def p9_words():
-    words = []
-    for k in range(4):
-        parts = []
-        for i in range(LIMBS):
-            lo, hi = i * BITS, (i + 1) * BITS
-            if hi <= 64 * k or lo >= 64 * (k + 1): continue
-            if lo >= 64 * k: parts.append(f'shift_left(a.l{i},{lo - 64 * k})' if lo > 64 * k else f'a.l{i}')
-            else: parts.append(f'shift_right(a.l{i},{64 * k - lo})')
-        expr = parts[0]
-        for p in parts[1:]: expr = f'bit_or({expr},{p})'
-        words.append(expr)
-    return words
-
-def p9_constant(value):
-    return f'{PF} {{ ' + ','.join(f'l{i}={(value >> (BITS * i)) & MASK}' for i in range(LIMBS)) + ' }'
-
+PF = 'P4'
+W = 1 << 64
 P = 2**256 - 2**224 + 2**192 + 2**96 - 1
 N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
-R = 2**(LIMBS * BITS)
+R = 2**256
 
-def p9_constants():
+def p4_limbs(value): return [(value >> (64 * i)) % W for i in range(4)]
+def p4_signed(word): return word - W if word >= 1 << 63 else word
+def p4_constant(value):
+    return f'{PF} {{ ' + ','.join(f'l{i}={p4_signed(w)}' for i, w in enumerate(p4_limbs(value))) + ' }'
+
+def p4_carries():
+    """Four-limb sum and difference with the carry or borrow out (0 or 1)."""
+    add = ['let s0=wrapping_add(a.l0,b.l0) in let c=p4_below(s0,a.l0) in']
+    sub = ['let d0=wrapping_sub(a.l0,b.l0) in let c=p4_below(a.l0,b.l0) in']
+    for k in range(1, 4):
+        add.append(f'let t=wrapping_add(a.l{k},b.l{k}) in let s{k}=wrapping_add(t,c) in let c=bit_or(p4_below(t,a.l{k}),p4_below(s{k},t)) in')
+        sub.append(f'let t=wrapping_sub(a.l{k},b.l{k}) in let d{k}=wrapping_sub(t,c) in let c=bit_or(p4_below(a.l{k},b.l{k}),p4_below(t,c)) in')
+    return (f'private fn p4_add_carry(a:{PF},b:{PF}) -> P4Carry\n  = ' + '\n    '.join(add) +
+            f'\n    P4Carry {{ value={PF} {{ l0=s0,l1=s1,l2=s2,l3=s3 }},carry=c }}\n'
+            f'private fn p4_sub_borrow(a:{PF},b:{PF}) -> P4Carry\n  = ' + '\n    '.join(sub) +
+            f'\n    P4Carry {{ value={PF} {{ l0=d0,l1=d1,l2=d2,l3=d3 }},carry=c }}')
+
+def p4_product(head, m, square):
+    """Montgomery product a*b/2^256 mod m by finely integrated product scanning.
+    Column i adds the products a_j*b_(i-j) and q_j*m_(i-j); for i < 4 the digit
+    q_i = c0*(-m^-1) mod 2^64 makes q_i*m_0 cancel the low word, which is
+    shifted out. For a < 2^256 and b < m the result is below 2m, and one
+    subtraction reduces it. The P-256 prime has -p^-1 = 1 mod 2^64 and
+    m_0 = 2^64-1, so q_i = c0 and q_i*m_0 adds exactly q_i to the next word;
+    its zero limb drops out. The square adds each cross product twice."""
+    ml = p4_limbs(m); inverse = (-pow(m, -1, W)) % W
+    prime = m == P
+    assert not prime or (inverse == 1 and ml[0] == W - 1)
+    lines = ['let s=P4Acc { c0=0,c1=0,c2=0 } in']
+    for i in range(7):
+        lo, hi = max(0, i - 3), min(i, 3)
+        for j in range(lo, hi + 1):
+            if not square: lines.append(f'let s=p4_mac(s,a.l{j},b.l{i - j}) in')
+            elif j < i - j: lines.append(f'let s=p4_mac2(s,a.l{j},a.l{i - j}) in')
+            elif j == i - j: lines.append(f'let s=p4_mac(s,a.l{j},a.l{j}) in')
+        for j in range(lo, min(i, 4)):
+            if ml[i - j]: lines.append(f'let s=p4_mac(s,q{j},{p4_signed(ml[i - j])}) in')
+        if i < 4 and prime: lines.append(f'let q{i}=s.c0 in let s=p4_fold(s,q{i}) in')
+        elif i < 4:
+            lines.append(f'let q{i}=wrapping_mul(s.c0,{p4_signed(inverse)}) in '
+                         f'let s=p4_fold(s,wrapping_add(mul_high(q{i},{p4_signed(ml[0])}),if s.c0==0 then 0 else 1)) in')
+        else: lines.append(f'let r{i - 4}=s.c0 in let s=p4_shift(s) in')
+    return head + '\n  = ' + '\n    '.join(lines) + f'\n    p4_final({PF} {{ l0=r0,l1=r1,l2=r2,l3=s.c0 }},s.c1,{p4_constant(m)})'
+
+def p4_products():
+    return '\n'.join([p4_product(f'private fn p4_field_mul(a:{PF},b:{PF}) -> {PF}', P, False),
+                      p4_product(f'private fn p4_field_square(a:{PF}) -> {PF}', P, True),
+                      p4_product(f'private fn p4_order_mul(a:{PF},b:{PF}) -> {PF}', N, False)])
+
+def p4_constants():
     out = []
     for name, m in (('field', P), ('order', N)):
-        inverse = (-pow(m, -1, 1 << BITS)) % (1 << BITS)
-        out.append(f'private fn p9_{name}() -> P256Mod\n  = P256Mod {{ modulus={p9_constant(m)},twice={p9_constant(2 * m)},\n'
-                   f'      r2={p9_constant(R * R % m)},\n      one={p9_constant(R % m)},inverse={inverse} }}')
+        inverse = (-pow(m, -1, W)) % W
+        out.append(f'private fn p4_{name}() -> P256Mod\n  = P256Mod {{ modulus={p4_constant(m)},r2={p4_constant(R * R % m)},\n'
+                   f'      one={p4_constant(R % m)},inverse={p4_signed(inverse)} }}')
     gx = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296
     gy = 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5
     b = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
-    out.append(f'private fn p9_curve_b() -> {PF} = {p9_constant(b * R % P)}')
-    # Odd multiples 1G, 3G, ..., 15G in affine Montgomery form for the
-    # verification window (public data; ordinary branches select them).
+    out.append(f'private fn p4_curve_b() -> {PF} = {p4_constant(b * R % P)}')
+    # Odd multiples 1G, 3G, ..., 63G for width-7 NAF verification, affine in
+    # Montgomery form: x then y, limbs little-endian (public data; ordinary
+    # branches select them).
     table = []
-    for k in range(1, 16, 2):
+    for k in range(1, 64, 2):
         x, y = affine_mul(k, (gx, gy))
-        table.append((x * R % P, y * R % P))
-    out.append(f'private fn p9_generator(index:i64) -> P9Affine\n  = ' + ' else\n    '.join(
-        f'if index=={i} then P9Affine {{ x={p9_constant(x)},\n      y={p9_constant(y)} }}' for i, (x, y) in enumerate(table[:-1]))
-        + f' else\n    P9Affine {{ x={p9_constant(table[-1][0])},\n      y={p9_constant(table[-1][1])} }}')
+        data = b''.join(w.to_bytes(8, 'little') for v in (x * R % P, y * R % P) for w in p4_limbs(v))
+        table.append(''.join(f'\\x{c:02x}' for c in data))
+    out.append('private fn p4_generator_bytes(index:i64) -> Arr u8 _\n  = ' + ' else\n    '.join(
+        f'if index=={i} then "{t}"' for i, t in enumerate(table[:-1])) + f' else\n    "{table[-1]}"')
     return '\n'.join(out)
 
 def affine_add(p, q):
@@ -284,14 +237,9 @@ def main():
                   ' in\n    '.join(f'let out=byte_write_le(out,{8 * k},{w[k]},8)' for k in range(4)) + ' in out')
     path.write_text(text)
     path = ROOT / 'stdlib/p256.neo'; text = path.read_text()
-    if '; generated: begin p9_mont' not in text: return
-    w = p9_words()
-    text = region(text, 'p9_mont', p9_mont() + '\n' + p9_field(False) + '\n' + p9_field(True))
-    text = region(text, 'p9_norm', p9_norm())
-    text = region(text, 'p9_unpack', p9_unpack())
-    text = region(text, 'p9_words', f'private fn p9_bytes(a:{PF}) -> Arr u8 _\n  = let out=arr(i in 0..32) u8(0) in\n    ' +
-                  ' in\n    '.join(f'let out=byte_write_le(out,{8 * (3 - k)},byte_swap64({w[k]}),8)' for k in range(4)) + ' in out')
-    text = region(text, 'p9_constants', p9_constants())
+    text = region(text, 'p4_carries', p4_carries())
+    text = region(text, 'p4_products', p4_products())
+    text = region(text, 'p4_constants', p4_constants())
     path.write_text(text)
     path = ROOT / 'stdlib/sha256.neo'; text = path.read_text()
     path.write_text(region(text, 'sha_compress', sha_compress()))
