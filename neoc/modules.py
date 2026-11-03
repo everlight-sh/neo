@@ -19,20 +19,28 @@ class SourceError(Exception):
         self.diagnostic = {'kind': 'source', 'file': str(path), 'pos': list(pos), 'msg': message}
 
 
-def _identity(path,entry):
+def _identity(path,entry,manifests=None):
+    """manifests, when given, records which manifest named the module and the
+    text it held, so a cached build can tell when either changes."""
     for parent in path.parents:
         manifest=legacy.existing(parent,legacy.MANIFESTS)
         if manifest.is_file():
             try:
-                package=tomllib.loads(manifest.read_text()).get('package',{})
+                text=manifest.read_text()
+                if manifests is not None:manifests[str(path)]=[str(manifest),hashlib.sha256(text.encode()).hexdigest()]
+                package=tomllib.loads(text).get('package',{})
                 key=(package.get('name',parent.name),package.get('version','0'),str(path.relative_to(parent)))
                 return hashlib.sha256(repr(key).encode()).hexdigest()[:16]
             except (ValueError,OSError):break
+    if manifests is not None:manifests.setdefault(str(path),['',''])
     return hashlib.sha256(os.path.relpath(path,entry.parent).encode()).hexdigest()[:16]
 
 
 def sources(entry, runtime=(), overlays=None):
     entry=Path(entry).resolve();texts={};lexed={};order=[];active=[];imports={}
+    # What resolution read besides source texts: each import as written and
+    # where it resolved, package imports, and the manifests naming modules.
+    edges=[];packaged=[];manifests={};prefixes={}
     overlays={str(Path(p).resolve()):text for p,text in (overlays or {}).items()}
     def visit(path,parent=None,pos=(1,1)):
         path=Path(path).resolve()
@@ -57,10 +65,12 @@ def sources(entry, runtime=(), overlays=None):
                 from .packages import resolve_import
                 try:target=resolve_import(name,path,entry)
                 except ValueError as exc:raise SourceError(str(exc),path,t.pos) from exc
+                packaged.append(str(path))
             else:target=path.parent/name
-            target=target.resolve();visit(target,path,t.pos);children.append((target,alias,t.pos))
+            resolved=target.resolve();edges.append([str(target),str(resolved)])
+            target=resolved;visit(target,path,t.pos);children.append((target,alias,t.pos))
         imports[path]=children;active.pop();texts[path]=text;lexed[path]=tokens;order.append(path)
-    for path in runtime:visit(path)
+    for path in runtime:edges.append([str(path),str(Path(path).resolve())]);visit(path)
     visit(entry)
     names=set()
     for tokens in lexed.values():
@@ -77,7 +87,8 @@ def sources(entry, runtime=(), overlays=None):
     local={};surface={};canonical={}
     for path,part in parts.items():
         trusted=path.is_relative_to(STDLIB) or path.is_relative_to(RUNTIME)
-        prefix='' if trusted else '__m'+_identity(path,entry)+'_'
+        prefix='' if trusted else '__m'+_identity(path,entry,manifests)+'_'
+        prefixes[str(path)]=prefix
         declared={}
         def add(name,actual,declaration):
             if name in declared:raise SourceError('duplicate declaration '+name,path,declaration.pos)
@@ -184,6 +195,8 @@ def sources(entry, runtime=(), overlays=None):
         program.types.extend(part.types);program.fns.extend(part.fns)
     program.sources={str(p):texts[p] for p in order}
     program.dependencies={str(p):[str(child) for child,_,_ in imports[p]] for p in order}
+    program.import_edges=edges;program.package_imports=packaged
+    program.module_manifests=manifests;program.module_prefixes=prefixes
     program.module_symbols={str(p):surface[p] for p in order}
     program.entry_scope=scopes[entry]
     return program
