@@ -4,7 +4,8 @@
 OpenSSL s_server is restricted to AES-128-GCM, to P-256 (a HelloRetryRequest
 naming P-256), to P-256 with a stateless cookie, and to a group the client does
 not offer (which must fail cleanly). Each case checks the negotiated suite and
-group the client reports. Live sites then use the system trust store; their
+group the client reports. OpenSSL then sends KeyUpdate (requesting one back)
+before its answer, with each suite. Live sites then use the system trust store; their
 results are printed, and with --require-live every one must answer.
 
   python3 tests/tls_web_language.py [--require-live]
@@ -12,6 +13,7 @@ results are printed, and with --require-live every one must answer.
 import importlib.util
 import os
 from pathlib import Path
+import select
 import shlex
 import socket
 import subprocess
@@ -52,6 +54,29 @@ def server(root, options):
     proc.kill(); raise RuntimeError('openssl s_server did not start: ' + proc.stderr.read().decode(errors='replace'))
 
 
+def key_update(binary, root, suite):
+    """OpenSSL s_server sends KeyUpdate (its K command, requesting one back), then two lines (the client reads twice)."""
+    port = free_port()
+    proc = subprocess.Popen(['openssl', 's_server', '-accept', str(port), '-cert', str(root / 'leaf.pem'), '-key', str(root / 'leaf.key'),
+                             '-tls1_3', '-ciphersuites', suite, '-naccept', '1'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        neo = subprocess.Popen(RUNNER + [str(binary), '127.0.0.1', str(port), str(root / 'ca.der')], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        seen, end = b'', time.time() + 6
+        while b'GET / ' not in seen and time.time() < end:  # s_server echoes the request it receives
+            if select.select([proc.stdout], [], [], 0.2)[0]:
+                seen += os.read(proc.stdout.fileno(), 65536)
+        try:
+            for command in (b'K\n', b'HTTP/1.0 200 after KeyUpdate\r\n', b'second line\r\n'):  # one stdin read and record each
+                proc.stdin.write(command); proc.stdin.flush(); time.sleep(0.3)
+        except BrokenPipeError:
+            pass  # the server ended the connection: the client reports why
+        out, err = neo.communicate(timeout=30)
+        return neo.returncode, out.strip().splitlines(), err.strip()
+    finally:
+        proc.kill(); proc.wait()
+
+
 def client(binary, host, port, trust):
     r = subprocess.run(RUNNER + [str(binary), host, str(port), trust], capture_output=True, text=True, timeout=30)
     return r.returncode, r.stdout.strip().splitlines(), r.stderr.strip()
@@ -88,6 +113,10 @@ def main():
             proc.terminate(); proc.wait()
         assert code == 0 and lines and lines[-1].startswith('rejected:'), ('unsupported group', code, lines, err)
         print(f'PASS unsupported group (X448 only) fails cleanly: {lines[-1]}', flush=True)
+        for suite, number in (('TLS_AES_128_GCM_SHA256', 4865), ('TLS_CHACHA20_POLY1305_SHA256', 4867)):
+            code, lines, err = key_update(binary, root, suite)
+            assert code == 0 and lines and lines[-1] == f'suite={number} group=29 HTTP/1.0 200 after KeyUpdate', (suite, code, lines, err)
+            print(f'PASS KeyUpdate with {suite}: {lines[-1]}', flush=True)
         failures = []
         for site in SITES:
             code, lines, err = client(binary, site, 443, 'system')

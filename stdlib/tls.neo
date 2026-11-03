@@ -567,11 +567,11 @@ private effect(net,time) fn tls_post_handshake(socket:Socket,ctx:ptr,bytes:Arr u
         if str_byte(message,0)==4 then tls_new_ticket(ctx,message) else
         if str_byte(message,0)!=24 || size!=5 || str_byte(message,4)>1 || remaining!=0 then tls_error(ctx,71,"unsupported TLS post-handshake message") else
           let read_secret=tls_bytes(ctx,160,32) in let next_read=hkdf_label(read_secret,"traffic upd","",32) in
-          let a=tls_store(ctx,160,next_read) in let b=tls_store(ctx,96,hkdf_label(next_read,"key","",32)) in let c=tls_store(ctx,144,hkdf_label(next_read,"iv","",12)) in let reset=store_i64(ctx,40,0) in
+          let a=tls_store(ctx,160,next_read) in let b=tls_store(ctx,96,hkdf_label(next_read,"key","",tls_key_size(ctx))) in let c=tls_store(ctx,144,hkdf_label(next_read,"iv","",12)) in let reset=store_i64(ctx,40,0) in
           if str_byte(message,4)==0 then bytes_ok("") else
             let response=tls_send_record(socket,ctx,22,"\x18\0\0\x01\0",deadline) in if !response.ok then tls_error(ctx,response.error.code,response.error.message) else
             let write_secret=tls_bytes(ctx,192,32) in let next_write=hkdf_label(write_secret,"traffic upd","",32) in
-            let a=tls_store(ctx,192,next_write) in let b=tls_store(ctx,64,hkdf_label(next_write,"key","",32)) in let c=tls_store(ctx,128,hkdf_label(next_write,"iv","",12)) in
+            let a=tls_store(ctx,192,next_write) in let b=tls_store(ctx,64,hkdf_label(next_write,"key","",tls_key_size(ctx))) in let c=tls_store(ctx,128,hkdf_label(next_write,"iv","",12)) in
             let reset=store_i64(ctx,48,0) in bytes_ok("")) yield result
 private effect(net,time) fn tls_read_step(socket:Socket,ctx:ptr,deadline:i64) -> BytesResult
   = let record=tls_receive(socket,ctx,true,deadline) in if !record.ok then bytes_error(record.error.code,record.error.message,0) else
