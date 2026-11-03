@@ -285,9 +285,14 @@ limited per key and updated by authenticated KeyUpdate. Records and handshake
 messages are bounded. Corrupt authentication releases no plaintext. Authenticated
 close-notify is distinct from transport truncation; use `tls_close` for graceful
 shutdown. Context cleanup clears active key storage and releases its mapping.
+TLS 1.3 sessions resume with PSK tickets (psk_dhe_ke only): `tls_take_ticket`
+returns the newest NewSessionTicket with its PSK, bound to the host name and
+suite, and `tls_connect_resume` offers it once, within its lifetime, with a
+binder; a server that declines it gets a full handshake. `tls_resumed` reports
+whether the certificate exchange was skipped.
 
 This is a deliberately limited, unaudited implementation: no TLS 1.2 fallback,
-client certificates, session resumption, 0-RTT, AIA fetching,
+client certificates, 0-RTT, AIA fetching,
 OCSP/CRL revocation or general PKIX path construction. Ordered RSA chains with
 SHA-256 signatures and exponent 65537 are supported at 2,048..4,096 bits. Unknown
 critical extensions fail closed. The implementation and its secret-dependent
@@ -456,7 +461,9 @@ arena references, and `HttpClient`, a keep-alive client for one origin:
 `http_send(arena,client,...)` returns the response and the client, whose
 connection lives in the caller's arena and is reopened after any response
 that does not leave it reusable. A GET, HEAD or OPTIONS request that finds a
-reused connection closed is sent once more; other methods return the error. `std:sse` incrementally frames SSE data/event/id/retry fields
+reused connection closed is sent once more; other methods return the error.
+`http_client_disconnect` closes the connection but keeps the newest TLS session
+ticket, so the next connection resumes; `http_client_close` forgets it. `std:sse` incrementally frames SSE data/event/id/retry fields
 across arbitrary chunks, supports BOM/CR/LF/CRLF, and bounds pending event data.
 Feed it decoded HTTP body chunks; EOF does not dispatch an unterminated event.
 The optional sibling `axon-libs/http-server` package adds an explicit chunked

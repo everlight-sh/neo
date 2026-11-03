@@ -23,9 +23,12 @@ fn http_tls_transport(socket:Ref<Socket>,session:Ref<TlsSession>) -> HttpIO<TLSH
 ; out to be closed before any response arrives, a GET, HEAD or OPTIONS request
 ; is sent once more on a new connection, as Go's net/http does; other methods
 ; return the error, since repeating them could repeat a side effect.
-; connections counts the opened ones.
+; connections counts the opened ones. Over TLS, the newest session ticket is kept
+; when a connection closes and offered once by the next one, which then resumes
+; without a certificate exchange; resumptions counts those. http_client_disconnect
+; closes the connection and keeps the ticket; http_client_close forgets it.
 type HttpClient = { host:Arr u8 _,address:Arr u8 _,port:i64,tls:bool,roots:Arr Certificate _,
-  socket:Option<Ref<Socket>>,session:Option<Ref<TlsSession>>,connections:i64 }
+  socket:Option<Ref<Socket>>,session:Option<Ref<TlsSession>>,connections:i64,ticket:TlsTicket,resumptions:i64 }
 type HttpExchange = { client:HttpClient,response:HttpResult }
 type SocketHTTPCapture = { socket:Ref<Socket> }
 private type HttpConnect = { client:HttpClient,ok:bool,error:Error }
@@ -42,18 +45,25 @@ fn http_socket_transport(socket:Ref<Socket>) -> HttpIO<SocketHTTPCapture>
 ; Plain HTTP to host:port, resolved when the client connects.
 fn http_client(host:Arr u8 n,port:i64) -> HttpClient
   = HttpClient { host=host,address="",port=port,tls=false,roots=arr(i in 0..0) x509_parse(""),
-      socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),connections=0 }
+      socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),connections=0,ticket=tls_no_ticket(),resumptions=0 }
 ; HTTPS to host:port, trusting roots.
 fn https_client(host:Arr u8 n,port:i64,roots:Arr Certificate m) -> HttpClient = http_client(host,port) with { tls=true,roots=roots }
 ; Connects to an IPv4 address instead of resolving the host, which still names
 ; the server in Host and to TLS.
 fn http_client_at(move client:HttpClient,address:Arr u8 n) -> HttpClient = client with { address=address }
 
-; Closes the client's connection, if any; the next request opens a new one.
+; Closes the client's connection, if any, and forgets its TLS session ticket; the
+; next request opens a new connection with a full handshake.
 effect(fs,net,process) fn http_client_close(move client:HttpClient) -> HttpClient
   = let ended=match client.session { None => noop(),Some(session) => ref_release(session) } in
     let closed=match client.socket { None => noop(),Some(socket) => ref_release(socket) } in
-    client with { socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>() }
+    client with { socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),ticket=tls_no_ticket() }
+; Closes the client's connection, if any, but keeps the newest TLS session ticket,
+; so that the next request's new connection resumes the session.
+effect(fs,net,process) fn http_client_disconnect(move client:HttpClient) -> HttpClient
+  = let kept=match client.session { None => client.ticket,Some(session) =>
+      let fresh=tls_take_ticket(borrow_ref(session)) in if len(fresh.identity)>0 then fresh else client.ticket } in
+    http_client_close(client) with { ticket=kept }
 
 private fn http_replayable(method:Arr u8 n) -> bool = str_equal(method,"GET") || str_equal(method,"HEAD") || str_equal(method,"OPTIONS")
 
@@ -64,12 +74,13 @@ private effect(fs,net,time,process) fn http_client_connect(arena:Arena,move clie
     using socket=tcp_connect_ipv4(address.value,client.port,deadline) in
     let connected=socket_status(socket) in let socket_ref=adopt(socket,arena) in
     let client=client with { socket=Some::<Ref<Socket>>(socket_ref),connections=client.connections+1 } in
-    if !connected.ok then HttpConnect { client=http_client_close(client),ok=false,error=connected.error } else
+    if !connected.ok then HttpConnect { client=http_client_disconnect(client),ok=false,error=connected.error } else
     if !client.tls then HttpConnect { client=client,ok=true,error=no_error() } else
-    using session=tls_connect(borrow_ref(socket_ref),client.host,client.roots,deadline) in
-    let secured=tls_status(session) in let session_ref=adopt(session,arena) in
-    let client=client with { session=Some::<Ref<TlsSession>>(session_ref) } in
-    if !secured.ok then HttpConnect { client=http_client_close(client),ok=false,error=secured.error } else HttpConnect { client=client,ok=true,error=no_error() }
+    ; The ticket is offered once, whether or not the server accepts it.
+    using session=tls_connect_resume(borrow_ref(socket_ref),client.host,client.roots,deadline,client.ticket) in
+    let secured=tls_status(session) in let resumed=secured.ok && tls_resumed(session) in let session_ref=adopt(session,arena) in
+    let client=client with { session=Some::<Ref<TlsSession>>(session_ref),ticket=tls_no_ticket(),resumptions=if resumed then client.resumptions+1 else client.resumptions } in
+    if !secured.ok then HttpConnect { client=http_client_disconnect(client),ok=false,error=secured.error } else HttpConnect { client=client,ok=true,error=no_error() }
 
 ; One request and its whole response over io. retry: the connection failed
 ; before any response, as a kept-alive connection the server has closed does.
@@ -94,7 +105,7 @@ private effect(fs,net,time,process) fn http_client_attempt(arena:Arena,move clie
   = let connected=if option_is_some(client.socket) then HttpConnect { client=client,ok=true,error=no_error() } else http_client_connect(arena,client,deadline) in
     if !connected.ok then HttpAttempt { client=connected.client,response=net_error(connected.error.code,connected.error.message),retry=false } else
     let outcome=http_client_exchange(connected.client,method,path,body,deadline,limit) in
-    HttpAttempt { client=if outcome.reusable then connected.client else http_client_close(connected.client),response=outcome.response,retry=outcome.retry }
+    HttpAttempt { client=if outcome.reusable then connected.client else http_client_disconnect(connected.client),response=outcome.response,retry=outcome.retry }
 
 ; One request over the client's connection, which it opens or replaces as
 ; needed. timeout covers the whole exchange, a retry included; limit bounds

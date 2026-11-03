@@ -1,0 +1,73 @@
+import "std:https_client"
+import "std:io"
+import "std:time"
+import "std:debug"
+
+; TLS 1.3 session resumption against a server on 127.0.0.1:
+;   tls_resume PORT CA.der tls PATH     a chain of std:tls connections, each offering a
+;                                       ticket from an earlier one (see chain)
+;   tls_resume PORT CA.der client PATH  HttpClient requests on a new connection each
+; Each tls connection prints whether it resumed, its suite and group, whether it got a
+; ticket, what the server reported (OpenSSL -www pages say New or Reused) and the
+; response's status line, or why the handshake failed.
+type Hop = { line:Arr u8 _, ticket:TlsTicket }
+
+fn status_line(response:Arr u8 n) -> Arr u8 _
+  = let end=str_find(response,"\r\n") in if end.present then str_slice(response,0,end.value) else response
+fn server_view(response:Arr u8 n) -> Arr u8 _
+  = if str_find(response,"Reused, TLSv1.3").present then "reused" else if str_find(response,"New, TLSv1.3").present then "new" else "-"
+fn flag(value:bool) -> Arr u8 _ = if value then "1" else "0"
+
+effect(fs,net,time,process) fn hop(port:i64, roots:Arr Certificate m, host:Arr u8 h, ticket:TlsTicket, path:Arr u8 k) -> Hop
+  = let deadline=deadline_after(5000) in using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let connected=socket_status(socket) in if !connected.ok then Hop { line="connect failed", ticket=tls_no_ticket() } else
+    using session=tls_connect_resume(socket,host,roots,deadline.value,ticket) in
+      let status=tls_status(session) in if !status.ok then Hop { line=concat("rejected: ",status.error.message), ticket=tls_no_ticket() } else
+      let request=concat("GET ",path," HTTP/1.0\r\nHost: localhost\r\n\r\n") in
+      let sent=tls_write(socket,session,request,deadline.value) in
+      let received=loop(chunk=tls_read(socket,session,deadline.value),out="") while chunk.ok && len(chunk.value)>0 && len(out)<65536
+        next(tls_read(socket,session,deadline.value),concat(out,chunk.value)) yield out in
+      let taken=tls_take_ticket(session) in
+      let line=concat("resumed=",flag(tls_resumed(session))," suite=",int_text(tls_suite(session))," group=",int_text(tls_group(session)),
+        " ticket=",flag(len(taken.identity)>0)," server=",server_view(received)," ",status_line(received)) in
+      let closed=tls_close(socket,session,deadline.value) in Hop { line=line, ticket=taken }
+
+; A ticket the server cannot decrypt, one past its lifetime, and one whose PSK is wrong.
+fn tampered(ticket:TlsTicket) -> TlsTicket
+  = let n=len(ticket.identity) in if n==0 then ticket else check n/2>=0 && n/2<n in
+    ticket with { identity=set(ticket.identity,n/2,u8(bit_xor(i64(ticket.identity[n/2]),1))) }
+fn expired(ticket:TlsTicket) -> TlsTicket = ticket with { lifetime=1, received=if ticket.received>=1000 then ticket.received-1000 else 0 }
+fn wrong_psk(ticket:TlsTicket) -> TlsTicket
+  = if len(ticket.psk)==0 then ticket else ticket with { psk=set(ticket.psk,0,u8(bit_xor(i64(ticket.psk[0]),1))) }
+
+effect(fs,net,time,process) fn chain(port:i64, roots:Arr Certificate m, path:Arr u8 k) -> Arr u8 _
+  = let a=hop(port,roots,"localhost",tls_no_ticket(),path) in
+    let b=hop(port,roots,"localhost",a.ticket,path) in
+    let c=hop(port,roots,"localhost",tampered(b.ticket),path) in
+    let d=hop(port,roots,"localhost",expired(c.ticket),path) in
+    let e=hop(port,roots,"127.0.0.1",d.ticket,path) in
+    let f=hop(port,roots,"LocalHost.",d.ticket,path) in
+    let g=hop(port,roots,"localhost",wrong_psk(f.ticket),path) in
+    concat("full ",a.line,"\nresumed ",b.line,"\ntampered ",c.line,"\nexpired ",d.line,"\nother-host ",e.line,"\nsame-host ",f.line,"\nwrong-psk ",g.line,"\n")
+
+type Steps = { client:HttpClient, out:Arr u8 _ }
+effect(fs,net,time,process) fn request(arena:Arena, move s:Steps, path:Arr u8 k) -> Steps
+  = let sent=http_send(arena,s.client,"GET",path,"",5000,1048576) in let client=http_client_disconnect(sent.client) in
+    Steps { client=client, out=concat(s.out,if sent.response.ok then int_text(sent.response.status) else concat("error:",int_text(sent.response.error.code)),
+      " connections=",int_text(client.connections)," resumptions=",int_text(client.resumptions),"\n") }
+; Four requests with http_client_disconnect between them, then two more after http_client_close.
+effect(fs,net,time,process) fn client_run(port:i64, roots:Arr Certificate m, path:Arr u8 k) -> Arr u8 _
+  = using arena=new_arena(8) in
+    let s=Steps { client=http_client_at(https_client("localhost",port,roots),"127.0.0.1"), out="" } in
+    let s=request(arena,s,path) in let s=request(arena,s,path) in let s=request(arena,s,path) in let s=request(arena,s,path) in
+    let s=s with { client=http_client_close(s.client) } in
+    let s=request(arena,s,path) in let s=request(arena,s,path) in
+    let closed=http_client_close(s.client) in s.out
+
+effect(fs,net,time,process,env) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let ca=cli_arg(2) in let mode=cli_arg(3) in let path=cli_arg(4) in
+    check port.ok && ca.present && mode.present && path.present in
+    let der=fs_read(ca.value) in check der.ok in let roots=arr(i in 0..1) x509_parse(der.value) in
+    let baseline=live_resources() in
+    let out=if str_equal(mode.value,"client") then client_run(port.value,roots,path.value) else chain(port.value,roots,path.value) in
+    let shown=print_out(out) in let live=live_resources() in check live==baseline in noop()
