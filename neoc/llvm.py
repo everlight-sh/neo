@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 from . import syntax as S
 from . import vectorize as VZ
+from . import strided
 from . import ranges as Ranges
 from .linear import Lin, cmp, and_, entails
 
@@ -2418,6 +2419,7 @@ class LLVMGen:
         for k, (s, t) in enumerate(zip(slots, e.state_tys)):
             if s.ty == ARR and s.own_ptr and set_only_state(e, k):
                 self.ensure_unique(s, t); s.always_unique = True
+        strided.prefix(self, e, slots, env2, par)
         cond, body, exit_ = fb.label("loop_cond"), fb.label("loop_body"), fb.label("loop_exit")
         fb.br(cond); fb.block(cond)
         c, _ = self.gen(e.cond, env2, par)
