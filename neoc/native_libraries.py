@@ -104,7 +104,7 @@ def merge(gen,folder,key,data,hit=True,started=None):
     globals_[symbol]=line
    elif not from_library and line.strip():ordinary.append(line)
  add(app_header,False);add([line for line in head if not line.startswith('module asm ')],True)
- forced={gen.fname(f,mode).removeprefix('@') for f in gen.fns if f.name in gen.literal_inlined|gen.small_pure_inlined for mode in (('seq',) if f.effect or f.exported else ('par','seq'))}
+ forced={gen.fname(f,mode).removeprefix('@') for f in gen.fns if f.name in gen.literal_inlined|gen.small_pure_inlined for mode in (('seq',) if f.effect or f.exported else ('par','seq'))}-set(gen.inline_cut)
  imported=[];needed={symbol for body in app_bodies for symbol in SYMBOL.findall(body) if symbol in defs and symbol not in app_names};visited=set()
  while needed:
   symbol=min(needed);needed.remove(symbol)

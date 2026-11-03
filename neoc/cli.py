@@ -14,6 +14,8 @@ from .elaborate import ElaborationError
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.join(os.path.dirname(HERE), "runtime")
 DIAGNOSTIC_FORMAT = 'json'
+# The most IR lines forced inlining may grow one function to (0: unbounded).
+INLINE_EXPANSION = 262144
 
 def target_triple() -> str:
     """The triple clang itself would stamp on a module for this host."""
@@ -80,9 +82,10 @@ def build(args, want_binary=True):
     started = time.monotonic()
     opt_level = str(getattr(args, 'opt_level', None) or os.environ.get('NEO_OPT_LEVEL', '3'))
     inline_budget = int(os.environ.get('NEO_INLINE_BUDGET', '160'))
-    if opt_level not in ('0','1','2','3') or not 0 <= inline_budget <= 10000:
-        raise ValueError('optimization level must be 0..3; NEO_INLINE_BUDGET must be 0..10000')
-    optimization = {'level':int(opt_level), 'inline_budget':inline_budget}
+    inline_expansion = int(os.environ.get('NEO_INLINE_EXPANSION', str(INLINE_EXPANSION)))
+    if opt_level not in ('0','1','2','3') or not 0 <= inline_budget <= 10000 or inline_expansion < 0:
+        raise ValueError('optimization level must be 0..3; NEO_INLINE_BUDGET must be 0..10000; NEO_INLINE_EXPANSION must be >= 0')
+    optimization = {'level':int(opt_level), 'inline_budget':inline_budget, 'inline_expansion':inline_expansion}
     library_cache = getattr(args,'library_cache',None)
     library_roots = [os.path.realpath(root) for root in [RUNTIME,os.path.join(os.path.dirname(HERE),'stdlib'),*getattr(args,'library_root',[])]] if library_cache else []
     optimization['library_roots'] = library_roots
@@ -94,7 +97,7 @@ def build(args, want_binary=True):
     h.update(repr([(k,os.environ.get(k,'')) for k in ('NEO_ASSUME','NEO_VEC','NEO_FOLD','NEO_INLINE','NEO_RANGE','NEO_SWITCH','NEO_UNIQUE','NEO_ALLOC_STATS','NEO_FRAME_POINTERS')]).encode())
     h.update(str(args.allow_unproven).encode())
     library_salt=h.copy()
-    library_salt.update(repr({'inline_budget':inline_budget,'library_roots':library_roots}).encode())
+    library_salt.update(repr({'inline_budget':inline_budget,'inline_expansion':inline_expansion,'library_roots':library_roots}).encode())
     h.update(repr(optimization).encode())
     fns, fn_hashes = load(args.file,target=target)
     parse_seconds = time.monotonic() - started
@@ -140,7 +143,8 @@ def build(args, want_binary=True):
                   vectorize=os.environ.get("NEO_VEC", "1") != "0",
                   ranges=os.environ.get("NEO_RANGE", "1") != "0",
                   literal_inline=os.environ.get("NEO_INLINE", "1") != "0", inline_budget=inline_budget,library_roots=library_roots,
-                  switches=os.environ.get("NEO_SWITCH", "1") != "0", unique_flags=os.environ.get("NEO_UNIQUE", "1") != "0")
+                  switches=os.environ.get("NEO_SWITCH", "1") != "0", unique_flags=os.environ.get("NEO_UNIQUE", "1") != "0",
+                  inline_expansion=inline_expansion)
     ir = gen.program()
     report['build_stages'] = {'parse_seconds':round(parse_seconds,4), 'check_seconds':round(check_seconds,4),
                              'optimize_seconds':round(optimize_seconds,4), 'lower_seconds':round(time.monotonic()-stage,4)}
@@ -158,6 +162,9 @@ def build(args, want_binary=True):
     report['inline_budget_misses'] = gen.inline_budget_misses
     report['forced_inline_functions'] = sorted(getattr(f,'display_name',f.name) for f in fns.fns if f.name in gen.forced_inline)
     if gen.inline_ignored: report['inline_ignored'] = gen.inline_ignored
+    # Policy-inlined callees that would have grown a function past
+    # NEO_INLINE_EXPANSION IR lines; they stay ordinary calls.
+    if gen.inline_cut: report['inline_expansion_cuts'] = gen.inline_cut
     report["backend"] = "llvm-ir"
     library_objects=[]
     if library_cache and not args.emit_llvm:

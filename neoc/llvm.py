@@ -449,7 +449,8 @@ class FuncBuilder:
         return "\n".join(out)
 
 class LLVMGen:
-    def __init__(self, fns: List[S.Fn], fn_hashes: Dict[str, str], triple: str, assume: bool = True, vectorize: bool = True, ranges: bool = True, literal_inline: bool = True, inline_budget: int = 160, library_roots=(), switches: bool = True, unique_flags: bool = True):
+    def __init__(self, fns: List[S.Fn], fn_hashes: Dict[str, str], triple: str, assume: bool = True, vectorize: bool = True, ranges: bool = True, literal_inline: bool = True, inline_budget: int = 160, library_roots=(), switches: bool = True, unique_flags: bool = True, inline_expansion: int = 0):
+        self.inline_expansion = inline_expansion; self.inline_cut = []
         self.fns = fns; self.fn_hashes = fn_hashes; self.triple = triple
         VZ.K = VZ.sum_lanes(triple)
         self.assume = assume; self.vectorize = vectorize
@@ -605,6 +606,7 @@ class LLVMGen:
         self.private_heap = 'ax_par_for_shared' in reachable and 'ax_par_for' not in reachable and not prebuilt
         omitted = {bodies[name] for name in self.omitted_functions}
         self.funcs = [body for body in self.funcs if body not in omitted]
+        if self.inline_expansion: self.bound_inline_expansion()
         # A BSS-only ELF segment must start on its own page for loaders that
         # do not map the partial first page when p_filesz is zero (Rosetta).
         # Other targets retain their existing layout.
@@ -710,6 +712,50 @@ class LLVMGen:
         head.append("")
         self.module_header = '\n'.join(head)
         return self.module_header + "\n\n".join(self.funcs) + "\n"
+
+    def bound_inline_expansion(self):
+        """Forced inlining is transitive: a small helper whose callees are
+        inlined carries all of their bodies into each of its callers, and
+        LLVM's optimizer and register allocator are superlinear in function
+        size. Bottom-up, no function may grow past `inline_expansion` IR lines
+        through forced inlining: its largest callees inlined only for being
+        small and pure become ordinary calls, left to LLVM's cost model, until
+        it fits. Constant-argument specializations and explicit `inline fn`
+        stay forced: their constants fold away code the line count includes.
+        So do callees that expand to under a sixteenth of the bound, whose
+        inlining is what hot loops gain from; a function they keep over the
+        bound is cut from its own callers instead. Programs whose expansions
+        fit are unchanged."""
+        header = re.compile(r'^define [^\n]*?@([^\s(]+)\([^\n]*', re.M)
+        call = re.compile(r'call [^@\n]*@([^\s(]+)\(')
+        optional = {self.fname(f, mode)[1:] for f in self.fns if f.name in self.small_pure_inlined
+                    and f.name not in self.literal_inlined | self.forced_inline
+                    and not f.external and f.name != 'ax_heap_small' for mode in ('par', 'seq')}
+        index, lines, calls, forced = {}, {}, {}, set()
+        for k, body in enumerate(self.funcs):
+            match = header.search(body)
+            if not match: continue
+            name = match[1]; index[name] = k; lines[name] = body.count('\n')
+            if ' alwaysinline' in match[0]: forced.add(name)
+            calls[name] = call.findall(body)
+        cut, sizes, active, least = set(), {}, set(), self.inline_expansion // 16
+        def expanded(name):
+            if name in sizes: return sizes[name]
+            if name in active: return lines[name]
+            active.add(name); parts = {}
+            for callee in calls[name]:
+                if callee in forced and callee not in cut and callee in lines: parts[callee] = parts.get(callee, 0) + expanded(callee)
+            total = lines[name] + sum(parts.values())
+            for callee, size in sorted(parts.items(), key=lambda part: (-part[1], part[0])):
+                if total <= self.inline_expansion: break
+                if callee in optional and callee not in cut and size >= least: cut.add(callee); total -= size
+            active.discard(name); sizes[name] = total
+            return total
+        for name in index: expanded(name)
+        for name in sorted(cut):
+            body = self.funcs[index[name]]; match = header.search(body)
+            self.funcs[index[name]] = body[:match.start()] + match[0].replace(') alwaysinline', ') ', 1) + body[match.end():]
+        self.inline_cut = sorted(cut)
 
     def fname(self, f: S.Fn, mode: str) -> str:
         if f.external or f.exported: return f"@{f.name}"
