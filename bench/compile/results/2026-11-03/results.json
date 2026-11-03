@@ -1,0 +1,5053 @@
+{
+ "method": "Compile-time benchmark: Neo against Rust, Go and Zig on equivalent programs.\n\nusage: run.py OUT.json ROUNDS\n\nEvery (program, implementation) pair is built three ways in each round:\n  cold         every build cache the toolchain keeps is emptied first (Neo's\n               .neo-build, Cargo's target directory, GOCACHE, Zig's local and\n               global caches); downloaded dependency sources stay.\n  noop         the same build again, nothing changed.\n  incremental  one comment line appended to the program's main source file.\nRounds visit the pairs in a shuffled order (fixed seed), so slow drift on the\nbox spreads over every implementation. Wall time, child CPU time and peak RSS\ncome from GNU time. A Neo cold build also records its --report stage split.\n\nRelease builds are the ones the runtime benchmarks use: Neo's default (-O3),\nCargo's release profile (opt-level 3, one codegen unit, fat LTO), Zig\nReleaseFast, Go's only mode. Development builds are rows of their own: Neo\n--dev, Cargo's dev profile, Zig Debug.\n\nEnvironment:\n  NEO_TREES   label=path,... Neo checkouts to compare (default after=$PWD's\n              checkout); each builds its own copy of the Neo programs.\n  NEO_DEV     labels of NEO_TREES that also get a --dev row (default: none).\n  DEBUG       1 (default) adds Rust dev-profile and Zig Debug rows.\n  SOURCES     the checkout holding bench/ sources for Rust, Go and Zig.\n  WORK        scratch directory (default /root/cc).\n  ONLY        comma-separated program names to run (default: all).\n  LARGE_ROUNDS  rounds that include the large program (default 1).\n",
+ "versions": {
+  "neo_trees": {
+   "before": null,
+   "after": null
+  },
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "python": "Python 3.12.3",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "go": "go version go1.25.14 linux/amd64",
+  "zig": "0.17.0",
+  "kernel": "6.8.0-146-generic",
+  "cpu": "AMD EPYC-Milan Processor",
+  "cpus": 2
+ },
+ "runs": [
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Go",
+   "cold": {
+    "wall": 4.755,
+    "cpu": 8.34,
+    "rss_kb": 247916
+   },
+   "noop": {
+    "wall": 0.0433,
+    "cpu": 0.06,
+    "rss_kb": 20224
+   },
+   "incremental": {
+    "wall": 0.1535,
+    "cpu": 0.2,
+    "rss_kb": 59776
+   },
+   "binary_bytes": 2298710
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 3.5571,
+    "cpu": 3.54,
+    "rss_kb": 106748,
+    "stages": {
+     "parse_seconds": 0.4481,
+     "check_seconds": 0.9408,
+     "prove_seconds": 0.6343,
+     "optimize_seconds": 0.0452,
+     "lower_seconds": 0.7191
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1715,
+     "compile_seconds": 1.1461,
+     "link_seconds": 0.0254,
+     "total_seconds": 3.3432
+    }
+   },
+   "noop": {
+    "wall": 0.6081,
+    "cpu": 0.6,
+    "rss_kb": 68736,
+    "stages": {
+     "parse_seconds": 0.4481,
+     "check_seconds": 0.9408,
+     "prove_seconds": 0.6343,
+     "optimize_seconds": 0.0452,
+     "lower_seconds": 0.7191
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4676
+    }
+   },
+   "incremental": {
+    "wall": 3.5839,
+    "cpu": 3.57,
+    "rss_kb": 107968,
+    "stages": {
+     "parse_seconds": 0.5029,
+     "check_seconds": 0.9068,
+     "prove_seconds": 0.6119,
+     "optimize_seconds": 0.0438,
+     "lower_seconds": 0.7254
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1595,
+     "compile_seconds": 1.1328,
+     "link_seconds": 0.0267,
+     "total_seconds": 3.3606
+    }
+   },
+   "binary_bytes": 101576
+  },
+  {
+   "round": 0,
+   "program": "large",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 153.0075,
+    "cpu": 152.94,
+    "rss_kb": 935572,
+    "stages": {
+     "parse_seconds": 0.6781,
+     "check_seconds": 0.9166,
+     "prove_seconds": 0.4642,
+     "optimize_seconds": 0.0725,
+     "lower_seconds": 3.3582
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 147.6156,
+     "compile_seconds": 147.5667,
+     "link_seconds": 0.0489,
+     "total_seconds": 152.721
+    }
+   },
+   "noop": {
+    "wall": 0.8893,
+    "cpu": 0.86,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.6781,
+     "check_seconds": 0.9166,
+     "prove_seconds": 0.4642,
+     "optimize_seconds": 0.0725,
+     "lower_seconds": 3.3582
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "6f1b76fcea8f12fe",
+     "total_seconds": 0.6929
+    }
+   },
+   "incremental": {
+    "wall": 151.6719,
+    "cpu": 151.54,
+    "rss_kb": 935468,
+    "stages": {
+     "parse_seconds": 0.655,
+     "check_seconds": 0.8639,
+     "prove_seconds": 0.4394,
+     "optimize_seconds": 0.0686,
+     "lower_seconds": 3.3112
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 146.425,
+     "compile_seconds": 146.3785,
+     "link_seconds": 0.0465,
+     "total_seconds": 151.4016
+    }
+   },
+   "binary_bytes": 5515056
+  },
+  {
+   "round": 0,
+   "program": "tls-fixture",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 28.447,
+    "cpu": 28.41,
+    "rss_kb": 304896,
+    "stages": {
+     "parse_seconds": 0.8577,
+     "check_seconds": 1.5203,
+     "prove_seconds": 0.9266,
+     "optimize_seconds": 0.1634,
+     "lower_seconds": 2.0422
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.5533,
+     "compile_seconds": 23.518,
+     "link_seconds": 0.0353,
+     "total_seconds": 28.1655
+    }
+   },
+   "noop": {
+    "wall": 1.0727,
+    "cpu": 1.05,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.8577,
+     "check_seconds": 1.5203,
+     "prove_seconds": 0.9266,
+     "optimize_seconds": 0.1634,
+     "lower_seconds": 2.0422
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8819
+    }
+   },
+   "incremental": {
+    "wall": 28.4494,
+    "cpu": 28.41,
+    "rss_kb": 305040,
+    "stages": {
+     "parse_seconds": 0.8775,
+     "check_seconds": 1.5685,
+     "prove_seconds": 0.951,
+     "optimize_seconds": 0.1547,
+     "lower_seconds": 2.0236
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.5259,
+     "compile_seconds": 23.4934,
+     "link_seconds": 0.0325,
+     "total_seconds": 28.1767
+    }
+   },
+   "binary_bytes": 1498840
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.1421,
+    "cpu": 5.98,
+    "rss_kb": 280612
+   },
+   "noop": {
+    "wall": 0.0424,
+    "cpu": 0.04,
+    "rss_kb": 36932
+   },
+   "incremental": {
+    "wall": 2.704,
+    "cpu": 2.69,
+    "rss_kb": 210584
+   },
+   "binary_bytes": 491952
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.6761,
+    "cpu": 0.66,
+    "rss_kb": 87040,
+    "stages": {
+     "parse_seconds": 0.156,
+     "check_seconds": 0.179,
+     "prove_seconds": 0.0916,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0502
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1428,
+     "compile_seconds": 0.1193,
+     "link_seconds": 0.0235,
+     "total_seconds": 0.559
+    }
+   },
+   "noop": {
+    "wall": 0.2668,
+    "cpu": 0.25,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.156,
+     "check_seconds": 0.179,
+     "prove_seconds": 0.0916,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0502
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1576
+    }
+   },
+   "incremental": {
+    "wall": 0.6824,
+    "cpu": 0.67,
+    "rss_kb": 86912,
+    "stages": {
+     "parse_seconds": 0.1547,
+     "check_seconds": 0.1892,
+     "prove_seconds": 0.0955,
+     "optimize_seconds": 0.0145,
+     "lower_seconds": 0.0535
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1381,
+     "compile_seconds": 0.1136,
+     "link_seconds": 0.0245,
+     "total_seconds": 0.5666
+    }
+   },
+   "binary_bytes": 10216
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.8138,
+    "cpu": 0.8,
+    "rss_kb": 89800,
+    "stages": {
+     "parse_seconds": 0.1658,
+     "check_seconds": 0.1832,
+     "prove_seconds": 0.1,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0663
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.2509,
+     "compile_seconds": 0.2266,
+     "link_seconds": 0.0243,
+     "total_seconds": 0.6959
+    }
+   },
+   "noop": {
+    "wall": 0.2707,
+    "cpu": 0.25,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1658,
+     "check_seconds": 0.1832,
+     "prove_seconds": 0.1,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0663
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1598
+    }
+   },
+   "incremental": {
+    "wall": 0.8295,
+    "cpu": 0.82,
+    "rss_kb": 89660,
+    "stages": {
+     "parse_seconds": 0.1574,
+     "check_seconds": 0.1852,
+     "prove_seconds": 0.1003,
+     "optimize_seconds": 0.0147,
+     "lower_seconds": 0.0639
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.2691,
+     "compile_seconds": 0.2435,
+     "link_seconds": 0.0256,
+     "total_seconds": 0.7067
+    }
+   },
+   "binary_bytes": 24184
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Go",
+   "cold": {
+    "wall": 11.871,
+    "cpu": 21.5,
+    "rss_kb": 250156
+   },
+   "noop": {
+    "wall": 0.0637,
+    "cpu": 0.1,
+    "rss_kb": 25800
+   },
+   "incremental": {
+    "wall": 0.3223,
+    "cpu": 0.43,
+    "rss_kb": 133760
+   },
+   "binary_bytes": 8452685
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.0792,
+    "cpu": 4.33,
+    "rss_kb": 252408
+   },
+   "noop": {
+    "wall": 0.5578,
+    "cpu": 0.81,
+    "rss_kb": 134588
+   },
+   "incremental": {
+    "wall": 0.5594,
+    "cpu": 0.81,
+    "rss_kb": 134420
+   },
+   "binary_bytes": 12584546
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 5.256,
+    "cpu": 5.24,
+    "rss_kb": 139900,
+    "stages": {
+     "parse_seconds": 0.4513,
+     "check_seconds": 0.9341,
+     "prove_seconds": 0.6295,
+     "optimize_seconds": 0.0486,
+     "lower_seconds": 0.7821
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8211,
+     "compile_seconds": 2.7962,
+     "link_seconds": 0.0249,
+     "total_seconds": 5.0551
+    }
+   },
+   "noop": {
+    "wall": 0.5951,
+    "cpu": 0.59,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.4513,
+     "check_seconds": 0.9341,
+     "prove_seconds": 0.6295,
+     "optimize_seconds": 0.0486,
+     "lower_seconds": 0.7821
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4555
+    }
+   },
+   "incremental": {
+    "wall": 5.2717,
+    "cpu": 5.26,
+    "rss_kb": 140028,
+    "stages": {
+     "parse_seconds": 0.4478,
+     "check_seconds": 0.9167,
+     "prove_seconds": 0.6193,
+     "optimize_seconds": 0.0475,
+     "lower_seconds": 0.7726
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8616,
+     "compile_seconds": 2.8371,
+     "link_seconds": 0.0245,
+     "total_seconds": 5.0639
+    }
+   },
+   "binary_bytes": 112664
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Zig",
+   "cold": {
+    "wall": 40.5445,
+    "cpu": 40.53,
+    "rss_kb": 900860
+   },
+   "noop": {
+    "wall": 36.6406,
+    "cpu": 36.61,
+    "rss_kb": 895160
+   },
+   "incremental": {
+    "wall": 37.0891,
+    "cpu": 36.9,
+    "rss_kb": 895252
+   },
+   "binary_bytes": 9087744
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.2264,
+    "cpu": 4.43,
+    "rss_kb": 252504
+   },
+   "noop": {
+    "wall": 0.7595,
+    "cpu": 0.89,
+    "rss_kb": 139788
+   },
+   "incremental": {
+    "wall": 0.8185,
+    "cpu": 0.89,
+    "rss_kb": 140000
+   },
+   "binary_bytes": 17501837
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 0.15,
+    "cpu": 0.14,
+    "rss_kb": 98812
+   },
+   "noop": {
+    "wall": 0.0418,
+    "cpu": 0.03,
+    "rss_kb": 36780
+   },
+   "incremental": {
+    "wall": 0.1085,
+    "cpu": 0.09,
+    "rss_kb": 73568
+   },
+   "binary_bytes": 4545688
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.6981,
+    "cpu": 0.68,
+    "rss_kb": 88320,
+    "stages": {
+     "parse_seconds": 0.1516,
+     "check_seconds": 0.1804,
+     "prove_seconds": 0.0931,
+     "optimize_seconds": 0.0133,
+     "lower_seconds": 0.057
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1583,
+     "compile_seconds": 0.1353,
+     "link_seconds": 0.023,
+     "total_seconds": 0.5765
+    }
+   },
+   "noop": {
+    "wall": 0.2928,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1516,
+     "check_seconds": 0.1804,
+     "prove_seconds": 0.0931,
+     "optimize_seconds": 0.0133,
+     "lower_seconds": 0.057
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1662
+    }
+   },
+   "incremental": {
+    "wall": 0.7488,
+    "cpu": 0.7,
+    "rss_kb": 88192,
+    "stages": {
+     "parse_seconds": 0.1607,
+     "check_seconds": 0.1969,
+     "prove_seconds": 0.0987,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.0596
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1702,
+     "compile_seconds": 0.1453,
+     "link_seconds": 0.0249,
+     "total_seconds": 0.6204
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.2219,
+    "cpu": 1.06,
+    "rss_kb": 87296,
+    "stages": {
+     "parse_seconds": 0.2412,
+     "check_seconds": 0.5557,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.1185
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1611,
+     "total_seconds": 1.1064
+    }
+   },
+   "noop": {
+    "wall": 0.4409,
+    "cpu": 0.27,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.2412,
+     "check_seconds": 0.5557,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.1185
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.2313
+    }
+   },
+   "incremental": {
+    "wall": 1.2242,
+    "cpu": 1.07,
+    "rss_kb": 87424,
+    "stages": {
+     "parse_seconds": 0.1648,
+     "check_seconds": 0.5804,
+     "optimize_seconds": 0.0159,
+     "lower_seconds": 0.1242
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1905,
+     "total_seconds": 1.0923
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Go",
+   "cold": {
+    "wall": 17.9544,
+    "cpu": 21.69,
+    "rss_kb": 247596
+   },
+   "noop": {
+    "wall": 0.1198,
+    "cpu": 0.11,
+    "rss_kb": 27264
+   },
+   "incremental": {
+    "wall": 0.4274,
+    "cpu": 0.42,
+    "rss_kb": 132096
+   },
+   "binary_bytes": 8139234
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.8705,
+    "cpu": 0.86,
+    "rss_kb": 90820,
+    "stages": {
+     "parse_seconds": 0.155,
+     "check_seconds": 0.1859,
+     "prove_seconds": 0.1008,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0705
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3143,
+     "compile_seconds": 0.2895,
+     "link_seconds": 0.0248,
+     "total_seconds": 0.756
+    }
+   },
+   "noop": {
+    "wall": 0.2728,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.155,
+     "check_seconds": 0.1859,
+     "prove_seconds": 0.1008,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0705
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1623
+    }
+   },
+   "incremental": {
+    "wall": 0.8942,
+    "cpu": 0.88,
+    "rss_kb": 90564,
+    "stages": {
+     "parse_seconds": 0.1604,
+     "check_seconds": 0.1919,
+     "prove_seconds": 0.1051,
+     "optimize_seconds": 0.0143,
+     "lower_seconds": 0.0715
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3203,
+     "compile_seconds": 0.2945,
+     "link_seconds": 0.0258,
+     "total_seconds": 0.7744
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 16.7872,
+    "cpu": 16.53,
+    "rss_kb": 240336,
+    "stages": {
+     "parse_seconds": 1.0536,
+     "check_seconds": 1.7068,
+     "prove_seconds": 1.0731,
+     "optimize_seconds": 0.1776,
+     "lower_seconds": 2.2496
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 11.2508,
+     "compile_seconds": 11.2175,
+     "link_seconds": 0.0333,
+     "total_seconds": 16.4724
+    }
+   },
+   "noop": {
+    "wall": 1.2556,
+    "cpu": 1.22,
+    "rss_kb": 70128,
+    "stages": {
+     "parse_seconds": 1.0536,
+     "check_seconds": 1.7068,
+     "prove_seconds": 1.0731,
+     "optimize_seconds": 0.1776,
+     "lower_seconds": 2.2496
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.07
+    }
+   },
+   "incremental": {
+    "wall": 16.7173,
+    "cpu": 16.34,
+    "rss_kb": 240396,
+    "stages": {
+     "parse_seconds": 1.0792,
+     "check_seconds": 1.6331,
+     "prove_seconds": 1.031,
+     "optimize_seconds": 0.1672,
+     "lower_seconds": 2.3844
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 11.0701,
+     "compile_seconds": 11.0351,
+     "link_seconds": 0.035,
+     "total_seconds": 16.3675
+    }
+   },
+   "binary_bytes": 1124704
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.9442,
+    "cpu": 3.19,
+    "rss_kb": 263416
+   },
+   "noop": {
+    "wall": 0.0472,
+    "cpu": 0.03,
+    "rss_kb": 36804
+   },
+   "incremental": {
+    "wall": 0.1705,
+    "cpu": 0.16,
+    "rss_kb": 100740
+   },
+   "binary_bytes": 8515288
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Go",
+   "cold": {
+    "wall": 8.0017,
+    "cpu": 9.17,
+    "rss_kb": 253596
+   },
+   "noop": {
+    "wall": 0.0749,
+    "cpu": 0.06,
+    "rss_kb": 20476
+   },
+   "incremental": {
+    "wall": 0.2005,
+    "cpu": 0.19,
+    "rss_kb": 65024
+   },
+   "binary_bytes": 2774090
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.9228,
+    "cpu": 18.59,
+    "rss_kb": 383752
+   },
+   "noop": {
+    "wall": 14.4407,
+    "cpu": 14.42,
+    "rss_kb": 376600
+   },
+   "incremental": {
+    "wall": 14.548,
+    "cpu": 14.54,
+    "rss_kb": 375728
+   },
+   "binary_bytes": 4605256
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Zig",
+   "cold": {
+    "wall": 16.7818,
+    "cpu": 16.78,
+    "rss_kb": 365168
+   },
+   "noop": {
+    "wall": 13.2537,
+    "cpu": 13.26,
+    "rss_kb": 357716
+   },
+   "incremental": {
+    "wall": 13.186,
+    "cpu": 13.19,
+    "rss_kb": 357516
+   },
+   "binary_bytes": 4268824
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1208,
+    "cpu": 4.39,
+    "rss_kb": 252604
+   },
+   "noop": {
+    "wall": 0.6176,
+    "cpu": 0.88,
+    "rss_kb": 139428
+   },
+   "incremental": {
+    "wall": 0.6051,
+    "cpu": 0.88,
+    "rss_kb": 139664
+   },
+   "binary_bytes": 17461922
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.147,
+    "cpu": 5.81,
+    "rss_kb": 294412
+   },
+   "noop": {
+    "wall": 0.0412,
+    "cpu": 0.03,
+    "rss_kb": 36928
+   },
+   "incremental": {
+    "wall": 2.8499,
+    "cpu": 2.84,
+    "rss_kb": 205568
+   },
+   "binary_bytes": 546424
+  },
+  {
+   "round": 0,
+   "program": "large",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 47.8094,
+    "cpu": 47.77,
+    "rss_kb": 826708,
+    "stages": {
+     "parse_seconds": 0.6478,
+     "check_seconds": 0.8612,
+     "prove_seconds": 0.4362,
+     "optimize_seconds": 0.0663,
+     "lower_seconds": 3.2178
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 42.6391,
+     "compile_seconds": 42.5935,
+     "link_seconds": 0.0456,
+     "total_seconds": 47.5141
+    }
+   },
+   "noop": {
+    "wall": 0.9255,
+    "cpu": 0.91,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.6478,
+     "check_seconds": 0.8612,
+     "prove_seconds": 0.4362,
+     "optimize_seconds": 0.0663,
+     "lower_seconds": 3.2178
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "6f1b76fcea8f12fe",
+     "total_seconds": 0.7321
+    }
+   },
+   "incremental": {
+    "wall": 48.3209,
+    "cpu": 48.26,
+    "rss_kb": 826552,
+    "stages": {
+     "parse_seconds": 0.7078,
+     "check_seconds": 0.9458,
+     "prove_seconds": 0.4694,
+     "optimize_seconds": 0.0773,
+     "lower_seconds": 3.2586
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 42.9647,
+     "compile_seconds": 42.9247,
+     "link_seconds": 0.04,
+     "total_seconds": 48.0282
+    }
+   },
+   "binary_bytes": 3211032
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Rust",
+   "cold": {
+    "wall": 37.5496,
+    "cpu": 57.54,
+    "rss_kb": 502008
+   },
+   "noop": {
+    "wall": 0.0764,
+    "cpu": 0.06,
+    "rss_kb": 46144
+   },
+   "incremental": {
+    "wall": 11.4996,
+    "cpu": 11.5,
+    "rss_kb": 377608
+   },
+   "binary_bytes": 3351088
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.2075,
+    "cpu": 3.25,
+    "rss_kb": 275156
+   },
+   "noop": {
+    "wall": 0.0414,
+    "cpu": 0.03,
+    "rss_kb": 37060
+   },
+   "incremental": {
+    "wall": 0.1534,
+    "cpu": 0.16,
+    "rss_kb": 98184
+   },
+   "binary_bytes": 7100800
+  },
+  {
+   "round": 0,
+   "program": "tls-fixture",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 11.4686,
+    "cpu": 11.44,
+    "rss_kb": 166356,
+    "stages": {
+     "parse_seconds": 0.8749,
+     "check_seconds": 1.5705,
+     "prove_seconds": 0.945,
+     "optimize_seconds": 0.1551,
+     "lower_seconds": 1.941
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.6162,
+     "compile_seconds": 6.5855,
+     "link_seconds": 0.0306,
+     "total_seconds": 11.1843
+    }
+   },
+   "noop": {
+    "wall": 1.0586,
+    "cpu": 1.04,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.8749,
+     "check_seconds": 1.5705,
+     "prove_seconds": 0.945,
+     "optimize_seconds": 0.1551,
+     "lower_seconds": 1.941
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8739
+    }
+   },
+   "incremental": {
+    "wall": 11.7321,
+    "cpu": 11.69,
+    "rss_kb": 166352,
+    "stages": {
+     "parse_seconds": 0.9113,
+     "check_seconds": 1.5871,
+     "prove_seconds": 0.9611,
+     "optimize_seconds": 0.1557,
+     "lower_seconds": 2.0059
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.7365,
+     "compile_seconds": 6.7054,
+     "link_seconds": 0.0311,
+     "total_seconds": 11.4227
+    }
+   },
+   "binary_bytes": 719440
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Zig",
+   "cold": {
+    "wall": 16.1856,
+    "cpu": 16.17,
+    "rss_kb": 354408
+   },
+   "noop": {
+    "wall": 12.5881,
+    "cpu": 12.58,
+    "rss_kb": 345896
+   },
+   "incremental": {
+    "wall": 12.5097,
+    "cpu": 12.51,
+    "rss_kb": 345956
+   },
+   "binary_bytes": 4116048
+  },
+  {
+   "round": 0,
+   "program": "nbody",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.252,
+    "cpu": 1.24,
+    "rss_kb": 89644,
+    "stages": {
+     "parse_seconds": 0.1577,
+     "check_seconds": 0.4896,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.145
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3124,
+     "total_seconds": 1.1374
+    }
+   },
+   "noop": {
+    "wall": 0.2779,
+    "cpu": 0.27,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1577,
+     "check_seconds": 0.4896,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.145
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1661
+    }
+   },
+   "incremental": {
+    "wall": 1.3496,
+    "cpu": 1.34,
+    "rss_kb": 89644,
+    "stages": {
+     "parse_seconds": 0.1674,
+     "check_seconds": 0.5778,
+     "optimize_seconds": 0.0141,
+     "lower_seconds": 0.1398
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3147,
+     "total_seconds": 1.2307
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.6484,
+    "cpu": 18.64,
+    "rss_kb": 384440
+   },
+   "noop": {
+    "wall": 14.9264,
+    "cpu": 14.92,
+    "rss_kb": 376656
+   },
+   "incremental": {
+    "wall": 14.9288,
+    "cpu": 14.92,
+    "rss_kb": 376656
+   },
+   "binary_bytes": 4578784
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Rust",
+   "cold": {
+    "wall": 14.4068,
+    "cpu": 22.38,
+    "rss_kb": 398304
+   },
+   "noop": {
+    "wall": 0.0525,
+    "cpu": 0.05,
+    "rss_kb": 38348
+   },
+   "incremental": {
+    "wall": 6.0572,
+    "cpu": 6.06,
+    "rss_kb": 271216
+   },
+   "binary_bytes": 1039952
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1142,
+    "cpu": 4.34,
+    "rss_kb": 252372
+   },
+   "noop": {
+    "wall": 0.5382,
+    "cpu": 0.77,
+    "rss_kb": 131544
+   },
+   "incremental": {
+    "wall": 0.5363,
+    "cpu": 0.76,
+    "rss_kb": 131552
+   },
+   "binary_bytes": 12348792
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 52.4902,
+    "cpu": 52.43,
+    "rss_kb": 487816,
+    "stages": {
+     "parse_seconds": 1.0514,
+     "check_seconds": 2.8032,
+     "optimize_seconds": 0.4276,
+     "lower_seconds": 4.2901
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 43.6214,
+     "total_seconds": 52.227
+    }
+   },
+   "noop": {
+    "wall": 1.2435,
+    "cpu": 1.22,
+    "rss_kb": 70116,
+    "stages": {
+     "parse_seconds": 1.0514,
+     "check_seconds": 2.8032,
+     "optimize_seconds": 0.4276,
+     "lower_seconds": 4.2901
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0655
+    }
+   },
+   "incremental": {
+    "wall": 52.6608,
+    "cpu": 52.61,
+    "rss_kb": 488272,
+    "stages": {
+     "parse_seconds": 1.0596,
+     "check_seconds": 2.704,
+     "optimize_seconds": 0.4231,
+     "lower_seconds": 4.2595
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 43.9025,
+     "total_seconds": 52.3852
+    }
+   },
+   "binary_bytes": 2199888
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 18.5069,
+    "cpu": 34.94,
+    "rss_kb": 390788
+   },
+   "noop": {
+    "wall": 0.0847,
+    "cpu": 0.07,
+    "rss_kb": 46276
+   },
+   "incremental": {
+    "wall": 0.3959,
+    "cpu": 0.51,
+    "rss_kb": 268912
+   },
+   "binary_bytes": 51527288
+  },
+  {
+   "round": 0,
+   "program": "json",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 6.5827,
+    "cpu": 6.56,
+    "rss_kb": 138872,
+    "stages": {
+     "parse_seconds": 0.4839,
+     "check_seconds": 1.7791,
+     "optimize_seconds": 0.0472,
+     "lower_seconds": 1.2118
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8457,
+     "total_seconds": 6.3871
+    }
+   },
+   "noop": {
+    "wall": 0.5968,
+    "cpu": 0.59,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.4839,
+     "check_seconds": 1.7791,
+     "optimize_seconds": 0.0472,
+     "lower_seconds": 1.2118
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4575
+    }
+   },
+   "incremental": {
+    "wall": 6.6142,
+    "cpu": 6.59,
+    "rss_kb": 138780,
+    "stages": {
+     "parse_seconds": 0.5026,
+     "check_seconds": 1.7983,
+     "optimize_seconds": 0.0542,
+     "lower_seconds": 1.2177
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8244,
+     "total_seconds": 6.4183
+    }
+   },
+   "binary_bytes": 112664
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 37.0408,
+    "cpu": 37.0,
+    "rss_kb": 351380,
+    "stages": {
+     "parse_seconds": 1.0887,
+     "check_seconds": 1.6527,
+     "prove_seconds": 1.0523,
+     "optimize_seconds": 0.1646,
+     "lower_seconds": 2.2896
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.4747,
+     "compile_seconds": 31.4393,
+     "link_seconds": 0.0354,
+     "total_seconds": 36.7042
+    }
+   },
+   "noop": {
+    "wall": 1.224,
+    "cpu": 1.21,
+    "rss_kb": 70124,
+    "stages": {
+     "parse_seconds": 1.0887,
+     "check_seconds": 1.6527,
+     "prove_seconds": 1.0523,
+     "optimize_seconds": 0.1646,
+     "lower_seconds": 2.2896
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.048
+    }
+   },
+   "incremental": {
+    "wall": 36.9185,
+    "cpu": 36.89,
+    "rss_kb": 351240,
+    "stages": {
+     "parse_seconds": 1.0235,
+     "check_seconds": 1.5894,
+     "prove_seconds": 0.9989,
+     "optimize_seconds": 0.1667,
+     "lower_seconds": 2.2811
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.5017,
+     "compile_seconds": 31.4666,
+     "link_seconds": 0.0352,
+     "total_seconds": 36.5972
+    }
+   },
+   "binary_bytes": 1965312
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Rust",
+   "cold": {
+    "wall": 1.9945,
+    "cpu": 1.98,
+    "rss_kb": 187000
+   },
+   "noop": {
+    "wall": 0.0443,
+    "cpu": 0.03,
+    "rss_kb": 37064
+   },
+   "incremental": {
+    "wall": 1.893,
+    "cpu": 1.88,
+    "rss_kb": 190592
+   },
+   "binary_bytes": 361712
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 2.1978,
+    "cpu": 2.18,
+    "rss_kb": 112576,
+    "stages": {
+     "parse_seconds": 0.1695,
+     "check_seconds": 0.5855,
+     "optimize_seconds": 0.0259,
+     "lower_seconds": 0.2146
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0622,
+     "total_seconds": 2.0794
+    }
+   },
+   "noop": {
+    "wall": 0.2736,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1695,
+     "check_seconds": 0.5855,
+     "optimize_seconds": 0.0259,
+     "lower_seconds": 0.2146
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1691
+    }
+   },
+   "incremental": {
+    "wall": 2.1893,
+    "cpu": 2.17,
+    "rss_kb": 112896,
+    "stages": {
+     "parse_seconds": 0.1688,
+     "check_seconds": 0.5885,
+     "optimize_seconds": 0.0259,
+     "lower_seconds": 0.2177
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0566,
+     "total_seconds": 2.075
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 0,
+   "program": "tls-fixture",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 44.6681,
+    "cpu": 44.62,
+    "rss_kb": 431272,
+    "stages": {
+     "parse_seconds": 0.8675,
+     "check_seconds": 2.6529,
+     "optimize_seconds": 0.3909,
+     "lower_seconds": 3.7483
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.7479,
+     "total_seconds": 44.4352
+    }
+   },
+   "noop": {
+    "wall": 1.0862,
+    "cpu": 1.07,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.8675,
+     "check_seconds": 2.6529,
+     "optimize_seconds": 0.3909,
+     "lower_seconds": 3.7483
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8979
+    }
+   },
+   "incremental": {
+    "wall": 44.791,
+    "cpu": 44.74,
+    "rss_kb": 434600,
+    "stages": {
+     "parse_seconds": 0.8826,
+     "check_seconds": 2.6055,
+     "optimize_seconds": 0.3936,
+     "lower_seconds": 3.7481
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.8972,
+     "total_seconds": 44.5546
+    }
+   },
+   "binary_bytes": 1729328
+  },
+  {
+   "round": 0,
+   "program": "https-client",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 5.3268,
+    "cpu": 5.83,
+    "rss_kb": 276176
+   },
+   "noop": {
+    "wall": 1.8471,
+    "cpu": 2.34,
+    "rss_kb": 186724
+   },
+   "incremental": {
+    "wall": 1.862,
+    "cpu": 2.34,
+    "rss_kb": 187104
+   },
+   "binary_bytes": 32950797
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 8.5392,
+    "cpu": 15.85,
+    "rss_kb": 361300
+   },
+   "noop": {
+    "wall": 0.0511,
+    "cpu": 0.04,
+    "rss_kb": 38260
+   },
+   "incremental": {
+    "wall": 0.2813,
+    "cpu": 0.33,
+    "rss_kb": 138688
+   },
+   "binary_bytes": 20197112
+  },
+  {
+   "round": 0,
+   "program": "large",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 640.4425,
+    "cpu": 640.08,
+    "rss_kb": 2124208,
+    "stages": {
+     "parse_seconds": 0.6669,
+     "check_seconds": 1.6493,
+     "optimize_seconds": 0.0776,
+     "lower_seconds": 5.2614
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 632.4614,
+     "total_seconds": 640.2043
+    }
+   },
+   "noop": {
+    "wall": 0.8712,
+    "cpu": 0.86,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.6669,
+     "check_seconds": 1.6493,
+     "optimize_seconds": 0.0776,
+     "lower_seconds": 5.2614
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "6f1b76fcea8f12fe",
+     "total_seconds": 0.6782
+    }
+   },
+   "incremental": {
+    "wall": 637.4951,
+    "cpu": 637.26,
+    "rss_kb": 2124152,
+    "stages": {
+     "parse_seconds": 0.6627,
+     "check_seconds": 1.5986,
+     "optimize_seconds": 0.0739,
+     "lower_seconds": 5.2423
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "6f1b76fcea8f12fe",
+     "llvm_seconds": 629.6056,
+     "total_seconds": 637.267
+    }
+   },
+   "binary_bytes": 8299696
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 1.4127,
+    "cpu": 1.39,
+    "rss_kb": 102036,
+    "stages": {
+     "parse_seconds": 0.1772,
+     "check_seconds": 0.221,
+     "prove_seconds": 0.1232,
+     "optimize_seconds": 0.0192,
+     "lower_seconds": 0.1119
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7348,
+     "compile_seconds": 0.7101,
+     "link_seconds": 0.0247,
+     "total_seconds": 1.2816
+    }
+   },
+   "noop": {
+    "wall": 0.2862,
+    "cpu": 0.28,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1772,
+     "check_seconds": 0.221,
+     "prove_seconds": 0.1232,
+     "optimize_seconds": 0.0192,
+     "lower_seconds": 0.1119
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1705
+    }
+   },
+   "incremental": {
+    "wall": 1.3949,
+    "cpu": 1.38,
+    "rss_kb": 101928,
+    "stages": {
+     "parse_seconds": 0.1665,
+     "check_seconds": 0.2179,
+     "prove_seconds": 0.1224,
+     "optimize_seconds": 0.0203,
+     "lower_seconds": 0.1044
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7376,
+     "compile_seconds": 0.7128,
+     "link_seconds": 0.0249,
+     "total_seconds": 1.2633
+    }
+   },
+   "binary_bytes": 66912
+  },
+  {
+   "round": 0,
+   "program": "http",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 1.7092,
+    "cpu": 1.7,
+    "rss_kb": 114040,
+    "stages": {
+     "parse_seconds": 0.1708,
+     "check_seconds": 0.2269,
+     "prove_seconds": 0.1284,
+     "optimize_seconds": 0.0184,
+     "lower_seconds": 0.1138
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.043,
+     "compile_seconds": 1.0187,
+     "link_seconds": 0.0243,
+     "total_seconds": 1.5892
+    }
+   },
+   "noop": {
+    "wall": 0.2735,
+    "cpu": 0.26,
+    "rss_kb": 68736,
+    "stages": {
+     "parse_seconds": 0.1708,
+     "check_seconds": 0.2269,
+     "prove_seconds": 0.1284,
+     "optimize_seconds": 0.0184,
+     "lower_seconds": 0.1138
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1676
+    }
+   },
+   "incremental": {
+    "wall": 1.71,
+    "cpu": 1.7,
+    "rss_kb": 115204,
+    "stages": {
+     "parse_seconds": 0.1668,
+     "check_seconds": 0.212,
+     "prove_seconds": 0.1187,
+     "optimize_seconds": 0.0186,
+     "lower_seconds": 0.1144
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0634,
+     "compile_seconds": 1.0389,
+     "link_seconds": 0.0245,
+     "total_seconds": 1.5915
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 0,
+   "program": "hello",
+   "impl": "Go",
+   "cold": {
+    "wall": 4.2297,
+    "cpu": 6.74,
+    "rss_kb": 246008
+   },
+   "noop": {
+    "wall": 0.042,
+    "cpu": 0.05,
+    "rss_kb": 19328
+   },
+   "incremental": {
+    "wall": 0.15,
+    "cpu": 0.18,
+    "rss_kb": 51968
+   },
+   "binary_bytes": 1931832
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 37.5006,
+    "cpu": 37.45,
+    "rss_kb": 351456,
+    "stages": {
+     "parse_seconds": 1.0482,
+     "check_seconds": 1.6395,
+     "prove_seconds": 1.0442,
+     "optimize_seconds": 0.1726,
+     "lower_seconds": 2.2767
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.9735,
+     "compile_seconds": 31.9354,
+     "link_seconds": 0.0381,
+     "total_seconds": 37.1464
+    }
+   },
+   "noop": {
+    "wall": 1.2529,
+    "cpu": 1.23,
+    "rss_kb": 70148,
+    "stages": {
+     "parse_seconds": 1.0482,
+     "check_seconds": 1.6395,
+     "prove_seconds": 1.0442,
+     "optimize_seconds": 0.1726,
+     "lower_seconds": 2.2767
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.076
+    }
+   },
+   "incremental": {
+    "wall": 37.3866,
+    "cpu": 37.36,
+    "rss_kb": 349328,
+    "stages": {
+     "parse_seconds": 1.043,
+     "check_seconds": 1.6612,
+     "prove_seconds": 1.0566,
+     "optimize_seconds": 0.1688,
+     "lower_seconds": 2.3372
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.824,
+     "compile_seconds": 31.7869,
+     "link_seconds": 0.0371,
+     "total_seconds": 37.0687
+    }
+   },
+   "binary_bytes": 1965312
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 53.0163,
+    "cpu": 52.96,
+    "rss_kb": 488448,
+    "stages": {
+     "parse_seconds": 1.118,
+     "check_seconds": 2.6916,
+     "optimize_seconds": 0.4326,
+     "lower_seconds": 4.2203
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 44.2503,
+     "total_seconds": 52.7483
+    }
+   },
+   "noop": {
+    "wall": 1.2213,
+    "cpu": 1.21,
+    "rss_kb": 70200,
+    "stages": {
+     "parse_seconds": 1.118,
+     "check_seconds": 2.6916,
+     "optimize_seconds": 0.4326,
+     "lower_seconds": 4.2203
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0524
+    }
+   },
+   "incremental": {
+    "wall": 53.3241,
+    "cpu": 53.28,
+    "rss_kb": 488132,
+    "stages": {
+     "parse_seconds": 1.0761,
+     "check_seconds": 2.7077,
+     "optimize_seconds": 0.4277,
+     "lower_seconds": 4.344
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 44.4366,
+     "total_seconds": 53.0278
+    }
+   },
+   "binary_bytes": 2199888
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.5978,
+    "cpu": 4.45,
+    "rss_kb": 249320
+   },
+   "noop": {
+    "wall": 0.5392,
+    "cpu": 0.78,
+    "rss_kb": 130084
+   },
+   "incremental": {
+    "wall": 0.538,
+    "cpu": 0.8,
+    "rss_kb": 129848
+   },
+   "binary_bytes": 12348792
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.8284,
+    "cpu": 0.81,
+    "rss_kb": 89784,
+    "stages": {
+     "parse_seconds": 0.1579,
+     "check_seconds": 0.1819,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.014,
+     "lower_seconds": 0.0673
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.2513,
+     "compile_seconds": 0.2255,
+     "link_seconds": 0.0258,
+     "total_seconds": 0.6946
+    }
+   },
+   "noop": {
+    "wall": 0.274,
+    "cpu": 0.27,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1579,
+     "check_seconds": 0.1819,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.014,
+     "lower_seconds": 0.0673
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.16
+    }
+   },
+   "incremental": {
+    "wall": 0.8449,
+    "cpu": 0.83,
+    "rss_kb": 89924,
+    "stages": {
+     "parse_seconds": 0.1632,
+     "check_seconds": 0.1982,
+     "prove_seconds": 0.1083,
+     "optimize_seconds": 0.0141,
+     "lower_seconds": 0.0661
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.256,
+     "compile_seconds": 0.2315,
+     "link_seconds": 0.0245,
+     "total_seconds": 0.714
+    }
+   },
+   "binary_bytes": 24184
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Rust",
+   "cold": {
+    "wall": 38.0719,
+    "cpu": 57.8,
+    "rss_kb": 499636
+   },
+   "noop": {
+    "wall": 0.0767,
+    "cpu": 0.06,
+    "rss_kb": 45768
+   },
+   "incremental": {
+    "wall": 11.6851,
+    "cpu": 11.69,
+    "rss_kb": 381952
+   },
+   "binary_bytes": 3351088
+  },
+  {
+   "round": 1,
+   "program": "tls-fixture",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 28.4194,
+    "cpu": 28.39,
+    "rss_kb": 302952,
+    "stages": {
+     "parse_seconds": 0.8717,
+     "check_seconds": 1.5291,
+     "prove_seconds": 0.922,
+     "optimize_seconds": 0.1554,
+     "lower_seconds": 2.0142
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.5464,
+     "compile_seconds": 23.514,
+     "link_seconds": 0.0324,
+     "total_seconds": 28.1433
+    }
+   },
+   "noop": {
+    "wall": 1.0424,
+    "cpu": 1.03,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.8717,
+     "check_seconds": 1.5291,
+     "prove_seconds": 0.922,
+     "optimize_seconds": 0.1554,
+     "lower_seconds": 2.0142
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8631
+    }
+   },
+   "incremental": {
+    "wall": 28.5331,
+    "cpu": 28.5,
+    "rss_kb": 302828,
+    "stages": {
+     "parse_seconds": 0.8617,
+     "check_seconds": 1.5495,
+     "prove_seconds": 0.9335,
+     "optimize_seconds": 0.1613,
+     "lower_seconds": 2.1121
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.5094,
+     "compile_seconds": 23.477,
+     "link_seconds": 0.0325,
+     "total_seconds": 28.221
+    }
+   },
+   "binary_bytes": 1498840
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.5148,
+    "cpu": 18.5,
+    "rss_kb": 381916
+   },
+   "noop": {
+    "wall": 14.5449,
+    "cpu": 14.54,
+    "rss_kb": 374408
+   },
+   "incremental": {
+    "wall": 14.5746,
+    "cpu": 14.57,
+    "rss_kb": 374936
+   },
+   "binary_bytes": 4605256
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 2.2421,
+    "cpu": 2.23,
+    "rss_kb": 112824,
+    "stages": {
+     "parse_seconds": 0.1717,
+     "check_seconds": 0.6025,
+     "optimize_seconds": 0.0258,
+     "lower_seconds": 0.2181
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0826,
+     "total_seconds": 2.1187
+    }
+   },
+   "noop": {
+    "wall": 0.2959,
+    "cpu": 0.28,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1717,
+     "check_seconds": 0.6025,
+     "optimize_seconds": 0.0258,
+     "lower_seconds": 0.2181
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1773
+    }
+   },
+   "incremental": {
+    "wall": 2.2159,
+    "cpu": 2.2,
+    "rss_kb": 114176,
+    "stages": {
+     "parse_seconds": 0.1742,
+     "check_seconds": 0.5923,
+     "optimize_seconds": 0.0258,
+     "lower_seconds": 0.2207
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0601,
+     "total_seconds": 2.0927
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.0934,
+    "cpu": 4.32,
+    "rss_kb": 250580
+   },
+   "noop": {
+    "wall": 0.5647,
+    "cpu": 0.81,
+    "rss_kb": 133072
+   },
+   "incremental": {
+    "wall": 0.5681,
+    "cpu": 0.81,
+    "rss_kb": 132972
+   },
+   "binary_bytes": 12584546
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 16.3654,
+    "cpu": 16.34,
+    "rss_kb": 240248,
+    "stages": {
+     "parse_seconds": 1.0456,
+     "check_seconds": 1.6157,
+     "prove_seconds": 1.0215,
+     "optimize_seconds": 0.165,
+     "lower_seconds": 2.2177
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 10.9699,
+     "compile_seconds": 10.9358,
+     "link_seconds": 0.0342,
+     "total_seconds": 16.0483
+    }
+   },
+   "noop": {
+    "wall": 1.2248,
+    "cpu": 1.21,
+    "rss_kb": 70092,
+    "stages": {
+     "parse_seconds": 1.0456,
+     "check_seconds": 1.6157,
+     "prove_seconds": 1.0215,
+     "optimize_seconds": 0.165,
+     "lower_seconds": 2.2177
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0487
+    }
+   },
+   "incremental": {
+    "wall": 16.4571,
+    "cpu": 16.42,
+    "rss_kb": 240400,
+    "stages": {
+     "parse_seconds": 1.0295,
+     "check_seconds": 1.6286,
+     "prove_seconds": 1.0259,
+     "optimize_seconds": 0.1792,
+     "lower_seconds": 2.2918
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 10.987,
+     "compile_seconds": 10.9527,
+     "link_seconds": 0.0344,
+     "total_seconds": 16.1491
+    }
+   },
+   "binary_bytes": 1124704
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Rust",
+   "cold": {
+    "wall": 14.2614,
+    "cpu": 22.16,
+    "rss_kb": 401040
+   },
+   "noop": {
+    "wall": 0.0499,
+    "cpu": 0.04,
+    "rss_kb": 37832
+   },
+   "incremental": {
+    "wall": 6.1203,
+    "cpu": 6.12,
+    "rss_kb": 270068
+   },
+   "binary_bytes": 1039952
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Zig",
+   "cold": {
+    "wall": 40.5305,
+    "cpu": 40.49,
+    "rss_kb": 899516
+   },
+   "noop": {
+    "wall": 36.7125,
+    "cpu": 36.7,
+    "rss_kb": 893520
+   },
+   "incremental": {
+    "wall": 36.8792,
+    "cpu": 36.87,
+    "rss_kb": 893492
+   },
+   "binary_bytes": 9087744
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 1.4126,
+    "cpu": 1.4,
+    "rss_kb": 102048,
+    "stages": {
+     "parse_seconds": 0.1767,
+     "check_seconds": 0.2303,
+     "prove_seconds": 0.1274,
+     "optimize_seconds": 0.0185,
+     "lower_seconds": 0.1087
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7371,
+     "compile_seconds": 0.7121,
+     "link_seconds": 0.025,
+     "total_seconds": 1.2879
+    }
+   },
+   "noop": {
+    "wall": 0.2873,
+    "cpu": 0.27,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.1767,
+     "check_seconds": 0.2303,
+     "prove_seconds": 0.1274,
+     "optimize_seconds": 0.0185,
+     "lower_seconds": 0.1087
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1761
+    }
+   },
+   "incremental": {
+    "wall": 1.4273,
+    "cpu": 1.42,
+    "rss_kb": 101892,
+    "stages": {
+     "parse_seconds": 0.1712,
+     "check_seconds": 0.2282,
+     "prove_seconds": 0.1295,
+     "optimize_seconds": 0.0194,
+     "lower_seconds": 0.1099
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7583,
+     "compile_seconds": 0.7328,
+     "link_seconds": 0.0255,
+     "total_seconds": 1.3032
+    }
+   },
+   "binary_bytes": 66912
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.2437,
+    "cpu": 1.23,
+    "rss_kb": 89648,
+    "stages": {
+     "parse_seconds": 0.1595,
+     "check_seconds": 0.4898,
+     "optimize_seconds": 0.0142,
+     "lower_seconds": 0.1382
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3106,
+     "total_seconds": 1.1295
+    }
+   },
+   "noop": {
+    "wall": 0.273,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1595,
+     "check_seconds": 0.4898,
+     "optimize_seconds": 0.0142,
+     "lower_seconds": 0.1382
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.161
+    }
+   },
+   "incremental": {
+    "wall": 1.2445,
+    "cpu": 1.24,
+    "rss_kb": 89656,
+    "stages": {
+     "parse_seconds": 0.1593,
+     "check_seconds": 0.4905,
+     "optimize_seconds": 0.0153,
+     "lower_seconds": 0.1407
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3105,
+     "total_seconds": 1.1327
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 1.7152,
+    "cpu": 1.7,
+    "rss_kb": 114128,
+    "stages": {
+     "parse_seconds": 0.1703,
+     "check_seconds": 0.2114,
+     "prove_seconds": 0.1186,
+     "optimize_seconds": 0.0185,
+     "lower_seconds": 0.1133
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0612,
+     "compile_seconds": 1.0359,
+     "link_seconds": 0.0253,
+     "total_seconds": 1.5915
+    }
+   },
+   "noop": {
+    "wall": 0.2855,
+    "cpu": 0.27,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.1703,
+     "check_seconds": 0.2114,
+     "prove_seconds": 0.1186,
+     "optimize_seconds": 0.0185,
+     "lower_seconds": 0.1133
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.172
+    }
+   },
+   "incremental": {
+    "wall": 1.7174,
+    "cpu": 1.7,
+    "rss_kb": 113992,
+    "stages": {
+     "parse_seconds": 0.1694,
+     "check_seconds": 0.2161,
+     "prove_seconds": 0.1206,
+     "optimize_seconds": 0.0187,
+     "lower_seconds": 0.1137
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0579,
+     "compile_seconds": 1.033,
+     "link_seconds": 0.0249,
+     "total_seconds": 1.5926
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 5.3025,
+    "cpu": 5.29,
+    "rss_kb": 140032,
+    "stages": {
+     "parse_seconds": 0.4485,
+     "check_seconds": 0.9271,
+     "prove_seconds": 0.6267,
+     "optimize_seconds": 0.0481,
+     "lower_seconds": 0.7796
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8715,
+     "compile_seconds": 2.8465,
+     "link_seconds": 0.025,
+     "total_seconds": 5.0931
+    }
+   },
+   "noop": {
+    "wall": 0.5885,
+    "cpu": 0.57,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.4485,
+     "check_seconds": 0.9271,
+     "prove_seconds": 0.6267,
+     "optimize_seconds": 0.0481,
+     "lower_seconds": 0.7796
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4507
+    }
+   },
+   "incremental": {
+    "wall": 5.1822,
+    "cpu": 5.17,
+    "rss_kb": 140036,
+    "stages": {
+     "parse_seconds": 0.4627,
+     "check_seconds": 0.9286,
+     "prove_seconds": 0.6266,
+     "optimize_seconds": 0.0434,
+     "lower_seconds": 0.7516
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.7819,
+     "compile_seconds": 2.7577,
+     "link_seconds": 0.0241,
+     "total_seconds": 4.9857
+    }
+   },
+   "binary_bytes": 112664
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Go",
+   "cold": {
+    "wall": 4.7172,
+    "cpu": 8.26,
+    "rss_kb": 247356
+   },
+   "noop": {
+    "wall": 0.0455,
+    "cpu": 0.06,
+    "rss_kb": 20452
+   },
+   "incremental": {
+    "wall": 0.1589,
+    "cpu": 0.2,
+    "rss_kb": 59776
+   },
+   "binary_bytes": 2298710
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.0676,
+    "cpu": 5.97,
+    "rss_kb": 279044
+   },
+   "noop": {
+    "wall": 0.0423,
+    "cpu": 0.04,
+    "rss_kb": 36552
+   },
+   "incremental": {
+    "wall": 2.6543,
+    "cpu": 2.65,
+    "rss_kb": 209452
+   },
+   "binary_bytes": 491952
+  },
+  {
+   "round": 1,
+   "program": "tls-fixture",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 11.6409,
+    "cpu": 11.61,
+    "rss_kb": 166456,
+    "stages": {
+     "parse_seconds": 0.8649,
+     "check_seconds": 1.5162,
+     "prove_seconds": 0.9231,
+     "optimize_seconds": 0.1608,
+     "lower_seconds": 1.9897
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.8094,
+     "compile_seconds": 6.7786,
+     "link_seconds": 0.0307,
+     "total_seconds": 11.3673
+    }
+   },
+   "noop": {
+    "wall": 1.0885,
+    "cpu": 1.07,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.8649,
+     "check_seconds": 1.5162,
+     "prove_seconds": 0.9231,
+     "optimize_seconds": 0.1608,
+     "lower_seconds": 1.9897
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.889
+    }
+   },
+   "incremental": {
+    "wall": 11.5505,
+    "cpu": 11.53,
+    "rss_kb": 166360,
+    "stages": {
+     "parse_seconds": 0.8709,
+     "check_seconds": 1.5459,
+     "prove_seconds": 0.9362,
+     "optimize_seconds": 0.1624,
+     "lower_seconds": 1.9809
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.6861,
+     "compile_seconds": 6.6552,
+     "link_seconds": 0.0309,
+     "total_seconds": 11.2723
+    }
+   },
+   "binary_bytes": 719440
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Rust",
+   "cold": {
+    "wall": 1.9874,
+    "cpu": 1.97,
+    "rss_kb": 186436
+   },
+   "noop": {
+    "wall": 0.0404,
+    "cpu": 0.03,
+    "rss_kb": 36680
+   },
+   "incremental": {
+    "wall": 1.9307,
+    "cpu": 1.92,
+    "rss_kb": 187456
+   },
+   "binary_bytes": 361712
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 5.403,
+    "cpu": 5.89,
+    "rss_kb": 273876
+   },
+   "noop": {
+    "wall": 1.8252,
+    "cpu": 2.33,
+    "rss_kb": 185464
+   },
+   "incremental": {
+    "wall": 1.852,
+    "cpu": 2.35,
+    "rss_kb": 185240
+   },
+   "binary_bytes": 32950797
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 0.1426,
+    "cpu": 0.14,
+    "rss_kb": 96888
+   },
+   "noop": {
+    "wall": 0.0389,
+    "cpu": 0.03,
+    "rss_kb": 36416
+   },
+   "incremental": {
+    "wall": 0.098,
+    "cpu": 0.1,
+    "rss_kb": 77184
+   },
+   "binary_bytes": 4545688
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.6795,
+    "cpu": 0.67,
+    "rss_kb": 88320,
+    "stages": {
+     "parse_seconds": 0.1497,
+     "check_seconds": 0.178,
+     "prove_seconds": 0.091,
+     "optimize_seconds": 0.0133,
+     "lower_seconds": 0.0552
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1559,
+     "compile_seconds": 0.1331,
+     "link_seconds": 0.0228,
+     "total_seconds": 0.5674
+    }
+   },
+   "noop": {
+    "wall": 0.2507,
+    "cpu": 0.24,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1497,
+     "check_seconds": 0.178,
+     "prove_seconds": 0.091,
+     "optimize_seconds": 0.0133,
+     "lower_seconds": 0.0552
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1493
+    }
+   },
+   "incremental": {
+    "wall": 0.6792,
+    "cpu": 0.66,
+    "rss_kb": 88448,
+    "stages": {
+     "parse_seconds": 0.1506,
+     "check_seconds": 0.1764,
+     "prove_seconds": 0.0903,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0566
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1566,
+     "compile_seconds": 0.1335,
+     "link_seconds": 0.023,
+     "total_seconds": 0.5689
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1932,
+    "cpu": 4.45,
+    "rss_kb": 250844
+   },
+   "noop": {
+    "wall": 0.6113,
+    "cpu": 0.88,
+    "rss_kb": 137848
+   },
+   "incremental": {
+    "wall": 0.6136,
+    "cpu": 0.89,
+    "rss_kb": 137884
+   },
+   "binary_bytes": 17461922
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Go",
+   "cold": {
+    "wall": 3.9583,
+    "cpu": 6.62,
+    "rss_kb": 249472
+   },
+   "noop": {
+    "wall": 0.0423,
+    "cpu": 0.05,
+    "rss_kb": 19712
+   },
+   "incremental": {
+    "wall": 0.1258,
+    "cpu": 0.16,
+    "rss_kb": 52992
+   },
+   "binary_bytes": 1931832
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1488,
+    "cpu": 4.41,
+    "rss_kb": 250812
+   },
+   "noop": {
+    "wall": 0.6072,
+    "cpu": 0.88,
+    "rss_kb": 137868
+   },
+   "incremental": {
+    "wall": 0.6156,
+    "cpu": 0.89,
+    "rss_kb": 137944
+   },
+   "binary_bytes": 17497741
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.3618,
+    "cpu": 3.08,
+    "rss_kb": 264256
+   },
+   "noop": {
+    "wall": 0.0431,
+    "cpu": 0.03,
+    "rss_kb": 36424
+   },
+   "incremental": {
+    "wall": 0.169,
+    "cpu": 0.18,
+    "rss_kb": 99540
+   },
+   "binary_bytes": 8515288
+  },
+  {
+   "round": 1,
+   "program": "tls-fixture",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 44.4901,
+    "cpu": 44.43,
+    "rss_kb": 432968,
+    "stages": {
+     "parse_seconds": 0.9692,
+     "check_seconds": 2.6181,
+     "optimize_seconds": 0.3968,
+     "lower_seconds": 3.7785
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.4291,
+     "total_seconds": 44.2216
+    }
+   },
+   "noop": {
+    "wall": 1.0989,
+    "cpu": 1.09,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.9692,
+     "check_seconds": 2.6181,
+     "optimize_seconds": 0.3968,
+     "lower_seconds": 3.7785
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.9057
+    }
+   },
+   "incremental": {
+    "wall": 44.25,
+    "cpu": 44.21,
+    "rss_kb": 432496,
+    "stages": {
+     "parse_seconds": 0.8924,
+     "check_seconds": 2.635,
+     "optimize_seconds": 0.4225,
+     "lower_seconds": 3.7868
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.2565,
+     "total_seconds": 44.0217
+    }
+   },
+   "binary_bytes": 1729328
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.8937,
+    "cpu": 0.88,
+    "rss_kb": 90696,
+    "stages": {
+     "parse_seconds": 0.166,
+     "check_seconds": 0.1965,
+     "prove_seconds": 0.1113,
+     "optimize_seconds": 0.0157,
+     "lower_seconds": 0.0735
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.308,
+     "compile_seconds": 0.2838,
+     "link_seconds": 0.0242,
+     "total_seconds": 0.7757
+    }
+   },
+   "noop": {
+    "wall": 0.2692,
+    "cpu": 0.25,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.166,
+     "check_seconds": 0.1965,
+     "prove_seconds": 0.1113,
+     "optimize_seconds": 0.0157,
+     "lower_seconds": 0.0735
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1591
+    }
+   },
+   "incremental": {
+    "wall": 0.8879,
+    "cpu": 0.88,
+    "rss_kb": 90552,
+    "stages": {
+     "parse_seconds": 0.1625,
+     "check_seconds": 0.1911,
+     "prove_seconds": 0.1042,
+     "optimize_seconds": 0.014,
+     "lower_seconds": 0.0698
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3162,
+     "compile_seconds": 0.2913,
+     "link_seconds": 0.0249,
+     "total_seconds": 0.7698
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.2707,
+    "cpu": 3.3,
+    "rss_kb": 273844
+   },
+   "noop": {
+    "wall": 0.0418,
+    "cpu": 0.03,
+    "rss_kb": 36292
+   },
+   "incremental": {
+    "wall": 0.1493,
+    "cpu": 0.15,
+    "rss_kb": 96944
+   },
+   "binary_bytes": 7100800
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.0711,
+    "cpu": 1.05,
+    "rss_kb": 87424,
+    "stages": {
+     "parse_seconds": 0.1575,
+     "check_seconds": 0.488,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.1202
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1625,
+     "total_seconds": 0.9587
+    }
+   },
+   "noop": {
+    "wall": 0.2665,
+    "cpu": 0.25,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1575,
+     "check_seconds": 0.488,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.1202
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1574
+    }
+   },
+   "incremental": {
+    "wall": 1.0704,
+    "cpu": 1.06,
+    "rss_kb": 87424,
+    "stages": {
+     "parse_seconds": 0.1564,
+     "check_seconds": 0.492,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.1177
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.163,
+     "total_seconds": 0.96
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Zig",
+   "cold": {
+    "wall": 17.2792,
+    "cpu": 17.27,
+    "rss_kb": 363800
+   },
+   "noop": {
+    "wall": 13.3287,
+    "cpu": 13.33,
+    "rss_kb": 355316
+   },
+   "incremental": {
+    "wall": 13.4272,
+    "cpu": 13.42,
+    "rss_kb": 355584
+   },
+   "binary_bytes": 4268824
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.5865,
+    "cpu": 18.58,
+    "rss_kb": 382100
+   },
+   "noop": {
+    "wall": 15.0784,
+    "cpu": 15.08,
+    "rss_kb": 374900
+   },
+   "incremental": {
+    "wall": 15.0467,
+    "cpu": 15.04,
+    "rss_kb": 375408
+   },
+   "binary_bytes": 4578784
+  },
+  {
+   "round": 1,
+   "program": "nbody",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.2526,
+    "cpu": 5.95,
+    "rss_kb": 293452
+   },
+   "noop": {
+    "wall": 0.0434,
+    "cpu": 0.03,
+    "rss_kb": 36296
+   },
+   "incremental": {
+    "wall": 2.9071,
+    "cpu": 2.91,
+    "rss_kb": 205332
+   },
+   "binary_bytes": 546424
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Go",
+   "cold": {
+    "wall": 12.017,
+    "cpu": 21.8,
+    "rss_kb": 246908
+   },
+   "noop": {
+    "wall": 0.0791,
+    "cpu": 0.12,
+    "rss_kb": 25600
+   },
+   "incremental": {
+    "wall": 0.3631,
+    "cpu": 0.5,
+    "rss_kb": 133760
+   },
+   "binary_bytes": 8452685
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Go",
+   "cold": {
+    "wall": 5.2083,
+    "cpu": 9.16,
+    "rss_kb": 243884
+   },
+   "noop": {
+    "wall": 0.062,
+    "cpu": 0.07,
+    "rss_kb": 19456
+   },
+   "incremental": {
+    "wall": 0.1592,
+    "cpu": 0.2,
+    "rss_kb": 63488
+   },
+   "binary_bytes": 2774090
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Zig",
+   "cold": {
+    "wall": 16.4601,
+    "cpu": 16.45,
+    "rss_kb": 352408
+   },
+   "noop": {
+    "wall": 12.5582,
+    "cpu": 12.56,
+    "rss_kb": 343964
+   },
+   "incremental": {
+    "wall": 12.6974,
+    "cpu": 12.69,
+    "rss_kb": 344040
+   },
+   "binary_bytes": 4116048
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 18.5001,
+    "cpu": 35.05,
+    "rss_kb": 388792
+   },
+   "noop": {
+    "wall": 0.077,
+    "cpu": 0.06,
+    "rss_kb": 45376
+   },
+   "incremental": {
+    "wall": 0.3964,
+    "cpu": 0.5,
+    "rss_kb": 268828
+   },
+   "binary_bytes": 51527288
+  },
+  {
+   "round": 1,
+   "program": "hello",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.6894,
+    "cpu": 0.68,
+    "rss_kb": 86912,
+    "stages": {
+     "parse_seconds": 0.1564,
+     "check_seconds": 0.1852,
+     "prove_seconds": 0.0932,
+     "optimize_seconds": 0.0131,
+     "lower_seconds": 0.0507
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1453,
+     "compile_seconds": 0.1147,
+     "link_seconds": 0.0306,
+     "total_seconds": 0.5724
+    }
+   },
+   "noop": {
+    "wall": 0.2782,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1564,
+     "check_seconds": 0.1852,
+     "prove_seconds": 0.0932,
+     "optimize_seconds": 0.0131,
+     "lower_seconds": 0.0507
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1689
+    }
+   },
+   "incremental": {
+    "wall": 0.6645,
+    "cpu": 0.65,
+    "rss_kb": 87168,
+    "stages": {
+     "parse_seconds": 0.1532,
+     "check_seconds": 0.1825,
+     "prove_seconds": 0.093,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.0515
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1356,
+     "compile_seconds": 0.1126,
+     "link_seconds": 0.023,
+     "total_seconds": 0.5519
+    }
+   },
+   "binary_bytes": 10216
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 6.5918,
+    "cpu": 6.58,
+    "rss_kb": 138860,
+    "stages": {
+     "parse_seconds": 0.4539,
+     "check_seconds": 1.8544,
+     "optimize_seconds": 0.045,
+     "lower_seconds": 1.2294
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8204,
+     "total_seconds": 6.4216
+    }
+   },
+   "noop": {
+    "wall": 0.6107,
+    "cpu": 0.6,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.4539,
+     "check_seconds": 1.8544,
+     "optimize_seconds": 0.045,
+     "lower_seconds": 1.2294
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4686
+    }
+   },
+   "incremental": {
+    "wall": 6.6446,
+    "cpu": 6.63,
+    "rss_kb": 138860,
+    "stages": {
+     "parse_seconds": 0.4549,
+     "check_seconds": 1.8558,
+     "optimize_seconds": 0.0539,
+     "lower_seconds": 1.2214
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8553,
+     "total_seconds": 6.4596
+    }
+   },
+   "binary_bytes": 112664
+  },
+  {
+   "round": 1,
+   "program": "json",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 3.6143,
+    "cpu": 3.6,
+    "rss_kb": 106800,
+    "stages": {
+     "parse_seconds": 0.4589,
+     "check_seconds": 0.9555,
+     "prove_seconds": 0.647,
+     "optimize_seconds": 0.0439,
+     "lower_seconds": 0.7417
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1862,
+     "compile_seconds": 1.1611,
+     "link_seconds": 0.0251,
+     "total_seconds": 3.405
+    }
+   },
+   "noop": {
+    "wall": 0.584,
+    "cpu": 0.57,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.4589,
+     "check_seconds": 0.9555,
+     "prove_seconds": 0.647,
+     "optimize_seconds": 0.0439,
+     "lower_seconds": 0.7417
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4508
+    }
+   },
+   "incremental": {
+    "wall": 3.6085,
+    "cpu": 3.59,
+    "rss_kb": 108032,
+    "stages": {
+     "parse_seconds": 0.4678,
+     "check_seconds": 0.9668,
+     "prove_seconds": 0.6462,
+     "optimize_seconds": 0.0489,
+     "lower_seconds": 0.7369
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1644,
+     "compile_seconds": 1.1397,
+     "link_seconds": 0.0247,
+     "total_seconds": 3.4031
+    }
+   },
+   "binary_bytes": 101576
+  },
+  {
+   "round": 1,
+   "program": "https-client",
+   "impl": "Go",
+   "cold": {
+    "wall": 11.5531,
+    "cpu": 21.37,
+    "rss_kb": 243504
+   },
+   "noop": {
+    "wall": 0.0656,
+    "cpu": 0.1,
+    "rss_kb": 25216
+   },
+   "incremental": {
+    "wall": 0.3053,
+    "cpu": 0.41,
+    "rss_kb": 131712
+   },
+   "binary_bytes": 8139234
+  },
+  {
+   "round": 1,
+   "program": "http",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 8.7231,
+    "cpu": 15.92,
+    "rss_kb": 359468
+   },
+   "noop": {
+    "wall": 0.051,
+    "cpu": 0.04,
+    "rss_kb": 37828
+   },
+   "incremental": {
+    "wall": 0.2929,
+    "cpu": 0.34,
+    "rss_kb": 138104
+   },
+   "binary_bytes": 20197112
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 37.469,
+    "cpu": 37.43,
+    "rss_kb": 353200,
+    "stages": {
+     "parse_seconds": 1.0618,
+     "check_seconds": 1.6629,
+     "prove_seconds": 1.0418,
+     "optimize_seconds": 0.1748,
+     "lower_seconds": 2.3279
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.8578,
+     "compile_seconds": 31.82,
+     "link_seconds": 0.0378,
+     "total_seconds": 37.1251
+    }
+   },
+   "noop": {
+    "wall": 1.2293,
+    "cpu": 1.22,
+    "rss_kb": 70116,
+    "stages": {
+     "parse_seconds": 1.0618,
+     "check_seconds": 1.6629,
+     "prove_seconds": 1.0418,
+     "optimize_seconds": 0.1748,
+     "lower_seconds": 2.3279
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0516
+    }
+   },
+   "incremental": {
+    "wall": 37.5735,
+    "cpu": 37.54,
+    "rss_kb": 351192,
+    "stages": {
+     "parse_seconds": 1.0452,
+     "check_seconds": 1.6347,
+     "prove_seconds": 1.0347,
+     "optimize_seconds": 0.17,
+     "lower_seconds": 2.3609
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 31.9882,
+     "compile_seconds": 31.949,
+     "link_seconds": 0.0392,
+     "total_seconds": 37.2341
+    }
+   },
+   "binary_bytes": 1965312
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.9492,
+    "cpu": 0.94,
+    "rss_kb": 90820,
+    "stages": {
+     "parse_seconds": 0.1627,
+     "check_seconds": 0.205,
+     "prove_seconds": 0.1114,
+     "optimize_seconds": 0.0158,
+     "lower_seconds": 0.0745
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3518,
+     "compile_seconds": 0.3255,
+     "link_seconds": 0.0263,
+     "total_seconds": 0.8279
+    }
+   },
+   "noop": {
+    "wall": 0.2718,
+    "cpu": 0.26,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.1627,
+     "check_seconds": 0.205,
+     "prove_seconds": 0.1114,
+     "optimize_seconds": 0.0158,
+     "lower_seconds": 0.0745
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.161
+    }
+   },
+   "incremental": {
+    "wall": 0.9036,
+    "cpu": 0.89,
+    "rss_kb": 90676,
+    "stages": {
+     "parse_seconds": 0.1594,
+     "check_seconds": 0.194,
+     "prove_seconds": 0.1068,
+     "optimize_seconds": 0.0153,
+     "lower_seconds": 0.0797
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3132,
+     "compile_seconds": 0.2871,
+     "link_seconds": 0.0261,
+     "total_seconds": 0.7807
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.0787,
+    "cpu": 1.06,
+    "rss_kb": 87424,
+    "stages": {
+     "parse_seconds": 0.1572,
+     "check_seconds": 0.5038,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.1162
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1588,
+     "total_seconds": 0.9661
+    }
+   },
+   "noop": {
+    "wall": 0.2623,
+    "cpu": 0.25,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1572,
+     "check_seconds": 0.5038,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.1162
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1582
+    }
+   },
+   "incremental": {
+    "wall": 1.088,
+    "cpu": 1.07,
+    "rss_kb": 87424,
+    "stages": {
+     "parse_seconds": 0.1556,
+     "check_seconds": 0.4934,
+     "optimize_seconds": 0.0137,
+     "lower_seconds": 0.1417
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1586,
+     "total_seconds": 0.9791
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Rust",
+   "cold": {
+    "wall": 37.333,
+    "cpu": 57.6,
+    "rss_kb": 497160
+   },
+   "noop": {
+    "wall": 0.0779,
+    "cpu": 0.06,
+    "rss_kb": 45380
+   },
+   "incremental": {
+    "wall": 11.5724,
+    "cpu": 11.58,
+    "rss_kb": 377296
+   },
+   "binary_bytes": 3351088
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Zig",
+   "cold": {
+    "wall": 16.3507,
+    "cpu": 16.35,
+    "rss_kb": 352636
+   },
+   "noop": {
+    "wall": 12.7685,
+    "cpu": 12.77,
+    "rss_kb": 344928
+   },
+   "incremental": {
+    "wall": 12.6238,
+    "cpu": 12.62,
+    "rss_kb": 344768
+   },
+   "binary_bytes": 4116048
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.1958,
+    "cpu": 6.11,
+    "rss_kb": 279072
+   },
+   "noop": {
+    "wall": 0.0428,
+    "cpu": 0.03,
+    "rss_kb": 36552
+   },
+   "incremental": {
+    "wall": 2.6964,
+    "cpu": 2.69,
+    "rss_kb": 207660
+   },
+   "binary_bytes": 491952
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.7052,
+    "cpu": 0.7,
+    "rss_kb": 87040,
+    "stages": {
+     "parse_seconds": 0.1567,
+     "check_seconds": 0.1988,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0594
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1434,
+     "compile_seconds": 0.1162,
+     "link_seconds": 0.0272,
+     "total_seconds": 0.5897
+    }
+   },
+   "noop": {
+    "wall": 0.2584,
+    "cpu": 0.25,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1567,
+     "check_seconds": 0.1988,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0594
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1542
+    }
+   },
+   "incremental": {
+    "wall": 0.6953,
+    "cpu": 0.68,
+    "rss_kb": 87040,
+    "stages": {
+     "parse_seconds": 0.1645,
+     "check_seconds": 0.1907,
+     "prove_seconds": 0.0995,
+     "optimize_seconds": 0.0134,
+     "lower_seconds": 0.0507
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.1423,
+     "compile_seconds": 0.1165,
+     "link_seconds": 0.0258,
+     "total_seconds": 0.5787
+    }
+   },
+   "binary_bytes": 10216
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Go",
+   "cold": {
+    "wall": 4.8079,
+    "cpu": 8.4,
+    "rss_kb": 248632
+   },
+   "noop": {
+    "wall": 0.046,
+    "cpu": 0.06,
+    "rss_kb": 19712
+   },
+   "incremental": {
+    "wall": 0.1544,
+    "cpu": 0.2,
+    "rss_kb": 59264
+   },
+   "binary_bytes": 2298710
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1231,
+    "cpu": 4.37,
+    "rss_kb": 250616
+   },
+   "noop": {
+    "wall": 0.5453,
+    "cpu": 0.8,
+    "rss_kb": 130028
+   },
+   "incremental": {
+    "wall": 0.5359,
+    "cpu": 0.76,
+    "rss_kb": 130080
+   },
+   "binary_bytes": 12348792
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Go",
+   "cold": {
+    "wall": 4.0953,
+    "cpu": 6.83,
+    "rss_kb": 249440
+   },
+   "noop": {
+    "wall": 0.0438,
+    "cpu": 0.05,
+    "rss_kb": 19456
+   },
+   "incremental": {
+    "wall": 0.1417,
+    "cpu": 0.18,
+    "rss_kb": 53504
+   },
+   "binary_bytes": 1931832
+  },
+  {
+   "round": 2,
+   "program": "tls-fixture",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 44.9104,
+    "cpu": 44.86,
+    "rss_kb": 434900,
+    "stages": {
+     "parse_seconds": 0.9154,
+     "check_seconds": 2.6849,
+     "optimize_seconds": 0.4122,
+     "lower_seconds": 3.7961
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.844,
+     "total_seconds": 44.6805
+    }
+   },
+   "noop": {
+    "wall": 1.0799,
+    "cpu": 1.07,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.9154,
+     "check_seconds": 2.6849,
+     "optimize_seconds": 0.4122,
+     "lower_seconds": 3.7961
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8984
+    }
+   },
+   "incremental": {
+    "wall": 44.5034,
+    "cpu": 44.46,
+    "rss_kb": 432588,
+    "stages": {
+     "parse_seconds": 0.8884,
+     "check_seconds": 2.6138,
+     "optimize_seconds": 0.3824,
+     "lower_seconds": 3.7292
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 36.6216,
+     "total_seconds": 44.2682
+    }
+   },
+   "binary_bytes": 1729328
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Go",
+   "cold": {
+    "wall": 11.9139,
+    "cpu": 21.53,
+    "rss_kb": 243416
+   },
+   "noop": {
+    "wall": 0.0794,
+    "cpu": 0.13,
+    "rss_kb": 25344
+   },
+   "incremental": {
+    "wall": 0.3901,
+    "cpu": 0.54,
+    "rss_kb": 137344
+   },
+   "binary_bytes": 8452685
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Zig",
+   "cold": {
+    "wall": 40.9192,
+    "cpu": 40.9,
+    "rss_kb": 899508
+   },
+   "noop": {
+    "wall": 36.6529,
+    "cpu": 36.64,
+    "rss_kb": 893312
+   },
+   "incremental": {
+    "wall": 36.8763,
+    "cpu": 36.86,
+    "rss_kb": 893472
+   },
+   "binary_bytes": 9087744
+  },
+  {
+   "round": 2,
+   "program": "tls-fixture",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 28.7797,
+    "cpu": 28.74,
+    "rss_kb": 304868,
+    "stages": {
+     "parse_seconds": 0.8886,
+     "check_seconds": 1.5534,
+     "prove_seconds": 0.9413,
+     "optimize_seconds": 0.1565,
+     "lower_seconds": 2.0076
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.8519,
+     "compile_seconds": 23.8194,
+     "link_seconds": 0.0326,
+     "total_seconds": 28.4851
+    }
+   },
+   "noop": {
+    "wall": 1.0624,
+    "cpu": 1.05,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.8886,
+     "check_seconds": 1.5534,
+     "prove_seconds": 0.9413,
+     "optimize_seconds": 0.1565,
+     "lower_seconds": 2.0076
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8752
+    }
+   },
+   "incremental": {
+    "wall": 28.495,
+    "cpu": 28.47,
+    "rss_kb": 302908,
+    "stages": {
+     "parse_seconds": 0.8818,
+     "check_seconds": 1.5158,
+     "prove_seconds": 0.9267,
+     "optimize_seconds": 0.1557,
+     "lower_seconds": 2.0238
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 23.5642,
+     "compile_seconds": 23.5306,
+     "link_seconds": 0.0336,
+     "total_seconds": 28.1698
+    }
+   },
+   "binary_bytes": 1498840
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 2.2624,
+    "cpu": 2.25,
+    "rss_kb": 112872,
+    "stages": {
+     "parse_seconds": 0.183,
+     "check_seconds": 0.6015,
+     "optimize_seconds": 0.0267,
+     "lower_seconds": 0.2197
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0833,
+     "total_seconds": 2.1327
+    }
+   },
+   "noop": {
+    "wall": 0.2941,
+    "cpu": 0.28,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.183,
+     "check_seconds": 0.6015,
+     "optimize_seconds": 0.0267,
+     "lower_seconds": 0.2197
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1787
+    }
+   },
+   "incremental": {
+    "wall": 2.2225,
+    "cpu": 2.21,
+    "rss_kb": 112920,
+    "stages": {
+     "parse_seconds": 0.182,
+     "check_seconds": 0.5934,
+     "optimize_seconds": 0.0261,
+     "lower_seconds": 0.2244
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0546,
+     "total_seconds": 2.0981
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 2,
+   "program": "tls-fixture",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 11.5744,
+    "cpu": 11.54,
+    "rss_kb": 166240,
+    "stages": {
+     "parse_seconds": 0.8922,
+     "check_seconds": 1.5578,
+     "prove_seconds": 0.9455,
+     "optimize_seconds": 0.1604,
+     "lower_seconds": 2.0134
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.6399,
+     "compile_seconds": 6.6092,
+     "link_seconds": 0.0307,
+     "total_seconds": 11.2916
+    }
+   },
+   "noop": {
+    "wall": 1.0649,
+    "cpu": 1.05,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.8922,
+     "check_seconds": 1.5578,
+     "prove_seconds": 0.9455,
+     "optimize_seconds": 0.1604,
+     "lower_seconds": 2.0134
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "529a5ea7a657d16b",
+     "total_seconds": 0.8833
+    }
+   },
+   "incremental": {
+    "wall": 11.5495,
+    "cpu": 11.52,
+    "rss_kb": 166436,
+    "stages": {
+     "parse_seconds": 0.8678,
+     "check_seconds": 1.5405,
+     "prove_seconds": 0.9348,
+     "optimize_seconds": 0.1542,
+     "lower_seconds": 1.9336
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "529a5ea7a657d16b",
+     "llvm_seconds": 6.7428,
+     "compile_seconds": 6.71,
+     "link_seconds": 0.0328,
+     "total_seconds": 11.2669
+    }
+   },
+   "binary_bytes": 719440
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Rust",
+   "cold": {
+    "wall": 14.4141,
+    "cpu": 22.43,
+    "rss_kb": 400752
+   },
+   "noop": {
+    "wall": 0.0499,
+    "cpu": 0.04,
+    "rss_kb": 37832
+   },
+   "incremental": {
+    "wall": 6.0755,
+    "cpu": 6.08,
+    "rss_kb": 270136
+   },
+   "binary_bytes": 1039952
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 1.4097,
+    "cpu": 1.4,
+    "rss_kb": 103144,
+    "stages": {
+     "parse_seconds": 0.1714,
+     "check_seconds": 0.217,
+     "prove_seconds": 0.1206,
+     "optimize_seconds": 0.0193,
+     "lower_seconds": 0.1098
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7495,
+     "compile_seconds": 0.7239,
+     "link_seconds": 0.0255,
+     "total_seconds": 1.2835
+    }
+   },
+   "noop": {
+    "wall": 0.2778,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1714,
+     "check_seconds": 0.217,
+     "prove_seconds": 0.1206,
+     "optimize_seconds": 0.0193,
+     "lower_seconds": 0.1098
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1695
+    }
+   },
+   "incremental": {
+    "wall": 1.3937,
+    "cpu": 1.38,
+    "rss_kb": 102048,
+    "stages": {
+     "parse_seconds": 0.1688,
+     "check_seconds": 0.2155,
+     "prove_seconds": 0.1206,
+     "optimize_seconds": 0.0185,
+     "lower_seconds": 0.1075
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 0.7442,
+     "compile_seconds": 0.7169,
+     "link_seconds": 0.0273,
+     "total_seconds": 1.2712
+    }
+   },
+   "binary_bytes": 66912
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 0.7135,
+    "cpu": 0.71,
+    "rss_kb": 88320,
+    "stages": {
+     "parse_seconds": 0.1548,
+     "check_seconds": 0.185,
+     "prove_seconds": 0.0941,
+     "optimize_seconds": 0.0141,
+     "lower_seconds": 0.0642
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.159,
+     "compile_seconds": 0.1354,
+     "link_seconds": 0.0236,
+     "total_seconds": 0.5928
+    }
+   },
+   "noop": {
+    "wall": 0.2561,
+    "cpu": 0.25,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.1548,
+     "check_seconds": 0.185,
+     "prove_seconds": 0.0941,
+     "optimize_seconds": 0.0141,
+     "lower_seconds": 0.0642
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "9dfc8984c62c4fb2",
+     "total_seconds": 0.1521
+    }
+   },
+   "incremental": {
+    "wall": 0.6909,
+    "cpu": 0.68,
+    "rss_kb": 88448,
+    "stages": {
+     "parse_seconds": 0.1521,
+     "check_seconds": 0.1826,
+     "prove_seconds": 0.0936,
+     "optimize_seconds": 0.0131,
+     "lower_seconds": 0.0565
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "9dfc8984c62c4fb2",
+     "llvm_seconds": 0.158,
+     "compile_seconds": 0.1346,
+     "link_seconds": 0.0234,
+     "total_seconds": 0.5779
+    }
+   },
+   "binary_bytes": 10208
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 8.4896,
+    "cpu": 15.75,
+    "rss_kb": 359420
+   },
+   "noop": {
+    "wall": 0.049,
+    "cpu": 0.03,
+    "rss_kb": 37828
+   },
+   "incremental": {
+    "wall": 0.2911,
+    "cpu": 0.34,
+    "rss_kb": 137912
+   },
+   "binary_bytes": 20197112
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 1.7369,
+    "cpu": 1.72,
+    "rss_kb": 114124,
+    "stages": {
+     "parse_seconds": 0.1726,
+     "check_seconds": 0.2232,
+     "prove_seconds": 0.1249,
+     "optimize_seconds": 0.019,
+     "lower_seconds": 0.116
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0645,
+     "compile_seconds": 1.0392,
+     "link_seconds": 0.0254,
+     "total_seconds": 1.6121
+    }
+   },
+   "noop": {
+    "wall": 0.2869,
+    "cpu": 0.28,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1726,
+     "check_seconds": 0.2232,
+     "prove_seconds": 0.1249,
+     "optimize_seconds": 0.019,
+     "lower_seconds": 0.116
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "2cd184268a4a6cfe",
+     "total_seconds": 0.1729
+    }
+   },
+   "incremental": {
+    "wall": 1.7321,
+    "cpu": 1.72,
+    "rss_kb": 114000,
+    "stages": {
+     "parse_seconds": 0.1699,
+     "check_seconds": 0.2157,
+     "prove_seconds": 0.1206,
+     "optimize_seconds": 0.0183,
+     "lower_seconds": 0.1138
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "2cd184268a4a6cfe",
+     "llvm_seconds": 1.0745,
+     "compile_seconds": 1.0487,
+     "link_seconds": 0.0258,
+     "total_seconds": 1.6093
+    }
+   },
+   "binary_bytes": 78528
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 3.5167,
+    "cpu": 3.5,
+    "rss_kb": 108024,
+    "stages": {
+     "parse_seconds": 0.4571,
+     "check_seconds": 0.9342,
+     "prove_seconds": 0.6273,
+     "optimize_seconds": 0.0437,
+     "lower_seconds": 0.7132
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1521,
+     "compile_seconds": 1.127,
+     "link_seconds": 0.0251,
+     "total_seconds": 3.3182
+    }
+   },
+   "noop": {
+    "wall": 0.574,
+    "cpu": 0.56,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.4571,
+     "check_seconds": 0.9342,
+     "prove_seconds": 0.6273,
+     "optimize_seconds": 0.0437,
+     "lower_seconds": 0.7132
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4464
+    }
+   },
+   "incremental": {
+    "wall": 3.5356,
+    "cpu": 3.52,
+    "rss_kb": 106868,
+    "stages": {
+     "parse_seconds": 0.4677,
+     "check_seconds": 0.9152,
+     "prove_seconds": 0.617,
+     "optimize_seconds": 0.0439,
+     "lower_seconds": 0.7253
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 1.1643,
+     "compile_seconds": 1.1394,
+     "link_seconds": 0.0249,
+     "total_seconds": 3.3343
+    }
+   },
+   "binary_bytes": 101576
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Rust",
+   "cold": {
+    "wall": 5.2815,
+    "cpu": 5.97,
+    "rss_kb": 293912
+   },
+   "noop": {
+    "wall": 0.0437,
+    "cpu": 0.03,
+    "rss_kb": 36552
+   },
+   "incremental": {
+    "wall": 2.9018,
+    "cpu": 2.89,
+    "rss_kb": 208112
+   },
+   "binary_bytes": 546424
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 1.2525,
+    "cpu": 1.24,
+    "rss_kb": 89644,
+    "stages": {
+     "parse_seconds": 0.1581,
+     "check_seconds": 0.4939,
+     "optimize_seconds": 0.014,
+     "lower_seconds": 0.1401
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3154,
+     "total_seconds": 1.139
+    }
+   },
+   "noop": {
+    "wall": 0.2756,
+    "cpu": 0.26,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.1581,
+     "check_seconds": 0.4939,
+     "optimize_seconds": 0.014,
+     "lower_seconds": 0.1401
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1643
+    }
+   },
+   "incremental": {
+    "wall": 1.2768,
+    "cpu": 1.26,
+    "rss_kb": 89528,
+    "stages": {
+     "parse_seconds": 0.165,
+     "check_seconds": 0.5197,
+     "optimize_seconds": 0.0145,
+     "lower_seconds": 0.1376
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.3099,
+     "total_seconds": 1.1643
+    }
+   },
+   "binary_bytes": 24224
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.1882,
+    "cpu": 4.44,
+    "rss_kb": 250660
+   },
+   "noop": {
+    "wall": 0.5951,
+    "cpu": 0.85,
+    "rss_kb": 137876
+   },
+   "incremental": {
+    "wall": 0.5877,
+    "cpu": 0.85,
+    "rss_kb": 137968
+   },
+   "binary_bytes": 17461922
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 53.4743,
+    "cpu": 53.42,
+    "rss_kb": 488176,
+    "stages": {
+     "parse_seconds": 1.049,
+     "check_seconds": 2.6615,
+     "optimize_seconds": 0.4234,
+     "lower_seconds": 4.3199
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 44.7291,
+     "total_seconds": 53.219
+    }
+   },
+   "noop": {
+    "wall": 1.2367,
+    "cpu": 1.23,
+    "rss_kb": 70312,
+    "stages": {
+     "parse_seconds": 1.049,
+     "check_seconds": 2.6615,
+     "optimize_seconds": 0.4234,
+     "lower_seconds": 4.3199
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0638
+    }
+   },
+   "incremental": {
+    "wall": 53.528,
+    "cpu": 53.47,
+    "rss_kb": 488044,
+    "stages": {
+     "parse_seconds": 1.0789,
+     "check_seconds": 2.7206,
+     "optimize_seconds": 0.4249,
+     "lower_seconds": 4.2861
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 44.7119,
+     "total_seconds": 53.2582
+    }
+   },
+   "binary_bytes": 2199888
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Rust",
+   "cold": {
+    "wall": 1.9295,
+    "cpu": 1.92,
+    "rss_kb": 187756
+   },
+   "noop": {
+    "wall": 0.0404,
+    "cpu": 0.03,
+    "rss_kb": 36424
+   },
+   "incremental": {
+    "wall": 1.9161,
+    "cpu": 1.91,
+    "rss_kb": 186056
+   },
+   "binary_bytes": 361712
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Neo after",
+   "cold": {
+    "wall": 5.2719,
+    "cpu": 5.25,
+    "rss_kb": 139964,
+    "stages": {
+     "parse_seconds": 0.4411,
+     "check_seconds": 0.9047,
+     "prove_seconds": 0.6117,
+     "optimize_seconds": 0.0429,
+     "lower_seconds": 0.8364
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8156,
+     "compile_seconds": 2.7898,
+     "link_seconds": 0.0258,
+     "total_seconds": 5.0594
+    }
+   },
+   "noop": {
+    "wall": 0.5839,
+    "cpu": 0.57,
+    "rss_kb": 68992,
+    "stages": {
+     "parse_seconds": 0.4411,
+     "check_seconds": 0.9047,
+     "prove_seconds": 0.6117,
+     "optimize_seconds": 0.0429,
+     "lower_seconds": 0.8364
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4498
+    }
+   },
+   "incremental": {
+    "wall": 5.2786,
+    "cpu": 5.26,
+    "rss_kb": 139776,
+    "stages": {
+     "parse_seconds": 0.4435,
+     "check_seconds": 0.9198,
+     "prove_seconds": 0.6144,
+     "optimize_seconds": 0.0443,
+     "lower_seconds": 0.7665
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8876,
+     "compile_seconds": 2.8631,
+     "link_seconds": 0.0245,
+     "total_seconds": 5.0794
+    }
+   },
+   "binary_bytes": 112664
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 5.3813,
+    "cpu": 5.86,
+    "rss_kb": 273948
+   },
+   "noop": {
+    "wall": 1.8254,
+    "cpu": 2.32,
+    "rss_kb": 185416
+   },
+   "incremental": {
+    "wall": 1.8354,
+    "cpu": 2.36,
+    "rss_kb": 185588
+   },
+   "binary_bytes": 32950797
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Go",
+   "cold": {
+    "wall": 5.1359,
+    "cpu": 9.07,
+    "rss_kb": 246264
+   },
+   "noop": {
+    "wall": 0.0495,
+    "cpu": 0.06,
+    "rss_kb": 19652
+   },
+   "incremental": {
+    "wall": 0.1633,
+    "cpu": 0.2,
+    "rss_kb": 63872
+   },
+   "binary_bytes": 2774090
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 16.4534,
+    "cpu": 16.42,
+    "rss_kb": 240212,
+    "stages": {
+     "parse_seconds": 1.054,
+     "check_seconds": 1.6499,
+     "prove_seconds": 1.0433,
+     "optimize_seconds": 0.1702,
+     "lower_seconds": 2.2757
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 10.9373,
+     "compile_seconds": 10.9033,
+     "link_seconds": 0.034,
+     "total_seconds": 16.1213
+    }
+   },
+   "noop": {
+    "wall": 1.2125,
+    "cpu": 1.19,
+    "rss_kb": 70172,
+    "stages": {
+     "parse_seconds": 1.054,
+     "check_seconds": 1.6499,
+     "prove_seconds": 1.0433,
+     "optimize_seconds": 0.1702,
+     "lower_seconds": 2.2757
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "3c1a2669991d5722",
+     "total_seconds": 1.0385
+    }
+   },
+   "incremental": {
+    "wall": 16.5429,
+    "cpu": 16.51,
+    "rss_kb": 240296,
+    "stages": {
+     "parse_seconds": 1.0284,
+     "check_seconds": 1.6249,
+     "prove_seconds": 1.0292,
+     "optimize_seconds": 0.1641,
+     "lower_seconds": 2.207
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "3c1a2669991d5722",
+     "llvm_seconds": 11.1509,
+     "compile_seconds": 11.1166,
+     "link_seconds": 0.0344,
+     "total_seconds": 16.2077
+    }
+   },
+   "binary_bytes": 1124704
+  },
+  {
+   "round": 2,
+   "program": "hello",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 0.1481,
+    "cpu": 0.15,
+    "rss_kb": 96648
+   },
+   "noop": {
+    "wall": 0.0421,
+    "cpu": 0.03,
+    "rss_kb": 36412
+   },
+   "incremental": {
+    "wall": 0.1115,
+    "cpu": 0.11,
+    "rss_kb": 76160
+   },
+   "binary_bytes": 4545688
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Zig",
+   "cold": {
+    "wall": 17.1849,
+    "cpu": 17.18,
+    "rss_kb": 363172
+   },
+   "noop": {
+    "wall": 13.5184,
+    "cpu": 13.51,
+    "rss_kb": 355808
+   },
+   "incremental": {
+    "wall": 13.4298,
+    "cpu": 13.43,
+    "rss_kb": 354972
+   },
+   "binary_bytes": 4268824
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.2374,
+    "cpu": 4.44,
+    "rss_kb": 250768
+   },
+   "noop": {
+    "wall": 0.6286,
+    "cpu": 0.92,
+    "rss_kb": 138260
+   },
+   "incremental": {
+    "wall": 0.636,
+    "cpu": 0.89,
+    "rss_kb": 138092
+   },
+   "binary_bytes": 17497741
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Neo after dev",
+   "cold": {
+    "wall": 0.8076,
+    "cpu": 0.8,
+    "rss_kb": 89784,
+    "stages": {
+     "parse_seconds": 0.1572,
+     "check_seconds": 0.1812,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0638
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.2555,
+     "compile_seconds": 0.2296,
+     "link_seconds": 0.0259,
+     "total_seconds": 0.6901
+    }
+   },
+   "noop": {
+    "wall": 0.2693,
+    "cpu": 0.26,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.1572,
+     "check_seconds": 0.1812,
+     "prove_seconds": 0.0993,
+     "optimize_seconds": 0.0138,
+     "lower_seconds": 0.0638
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "d30016f763eb8a72",
+     "total_seconds": 0.1564
+    }
+   },
+   "incremental": {
+    "wall": 0.8201,
+    "cpu": 0.81,
+    "rss_kb": 89800,
+    "stages": {
+     "parse_seconds": 0.1551,
+     "check_seconds": 0.181,
+     "prove_seconds": 0.0991,
+     "optimize_seconds": 0.0136,
+     "lower_seconds": 0.0627
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "d30016f763eb8a72",
+     "llvm_seconds": 0.2738,
+     "compile_seconds": 0.249,
+     "link_seconds": 0.0248,
+     "total_seconds": 0.7025
+    }
+   },
+   "binary_bytes": 24184
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.4483,
+    "cpu": 18.44,
+    "rss_kb": 382652
+   },
+   "noop": {
+    "wall": 14.7546,
+    "cpu": 14.75,
+    "rss_kb": 374632
+   },
+   "incremental": {
+    "wall": 14.8634,
+    "cpu": 14.87,
+    "rss_kb": 374920
+   },
+   "binary_bytes": 4605256
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Zig Debug",
+   "cold": {
+    "wall": 4.2047,
+    "cpu": 4.44,
+    "rss_kb": 250828
+   },
+   "noop": {
+    "wall": 0.5672,
+    "cpu": 0.82,
+    "rss_kb": 133128
+   },
+   "incremental": {
+    "wall": 0.5723,
+    "cpu": 0.82,
+    "rss_kb": 132952
+   },
+   "binary_bytes": 12584546
+  },
+  {
+   "round": 2,
+   "program": "nbody",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.3787,
+    "cpu": 3.15,
+    "rss_kb": 264216
+   },
+   "noop": {
+    "wall": 0.0435,
+    "cpu": 0.03,
+    "rss_kb": 36288
+   },
+   "incremental": {
+    "wall": 0.1628,
+    "cpu": 0.17,
+    "rss_kb": 99572
+   },
+   "binary_bytes": 8515288
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 18.8558,
+    "cpu": 35.3,
+    "rss_kb": 388988
+   },
+   "noop": {
+    "wall": 0.0795,
+    "cpu": 0.06,
+    "rss_kb": 45504
+   },
+   "incremental": {
+    "wall": 0.3917,
+    "cpu": 0.5,
+    "rss_kb": 268740
+   },
+   "binary_bytes": 51527288
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Rust debug",
+   "cold": {
+    "wall": 2.2865,
+    "cpu": 3.39,
+    "rss_kb": 273624
+   },
+   "noop": {
+    "wall": 0.0421,
+    "cpu": 0.03,
+    "rss_kb": 36292
+   },
+   "incremental": {
+    "wall": 0.1436,
+    "cpu": 0.15,
+    "rss_kb": 97316
+   },
+   "binary_bytes": 7100800
+  },
+  {
+   "round": 2,
+   "program": "http",
+   "impl": "Zig",
+   "cold": {
+    "wall": 18.665,
+    "cpu": 18.66,
+    "rss_kb": 381816
+   },
+   "noop": {
+    "wall": 15.2833,
+    "cpu": 15.29,
+    "rss_kb": 374988
+   },
+   "incremental": {
+    "wall": 15.1637,
+    "cpu": 15.17,
+    "rss_kb": 375180
+   },
+   "binary_bytes": 4578784
+  },
+  {
+   "round": 2,
+   "program": "https-client",
+   "impl": "Go",
+   "cold": {
+    "wall": 11.5393,
+    "cpu": 21.41,
+    "rss_kb": 244160
+   },
+   "noop": {
+    "wall": 0.0769,
+    "cpu": 0.13,
+    "rss_kb": 25088
+   },
+   "incremental": {
+    "wall": 0.3362,
+    "cpu": 0.46,
+    "rss_kb": 132352
+   },
+   "binary_bytes": 8139234
+  },
+  {
+   "round": 2,
+   "program": "json",
+   "impl": "Neo before",
+   "cold": {
+    "wall": 6.7276,
+    "cpu": 6.71,
+    "rss_kb": 138728,
+    "stages": {
+     "parse_seconds": 0.4616,
+     "check_seconds": 1.9193,
+     "optimize_seconds": 0.0494,
+     "lower_seconds": 1.2253
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.8817,
+     "total_seconds": 6.5561
+    }
+   },
+   "noop": {
+    "wall": 0.5897,
+    "cpu": 0.58,
+    "rss_kb": 68864,
+    "stages": {
+     "parse_seconds": 0.4616,
+     "check_seconds": 1.9193,
+     "optimize_seconds": 0.0494,
+     "lower_seconds": 1.2253
+    },
+    "build": {
+     "cache": "hit",
+     "graph": "76a948d851deeb7e",
+     "total_seconds": 0.4562
+    }
+   },
+   "incremental": {
+    "wall": 6.64,
+    "cpu": 6.63,
+    "rss_kb": 138752,
+    "stages": {
+     "parse_seconds": 0.4672,
+     "check_seconds": 1.8059,
+     "optimize_seconds": 0.0459,
+     "lower_seconds": 1.2189
+    },
+    "build": {
+     "cache": "miss",
+     "graph": "76a948d851deeb7e",
+     "llvm_seconds": 2.9117,
+     "total_seconds": 6.4683
+    }
+   },
+   "binary_bytes": 112664
+  }
+ ]
+}

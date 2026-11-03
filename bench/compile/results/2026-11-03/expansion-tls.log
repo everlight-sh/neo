@@ -1,0 +1,21 @@
+cap 262144 cut 3 max 201291 ['ax_tls12_signature_valid__seq', 'ax_x509_anchored__seq', 'ax_x509_verify__seq']
+cap 131072 cut 8 max 125511 ['ax_ecdsa_p256_verify_sha384__seq', 'ax_hkdf_label__seq', 'ax_tls12_seal__seq', 'ax_tls12_signature_valid__seq', 'ax_tls_seal__seq', 'ax_x509_anchored__seq', 'ax_x509_tls13_signature_valid__seq', 'ax_x509_verify__seq']
+cap 65536 cut 15 max 63732 ['ax_ecdsa_p256_verify_sha256__seq', 'ax_ecdsa_p256_verify_sha384__seq', 'ax_ecdsa_p256_verify_sha512__seq', 'ax_ecw_double__seq', 'ax_hkdf_label__seq', 'ax_p256_ecdh__seq', 'ax_tls12_prf__seq', 'ax_tls12_signature_valid__seq']
+language_tls O3 r1 32.24 432836 text 1619709
+language_tls-c262144 O3 r1 21.36 302948 text 1403475
+language_tls-c131072 O3 r1 17.77 275572 text 1254614
+language_tls-c65536 O3 r1 14.43 241968 text 1095140
+language_tls O0 r1 13.28 1013000 text 15338657
+language_tls O1 r1 28.81 458204 text 1622457
+language_tls O2 r1 30.93 422952 text 1532587
+language_tls O3 r2 32.93 434468 text 1619709
+language_tls-c262144 O3 r2 21.58 302944 text 1403475
+language_tls-c131072 O3 r2 17.82 275576 text 1254614
+language_tls-c65536 O3 r2 14.32 241504 text 1095140
+warning: overriding the module target triple with x86_64-unknown-linux-gnu [-Woverride-module]
+1 warning generated.
+language_tls link 0.03 69376
+warning: overriding the module target triple with x86_64-unknown-linux-gnu [-Woverride-module]
+1 warning generated.
+EXP-DONE
+
