@@ -1,0 +1,12 @@
+mandel 37 23 77 main=14573 dev=14573 dev4=14573
+stencil 73 7 main=31576048 dev=31576048 dev4=31576048
+stencil 1000000 20 main=499998359740 dev=499998359740 dev4=499998359740
+nbody 32 2 main=-9.2358591116616112e-1 dev=-9.2358591116616112e-1 dev4=-9.2358591116616112e-1
+mandel-1200-1200-300   w=1  dev    124.2  main    210.4  Rust    238.4  Go    228.8  ok
+stencil-1000000-20     w=1  dev     54.0  main     56.0  Rust     69.2  Go     85.2  ok
+nbody-1024-3           w=1  dev     21.7  main     21.5  Rust     24.2  Go     24.6  ok
+nbody-4096-10          w=1  dev    771.4  main    772.3  Rust    889.4  Go    870.9  ok
+mandel-1200-1200-300   w=4  dev     33.9  main     56.3  Rust     65.0  Go     61.2  ok
+stencil-1000000-20     w=4  dev     18.7  main     19.7  Rust     23.6  Go     28.9  ok
+nbody-1024-3           w=4  dev      8.2  main      7.9  Rust      9.5  Go     10.8  ok
+nbody-4096-10          w=4  dev    208.1  main    208.9  Rust    235.0  Go    234.7  ok

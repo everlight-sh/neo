@@ -1,0 +1,2 @@
+cd /root/dev && sh /root/build.sh /root/dev /root/bin-dev1 >/dev/null && for p in "mandel 37 23 77" "stencil 73 7" "stencil 1000000 20" "nbody 32 2"; do set -- $p; echo "$p main=$(NEO_THREADS=1 /root/bin-main/neo-$1 $2 $3 $4) dev=$(NEO_THREADS=1 /root/bin-dev1/neo-$1 $2 $3 $4) dev4=$(NEO_THREADS=4 /root/bin-dev1/neo-$1 $2 $3 $4)"; done; python3 bench/core/compute_compare.py /root/results/dev1.json 7 --variant dev=/root/bin-dev1 --variant main=/root/bin-main --rust /root/comp/rust --go /root/comp/go
+

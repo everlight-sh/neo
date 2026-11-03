@@ -1,0 +1,19 @@
+195:    if target.startswith(('x86_64','aarch64')):cmd += ['-falign-loops=32']
+mandel-1200-1200-300   w=1  final    124.5  align32    124.7  ok
+stencil-1000000-20     w=1  final     54.5  align32     54.0  ok
+nbody-1024-3           w=1  final     21.5  align32     21.0  ok
+nbody-4096-10          w=1  final    770.8  align32    758.6  ok
+stencil-50000000-20    w=1  final   2449.5  align32   2457.8  ok
+sieve-100000000        w=1  final    717.8  align32    722.7  ok
+mandel-1200-1200-300   w=4  final     33.3  align32     33.7  ok
+stencil-1000000-20     w=4  final     17.7  align32     17.6  ok
+nbody-1024-3           w=4  final      7.7  align32      7.8  ok
+nbody-4096-10          w=4  final    197.5  align32    194.1  ok
+stencil-50000000-20    w=4  final    613.6  align32    614.6  ok
+sieve-100000000        w=4  final    698.0  align32    695.8  ok
+## JSON doc x1M, CPU 0
+final          wall    370.5  (min    369.7 max    371.5)  user   368.7 sys    1.0  out ['513500000']
+align32        wall    372.0  (min    370.6 max    375.9)  user   370.1 sys    1.0  out ['513500000']
+## orders 1000 x1000, CPU 0
+final          wall    396.3  (min    394.9 max    397.8)  user   393.6 sys    1.0  out ['34327000']
+align32        wall    399.6  (min    398.7 max    400.1)  user   397.0 sys    2.0  out ['34327000']
