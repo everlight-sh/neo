@@ -1,0 +1,14 @@
+; Strided stores that are never redundant: each round writes every element
+; once (step passes at offsets 0..step-1) with the opposite of its value.
+; Measures the cost of the strided-store lowering when no store can be skipped.
+
+fn put (m : Arr bool n, step : i64{step >= 1}, start : i64{start >= 0}, v : bool) -> Arr bool n
+  = loop (m2 = m, j : i64{j >= 0} = start) while j < n next (set(m2, j, v), j + step) yield m2
+
+fn sweep (m : Arr bool n, step : i64{step >= 1}, v : bool) -> Arr bool n
+  = loop (m2 = m, o : i64{o >= 0} = 0) while o < step next (put(m2, step, o, v), o + 1) yield m2
+
+fn main (n : i64{n >= 1}, step : i64{step >= 1}, rounds : i64{rounds >= 0}) -> i64
+  = let marks = loop (m = arr(k in 0..n) true, r = 0) while r < rounds
+                  next (sweep(m, step, r % 2 != 0), r + 1) yield m in
+    sum(k in 0..n) if marks[k] then 1 else 0

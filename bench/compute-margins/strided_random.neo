@@ -1,0 +1,17 @@
+; Strided stores of which about half are redundant, in a pseudo-random
+; pattern: each round refills the array from a multiplicative hash of k and
+; the round, then sets every element to true once (step passes at offsets
+; 0..step-1). This is the worst case for skipping redundant stores, because
+; the skip test cannot be predicted. Prints n * rounds.
+
+fn put (m : Arr bool n, step : i64{step >= 1}, start : i64{start >= 0}, v : bool) -> Arr bool n
+  = loop (m2 = m, j : i64{j >= 0} = start) while j < n next (set(m2, j, v), j + step) yield m2
+
+fn sweep (m : Arr bool n, step : i64{step >= 1}, v : bool) -> Arr bool n
+  = loop (m2 = m, o : i64{o >= 0} = 0) while o < step next (put(m2, step, o, v), o + 1) yield m2
+
+fn main (n : i64{n >= 1 && n <= 1000000000}, step : i64{step >= 1}, rounds : i64{rounds >= 0 && rounds <= 1000}) -> i64
+  = loop (acc = 0, r = 0) while r < rounds
+      next (let m = sweep(arr(k in 0..n) ((k + r) * 2654435761) / 65536 % 2 == 0, step, true) in
+            acc + sum(k in 0..n) if m[k] then 1 else 0, r + 1)
+      yield acc
