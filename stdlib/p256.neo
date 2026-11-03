@@ -220,7 +220,7 @@ private fn p256_reduce(a:P4,modulus:P4) -> P4 = p4_final(a,0,modulus)
 private fn p256_words(bytes:Arr u8 n) -> P4
   = check n==32 in P4 { l0=byte_swap64(byte_read_le(bytes,24,8)),l1=byte_swap64(byte_read_le(bytes,16,8)),
       l2=byte_swap64(byte_read_le(bytes,8,8)),l3=byte_swap64(byte_read_le(bytes,0,8)) }
-private fn p4_bytes(a:P4) -> Arr u8 _
+private fn p256_bytes(a:P4) -> Arr u8 _
   = let out=arr(i in 0..32) u8(0) in
     let out=byte_write_le(out,24,byte_swap64(a.l0),8) in let out=byte_write_le(out,16,byte_swap64(a.l1),8) in
     let out=byte_write_le(out,8,byte_swap64(a.l2),8) in byte_write_le(out,0,byte_swap64(a.l3),8)
@@ -326,7 +326,7 @@ private fn p256_point_valid(bytes:Arr u8 n,mod:P256Mod) -> bool
     let x3=p256_multiply(p256_square(point.x,mod),point.x,mod) in let triple=p256_add(p256_add(point.x,point.x,p),point.x,p) in
     p4_equal(p256_square(point.y,mod),p256_add(p256_sub(x3,triple,p),p4_curve_b(),p))
 private fn p256_encode(point:P256Point,mod:P256Mod) -> Arr u8 _
-  = let normal=p256_affine(point,mod) in concat("\x04",p4_bytes(p256_normal(normal.x,mod)),p4_bytes(p256_normal(normal.y,mod)))
+  = let normal=p256_affine(point,mod) in concat("\x04",p256_bytes(p256_normal(normal.x,mod)),p256_bytes(p256_normal(normal.y,mod)))
 fn p256_public(secret:Arr u8 n) -> BytesResult
   = if n!=32 then bytes_error(22,"P-256 private key requires 32 bytes",0) else
     let scalar=p256_words(secret) in if !p256_scalar_valid(scalar,p256_mod(true)) then bytes_error(22,"invalid P-256 private scalar",0) else
@@ -337,7 +337,7 @@ fn p256_ecdh(secret:Arr u8 n,public:Arr u8 m) -> BytesResult
     let scalar=p256_words(secret) in let mod=p256_mod(false) in
     if !p256_scalar_valid(scalar,p256_mod(true)) || !p256_point_valid(public,mod) then bytes_error(22,"invalid P-256 ECDH key",0) else
     let shared=p256_scalar(p256_point_decode(public,mod),scalar,mod) in
-    if p256_is_zero(shared.z)==1 then bytes_error(74,"P-256 ECDH infinity",0) else bytes_ok(p4_bytes(p256_normal(p256_affine(shared,mod).x,mod)))
+    if p256_is_zero(shared.z)==1 then bytes_error(74,"P-256 ECDH infinity",0) else bytes_ok(p256_bytes(p256_normal(p256_affine(shared,mod).x,mod)))
 
 ; s^-1 mod n for a public s in [1,n-1] by the binary extended Euclidean
 ; algorithm, which branches on the value (verification only). Invariants:
@@ -476,12 +476,12 @@ private fn p256_sign_candidate(secret:P4,digest:P4,nonce:Arr u8 n,order:P256Mod,
     let mixed=p256_add(p256_montgomery(digest,order),p256_multiply(p256_montgomery(r,order),p256_montgomery(secret,order),order),order.modulus) in
     let s=p256_normal(p256_multiply(p256_inverse(p256_montgomery(scalar,order),order),mixed,order),order) in
     if p256_is_zero(r)==1 || p256_is_zero(s)==1 then "" else
-    let integers=concat(p256_der_encode(p4_bytes(r)),p256_der_encode(p4_bytes(s))) in concat("\x30",arr(i in 0..1) u8(len(integers)),integers)
+    let integers=concat(p256_der_encode(p256_bytes(r)),p256_der_encode(p256_bytes(s))) in concat("\x30",arr(i in 0..1) u8(len(integers)),integers)
 fn ecdsa_p256_sign_sha256(secret:Arr u8 n,message:Arr u8 m) -> BytesResult
   = if n!=32 then bytes_error(22,"P-256 private key requires 32 bytes",0) else
     let scalar=p256_words(secret) in let order=p256_mod(true) in
     if !p256_scalar_valid(scalar,order) then bytes_error(22,"invalid P-256 private scalar",0) else
-    let digest=p256_reduce(p256_words(sha256(message)),order.modulus) in let context=concat(secret,p4_bytes(digest)) in
+    let digest=p256_reduce(p256_words(sha256(message)),order.modulus) in let context=concat(secret,p256_bytes(digest)) in
     let zeros=arr(i in 0..32) u8(0) in let ones=arr(i in 0..32) u8(1) in
     let key=hmac_sha256(zeros,concat(ones,"\x00",context)) in let value=hmac_sha256(key,ones) in
     let key=hmac_sha256(key,concat(value,"\x01",context)) in let value=hmac_sha256(key,value) in let field=p256_mod(false) in
