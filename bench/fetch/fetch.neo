@@ -1,7 +1,9 @@
 ; GET http(s)://127.0.0.1:PORT/PATH COUNT times: fetch PORT PATH COUNT SIZE KEEP [CA.der]
 ; KEEP 0 opens a connection per request: plain HTTP through http_request, the
 ; one-call client, and HTTPS through a new HttpClient each time. KEEP 1 sends
-; every request through one keep-alive HttpClient. With a root certificate the
+; every request through one keep-alive HttpClient. KEEP 2 opens a connection per
+; request from one HttpClient, closed with http_client_disconnect, so HTTPS
+; connections after the first resume the TLS session. With a root certificate the
 ; requests go over TLS to "localhost". Prints the total nanoseconds and how
 ; many responses were 200 with a body of SIZE bytes, then each request's
 ; nanoseconds.
@@ -34,6 +36,15 @@ effect(fs,net,time,process) fn kept(port:i64, path:Arr u8 n, roots:Arr Certifica
     let done=loop(state=Kept { run=run_empty(), client=origin(port,roots,tls) },i=0) while i<count next(kept_step(arena,state,path,size),i+1) yield state in
     let closed=http_client_close(done.client) in done.run
 
+effect(fs,net,time,process) fn resumed_step(arena:Arena, move kept:Kept, path:Arr u8 n, size:i64) -> Kept
+  = let before=monotonic_ns() in let sent=http_send(arena,kept.client,"GET",path,"",10000,size) in
+    let client=http_client_disconnect(sent.client) in let after=monotonic_ns() in
+    Kept { run=run_add(kept.run,fine(sent.response,size),after.value-before.value), client=client }
+effect(fs,net,time,process) fn resumed(port:i64, path:Arr u8 n, roots:Arr Certificate m, tls:bool, size:i64, count:i64) -> Run
+  = using arena=new_arena(8) in
+    let done=loop(state=Kept { run=run_empty(), client=origin(port,roots,tls) },i=0) while i<count next(resumed_step(arena,state,path,size),i+1) yield state in
+    let closed=http_client_close(done.client) in done.run
+
 fn times_text(borrow times:Arr i64 _) -> Arr u8 _
   = loop(out="",i:i64{i>=0}=0) while i<len(times) next(concat(out,if i>0 then " " else "",int_text(times[i])),i+1) yield out
 
@@ -44,6 +55,7 @@ effect(net,time,process,fs,env) fn main() -> unit
     let roots=if ca.present then let der=fs_read(ca.value) in check der.ok in arr(i in 0..1) x509_parse(der.value) else arr(i in 0..0) x509_parse("") in
     let start=monotonic_ns() in
     let run=if str_equal(keep.value,"1") then kept(port.value,path.value,roots,ca.present,size.value,count.value)
+      else if str_equal(keep.value,"2") then resumed(port.value,path.value,roots,ca.present,size.value,count.value)
       else each(port.value,path.value,roots,ca.present,size.value,count.value) in
     let stop=monotonic_ns() in
     let shown=print_out(concat(int_text(stop.value-start.value)," ",int_text(run.good),"\n",times_text(run.times),"\n")) in noop()

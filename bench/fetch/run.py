@@ -15,8 +15,11 @@ cost of waking that CPU twice per request, which varies a lot.
 Each client makes COUNT sequential requests per round, on a new connection
 each time or over one kept-alive connection. Neo's new-connection plain HTTP
 client is http_request, the one-call API; its other modes use HttpClient from
-std:https_client. --clients keeps the clients whose names contain one of the
-given texts. Every response
+std:https_client. "Neo, resumed" (HTTPS only) opens a new connection per request
+from one HttpClient, so every TLS handshake after the first resumes the session
+from a ticket, as the Rust client's does; "Neo" makes a new client, and so a
+full handshake, for each request. --clients keeps the clients whose names
+contain one of the given texts. Every response
 must be a 200 with the whole body, and the server's connection count shows
 whether a client reused its connection. A last table times whole processes
 that make one request each: start, connect, read the response, exit. Results
@@ -74,27 +77,30 @@ def build(out):
     (out / 'rust_client').chmod(0o755)
 
 
+NEW, KEEP, RESUME = 0, 1, 2  # a connection per request, keep-alive, a connection per request resuming TLS
+
+
 def clients(out):
-    """name -> (argv, keep-alive, root certificate file)"""
+    """name -> (argv, mode, root certificate file)"""
     neo, bun, go, rust = [str(out / 'fetch_neo')], ['bun', str(HERE / 'fetch.ts')], [str(out / 'go_client')], [str(out / 'rust_client')]
-    return {'Neo': (neo, False, 'ca.der'), 'Neo, keep-alive': (neo, True, 'ca.der'),
-            'Bun fetch': (bun, False, 'ca.pem'), 'Bun fetch, keep-alive': (bun, True, 'ca.pem'),
-            'Go net/http': (go, False, 'ca.pem'), 'Go net/http, keep-alive': (go, True, 'ca.pem'),
-            'Rust reqwest': (rust, False, 'ca.pem'), 'Rust reqwest, keep-alive': (rust, True, 'ca.pem')}
+    return {'Neo': (neo, NEW, 'ca.der'), 'Neo, keep-alive': (neo, KEEP, 'ca.der'), 'Neo, resumed': (neo, RESUME, 'ca.der'),
+            'Bun fetch': (bun, NEW, 'ca.pem'), 'Bun fetch, keep-alive': (bun, KEEP, 'ca.pem'),
+            'Go net/http': (go, NEW, 'ca.pem'), 'Go net/http, keep-alive': (go, KEEP, 'ca.pem'),
+            'Rust reqwest': (rust, NEW, 'ca.pem'), 'Rust reqwest, keep-alive': (rust, KEEP, 'ca.pem')}
 
 
-def command(argv, keep, port, path, count, size, ca):
-    return ['taskset', '-c', '0', *argv, str(port), path, str(count), str(size), '1' if keep else '0'] + ([str(ca)] if ca else [])
+def command(argv, mode, port, path, count, size, ca):
+    return ['taskset', '-c', '0', *argv, str(port), path, str(count), str(size), str(mode)] + ([str(ca)] if ca else [])
 
 
-def run(cmd, keep, plain_port, count, size):
+def run(cmd, mode, plain_port, count, size):
     """(nanoseconds for all requests, connections opened, each request's nanoseconds)"""
     before = conns(plain_port)
     lines = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, check=True).stdout.splitlines()
     opened = conns(plain_port) - before - 1
     ns, good = map(int, lines[0].split())
     if good != count: raise SystemExit(f'{" ".join(cmd)}: {good} of {count} responses were 200 with {size} bytes')
-    if not keep and opened != count: raise SystemExit(f'{" ".join(cmd)}: {opened} connections for {count} requests')
+    if mode != KEEP and opened != count: raise SystemExit(f'{" ".join(cmd)}: {opened} connections for {count} requests')
     return ns, opened, [int(word) for word in lines[1].split()]
 
 
@@ -127,12 +133,13 @@ def main():
         data = {'server_cpu': args.server_cpu, 'key': args.key, 'rounds': args.rounds, 'http': {}, 'https': {}, 'oneshot': {}}
         for scheme in schemes:
             for path, size, count in SIZES:
-                rows = {name: {'mean': [], 'times': []} for name in table}; opened = {}
+                here = {name: client for name, client in table.items() if client[1] != RESUME or scheme == 'https'}
+                rows = {name: {'mean': [], 'times': []} for name in here}; opened = {}
                 for r in range(args.rounds + 1):  # round 0 warms up
-                    for name, (argv, keep, ca) in table.items():
-                        cmd = command(argv, keep, tls_port if scheme == 'https' else port, path, count, size,
+                    for name, (argv, mode, ca) in here.items():
+                        cmd = command(argv, mode, tls_port if scheme == 'https' else port, path, count, size,
                                       out / ca if scheme == 'https' else None)
-                        ns, opened[name], times = run(cmd, keep, port, count, size)
+                        ns, opened[name], times = run(cmd, mode, port, count, size)
                         if r: rows[name]['mean'].append(ns / count); rows[name]['times'] += times
                 result = {}
                 for name, row in rows.items():
@@ -142,12 +149,12 @@ def main():
                                     'connections': opened[name]}
                 data[scheme][path] = {'bytes': size, 'requests': count, 'clients': result}
                 print(scheme, path, {name: round(c['p50_ns'] / 1000, 1) for name, c in result.items()}, flush=True)
-        for name, (argv, keep, ca) in table.items():
-            if keep: continue
+        for name, (argv, mode, ca) in table.items():
+            if mode != NEW: continue  # one request per process can neither keep nor resume a connection
             for scheme in schemes:
                 walls = []
                 for k in range(args.oneshot + 2):
-                    cmd = command(argv, keep, tls_port if scheme == 'https' else port, '/hello', 1, 13, out / ca if scheme == 'https' else None)
+                    cmd = command(argv, mode, tls_port if scheme == 'https' else port, '/hello', 1, 13, out / ca if scheme == 'https' else None)
                     start = time.perf_counter(); subprocess.run(cmd, capture_output=True, check=True)
                     if k >= 2: walls.append(time.perf_counter() - start)
                 data['oneshot'].setdefault(name, {})[scheme] = sorted(walls)
