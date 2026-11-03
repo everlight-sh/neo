@@ -85,6 +85,7 @@ class VecGen:
         self.gen = gen; self.fb = fb; self.fns = fns
         self.lanes = K if lanes is None else lanes
         self.mask = None
+        self.assumed = {}    # id(comparison) -> its value on every lane (interior_assumptions)
 
     def checked(self, operation, a, b, node):
         K = self.lanes
@@ -212,6 +213,8 @@ class VecGen:
             v2 = dict(venv); v2[e.name] = v
             return self.gen_vec(e.body, v2, senv)
         if isinstance(e, S.If):
+            fixed = static_condition(e.cond, self.assumed) if self.assumed else None
+            if fixed is not None: return self.gen_vec(e.then if fixed else e.els, venv, senv)
             c = self.gen_vec(e.cond, venv, senv)
             previous=self.mask
             self.mask=c if previous is None else fb.ins(f'and <{K} x i1> {previous}, {c}',f'<{K} x i1>').name
@@ -273,6 +276,122 @@ class _V:
 
 S_TOP = (-(1 << 63), (1 << 63)-1)
 
+def static_condition(c, assumed):
+    """The value of a boolean condition when the comparisons in `assumed`
+    have the recorded values, or None when it still depends on the lane."""
+    if id(c) in assumed: return assumed[id(c)]
+    if isinstance(c, S.BoolLit): return c.value
+    if isinstance(c, S.Un) and c.op == '!':
+        inner = static_condition(c.expr, assumed)
+        return None if inner is None else not inner
+    if isinstance(c, S.Bin) and c.op in ('&&', '||'):
+        a, b = static_condition(c.left, assumed), static_condition(c.right, assumed)
+        if c.op == '||': return True if True in (a, b) else False if a is False and b is False else None
+        return False if False in (a, b) else True if a is True and b is True else None
+    return None
+
+FLIP = {'<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==', '!=': '!='}
+
+def index_atom(c, var, bound, env):
+    """`i + c1 OP x` with x a constant or a captured i64 scalar plus a
+    constant, as (OP with the index on the left, scalar name or None,
+    constant k): the comparison is `i OP name + k`. Names rebound by an
+    enclosing `let` (bound) do not count."""
+    if not (isinstance(c, S.Bin) and c.op in FLIP and c.left.ty == S.I64): return None
+    def offset(x):
+        if isinstance(x, S.Var) and x.name == var and x.name not in bound: return 0
+        if isinstance(x, S.Bin) and x.op in ('+', '-') and isinstance(x.right, S.Num):
+            inner = offset(x.left)
+            return None if inner is None else inner + (x.right.value if x.op == '+' else -x.right.value)
+        if isinstance(x, S.Bin) and x.op == '+' and isinstance(x.left, S.Num):
+            inner = offset(x.right)
+            return None if inner is None else inner + x.left.value
+        return None
+    def invariant(x):
+        if isinstance(x, S.Num): return (None, x.value)
+        if isinstance(x, S.Var) and x.name != var and x.name not in bound and x.name in env \
+                and env[x.name].ty == 'i64' and x.ty == S.I64: return (x.name, 0)
+        if isinstance(x, S.Bin) and x.op in ('+', '-') and isinstance(x.right, S.Num):
+            inner = invariant(x.left)
+            return None if inner is None else (inner[0], inner[1] + (x.right.value if x.op == '+' else -x.right.value))
+        return None
+    for a, b, op in ((c.left, c.right, c.op), (c.right, c.left, FLIP[c.op])):
+        k, other = offset(a), invariant(b)
+        if k is not None and other is not None and abs(other[1] - k) < 1 << 62: return (op, other[0], other[1] - k)
+    return None
+
+def index_atoms(x, var, env, bound=frozenset(), ifs=None):
+    """Every index comparison (index_atom) in a comprehension body, as
+    (comparison, op, name, k). Call bodies are not followed; `ifs` collects
+    each `if` with the names rebound around it."""
+    found = []
+    def visit(x, bound):
+        atom = index_atom(x, var, bound, env)
+        if atom: found.append((x,) + atom)
+        if isinstance(x, S.If) and ifs is not None: ifs.append((x, bound))
+        if isinstance(x, (S.If, S.Bin, S.Un, S.Cast)):
+            for child in S.children(x): visit(child, bound)
+        elif isinstance(x, S.Let):
+            visit(x.value, bound); visit(x.body, bound | {x.name})
+    visit(x, bound)
+    return found
+
+def invariant_value(fb, env, name, k):
+    """name + k as (i64 value, i1 overflowed), or the constant k."""
+    if name is None: return fb.ins(f'add i64 0, {k}', 'i64'), None
+    value = fb.load('i64', env[name].ptr)
+    summed = fb.ins(f'call {{ i64, i1 }} @llvm.sadd.with.overflow.i64(i64 {value.name}, i64 {k})', '{ i64, i1 }')
+    return fb.ins(f'extractvalue {summed}, 0', 'i64'), fb.ins(f'extractvalue {summed}, 1', 'i1')
+
+def interior_assumptions(gen, fb, e, env, lower, upper):
+    """Boundary tests such as `i == 0 || i + 1 == n` are false on every lane
+    of the vector interior whenever each tested index lies outside
+    [lower, upper). Returns ({id(comparison): value}, guard): the loop
+    specialized for those values may run when `guard` holds at run time.
+    Only `==` / `!=` index comparisons count, and only in `if` conditions
+    they decide; the guard compares the actual values, so nothing depends on
+    what the checker knew about them."""
+    ifs = []
+    index_atoms(e.body, e.var, env, ifs=ifs)
+    atoms = {}
+    for node, bound in ifs:
+        tests = [a for a in index_atoms(node.cond, e.var, env, bound) if a[1] in ('==', '!=')]
+        if tests and static_condition(node.cond, {id(a[0]): a[1] == '!=' for a in tests}) is not None:
+            for a in tests: atoms[id(a[0])] = a
+    if not atoms: return {}, None
+    guard = None
+    for c, op, name, k in atoms.values():
+        target, wrapped = invariant_value(fb, env, name, k)
+        below = fb.ins(f'icmp slt i64 {target.name}, {lower.name}', 'i1')
+        above = fb.ins(f'icmp sge i64 {target.name}, {upper.name}', 'i1')
+        outside = fb.ins(f'or i1 {below.name}, {above.name}', 'i1')
+        if wrapped is not None: outside = fb.ins(f'and i1 {outside.name}, ' + fb.ins(f'xor i1 {wrapped.name}, true', 'i1').name, 'i1')
+        guard = outside if guard is None else fb.ins(f'and i1 {guard.name}, {outside.name}', 'i1')
+    return {id(c): op == '!=' for c, op, _, _ in atoms.values()}, guard
+
+def split_counted_loop(gen, fb, e, lo, hi, env, body_fn):
+    """A scalar comprehension loop whose body compares its index with one
+    loop-invariant bound (`k >= 2`, `if i < m then … else …`) runs as two
+    loops split at that bound, each compiled with the comparisons fixed, so a
+    body like `k >= 2` becomes two constant fills. Comparisons against
+    different bounds, or none, keep the single loop."""
+    atoms = [a for a in index_atoms(e.body, e.var, env) if a[1] not in ('==', '!=')]
+    # i < t and i <= t-1 split at t; i >= t and i > t-1 are true from t on.
+    splits = {(name, k + (1 if op in ('<=', '>') else 0)) for _, op, name, k in atoms}
+    if len(splits) != 1: return gen.counted_loop(lo, hi, e.var, env, body_fn)
+    (name, k), = splits
+    at, wrapped = invariant_value(fb, env, name, k)
+    if wrapped is not None:
+        # name + k beyond i64 lies above (k > 0) or below (k < 0) every index.
+        at = fb.ins(f'select i1 {wrapped.name}, i64 {(1 << 63) - 1 if k > 0 else -(1 << 63)}, i64 {at.name}', 'i64')
+    at = fb.ins(f'select i1 ' + fb.ins(f'icmp slt i64 {at.name}, {lo.name}', 'i1').name + f', i64 {lo.name}, i64 {at.name}', 'i64')
+    at = fb.ins(f'select i1 ' + fb.ins(f'icmp sgt i64 {at.name}, {hi.name}', 'i1').name + f', i64 {hi.name}, i64 {at.name}', 'i64')
+    saved = gen.assumed
+    for first, last, below in ((lo, at, True), (at, hi, False)):
+        gen.assumed = {**saved, **{id(c): (op in ('<', '<=')) == below for c, op, _, _ in atoms}}
+        gen.counted_loop(first, last, e.var, env, body_fn)
+    gen.assumed = saved
+
 def vector_array_loop(gen, fb, e, lo, hi, env, out, origin, reads):
     """Full contiguous vectors in the common safe interior; scalar edges/tail.
 
@@ -303,21 +422,32 @@ def vector_array_loop(gen, fb, e, lo, hi, env, out, origin, reads):
         gen.store_elem(out,index,e.ty,value)
     gen.counted_loop(lo,lower,e.var,env,scalar)
     ip=fb.alloca('i64');fb.store(lower,ip)
-    head,body,end=fb.label('varr_cond'),fb.label('varr_body'),fb.label('varr_end')
-    fb.br(head);fb.block(head)
-    i=fb.load('i64',ip)
-    remaining=fb.ins(f'sub i64 {upper.name}, {i.name}','i64')
-    fb.cbr(fb.ins(f'icmp sge i64 {remaining.name}, {K}','i1'),body,end);fb.block(body)
-    vg=VecGen(gen,fb,gen.fn_map,lanes=K);vg.array_index=(e.var,i.name)
-    base=vg.splat(i.name,'i64',S.I64)
-    lanes=fb.ins(f'add <{K} x i64> {base}, <'+', '.join(f'i64 {k}' for k in range(K))+'>',f'<{K} x i64>')
-    value=vg.gen_vec(e.body,{e.var:lanes.name},env)
-    data=fb.ins(f'extractvalue {out}, 0','ptr')
-    index=fb.ins(f'sub i64 {i.name}, {origin.name}','i64')
-    scalar_ty='i64' if e.ty.elem==S.I64 else 'double'
-    ptr=fb.ins(f'getelementptr inbounds {scalar_ty}, ptr {data.name}, i64 {index.name}','ptr')
-    fb.emit(f'store {vg.vty(e.ty.elem)} {value}, ptr {ptr.name}, align 8')
-    fb.store(fb.ins(f'add i64 {i.name}, {K}','i64'),ip);fb.br(head);fb.block(end)
+    def vector_loop(assumed):
+        head,body,end=fb.label('varr_cond'),fb.label('varr_body'),fb.label('varr_end')
+        fb.br(head);fb.block(head)
+        i=fb.load('i64',ip)
+        remaining=fb.ins(f'sub i64 {upper.name}, {i.name}','i64')
+        fb.cbr(fb.ins(f'icmp sge i64 {remaining.name}, {K}','i1'),body,end);fb.block(body)
+        vg=VecGen(gen,fb,gen.fn_map,lanes=K);vg.array_index=(e.var,i.name);vg.assumed=assumed
+        base=vg.splat(i.name,'i64',S.I64)
+        lanes=fb.ins(f'add <{K} x i64> {base}, <'+', '.join(f'i64 {k}' for k in range(K))+'>',f'<{K} x i64>')
+        value=vg.gen_vec(e.body,{e.var:lanes.name},env)
+        data=fb.ins(f'extractvalue {out}, 0','ptr')
+        index=fb.ins(f'sub i64 {i.name}, {origin.name}','i64')
+        scalar_ty='i64' if e.ty.elem==S.I64 else 'double'
+        ptr=fb.ins(f'getelementptr inbounds {scalar_ty}, ptr {data.name}, i64 {index.name}','ptr')
+        fb.emit(f'store {vg.vty(e.ty.elem)} {value}, ptr {ptr.name}, align 8')
+        fb.store(fb.ins(f'add i64 {i.name}, {K}','i64'),ip);fb.br(head);fb.block(end)
+    # Edge tests that no interior lane can satisfy get a loop without them;
+    # the general masked loop remains for any other run-time values.
+    assumed,guard=interior_assumptions(gen,fb,e,env,lower,upper)
+    if assumed:
+        special,general,joined=fb.label('varr_interior'),fb.label('varr_general'),fb.label('varr_joined')
+        fb.cbr(guard,special,general)
+        fb.block(special);vector_loop(assumed);fb.br(joined)
+        fb.block(general);vector_loop({});fb.br(joined)
+        fb.block(joined)
+    else: vector_loop({})
     gen.counted_loop(fb.load('i64',ip),hi,e.var,env,scalar)
 
 def vector_sum_loop(gen, fb, e: S.Sum, lo, hi, env, acc_ptr: str, fns: Dict[str, S.Fn]):

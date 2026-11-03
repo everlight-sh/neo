@@ -1,0 +1,184 @@
++ export DEBIAN_FRONTEND=noninteractive
++ apt-get update -q
++ apt-get install -y -q clang lld python3 binutils openssl golang-go git unzip
+python3 is already the newest version (3.12.3-0ubuntu2.1).
+python3 set to manually installed.
+binutils is already the newest version (2.42-4ubuntu2.10).
+binutils set to manually installed.
+openssl is already the newest version (3.0.13-0ubuntu3.16).
+openssl set to manually installed.
+unzip is already the newest version (6.0-28ubuntu4.1).
+The following additional packages will be installed:
+  clang-18 git-man golang-1.22-go golang-1.22-src golang-src icu-devtools
+  lib32gcc-s1 lib32stdc++6 libc6-i386 libclang-common-18-dev
+  libclang-rt-18-dev libffi-dev libgc1 libicu-dev libncurses-dev
+  libobjc-13-dev libobjc4 libpfm4 libxml2 libxml2-dev libz3-4 libz3-dev lld-18
+  llvm-18 llvm-18-dev llvm-18-linker-tools llvm-18-runtime llvm-18-tools
+Suggested packages:
+  clang-18-doc wasi-libc git-daemon-run | git-daemon-sysvinit git-doc
+  git-email git-gui gitk gitweb git-cvs git-mediawiki git-svn bzr | brz
+  mercurial subversion icu-doc ncurses-doc llvm-18-doc
+The following NEW packages will be installed:
+  clang clang-18 golang-1.22-go golang-1.22-src golang-go golang-src
+  icu-devtools lib32gcc-s1 lib32stdc++6 libc6-i386 libclang-common-18-dev
+  libclang-rt-18-dev libffi-dev libgc1 libicu-dev libncurses-dev
+  libobjc-13-dev libobjc4 libpfm4 libxml2-dev libz3-4 libz3-dev lld lld-18
+  llvm-18 llvm-18-dev llvm-18-linker-tools llvm-18-runtime llvm-18-tools
+The following packages will be upgraded:
+  git git-man libxml2
+3 upgraded, 29 newly installed, 0 to remove and 62 not upgraded.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 93477 files and directories currently installed.)
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ systemctl restart fwupd.service packagekit.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
++ curl -fsSL https://bun.sh/install
++ bash -s bun-v1.3.13
+#######################################                                   55.4%######################################################################## 100.0%
+bun was installed successfully to ~/.bun/bin/bun 
+
+Added "~/.bun/bin" to $PATH in "~/.bashrc" 
+
+To get started, run: 
+
+  source /root/.bashrc 
+  bun --help 
++ export PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
++ mkdir -p /root/ci
++ tar xzf /root/commit.tgz -C /root/ci
++ cd /root/ci
++ cd examples/jsx-ssr
++ bun install --frozen-lockfile
+bun install v1.3.13 (bf2e2cec)
+
++ react@19.2.8
++ react-dom@19.2.8
++ typescript@5.9.3
+
+4 packages installed [109.00ms]
++ set +e
++ clang --version
++ head -1
+Ubuntu clang version 18.1.3 (1ubuntu1)
++ bun --version
+1.3.13
++ go version
+go version go1.22.2 linux/amd64
++ uname -r
+6.8.0-146-generic
++ lscpu
++ grep Model name
+Model name:                              AMD EPYC-Milan Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
++ ./neo test
++ echo STEP neo-test exit=0
+STEP neo-test exit=0
++ tail -40 /root/ci-test.log
+(pass) reject: Unsupported HTML attribute style [1.00ms]
+(pass) reject: Unsupported HTML tag
+(pass) reject: Spread attributes
+(pass) reject: Duplicate prop
+(pass) reject: Unknown prop missing
+(pass) reject: Only integer comparisons [1.00ms]
+(pass) reject: Reserved React props
+(pass) reject: Declare children as ReactNode
+(pass) reject: must be boolean
+(pass) reject: Unsupported PrefixUnaryExpression [1.00ms]
+(pass) reject: safe integer
+(pass) reject: Unsupported JSX entity
+(pass) reject: unknown component
+(pass) reject: Recursive component cycles
+(pass) reject: Recursive component cycles
+(pass) reject: Missing required prop
+(pass) reject: expects text
+(pass) reject: does not accept children
+(pass) diagnostics include the source location
+(pass) JavaScript control characters become valid Neo byte escapes
+(pass) literal attribute spacing is preserved
+(pass) optimizations have an explicit baseline mode [2.00ms]
+(pass) static markup is coalesced, dynamic text escaped once, numbers formatted once [2.00ms]
+(pass) sharing never hoists conditional escaping out of its branch
+
+ 31 pass
+ 0 fail
+ 46 expect() calls
+Ran 31 tests across 1 file. [574.00ms]
+neoc: /root/ci/.kernel-build/usability/ssr-linux-x86_64.building-46124  graph fff021154328127c  obligations 177/182 proven, 5 runtime checks, 3 parallel regions, 0 vectorised sums, 0 calls folded, 1 inlined, build miss
+Generated Neo: /root/ci/.kernel-build/jsx-ssr/components.neo
+Run: NEO_THREADS=1 /root/ci/.kernel-build/usability/ssr-linux-x86_64 8092
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+neo: serving, workers=1
+PASS: TSX->Neo vs React, all 1000 inputs, 1 worker(s); concurrent + pipelined HTTP
+neo: serving, workers=4
+PASS: TSX->Neo vs React, all 1000 inputs, 4 worker(s); concurrent + pipelined HTTP
+React reference: http://localhost:39069
+PASS: Bun/React reference HTTP routes
+neo test: 37 native cases, 0 failed
++ mkdir -p .kernel-build
++ ./neo build examples/http.neo -o .kernel-build/ci-http
+neoc: .kernel-build/ci-http  graph 50e53d4a26439ab8  obligations 254/260 proven, 6 runtime checks, 13 parallel regions, 2 vectorised sums, 1 calls folded, 1 inlined, build hit
++ python3 tests/freestanding_linux_smoke.py --binary .kernel-build/ci-http
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+== io_uring backend (default), 4 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+pipelined   : [b'200', b'404', b'200'] closed by server: True
+byte-by-byte: b'HTTP/1.1 200 OK' True
+post+get    : [b'405', b'200'] (first code is the server's choice for POST; second must be 200)
+300 idle    : b'HTTP/1.1 200 OK'
+ALL OK
+neo: serving, workers=4
+Test server stopped.
+HTTP PASS from an empty root containing only the executable: no /lib, /usr, /proc or runtime files.
++ echo STEP freestanding-http exit=0
+STEP freestanding-http exit=0
++ ./neo release -o .kernel-build/release-a.tar.gz
+{
+  "ok": true,
+  "version": "0.1.1",
+  "archive": "/root/ci/.kernel-build/release-a.tar.gz",
+  "sha256": "bc9322f8a23acb5a62ca895970bf6fe5a49c88ef28d3f9a38a7e3c2b0cbc1e83",
+  "files": 102,
+  "epoch": 0
+}
++ ./neo release -o .kernel-build/release-b.tar.gz
+{
+  "ok": true,
+  "version": "0.1.1",
+  "archive": "/root/ci/.kernel-build/release-b.tar.gz",
+  "sha256": "bc9322f8a23acb5a62ca895970bf6fe5a49c88ef28d3f9a38a7e3c2b0cbc1e83",
+  "files": 102,
+  "epoch": 0
+}
++ cmp .kernel-build/release-a.tar.gz .kernel-build/release-b.tar.gz
++ echo STEP reproducible-release exit=0
+STEP reproducible-release exit=0
++ ./neo build tests/fixtures/language_kernel.neo -o .kernel-build/ci-kernel
+neoc: .kernel-build/ci-kernel  graph 09c0052fd5c94172  obligations 212/247 proven, 35 runtime checks, 4 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build hit
++ ./neo build tests/fixtures/language_crypto.neo -o .kernel-build/ci-crypto
+neoc: .kernel-build/ci-crypto  graph 17cb9d60f1702f30  obligations 305/375 proven, 70 runtime checks, 17 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build hit
++ ./neo build tests/fixtures/language_tls.neo -o .kernel-build/ci-tls
+neoc: .kernel-build/ci-tls  graph 124293fd88ddbd8b  obligations 570/690 proven, 120 runtime checks, 24 parallel regions, 0 vectorised sums, 8 calls folded, 3 inlined, build hit
++ python3 tests/language_freestanding.py --kernel .kernel-build/ci-kernel --crypto .kernel-build/ci-crypto --tls .kernel-build/ci-tls
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS empty-root language/RNG/futex and SHA-256: executable only; TLS: executable plus explicit trust-anchor data, no libraries or tools
++ echo STEP language-freestanding exit=0
+STEP language-freestanding exit=0
++ echo CI-DONE
+CI-DONE
+f1fe5e60c703fd924cf590145cf0daaffccf6a19452178f982f7dd0789a606f8  /root/commit.tgz

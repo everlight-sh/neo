@@ -1,0 +1,37 @@
+total 108
+drwxr-xr-x  2 root root  4096 Nov  2 23:23 .
+drwx------ 13 root root  4096 Nov  2 23:23 ..
+-rw-r--r--  1 root root   180 Nov  2 23:23 mandel-report.json
+-rw-r--r--  1 root root   179 Nov  2 23:23 nbody-report.json
+-rwxr-xr-x  1 root root 19552 Nov  2 23:23 neo-mandel
+-rwxr-xr-x  1 root root 24224 Nov  2 23:23 neo-nbody
+-rwxr-xr-x  1 root root 19656 Nov  2 23:23 neo-sieve
+-rwxr-xr-x  1 root root 19840 Nov  2 23:23 neo-stencil
+-rw-r--r--  1 root root   179 Nov  2 23:23 sieve-report.json
+-rw-r--r--  1 root root   181 Nov  2 23:23 stencil-report.json
+   Compiling http-body-util v0.1.5
+   Compiling axon-bench v0.1.0 (/root/base/bench/rust)
+    Finished `release` profile [optimized] target(s) in 15.97s
+/root/proto:
+Cargo.toml
+sieve_c
+sieve_c.c
+sieve.rs
+stencil_c
+stencil_c.c
+
+/root/rust:
+mandel
+nbody
+sieve
+stencil
+
+/root/zig-baseline/bin:
+http_httpz
+http_std
+json
+mandel
+nbody
+sieve
+stencil
+BUILD-OK

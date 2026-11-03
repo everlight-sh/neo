@@ -1,0 +1,109 @@
++ export DEBIAN_FRONTEND=noninteractive
+python3 is already the newest version (3.12.3-0ubuntu2.1).
+python3 set to manually installed.
+binutils is already the newest version (2.42-4ubuntu2.10).
+binutils set to manually installed.
+unzip is already the newest version (6.0-28ubuntu4.1).
+time is already the newest version (1.9-0.2build1).
+time set to manually installed.
+jq is already the newest version (1.7.1-3ubuntu0.24.04.2).
+The following additional packages will be installed:
+Suggested packages:
+The following NEW packages will be installed:
+The following packages will be upgraded:
+8 upgraded, 25 newly installed, 0 to remove and 57 not upgraded.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 93477 files and directories currently installed.)
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 93477 files and directories currently installed.)
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ /etc/needrestart/restart.d/systemd-manager
+ systemctl restart multipathd.service packagekit.service polkit.service rsyslog.service systemd-hostnamed.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-timedated.service systemd-timesyncd.service systemd-udevd.service udisks2.service
+
+Service restarts being deferred:
+ systemctl restart ModemManager.service
+ /etc/needrestart/restart.d/dbus.service
+ systemctl restart systemd-logind.service
+ systemctl restart unattended-upgrades.service
+
+No containers need to be restarted.
+
+User sessions running outdated binaries:
+ root @ user manager service: systemd[1330]
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
++ uname -r
+linux-tools-6.8.0-146-generic is already the newest version (6.8.0-146.146).
+linux-tools-6.8.0-146-generic set to manually installed.
+The following packages will be upgraded:
+2 upgraded, 0 newly installed, 0 to remove and 55 not upgraded.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 97950 files and directories currently installed.)
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+
+Service restarts being deferred:
+ /etc/needrestart/restart.d/dbus.service
+ systemctl restart systemd-logind.service
+ systemctl restart unattended-upgrades.service
+
+No containers need to be restarted.
+
+User sessions running outdated binaries:
+ root @ user manager service: systemd[1330]
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
++ cd /root
++ curl -fsSLO https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
++ sha256sum zig-x86_64-linux-0.17.0.tar.xz
+1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  zig-x86_64-linux-0.17.0.tar.xz
++ tar xf zig-x86_64-linux-0.17.0.tar.xz
++ ln -sfn /root/zig-x86_64-linux-0.17.0/zig /usr/local/bin/zig
++ zig version
+0.17.0
++ curl -fsSL https://sh.rustup.rs
++ sh -s -- -y --profile minimal
+
+
+
+Rust is installed now. Great!
+
+To get started you may need to restart your current shell.
+This would reload your PATH environment variable to include
+Cargo's bin directory ($HOME/.cargo/bin).
+
+To configure your current shell, you need to source the
+corresponding env file under $HOME/.cargo.
+
+Consider running the right command for your shell (note the leading DOT):
+. "$HOME/.cargo/env" # For sh/ash/dash/pdksh/bash
+cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+CC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+CC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CC
+HOST_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
++ . /root/.cargo/env
++ export PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
++ rustc --version
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
++ mkdir -p /root/main /root/branch
++ tar xzf /root/main.tgz -C /root/main
++ tar xzf /root/commit.tgz -C /root/branch
++ echo SETUP-DONE
+SETUP-DONE

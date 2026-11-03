@@ -1,0 +1,55 @@
+## machine
+CPU(s):                                  2
+Model name:                              AMD EPYC-Milan Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      1
+L2 cache:                                512 KiB (1 instance)
+L3 cache:                                32 MiB (1 instance)
+6.8.0-146-generic
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+THP enabled: always [madvise] never
+THP defrag: always defer defer+madvise [madvise] never
+## toolchains
+Ubuntu clang version 18.1.3 (1ubuntu1)
+0.17.0
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+Python 3.12.3
+1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  /root/zig-x86_64-linux-0.17.0.tar.xz
+## sources
+de062dfa9adf2cabcf4d942094f23c388c398daf1c2824f24b5444b0e4fa807e  /root/base.tgz
+e332f667a5be1fd1d9615114d3103eee62b9c0821da44c41f437d78e86b22ed7  /root/fin.tgz
+7cd74623285172c84205fc18e135186964303d3ebf3c5626501f699886db46d6  /root/fin2.tgz
+## binaries (sha256)
+9bbc29309d4ee18e0702f8feb58602b6c49dc569376fe47e19692263d42db10c  bin-after/neo-stencil
+dd5280a967d98f1d29917c32e57c4fcecd6128d8c2c91847db1d97572611a265  bin-after/neo-mandel
+8b9f305d1056312d9086ed2bb8aa7a851c294beab5f9105d19a9b81394277ddf  bin-after/neo-nbody
+801b1a2a8893a3e6ab6f1b226b00c9a50993cc227eaa65a5f6ecd49a1e70aaa3  bin-after/neo-library_bench
+3d6b924f5402c921ac9afdfb75714f7f44e28e2fd715d1495ee11665c19ca5d6  bin-after/neo-orders_json
+9cb163dd366aa8dfc961b360c0c01c671934097cca51ba9378d597d7fc678d68  bin-after/neo-strided_flip
+97f72d261c2a7fba24715a949823c15925772ec32c126874b5f53313b4066de8  bin-after/neo-strided_random
+9691618de6cbef5b1e5a945ecde507315da5df85f5cdafbefebbb3db66c2e1cd  bin-after/neo-sieve
+4f4272c5b7c63077337fc37af02e8d59fae4ec14364f434aa644d4aa5d38db9a  bin-after2/neo-sieve
+bfa17ed0d35224f943aeb249c35a9747b6ceee982d2ddd85bc17db8e4c071610  bin-after2/neo-strided_flip
+42a53c58286de25aeb7839aa0ed5636506cc93f6919324d6625292891eea72c6  bin-after2/neo-strided_random
+a5d186a55879c20173cae9035b3c7f7c83ce8786d3c942037075c22e36e1c291  bin-base/neo-library_bench
+dd5280a967d98f1d29917c32e57c4fcecd6128d8c2c91847db1d97572611a265  bin-base/neo-mandel
+e8519a3a6679acbf722278fc71071a8aae8c00c7ea0b9c3d76fbb7c4b43821dc  bin-base/neo-nbody
+2cf0ca069bb1aca56c5262027503f7538ffaa540d528ea00ec51ad6393d882bb  bin-base/neo-orders_json
+01c6cc7b557e649f56e31d1ae35defd65f115e62d030ae66f45632e0fb6ee417  bin-base/neo-sieve
+0e42b7b3549ec3ba34b24bc674e09cb00774a4e102a2fcd7cf598bab6a9ebb18  bin-base/neo-stencil
+fcb8e0a3ed550753d857953e5ad9895e3558076687feccb83c2413597ffaf60b  bin-base/neo-strided_flip
+4d39b5d6c0e8dc654fdcff6a9099590cfb7ccf56d8a033fbe1be707db600c004  bin-base/neo-strided_random
+d11e46d6c510219612c088a5d8ff7d4aa27827a823640453dd9b9cf2f82e7052  zig-baseline/bin/stencil
+92a46f19c1439b1b62fefb509a4c44b4ce102c68f01dcc85c7fcbd4863e28f9f  zig-baseline/bin/sieve
+a612f2424e7bc496cef9ae3c3cd0c092848189a9a1f29cc354376045759d3196  zig-baseline/bin/mandel
+01cd94d76d5afb7b41fcb1c95f04caf3e658f04264fa82d9306348a8b48e9d23  zig-baseline/bin/nbody
+c3d468b1b8ad4d79fb2d90c528f88a3dab88a4d9eddc336864911501ba87de73  zig-native/bin/stencil
+cc92145548febe60d405aaf455bd1fac647e0c1d02737f4fad57c1b70784ad7b  zig-native/bin/sieve
+438e00fd1855cdc9ec2cac42fb7e2da50dbd49ecf88ab0c86b231dd89d4033a7  zig-native/bin/mandel
+4b30193923a19f47f0e379d51eeadffaaf542fd4e33c5bdc29f0661bca748906  zig-native/bin/nbody
+b3af6d9470994524a3c0c5980e1b74c9b89438604315caf3ec5c171a1313c438  rust/mandel
+e9a82642055cbe3d3c565de072c1e38ad3fa4cbd4310767658a12346147da54b  rust/nbody
+60b914f8134934dd976398eb32467eaaa3112ded684e215e64184fea25d4ceac  rust/sieve
+ecb6a65ae61cc8ce23af3f5681eb1687bb9683be9059f1338ad49a3200c7dc13  rust/stencil

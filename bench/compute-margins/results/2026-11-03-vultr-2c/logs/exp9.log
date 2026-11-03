@@ -1,0 +1,25 @@
+np sieve 5761455 json c12e45fc344ee40bf5bb02fa7e793fa8  -
+## THP madvise
+# sieve 1e8 w=1 (uc64 = before the bool-byte change)
+  after      median     389.0 ms  range     379.4-    403.7  out ['5761455']
+  uc64       median     379.5 ms  range     368.6-    388.4  out ['5761455']
+  nopop      median     392.0 ms  range     380.3-    405.0  out ['5761455']
+  before     median     442.4 ms  range     437.9-    449.9  out ['5761455']
+# json doc x1M w=1
+  after      median     197.5 ms  range     196.3-    202.5  out ['513500000']
+  nopop      median     196.6 ms  range     194.5-    211.4  out ['513500000']
+  before     median     198.2 ms  range     194.4-    230.8  out ['513500000']
+## THP never
+# sieve 1e8 w=1 (uc64 = before the bool-byte change)
+  after      median     423.0 ms  range     418.1-    433.8  out ['5761455']
+  uc64       median     410.5 ms  range     400.6-    420.2  out ['5761455']
+  nopop      median     429.7 ms  range     420.7-    449.7  out ['5761455']
+  before     median     479.7 ms  range     468.2-    505.2  out ['5761455']
+# json doc x1M w=1
+  after      median     198.1 ms  range     196.2-    202.4  out ['513500000']
+  nopop      median     196.3 ms  range     194.7-    216.1  out ['513500000']
+  before     median     195.1 ms  range     194.5-    205.5  out ['513500000']
+after json rss/faults: 1920 KiB 157 minflt 0.19 s
+np json rss/faults: 1920 KiB 157 minflt 0.19 s
+base json rss/faults: 1920 KiB 157 minflt 0.20 s
+EXP9-DONE

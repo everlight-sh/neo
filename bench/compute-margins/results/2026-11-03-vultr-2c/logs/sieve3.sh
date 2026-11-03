@@ -1,0 +1,1 @@
+NEO_AFTER=/root/sieve-only NEO_BEFORE=/root/bin-base ZIG=/root/zig-baseline/bin ZIG_NATIVE=/root/zig-native/bin RUST=/root/rust python3 /root/w-fin2/bench/compute-margins/run.py /root/final-2c-sieve-b.json 15 1,2 madvise,never sieve:100000000; echo SIEVE3-DONE

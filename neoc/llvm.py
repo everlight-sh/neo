@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 from . import syntax as S
 from . import vectorize as VZ
+from . import strided
 from . import ranges as Ranges
 from .linear import Lin, cmp, and_, entails
 
@@ -483,6 +484,7 @@ class LLVMGen:
                                  **Ranges.analyze([f for f in fns if f.name not in self.library_names])}
         else:self.value_ranges = Ranges.analyze(fns) if ranges else {}
         self.bounded_remainders = []
+        self.assumed = {}    # id(comparison) -> value fixed for the loop being emitted (VZ.split_counted_loop)
         self.overflow_checks = []
         self.resource_finalizers = {}
         self.region_counters = {}
@@ -1248,6 +1250,11 @@ class LLVMGen:
     def store_elem(self, arr: Val, idx: Val, t: S.TArr, v: Val):
         fb = self.fb
         ptrs = self.elem_ptrs(arr, idx, t)
+        # A bool element is stored as its byte: LLVM's loop idiom pass finds no
+        # memset in i1 stores, so a constant bool fill otherwise stores 4 bytes
+        # per instruction. Loads stay i1: as bytes, LLVM vectorizes a bool count
+        # by widening through unpack chains, which ran 2x slower on SSE2.
+        if t.elem == S.BOOL: fb.store(fb.ins(f'zext {v} to i8', 'i8'), ptrs[0][2].name); return
         if not isinstance(t.elem, S.TRec): fb.store(self.pack_storage(v,t.elem), ptrs[0][2].name); return
         for k, fty, p in ptrs:
             ft=t.elem.fields[k][1]
@@ -1293,7 +1300,9 @@ class LLVMGen:
         for factor in (4, 2, 1):
             threshold = d * factor
             if limit < threshold: continue
-            ge = fb.ins(f"icmp uge {value}, {constant(threshold)}", boolty)
+            # value is in [0, limit] and limit < 2**(width-1): a signed compare
+            # is exact, and SSE2 has no unsigned vector compare.
+            ge = fb.ins(f"icmp sge {value}, {constant(threshold)}", boolty)
             reduced = fb.ins(f"sub {value}, {constant(threshold)}", ty)
             value = fb.ins(f"select {ge}, {reduced}, {value}", ty)
         if negative is not None:
@@ -1355,6 +1364,7 @@ class LLVMGen:
 
     def gen(self, e: S.Node, env: Dict[str, Slot], par: bool) -> Tuple[Val, Optional[Val]]:
         fb = self.fb
+        if self.assumed and id(e) in self.assumed: return Val('true' if self.assumed[id(e)] else 'false', 'i1'), None
         if isinstance(e, S.Num): return Val(str(e.value), "i64"), None
         if isinstance(e, S.Flt): return Val(fconst(e.value), "double"), None
         if isinstance(e, S.BoolLit): return Val("true" if e.value else "false", "i1"), None
@@ -2363,7 +2373,7 @@ class LLVMGen:
                 self.counted_loop(lo,hi,e.var,env,body)
                 fb.br(ready);fb.block(ready)
                 return out,fb.ins(f'extractvalue {out}, 2','i64')
-            self.counted_loop(lo, hi, e.var, env, body)
+            VZ.split_counted_loop(self, fb, e, lo, hi, env, body)
             return (fb.load(ety, acc), None) if is_sum else (out, fb.ins(f'extractvalue {out}, 2','i64'))
 
         # ---- parallel: outline the body into @<fn>__regionK(ptr ctx, i64 chunk)
@@ -2424,7 +2434,7 @@ class LLVMGen:
                 self.store_elem(rtgt, k, e.ty, v)
         if vec: VZ.vector_sum_loop(self, rb, e, clo, chi, renv, racc, self.fn_map)
         elif varr: VZ.vector_array_loop(self,rb,e,clo,chi,renv,rtgt,rlo,reads)
-        else: self.counted_loop(clo, chi, e.var, renv, rbody)
+        else: VZ.split_counted_loop(self, rb, e, clo, chi, renv, rbody)
         if is_sum:
             p = rb.ins(f"getelementptr inbounds {ety}, ptr {rtgt.name}, i64 %chunk", "ptr")
             rb.store(rb.load(ety, racc), p.name)
@@ -2476,6 +2486,7 @@ class LLVMGen:
         for k, (s, t) in enumerate(zip(slots, e.state_tys)):
             if s.ty == ARR and s.own_ptr and set_only_state(e, k):
                 self.ensure_unique(s, t); s.always_unique = True
+        strided.prefix(self, e, slots, env2, par)
         cond, body, exit_ = fb.label("loop_cond"), fb.label("loop_body"), fb.label("loop_exit")
         fb.br(cond); fb.block(cond)
         c, _ = self.gen(e.cond, env2, par)
