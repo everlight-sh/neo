@@ -30,6 +30,14 @@ private fn json_digit_tail(borrow raw:Arr u8 n,first:i64) -> i64
   = let end=loop(i=first,done=false) while !done && i>=0 && i<=n-8 next(
       i+count_trailing_zeros(json_digit_mask(byte_read_le(raw,i,8)))/8,json_digit_mask(byte_read_le(raw,i,8))!=0) yield i in
     loop(i=end) while i>=0 && i<n && raw[i]>=u8(48) && raw[i]<=u8(57) next(i+1) yield i
+; The value of the first count (1 to 8) digits of a little-endian word, in
+; parallel: digit pairs, then groups of four, then the two groups (the second
+; is below 10^4, which its mask states for the overflow proof).
+private fn json_digits_value(word:i64,count:i64{count>=1,count<=8}) -> i64
+  = let digits=shift_left(bit_xor(word,3472328296227680304),(8-count)*8) in
+    let pairs=bit_and(digits,4222189076152335)*10+bit_and(shift_right(digits,8),4222189076152335) in
+    let quads=bit_and(pairs,1095216660735)*100+bit_and(shift_right(pairs,16),1095216660735) in
+    bit_and(quads,4294967295)*10000+bit_and(shift_right(quads,32),16383)
 private fn json_number_span(borrow raw:Arr u8 n,start:i64) -> i64
   = let span=json_number_end(raw,start) in if span.ok then span.end else -1-span.end
 fn json_hex (b: i64) -> i64
@@ -380,11 +388,14 @@ type JsonAtom = { present:bool,kind:i64,integer:bool,value:i64 }
 ; wanted members' value spans, without a member index or copied values. Values
 ; are read in place; plain strings share the source buffer. A repeated member
 ; keeps its last value, as json_get does. Arrays of objects reuse one span buffer.
-; lengths/words hold each name's byte length and its first eight bytes as one
-; little-endian word, so most keys are rejected or matched without touching names.
+; lengths holds each name's byte length; words holds names that a plain key can
+; spell (at most eight bytes from 0x20 to 0x7f other than quote and backslash)
+; as one zero-padded little-endian word, and -1, which no key word equals, for
+; the others, so a short plain key matches with one comparison per name.
 sealed type JsonFieldDecoder = {names:Arr Arr u8 _ _,lengths:Arr i64 _,words:Arr i64 _,count:i64,valid:bool}
 private fn json_name_word(borrow name:Arr u8 n) -> i64
-  = loop(j=0,word=0) while j<n && j<8 next(j+1,check j>=0 && j<n in bit_or(word,shift_left(i64(name[j]),8*j))) yield word
+  = let plain=n<=8 && loop(j=0,ok=true) while ok && j<n next(j+1,check j>=0 && j<n in name[j]>=u8(32) && name[j]<u8(128) && name[j]!=u8(34) && name[j]!=u8(92)) yield ok in
+    if !plain then -1 else loop(j=0,word=0) while j<n && j<8 next(j+1,check j>=0 && j<n in bit_or(word,shift_left(i64(name[j]),8*j))) yield word
 fn json_field_decoder(borrow names:Arr Arr u8 _ n) -> JsonFieldDecoder
   = let valid=n<=4096 && loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in utf8_valid(names[i])) yield ok in
     JsonFieldDecoder {names=arr(i in 0..n) check i>=0 && i<n in names[i],lengths=arr(i in 0..n) check i>=0 && i<n in len(names[i]),
@@ -418,27 +429,37 @@ private cold fn json_string_tail(borrow raw:Arr u8 _,quote:i64) -> JsonFieldValu
 private cold fn json_key_end(borrow raw:Arr u8 _,at:i64) -> i64
   = let key=json_string_end(raw,at) in if key.ok then key.end else -1-key.end
 ; Plain ASCII names were already proven escape-free by the word scan, so they
-; match by length and bytes; other names decode first.
-private fn json_field_name(borrow decoder:JsonFieldDecoder,borrow raw:Arr u8 _,start:i64,end:i64,plain:bool) -> i64
+; match by bytes; other names decode first. A key of up to eight bytes, read
+; as one word with the bytes after it cleared, is compared with each name word.
+private fn json_field_name(borrow decoder:JsonFieldDecoder,borrow raw:Arr u8 n,start:i64,end:i64,plain:bool) -> i64
   = if !plain then json_field_match(decoder,raw,start,end) else let width=end-start-2 in
-    let lengths=decoder.lengths in let words=decoder.words in
-    ; One masked word compares names of up to eight bytes when eight source bytes follow.
-    let direct=width<=8 && start>=0 && start+9<=len(raw) in
-    let key=if direct then bit_and(byte_read_le(raw,start+1,8),if width==8 then -1 else shift_left(1,8*width)-1) else 0 in
-    loop(i=0,found= -1) while found<0 && i<len(lengths) && i<len(words) next(i+1,check i>=0 && i<len(lengths) && i<len(words) in
-      if lengths[i]!=width then -1 else if direct then (if words[i]==key then i else -1) else
-        let names=decoder.names in check i<len(names) in if bytes_match_at(raw,start+1,names[i]) then i else -1) yield found
+    if width<0 || width>8 || start<0 || start>n-9 then json_field_bytes(decoder,raw,start,width) else
+    let key=bit_and(byte_read_le(raw,start+1,8),if width==8 then -1 else shift_left(1,8*width)-1) in
+    let words=decoder.words in loop(i=0,found= -1) while found<0 && i<len(words) next(i+1,check i>=0 && i<len(words) in if words[i]==key then i else -1) yield found
+; Longer plain keys, and keys too near the end of the source for a word load.
+private cold fn json_field_bytes(borrow decoder:JsonFieldDecoder,borrow raw:Arr u8 _,start:i64,width:i64) -> i64
+  = let lengths=decoder.lengths in let names=decoder.names in
+    loop(i=0,found= -1) while found<0 && i<len(lengths) && i<len(names) next(i+1,check i>=0 && i<len(lengths) && i<len(names) in
+      if lengths[i]==width && bytes_match_at(raw,start+1,names[i]) then i else -1) yield found
 ; The end of a member value, or -1-position on error. Plain ASCII strings and
 ; numbers take direct paths; everything else (escapes, UTF-8, containers,
 ; literals) is validated by the general scanner.
-private fn json_field_integer(borrow raw:Arr u8 _,start:i64) -> JsonFieldValue
-  = let negative=str_byte(raw,start)==45 in let first=start+(if negative then 1 else 0) in let c=str_byte(raw,first) in
-    let digits_end=if c==48 then first+1 else loop(i=first) while i-first<19 && str_byte(raw,i)>=48 && str_byte(raw,i)<=57 next(i+1) yield i in
+private fn json_field_integer(borrow raw:Arr u8 n,start:i64) -> JsonFieldValue
+  = let negative=str_byte(raw,start)==45 in let first=start+(if negative then 1 else 0) in
+    ; One word holds the digits of an integer below 10^7 and the byte after them.
+    let word=if first>=0 && first<=n-8 then byte_read_le(raw,first,8) else 0 in
+    let count=if bit_and(word,255)==48 then 1 else count_trailing_zeros(json_digit_mask(word))/8 in
+    if count<1 || count>7 then json_field_long(raw,start,first) else let after=bit_and(shift_right(word,count*8),255) in
+    if after==46 || after==101 || after==69 then json_field_long(raw,start,first) else
+      let magnitude=json_digits_value(word,count) in JsonFieldValue {end=first+count,kind=2,number=if negative then 0-magnitude else magnitude}
+; Integers of 8 to 18 digits, digits near the end of the source, and other
+; numbers, which keep kind 0 and are read later.
+private cold fn json_field_long(borrow raw:Arr u8 n,start:i64,first:i64) -> JsonFieldValue
+  = let c=str_byte(raw,first) in let digits_end=if c==48 then first+1 else json_digit_run(raw,first) in
     let after=str_byte(raw,digits_end) in
-    if c<48 || c>57 || digits_end-first>18 || after==46 || after==101 || after==69 then
-      let span=json_number_end(raw,start) in JsonFieldValue {end=if span.ok then span.end else -1-span.end,kind=0,number=0} else
-    let magnitude=loop(i=first,number=0) while i<digits_end next(i+1,number*10-(str_byte(raw,i)-48)) yield number in
-    JsonFieldValue {end=digits_end,kind=2,number=if negative then magnitude else 0-magnitude}
+    if c<48 || c>57 || digits_end-first>18 || after==46 || after==101 || after==69 then JsonFieldValue {end=json_number_span(raw,start),kind=0,number=0} else
+    let magnitude=loop(i=first,number=0) while i<digits_end next(i+1,number*10+(str_byte(raw,i)-48)) yield number in
+    JsonFieldValue {end=digits_end,kind=2,number=if str_byte(raw,start)==45 then 0-magnitude else magnitude}
 ; One array element's end, or -1-position: numbers and plain strings inline,
 ; nested containers through the general scanner.
 private fn json_element_end(borrow raw:Arr u8 _,start:i64,depth:i64) -> i64
@@ -481,7 +502,7 @@ private fn json_field_value(borrow raw:Arr u8 _,start:i64,depth:i64) -> JsonFiel
     if c==110 && start>=0 && start<=len(raw)-4 && byte_read_le(raw,start,4)==1819047278 then JsonFieldValue {end=start+4,kind=0,number=0} else
     json_field_other(raw,start,depth)
 private fn json_field_step(borrow raw:Arr u8 _,borrow decoder:JsonFieldDecoder,at:i64,depth:i64) -> JsonFieldStep
-  = let quote=if str_byte(raw,at)==34 then json_string_plain(raw,at+1,true) else at in
+  = let quote=if str_byte(raw,at)==34 then json_key_scan(raw,at+1) else at in
     let plain=quote>at && str_byte(raw,quote)==34 in
     let key_end=if plain then quote+1 else json_key_end(raw,at) in
     if key_end<0 then JsonFieldStep {state=2,index= -1,value_start=0,value_end=0,kind=0,number=0,following= -1-key_end} else
@@ -502,8 +523,10 @@ private fn json_fields_object(borrow raw:Arr u8 _,borrow decoder:JsonFieldDecode
     let first=json_space(raw,at+1) in
     if depth>127 then JsonFieldsWalk {spans=cleared,end=at,error=at} else
     if str_byte(raw,first)==125 then JsonFieldsWalk {spans=cleared,end=first+1,error= -1} else
+    ; The spans are written in place: the writes are spelled out in the loop.
     loop(step=json_field_step(raw,decoder,first,depth+1),out=cleared) while step.state==0
-      next(json_field_step(raw,decoder,step.following,depth+1),json_field_apply(out,step))
+      next(json_field_step(raw,decoder,step.following,depth+1),let at=step.index*4 in
+        if step.index>=0 && at+3<len(out) then set(set(set(set(out,at,step.value_start),at+1,step.value_end),at+2,step.kind),at+3,step.number) else out)
       yield if step.state==3 then JsonFieldsWalk {spans=json_field_apply(out,step),end=step.following,error= -1} else JsonFieldsWalk {spans=out,end=step.following,error=step.following}
 private cold fn json_fields_error(borrow raw:Arr u8 _,count:i64,at:i64) -> JsonFields
   = JsonFields {raw=raw,spans=arr(i in 0..0) -1,at=len(raw),count=count,present=false,done=true,ok=false,error=at}
