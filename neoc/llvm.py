@@ -1258,7 +1258,9 @@ class LLVMGen:
         for factor in (4, 2, 1):
             threshold = d * factor
             if limit < threshold: continue
-            ge = fb.ins(f"icmp uge {value}, {constant(threshold)}", boolty)
+            # value is in [0, limit] and limit < 2**(width-1): a signed compare
+            # is exact, and SSE2 has no unsigned vector compare.
+            ge = fb.ins(f"icmp sge {value}, {constant(threshold)}", boolty)
             reduced = fb.ins(f"sub {value}, {constant(threshold)}", ty)
             value = fb.ins(f"select {ge}, {reduced}, {value}", ty)
         if negative is not None:
