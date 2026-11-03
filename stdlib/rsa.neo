@@ -11,65 +11,68 @@ fn rsa_public(modulus:Arr u8 n,exponent:i64) -> RsaKey
     let bits=if n<1 then 0 else (n-1)*8+leading in
     RsaKey { valid=n>=256 && n<=512 && high>0 && bits>=2048 && bits<=4096 && exponent==65537 && str_byte(modulus,n-1)%2==1,
       modulus=modulus,bits=bits }
-; Big-endian bytes to k little-endian 32-bit limbs.
+; Big-endian bytes to k little-endian 64-bit limbs.
 private fn rsa_limbs(bytes:Arr u8 n,k:i64) -> Arr i64 _
-  = check k>=0 && k<=128 in arr(i in 0..k) let at=n-4*i in
-      (if at-1>=0 then str_byte(bytes,at-1) else 0)+(if at-2>=0 then shift_left(str_byte(bytes,at-2),8) else 0)+
-      (if at-3>=0 then shift_left(str_byte(bytes,at-3),16) else 0)+(if at-4>=0 then shift_left(str_byte(bytes,at-4),24) else 0)
+  = check k>=0 && k<=64 in arr(i in 0..k) let at=n-8*i in
+      loop(j=8,value=0) while j>=1 next(j-1,bit_or(shift_left(value,8),if at-j>=0 then str_byte(bytes,at-j) else 0)) yield value
+; 1 when a < b as unsigned 64-bit words, else 0.
+private fn rsa_below(a:i64,b:i64) -> i64 = if bit_xor(a,-9223372036854775808)<bit_xor(b,-9223372036854775808) then 1 else 0
 ; a >= b for equal-length limb arrays (public values: ordinary branches).
 private fn rsa_at_least(a:Arr i64 n,b:Arr i64 m) -> bool
   = check n==m in loop(i=n-1,comparison=0) while i>=0 && comparison==0
-      next(i-1,check i>=0 && i<n in if a[i]>b[i] then 1 else if a[i]<b[i] then -1 else 0) yield comparison>=0
+      next(i-1,check i>=0 && i<n in if rsa_below(b[i],a[i])==1 then 1 else if rsa_below(a[i],b[i])==1 then -1 else 0) yield comparison>=0
 private fn rsa_subtract(move a:Arr i64 n,b:Arr i64 m) -> Arr i64 _
   = check n==m in loop(i=0,borrow=0,words=a) while i<n
-      next(i+1,check i>=0 && i<n && len(words)==n in if words[i]-b[i]-borrow<0 then 1 else 0,
-        check i>=0 && i<n && len(words)==n in set(words,i,bit_and(words[i]-b[i]-borrow,4294967295))) yield words
+      next(i+1,check i>=0 && i<n && len(words)==n in bit_or(rsa_below(words[i],b[i]),rsa_below(wrapping_sub(words[i],b[i]),borrow)),
+        check i>=0 && i<n && len(words)==n in set(words,i,wrapping_sub(wrapping_sub(words[i],b[i]),borrow))) yield words
 ; 2x mod modulus for x below the modulus.
 private fn rsa_double(move x:Arr i64 n,modulus:Arr i64 m) -> Arr i64 _
-  = check n==m && n>=1 in let top=shift_right(x[n-1],31) in
+  = check n==m && n>=1 in let top=shift_right(x[n-1],63) in
     let shifted=loop(i=0,carry=0,words=x) while i<n
-      next(i+1,check i>=0 && i<n && len(words)==n in shift_right(words[i],31),
-        check i>=0 && i<n && len(words)==n in set(words,i,bit_and(bit_or(shift_left(words[i],1),carry),4294967295))) yield words in
+      next(i+1,check i>=0 && i<n && len(words)==n in shift_right(words[i],63),
+        check i>=0 && i<n && len(words)==n in set(words,i,bit_or(shift_left(words[i],1),carry))) yield words in
     if top!=0 || rsa_at_least(shifted,modulus) then rsa_subtract(shifted,modulus) else shifted
 ; One row of a Montgomery product: CIOS with its two inner loops fused, so
-; two carries. Limbs are 32 bits, so every sum fits 64 unsigned bits.
+; two carries. x = t[j] + ai*bj + c1 and y = low(x) + m*nj + c2 are each below
+; 2^128: their high words come from mul_high plus the low words' carries.
 private fn rsa_step(move row:RsaRow,j:i64,ai:i64,bj:i64,m:i64,nj:i64) -> RsaRow
   = let t=row.t in check j>=1 && j<len(t) in
-    let x=wrapping_add(wrapping_add(t[j],wrapping_mul(ai,bj)),row.c1) in
-    let y=wrapping_add(wrapping_add(bit_and(x,4294967295),wrapping_mul(m,nj)),row.c2) in
-    RsaRow { t=set(t,j-1,bit_and(y,4294967295)),c1=shift_right(x,32),c2=shift_right(y,32) }
+    let lo=wrapping_mul(ai,bj) in let s=wrapping_add(lo,t[j]) in let x=wrapping_add(s,row.c1) in
+    let high=wrapping_add(wrapping_add(mul_high(ai,bj),rsa_below(s,lo)),rsa_below(x,s)) in
+    let lo=wrapping_mul(m,nj) in let s=wrapping_add(lo,x) in let y=wrapping_add(s,row.c2) in
+    RsaRow { t=set(t,j-1,y),c1=high,c2=wrapping_add(wrapping_add(mul_high(m,nj),rsa_below(s,lo)),rsa_below(y,s)) }
 private fn rsa_row(move t:Arr i64 s,ai:i64,b:Arr i64 q,modulus:Arr i64 k,inverse:i64) -> Arr i64 _
   = check q==k && s==k+1 && k>=2 in
-    let x0=wrapping_add(t[0],wrapping_mul(ai,b[0])) in
-    let m=bit_and(wrapping_mul(x0,inverse),4294967295) in
-    let y0=wrapping_add(bit_and(x0,4294967295),wrapping_mul(m,modulus[0])) in
-    let row=loop(j=1,row=RsaRow { t=t,c1=shift_right(x0,32),c2=shift_right(y0,32) }) while j<k
+    let lo=wrapping_mul(ai,b[0]) in let x0=wrapping_add(t[0],lo) in let c1=wrapping_add(mul_high(ai,b[0]),rsa_below(x0,lo)) in
+    let m=wrapping_mul(x0,inverse) in
+    let lo=wrapping_mul(m,modulus[0]) in let c2=wrapping_add(mul_high(m,modulus[0]),rsa_below(wrapping_add(x0,lo),lo)) in
+    let row=loop(j=1,row=RsaRow { t=t,c1=c1,c2=c2 }) while j<k
       next(j+1,check j>=1 && j<k in rsa_step(row,j,ai,b[j],m,modulus[j])) yield row in
     let words=row.t in check len(words)==k+1 in
-    let x=wrapping_add(words[k],row.c1) in let y=wrapping_add(bit_and(x,4294967295),row.c2) in
-    set(set(words,k-1,bit_and(y,4294967295)),k,shift_right(x,32)+shift_right(y,32))
-; a*b/R mod modulus for a,b below the modulus, with R = 2^(32k).
+    let x=wrapping_add(words[k],row.c1) in let y=wrapping_add(x,row.c2) in
+    set(set(words,k-1,y),k,rsa_below(x,row.c1)+rsa_below(y,x))
+; a*b/R mod modulus for a,b below the modulus, with R = 2^(64k).
 private fn rsa_mont(a:Arr i64 p,b:Arr i64 q,modulus:Arr i64 k,inverse:i64) -> Arr i64 _
-  = check p==k && q==k && k>=2 && k<=128 in
+  = check p==k && q==k && k>=2 && k<=64 in
     let t=loop(i=0,t=arr(j in 0..k+1) 0) while i<k next(i+1,check i>=0 && i<k in rsa_row(t,a[i],b,modulus,inverse)) yield t in
     check len(t)==k+1 in let low=arr(i in 0..k) t[i] in
     if t[k]!=0 || rsa_at_least(low,modulus) then rsa_subtract(low,modulus) else low
-; signature^65537 mod n: R^2 mod n from 2^(bits-1) by doublings to 2^k*R and five
-; Montgomery squarings, then s*R, sixteen squarings and a product with s itself.
+; signature^65537 mod n: R^2 mod n from 2^(bits-1) by doublings to 2^(2k)*R and
+; five Montgomery squarings, then s*R, sixteen squarings and a product with s itself.
 private fn rsa_recover(key:RsaKey,signature:Arr u8 n) -> BytesResult
   = if !key.valid || n!=len(key.modulus) then bytes_error(22,"unsupported RSA key or signature length",0) else
-    let k=(n+3)/4 in let modulus=rsa_limbs(key.modulus,k) in let encoded=rsa_limbs(signature,k) in
+    let k=(n+7)/8 in let modulus=rsa_limbs(key.modulus,k) in let encoded=rsa_limbs(signature,k) in
     if rsa_at_least(encoded,modulus) then bytes_error(74,"noncanonical RSA signature",0) else
-      check len(modulus)==k && k>=2 && key.bits>=1 && key.bits<=32*k in
+      check len(modulus)==k && k>=2 && key.bits>=1 && key.bits<=64*k in
       let low=modulus[0] in
-      let x=loop(i=0,x=low) while i<4 next(i+1,bit_and(wrapping_mul(x,2-bit_and(wrapping_mul(low,x),4294967295)),4294967295)) yield x in
-      let inverse=bit_and(0-x,4294967295) in let top=(key.bits-1)/32 in
-      let start=arr(i in 0..k) if i==top then shift_left(1,(key.bits-1)%32) else 0 in
-      let doubled=loop(i=0,x=start) while i<32*k-key.bits+1+k next(i+1,rsa_double(x,modulus)) yield x in
+      let x=loop(i=0,x=low) while i<5 next(i+1,wrapping_mul(x,wrapping_sub(2,wrapping_mul(low,x)))) yield x in
+      let inverse=wrapping_sub(0,x) in let top=(key.bits-1)/64 in
+      let start=arr(i in 0..k) if i==top then shift_left(1,(key.bits-1)%64) else 0 in
+      let doubled=loop(i=0,x=start) while i<64*k-key.bits+1+2*k next(i+1,rsa_double(x,modulus)) yield x in
       let r2=loop(i=0,x=doubled) while i<5 next(i+1,rsa_mont(x,x,modulus,inverse)) yield x in
       let powered=loop(i=0,x=rsa_mont(encoded,r2,modulus,inverse)) while i<16 next(i+1,rsa_mont(x,x,modulus,inverse)) yield x in
       let value=rsa_mont(powered,encoded,modulus,inverse) in
-      bytes_ok(arr(i in 0..n) let index=(n-1-i)/4 in check index>=0 && index<len(value) in u8(shift_right(value[index],(n-1-i)%4*8)))
+      bytes_ok(arr(i in 0..n) let index=(n-1-i)/8 in check index>=0 && index<len(value) in u8(bit_and(shift_right(value[index],(n-1-i)%8*8),255)))
 fn rsa_verify_sha256(key:RsaKey,message:Arr u8 n,signature:Arr u8 m) -> bool
   = let decoded=rsa_recover(key,signature) in if !decoded.ok then false else
     let digest=concat("\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05\x00\x04\x20",sha256(message)) in
