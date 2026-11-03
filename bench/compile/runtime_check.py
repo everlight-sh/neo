@@ -7,8 +7,9 @@ NEO_DEV lists labels whose builds use --dev; one tree under two labels
 (NEO_TREES=release=DIR,dev=DIR NEO_DEV=dev) compares the two profiles.
 
 The cap leaves most programs' IR byte-identical; these are the ones it
-changes that do measurable work, followed by orders_json and the compute
-kernels (mandel, stencil, nbody, sieve), which a lower cap could reach:
+changes that do measurable work, followed by orders_json, library_bench and
+the compute kernels (mandel, stencil, nbody, sieve), which a lower cap could
+reach:
   orders_stages  bench/core/orders_stages.neo, modes 2 (four json_get lookups
                  per order) and 3 (lookups plus reads), 1,000 orders x 1,000.
   json-cli       examples/json-cli filtering and sorting 200,000 records.
@@ -18,6 +19,9 @@ kernels (mandel, stencil, nbody, sieve), which a lower cap could reach:
   p384           tests/fixtures/language_p384.neo verifying one P-384/SHA-384
                  signature (made with openssl) 200 times; odd runs alter the
                  message, as in tests/p384_language.py.
+  library_bench  examples/library_bench.neo, modes 0 (parse a small JSON
+                 document, three lookups) and 1 (text, vector and map helpers),
+                 1,000,000 iterations each.
 Each round runs every tree once per case, alternating which tree goes first.
 Outputs must match between trees. Clients and the server share CPU 0, as in
 bench/fetch. REUSE_BUILDS=1 keeps binaries a previous run built.
@@ -44,7 +48,8 @@ def build():
     for label, tree in TREES:
         for path, name in (('bench/core/orders_stages.neo', 'orders'), ('examples/json-cli/main.neo', 'json-cli'),
                            ('bench/fetch/fetch.neo', 'fetch'), ('tests/fixtures/language_p384.neo', 'p384'),
-                           *((f'examples/{k}.neo', k) for k in KERNELS), ('bench/core/orders_json.neo', 'orders_json')):
+                           *((f'examples/{k}.neo', k) for k in KERNELS), ('bench/core/orders_json.neo', 'orders_json'),
+                           ('examples/library_bench.neo', 'library_bench')):
             profile = ['--dev'] if label in os.environ.get('NEO_DEV', '').split(',') else []
             subprocess.run(['./neo', 'build', path, '-o', str(OUT / f'{label}-{name}'), *profile], cwd=tree, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(['go', 'build', '-o', str(OUT / 'server'), './server'], cwd=FETCH / 'go', check=True,
@@ -94,6 +99,8 @@ def main():
             'https keep-alive 1 MiB (us/request)': lambda label: https(label, '/1m', 50, 1 << 20, '1'),
             'p384 verify x200 (s)': lambda label: p384(label),
             'orders_json 1000 x1000 (s)': lambda label: timed([str(OUT / f'{label}-orders_json'), '1000', '1000']),
+            'library_bench documents x1M (s)': lambda label: timed([str(OUT / f'{label}-library_bench'), '0', '1000000']),
+            'library_bench collections x1M (s)': lambda label: timed([str(OUT / f'{label}-library_bench'), '1', '1000000']),
             **{f'{k} {" ".join(args)} (s)': (lambda k, args: lambda label: timed(['taskset', '-c', '1', str(OUT / f'{label}-{k}'), *args], ONE))(k, args)
                for k, args in KERNELS.items()},
         }
