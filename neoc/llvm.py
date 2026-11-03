@@ -435,7 +435,7 @@ class FuncBuilder:
 class LLVMGen:
     def __init__(self, fns: List[S.Fn], fn_hashes: Dict[str, str], triple: str, assume: bool = True, vectorize: bool = True, ranges: bool = True, literal_inline: bool = True, inline_budget: int = 160, library_roots=(), switches: bool = True, unique_flags: bool = True):
         self.fns = fns; self.fn_hashes = fn_hashes; self.triple = triple
-        VZ.K = VZ.sum_lanes(triple)
+        VZ.K = VZ.sum_lanes(triple); VZ.WIDTH = VZ.sum_width(triple); VZ.ARRAY_WIDTH = VZ.array_width(triple)
         self.assume = assume; self.vectorize = vectorize
         self.fn_map = {f.name: f for f in fns}
         self.vector_sums: List[dict] = []
@@ -585,10 +585,6 @@ class LLVMGen:
                 f"@ax_runtime_state = internal global [256 x i64] zeroinitializer, align {state_alignment}",
                 f"@ax_default_heap_mode = internal constant i64 {1 if self.private_heap else 0}",
                 "declare double @llvm.sqrt.f64(double)", "declare void @llvm.assume(i1)",
-                f"declare <{VZ.K} x double> @llvm.sqrt.v{VZ.K}f64(<{VZ.K} x double>)",
-                f"declare i1 @llvm.vector.reduce.or.v{VZ.K}i1(<{VZ.K} x i1>)",
-                f"declare i64 @llvm.vector.reduce.add.v{VZ.K}i64(<{VZ.K} x i64>)",
-                f"declare double @llvm.vector.reduce.fadd.v{VZ.K}f64(double, <{VZ.K} x double>)",
                 "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)", "declare i64 @llvm.ctlz.i64(i64, i1)", "declare i64 @llvm.cttz.i64(i64, i1)", 'declare i64 @llvm.bswap.i64(i64)', ""]
         head += ['declare { i64, i1 } @llvm.s'+op+'.with.overflow.i64(i64, i64)' for op in ('add','sub','mul')]
         # Decimal length and in-place formatting for int_text fused into concat.
@@ -662,10 +658,11 @@ class LLVMGen:
                  'next:', '  %o1 = phi ptr [ %op, %plain ], [ %oa, %amp ], [ %ol, %lt ], [ %og, %gt ], [ %oq, %quot ], [ %ox, %apos ]',
                  '  %i1 = add nuw nsw i64 %i, 1', '  %more = icmp slt i64 %i1, %n', '  br i1 %more, label %loop, label %done',
                  'done:', '  ret void', '}', '']
-        head += [f'declare {{ <{VZ.K} x i64>, <{VZ.K} x i1> }} @llvm.s'+op+f'.with.overflow.v{VZ.K}i64(<{VZ.K} x i64>, <{VZ.K} x i64>)' for op in ('add','sub','mul')]
-        k=VZ.ARRAY_LANES
-        head += [f'declare <{k} x double> @llvm.sqrt.v{k}f64(<{k} x double>)', f'declare i1 @llvm.vector.reduce.or.v{k}i1(<{k} x i1>)']
-        head += [f'declare {{ <{k} x i64>, <{k} x i1> }} @llvm.s{op}.with.overflow.v{k}i64(<{k} x i64>, <{k} x i64>)' for op in ('add','sub','mul')]
+        # Vector intrinsics at every width the sum and array vectorizers emit.
+        for k in sorted({VZ.K, VZ.WIDTH, VZ.ARRAY_LANES, VZ.ARRAY_WIDTH}):
+            head += [f'declare <{k} x double> @llvm.sqrt.v{k}f64(<{k} x double>)', f'declare i1 @llvm.vector.reduce.or.v{k}i1(<{k} x i1>)',
+                     f'declare i64 @llvm.vector.reduce.add.v{k}i64(<{k} x i64>)', f'declare double @llvm.vector.reduce.fadd.v{k}f64(double, <{k} x double>)']
+            head += [f'declare {{ <{k} x i64>, <{k} x i1> }} @llvm.s{op}.with.overflow.v{k}i64(<{k} x i64>, <{k} x i64>)' for op in ('add','sub','mul')]
         from .kernel_workers import assembly
         head += assembly(self.triple)
         for f in self.fns:

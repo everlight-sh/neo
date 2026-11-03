@@ -20,13 +20,24 @@ from typing import Dict, List, Optional, Tuple
 from . import syntax as S
 
 K = 16
+WIDTH = 16
 ARRAY_LANES = 4
+ARRAY_WIDTH = 4
 
 def sum_lanes(triple):
     """Lanes for masked `sum` loops. Darwin's ARM64 code keeps 16 f64 lanes
     fast; on Linux ARM64 (AAPCS64) the same IR spills and runs ~3x slower than
     8 lanes, measured with clang 18 and 20 on the same M1 Pro."""
     return 16 if 'apple' in triple else 8
+
+def sum_width(triple):
+    """Lanes per vector of a masked `sum` loop (see VecGen): one 128-bit NEON
+    register of f64/i64 on Linux AArch64, the whole <K x T> vector elsewhere."""
+    return 2 if triple.startswith(('aarch64', 'arm64')) and 'apple' not in triple else sum_lanes(triple)
+
+def array_width(triple):
+    """Lanes per vector of an array comprehension (see VecGen), as sum_width."""
+    return 2 if triple.startswith(('aarch64', 'arm64')) and 'apple' not in triple else ARRAY_LANES
 
 def work_cost(e):
     """Conservative scheduling estimate; calls/loops keep default granularity.
@@ -80,14 +91,31 @@ def eligible(body: S.Node, fns: Dict[str, S.Fn], depth: int = 0, array_var=None,
     return ok(body)
 
 class VecGen:
-    """Emits <K x T> code for a body; `lanes` is the <K x i64> vector of comprehension indices."""
-    def __init__(self, gen, fb, fns: Dict[str, S.Fn], lanes=None):
+    """Emits code for a body over `lanes` comprehension indices at once.
+
+    A K-lane value is a list of `groups` SSA names, each a <width x T> vector
+    holding lanes g*width .. g*width+width-1, and every operation is emitted
+    once per group. With width == lanes there is one group (one <K x T>
+    vector). Linux AArch64 uses width 2, one NEON register of f64/i64, so
+    every mask is the compare result of one register: LLVM splits a wider
+    vector across registers and keeps masks that span the split as bytes,
+    widening them again for every 64-bit select or zext.
+    """
+    def __init__(self, gen, fb, fns: Dict[str, S.Fn], lanes=None, width=None):
         self.gen = gen; self.fb = fb; self.fns = fns
         self.lanes = K if lanes is None else lanes
+        self.width = (WIDTH if lanes is None else self.lanes) if width is None else width
+        assert self.lanes % self.width == 0
+        self.groups = self.lanes // self.width
         self.mask = None
 
+    def each(self, text, ty, *values):
+        """One instruction per group; `text` maps the groups' operands to it."""
+        return [self.fb.ins(text(*(v[g] for v in values)), ty).name for g in range(self.groups)]
+
     def checked(self, operation, a, b, node):
-        K = self.lanes
+        W = self.width
+        vt = f'<{W} x i64>'
         bounds = self.gen.value_ranges
         left, right = bounds.get(id(getattr(node, 'left', None)), S_TOP), bounds.get(id(getattr(node, 'right', None)), S_TOP)
         safe = False
@@ -99,48 +127,64 @@ class VecGen:
                 else:
                     products=[x*y for x in left for y in right];lo,hi=min(products),max(products)
                 safe=R.MIN<=lo<=hi<=R.MAX
-        if not self.gen.checked_integer() or getattr(node,'arithmetic_proven',False) or safe:return self.fb.ins(f'{operation} <{K} x i64> {a}, {b}',f'<{K} x i64>').name
+        if not self.gen.checked_integer() or getattr(node,'arithmetic_proven',False) or safe:
+            return self.each(lambda x, y: f'{operation} {vt} {x}, {y}', vt, a, b)
         if self.mask:
-            a=self.fb.ins(f'select <{K} x i1> {self.mask}, <{K} x i64> {a}, <{K} x i64> zeroinitializer',f'<{K} x i64>').name
-            b=self.fb.ins(f'select <{K} x i1> {self.mask}, <{K} x i64> {b}, <{K} x i64> zeroinitializer',f'<{K} x i64>').name
-        ty=f'{{ <{K} x i64>, <{K} x i1> }}'
-        result=self.fb.ins(f'call {ty} @llvm.s{operation}.with.overflow.v{K}i64(<{K} x i64> {a}, <{K} x i64> {b})',ty)
-        value=self.fb.ins(f'extractvalue {result}, 0',f'<{K} x i64>')
-        bad=self.fb.ins(f'extractvalue {result}, 1',f'<{K} x i1>')
-        self.check_mask(bad.name,node)
-        return value.name
+            a=self.each(lambda m, x: f'select <{W} x i1> {m}, {vt} {x}, {vt} zeroinitializer', vt, self.mask, a)
+            b=self.each(lambda m, x: f'select <{W} x i1> {m}, {vt} {x}, {vt} zeroinitializer', vt, self.mask, b)
+        ty=f'{{ {vt}, <{W} x i1> }}'
+        result=self.each(lambda x, y: f'call {ty} @llvm.s{operation}.with.overflow.v{W}i64({vt} {x}, {vt} {y})', ty, a, b)
+        value=self.each(lambda r: f'extractvalue {ty} {r}, 0', vt, result)
+        bad=self.each(lambda r: f'extractvalue {ty} {r}, 1', f'<{W} x i1>', result)
+        self.check_mask(bad,node)
+        return value
+
+    def any_lane(self, masks):
+        """i1: some lane of the K-lane mask is set."""
+        W = self.width
+        part = masks[0]
+        for other in masks[1:]: part = self.fb.ins(f'or <{W} x i1> {part}, {other}', f'<{W} x i1>').name
+        return self.fb.ins(f"call i1 @llvm.vector.reduce.or.v{W}i1(<{W} x i1> {part})", "i1")
 
     def check_mask(self, bad, node):
-        K = self.lanes
-        if self.mask:bad=self.fb.ins(f'and <{K} x i1> {bad}, {self.mask}',f'<{K} x i1>').name
-        any_bad=self.fb.ins(f'call i1 @llvm.vector.reduce.or.v{K}i1(<{K} x i1> {bad})','i1')
-        self.gen.trap_if(any_bad,node,'integer vector overflow')
+        W = self.width
+        if self.mask:bad=self.each(lambda x, m: f'and <{W} x i1> {x}, {m}', f'<{W} x i1>', bad, self.mask)
+        self.gen.trap_if(self.any_lane(bad),node,'integer vector overflow')
 
     def vty(self, t) -> str:
-        K = self.lanes
-        return {S.I64: f"<{K} x i64>", S.F64: f"<{K} x double>", S.BOOL: f"<{K} x i1>"}[t]
+        W = self.width
+        return {S.I64: f"<{W} x i64>", S.F64: f"<{W} x double>", S.BOOL: f"<{W} x i1>"}[t]
 
-    def splat(self, scalar: str, ty: str, t) -> str:
-        K = self.lanes
+    def splat(self, scalar: str, ty: str, t) -> List[str]:
+        W = self.width
         fb = self.fb
         a = fb.ins(f"insertelement {self.vty(t)} poison, {ty} {scalar}, i64 0", self.vty(t))
-        return fb.ins(f"shufflevector {a}, {self.vty(t)} poison, <{K} x i32> zeroinitializer", self.vty(t)).name
+        return [fb.ins(f"shufflevector {a}, {self.vty(t)} poison, <{W} x i32> zeroinitializer", self.vty(t)).name] * self.groups
 
     def const(self, val: str, t) -> str:
-        K = self.lanes
+        W = self.width
         ty = {S.I64: "i64", S.F64: "double", S.BOOL: "i1"}[t]
-        return "<" + ", ".join(f"{ty} {val}" for _ in range(K)) + ">"
+        return "<" + ", ".join(f"{ty} {val}" for _ in range(W)) + ">"
 
-    def gen_vec(self, e: S.Node, venv: Dict[str, str], senv) -> str:
-        """venv: name -> vector SSA name; senv: scalar env (Slots) for captured outer variables."""
-        K = self.lanes
+    def consts(self, val: str, t) -> List[str]:
+        return [self.const(val, t)] * self.groups
+
+    def offsets(self) -> List[str]:
+        """Per group, the <width x i64> lane numbers of that group."""
+        W = self.width
+        return ['<' + ', '.join(f'i64 {g*W+k}' for k in range(W)) + '>' for g in range(self.groups)]
+
+    def gen_vec(self, e: S.Node, venv: Dict[str, List[str]], senv) -> List[str]:
+        """venv: name -> per-group vector SSA names; senv: scalar env (Slots) for captured outer variables."""
+        W = self.width
         fb = self.fb
         vt = self.vty(e.ty)
-        if isinstance(e, S.Num): return self.const(str(e.value), S.I64)
+        each = self.each
+        if isinstance(e, S.Num): return self.consts(str(e.value), S.I64)
         if isinstance(e, S.Flt):
             from .llvm import fconst
-            return self.const(fconst(e.value), S.F64)
-        if isinstance(e, S.BoolLit): return self.const("true" if e.value else "false", S.BOOL)
+            return self.consts(fconst(e.value), S.F64)
+        if isinstance(e, S.BoolLit): return self.consts("true" if e.value else "false", S.BOOL)
         if isinstance(e, S.Var):
             if e.name in venv: return venv[e.name]
             s = senv[e.name]
@@ -154,19 +198,24 @@ class VecGen:
             slot = senv[e.arr.name]
             arr = fb.load(slot.ty, slot.ptr)
             data = fb.ins(f'extractvalue {arr}, 0', 'ptr')
-            index = fb.ins(f'add i64 {base}, {offset}', 'i64')
             scalar = 'i64' if e.ty == S.I64 else 'double'
-            ptr = fb.ins(f'getelementptr inbounds {scalar}, ptr {data.name}, i64 {index.name}', 'ptr')
-            return fb.ins(f'load {vt}, ptr {ptr.name}, align 8',vt).name
+            loads = []
+            for g in range(self.groups):
+                index = fb.ins(f'add i64 {base}, {offset + g*W}', 'i64')
+                ptr = fb.ins(f'getelementptr inbounds {scalar}, ptr {data.name}, i64 {index.name}', 'ptr')
+                loads.append(fb.ins(f'load {vt}, ptr {ptr.name}, align 8',vt).name)
+            return loads
         if isinstance(e, S.Bin):
             a = self.gen_vec(e.left, venv, senv)
             lt = e.left.ty; lvt = self.vty(lt)
+            true, false = self.const("true",S.BOOL), self.const("false",S.BOOL)
             if e.op in ("&&", "||"):
                 previous=self.mask
-                rhs_mask=a if e.op=='&&' else fb.ins(f'xor {lvt} {a}, {self.const("true",S.BOOL)}',lvt).name
-                self.mask=rhs_mask if previous is None else fb.ins(f'and {lvt} {previous}, {rhs_mask}',lvt).name
+                rhs_mask=a if e.op=='&&' else each(lambda x: f'xor {lvt} {x}, {true}',lvt,a)
+                self.mask=rhs_mask if previous is None else each(lambda p, r: f'and {lvt} {p}, {r}',lvt,previous,rhs_mask)
                 b=self.gen_vec(e.right,venv,senv);self.mask=previous
-                return fb.ins(f'select {lvt} {a}, {lvt} {b if e.op=="&&" else self.const("true",S.BOOL)}, {lvt} {self.const("false",S.BOOL) if e.op=="&&" else b}',vt).name
+                if e.op=='&&': return each(lambda x, y: f'select {lvt} {x}, {lvt} {y}, {lvt} {false}',vt,a,b)
+                return each(lambda x, y: f'select {lvt} {x}, {lvt} {true}, {lvt} {y}',vt,a,b)
             b = self.gen_vec(e.right, venv, senv)
             fl = lt == S.F64
             if e.op in ("+", "-", "*", "/", "%"):
@@ -175,38 +224,38 @@ class VecGen:
                 if not fl and e.op in ('+','-','*'):return self.checked(op,a,b,e)
                 if e.op == '%' and not fl:
                     from .llvm import Val
-                    reduced = self.gen.bounded_remainder(e, Val(a,lvt), Val(b,lvt), lanes=K)
-                    if reduced is not None: return reduced.name
+                    reduced = [self.gen.bounded_remainder(e, Val(x,lvt), Val(y,lvt), lanes=W) for x, y in zip(a, b)]
+                    if reduced[0] is not None: return [r.name for r in reduced]
                 if not fl and self.gen.checked_integer():
                     if self.mask:
-                        a=fb.ins(f'select <{K} x i1> {self.mask}, {lvt} {a}, {lvt} zeroinitializer',lvt).name
-                        b=fb.ins(f'select <{K} x i1> {self.mask}, {lvt} {b}, {lvt} {self.const("1",S.I64)}',lvt).name
+                        a=each(lambda m, x: f'select <{W} x i1> {m}, {lvt} {x}, {lvt} zeroinitializer',lvt,self.mask,a)
+                        b=each(lambda m, x: f'select <{W} x i1> {m}, {lvt} {x}, {lvt} {self.const("1",S.I64)}',lvt,self.mask,b)
                     minval=self.const('-9223372036854775808',S.I64);minus=self.const('-1',S.I64)
-                    first=fb.ins(f'icmp eq {lvt} {a}, {minval}',f'<{K} x i1>')
-                    second=fb.ins(f'icmp eq {lvt} {b}, {minus}',f'<{K} x i1>')
-                    bad=fb.ins(f'and <{K} x i1> {first.name}, {second.name}',f'<{K} x i1>');self.check_mask(bad.name,e)
-                return fb.ins(f"{op} {lvt} {a}, {b}", vt).name
+                    first=each(lambda x: f'icmp eq {lvt} {x}, {minval}',f'<{W} x i1>',a)
+                    second=each(lambda y: f'icmp eq {lvt} {y}, {minus}',f'<{W} x i1>',b)
+                    bad=each(lambda x, y: f'and <{W} x i1> {x}, {y}',f'<{W} x i1>',first,second);self.check_mask(bad,e)
+                return each(lambda x, y: f"{op} {lvt} {x}, {y}", vt, a, b)
             if fl:
                 op = {"<": "olt", "<=": "ole", ">": "ogt", ">=": "oge", "==": "oeq", "!=": "une"}[e.op]
-                return fb.ins(f"fcmp {op} {lvt} {a}, {b}", vt).name
+                return each(lambda x, y: f"fcmp {op} {lvt} {x}, {y}", vt, a, b)
             op = {"<": "slt", "<=": "sle", ">": "sgt", ">=": "sge", "==": "eq", "!=": "ne"}[e.op]
-            return fb.ins(f"icmp {op} {lvt} {a}, {b}", vt).name
+            return each(lambda x, y: f"icmp {op} {lvt} {x}, {y}", vt, a, b)
         if isinstance(e, S.Un):
-            if e.op=='-' and isinstance(e.expr,S.Num) and e.expr.value==1<<63:return self.const('-9223372036854775808',S.I64)
+            if e.op=='-' and isinstance(e.expr,S.Num) and e.expr.value==1<<63:return self.consts('-9223372036854775808',S.I64)
             a = self.gen_vec(e.expr, venv, senv)
-            if e.op == "!": return fb.ins(f"xor {vt} {a}, {self.const('true', S.BOOL)}", vt).name
-            if e.ty == S.F64: return fb.ins(f"fneg {vt} {a}", vt).name
-            return self.checked('sub','zeroinitializer',a,e)
+            if e.op == "!": return each(lambda x: f"xor {vt} {x}, {self.const('true', S.BOOL)}", vt, a)
+            if e.ty == S.F64: return each(lambda x: f"fneg {vt} {x}", vt, a)
+            return self.checked('sub',['zeroinitializer']*self.groups,a,e)
         if isinstance(e, S.Cast):
             a = self.gen_vec(e.expr, venv, senv)
-            if e.to == S.F64: return fb.ins(f"sitofp <{K} x i64> {a} to <{K} x double>", vt).name
-            if self.mask:a=fb.ins(f'select <{K} x i1> {self.mask}, <{K} x double> {a}, <{K} x double> zeroinitializer',f'<{K} x double>').name
+            if e.to == S.F64: return each(lambda x: f"sitofp <{W} x i64> {x} to <{W} x double>", vt, a)
+            if self.mask:a=each(lambda m, x: f'select <{W} x i1> {m}, <{W} x double> {x}, <{W} x double> zeroinitializer',f'<{W} x double>',self.mask,a)
             from .llvm import fconst
-            low=fb.ins(f'fcmp oge <{K} x double> {a}, {self.const(fconst(float(-(1<<63))),S.F64)}',f'<{K} x i1>')
-            high=fb.ins(f'fcmp olt <{K} x double> {a}, {self.const(fconst(float(1<<63)),S.F64)}',f'<{K} x i1>')
-            good=fb.ins(f'and <{K} x i1> {low.name}, {high.name}',f'<{K} x i1>')
-            bad=fb.ins(f'xor <{K} x i1> {good.name}, {self.const("true",S.BOOL)}',f'<{K} x i1>');self.check_mask(bad.name,e)
-            return fb.ins(f"fptosi <{K} x double> {a} to <{K} x i64>", vt).name
+            low=each(lambda x: f'fcmp oge <{W} x double> {x}, {self.const(fconst(float(-(1<<63))),S.F64)}',f'<{W} x i1>',a)
+            high=each(lambda x: f'fcmp olt <{W} x double> {x}, {self.const(fconst(float(1<<63)),S.F64)}',f'<{W} x i1>',a)
+            good=each(lambda x, y: f'and <{W} x i1> {x}, {y}',f'<{W} x i1>',low,high)
+            bad=each(lambda x: f'xor <{W} x i1> {x}, {self.const("true",S.BOOL)}',f'<{W} x i1>',good);self.check_mask(bad,e)
+            return each(lambda x: f"fptosi <{W} x double> {x} to <{W} x i64>", vt, a)
         if isinstance(e, S.Let):
             v = self.gen_vec(e.value, venv, senv)
             v2 = dict(venv); v2[e.name] = v
@@ -214,17 +263,17 @@ class VecGen:
         if isinstance(e, S.If):
             c = self.gen_vec(e.cond, venv, senv)
             previous=self.mask
-            self.mask=c if previous is None else fb.ins(f'and <{K} x i1> {previous}, {c}',f'<{K} x i1>').name
+            self.mask=c if previous is None else each(lambda p, x: f'and <{W} x i1> {p}, {x}',f'<{W} x i1>',previous,c)
             a = self.gen_vec(e.then, venv, senv)
-            inverse=fb.ins(f'xor <{K} x i1> {c}, {self.const("true",S.BOOL)}',f'<{K} x i1>').name
-            self.mask=inverse if previous is None else fb.ins(f'and <{K} x i1> {previous}, {inverse}',f'<{K} x i1>').name
+            inverse=each(lambda x: f'xor <{W} x i1> {x}, {self.const("true",S.BOOL)}',f'<{W} x i1>',c)
+            self.mask=inverse if previous is None else each(lambda p, x: f'and <{W} x i1> {p}, {x}',f'<{W} x i1>',previous,inverse)
             b = self.gen_vec(e.els, venv, senv)
             self.mask=previous
-            return fb.ins(f"select <{K} x i1> {c}, {vt} {a}, {vt} {b}", vt).name
+            return each(lambda x, y, z: f"select <{W} x i1> {x}, {vt} {y}, {vt} {z}", vt, c, a, b)
         if isinstance(e, S.Call):
             if getattr(e, "builtin", None) == "sqrt":
                 a = self.gen_vec(e.args[0], venv, senv)
-                return fb.ins(f"call <{K} x double> @llvm.sqrt.v{K}f64(<{K} x double> {a})", vt).name
+                return each(lambda x: f"call <{W} x double> @llvm.sqrt.v{W}f64(<{W} x double> {x})", vt, a)
             f = self.fns[e.name]
             v2 = dict(venv)
             for p, a in zip(f.params, e.args):
@@ -234,36 +283,42 @@ class VecGen:
             return self.gen_loop(e, venv, senv)
         raise TypeError(type(e))
 
-    def gen_loop(self, e: S.Loop, venv, senv) -> str:
-        """Masked loop: run while any lane's condition holds; finished lanes keep their state."""
-        K = self.lanes
+    def gen_loop(self, e: S.Loop, venv, senv) -> List[str]:
+        """Masked loop: run while any lane's condition holds; finished lanes keep their state.
+
+        Each iteration is one block that evaluates the condition, then the
+        successor under the resulting mask. The mask is recomputed from the
+        state instead of being carried: a finished lane's frozen state is the
+        one its condition last failed on, with the same checks passing, so it
+        keeps failing. A carried <K x i1> phi is a byte vector on AArch64. The
+        successor is evaluated once more after the last lane finishes, fully
+        masked, and discarded.
+        """
+        W = self.width
         fb = self.fb
         tys = [self.vty(t) for t in e.state_tys]
         ptrs = []
         for x, ty in zip(e.inits, tys):
-            p = fb.alloca(ty); fb.store(_V(self.gen_vec(x, venv, senv), ty), p); ptrs.append(p)
+            ps = []
+            for v in self.gen_vec(x, venv, senv):
+                p = fb.alloca(ty); fb.store(_V(v, ty), p); ps.append(p)
+            ptrs.append(ps)
         parent_mask=self.mask
-        mask_p = fb.alloca(f"<{K} x i1>"); fb.store(_V(parent_mask or self.const("true", S.BOOL), f"<{K} x i1>"), mask_p)
-        head, body, exit_ = fb.label("vloop_head"), fb.label("vloop_body"), fb.label("vloop_exit")
-        fb.br(head); fb.block(head)
+        body, exit_ = fb.label("vloop_body"), fb.label("vloop_exit")
+        fb.br(body); fb.block(body)
         v2 = dict(venv)
-        for n, p, ty in zip(e.names, ptrs, tys): v2[n] = fb.load(ty, p).name
-        m = fb.load(f"<{K} x i1>", mask_p)
-        self.mask=m.name
+        for n, ps, ty in zip(e.names, ptrs, tys): v2[n] = [fb.load(ty, p).name for p in ps]
         c = self.gen_vec(e.cond, v2, senv)
-        m2 = fb.ins(f"and <{K} x i1> {m.name}, {c}", f"<{K} x i1>")
-        fb.store(m2, mask_p)
-        any_ = fb.ins(f"call i1 @llvm.vector.reduce.or.v{K}i1(<{K} x i1> {m2.name})", "i1")
-        fb.cbr(any_, body, exit_); fb.block(body)
-        self.mask=m2.name
+        m2 = c if parent_mask is None else self.each(lambda p, x: f"and <{W} x i1> {p}, {x}", f"<{W} x i1>", parent_mask, c)
+        self.mask = m2
         nexts = [self.gen_vec(x, v2, senv) for x in e.nexts]
-        for n, p, ty, nx in zip(e.names, ptrs, tys, nexts):
-            sel = fb.ins(f"select <{K} x i1> {m2.name}, {ty} {nx}, {ty} {v2[n]}", ty)
-            fb.store(sel, p)
-        fb.br(head); fb.block(exit_)
+        for n, ps, ty, nx in zip(e.names, ptrs, tys, nexts):
+            for p, sel in zip(ps, self.each(lambda m, x, y: f"select <{W} x i1> {m}, {ty} {x}, {ty} {y}", ty, m2, nx, v2[n])):
+                fb.store(_V(sel, ty), p)
+        fb.cbr(self.any_lane(m2), body, exit_); fb.block(exit_)
         v3 = dict(venv)
-        for n, p, ty in zip(e.names, ptrs, tys): v3[n] = fb.load(ty, p).name
-        self.mask=parent_mask
+        for n, ps, ty in zip(e.names, ptrs, tys): v3[n] = [fb.load(ty, p).name for p in ps]
+        self.mask = parent_mask
         return self.gen_vec(e.yld, v3, senv)
 
 class _V:
@@ -308,59 +363,77 @@ def vector_array_loop(gen, fb, e, lo, hi, env, out, origin, reads):
     i=fb.load('i64',ip)
     remaining=fb.ins(f'sub i64 {upper.name}, {i.name}','i64')
     fb.cbr(fb.ins(f'icmp sge i64 {remaining.name}, {K}','i1'),body,end);fb.block(body)
-    vg=VecGen(gen,fb,gen.fn_map,lanes=K);vg.array_index=(e.var,i.name)
+    vg=VecGen(gen,fb,gen.fn_map,lanes=K,width=ARRAY_WIDTH);vg.array_index=(e.var,i.name)
     base=vg.splat(i.name,'i64',S.I64)
-    lanes=fb.ins(f'add <{K} x i64> {base}, <'+', '.join(f'i64 {k}' for k in range(K))+'>',f'<{K} x i64>')
-    value=vg.gen_vec(e.body,{e.var:lanes.name},env)
+    lanes=vg.each(lambda b, o: f'add <{vg.width} x i64> {b}, {o}',f'<{vg.width} x i64>',base,vg.offsets())
+    value=vg.gen_vec(e.body,{e.var:lanes},env)
     data=fb.ins(f'extractvalue {out}, 0','ptr')
     index=fb.ins(f'sub i64 {i.name}, {origin.name}','i64')
     scalar_ty='i64' if e.ty.elem==S.I64 else 'double'
-    ptr=fb.ins(f'getelementptr inbounds {scalar_ty}, ptr {data.name}, i64 {index.name}','ptr')
-    fb.emit(f'store {vg.vty(e.ty.elem)} {value}, ptr {ptr.name}, align 8')
+    for g, v in enumerate(value):
+        at=fb.ins(f'add i64 {index.name}, {g*vg.width}','i64')
+        ptr=fb.ins(f'getelementptr inbounds {scalar_ty}, ptr {data.name}, i64 {at.name}','ptr')
+        fb.emit(f'store {vg.vty(e.ty.elem)} {v}, ptr {ptr.name}, align 8')
     fb.store(fb.ins(f'add i64 {i.name}, {K}','i64'),ip);fb.br(head);fb.block(end)
     gen.counted_loop(fb.load('i64',ip),hi,e.var,env,scalar)
 
 def vector_sum_loop(gen, fb, e: S.Sum, lo, hi, env, acc_ptr: str, fns: Dict[str, S.Fn]):
-    """Accumulate sum(body) over [lo, hi) into *acc_ptr, K lanes at a time."""
+    """Accumulate sum(body) over [lo, hi) into *acc_ptr, K lanes at a time.
+
+    Whole vectors run the body unmasked; one masked iteration takes the tail,
+    its inactive lanes recomputing the last valid index.
+    """
     vg = VecGen(gen, fb, fns)
+    W = vg.width
     t = e.ty; vt = vg.vty(t)
-    vacc = fb.alloca(vt); fb.store(_V("zeroinitializer", vt), vacc)
+    each = vg.each
+    vacc = []
+    for g in range(vg.groups):
+        p = fb.alloca(vt); fb.store(_V("zeroinitializer", vt), p); vacc.append(p)
     ip = fb.alloca("i64"); fb.store(_V(lo.name, "i64"), ip)
-    cond, body, end = fb.label("vsum_cond"), fb.label("vsum_body"), fb.label("vsum_end")
+    def accumulate(val, active):
+        old = [fb.load(vt, p).name for p in vacc]
+        if t == S.I64:
+            summed = vg.checked('add', old, val, e)
+            if active: summed = each(lambda m, x, y: f'select <{W} x i1> {m}, {vt} {x}, {vt} {y}', vt, active, summed, old)
+        else:
+            summed = each(lambda x, y: f"fadd reassoc {vt} {x}, {y}", vt, old, val)
+        for p, s in zip(vacc, summed): fb.store(_V(s, vt), p)
+    cond, body, tail = fb.label("vsum_full_cond"), fb.label("vsum_full_body"), fb.label("vsum_tail")
     fb.br(cond); fb.block(cond)
     i = fb.load("i64", ip)
-    c = fb.ins(f"icmp slt i64 {i.name}, {hi.name}", "i1")
-    fb.cbr(c, body, end); fb.block(body)
-    base = vg.splat(i.name, "i64", S.I64)
-    lanes = fb.ins(f"add <{K} x i64> {base}, <{', '.join(f'i64 {k}' for k in range(K))}>", f"<{K} x i64>")
-    hiv = vg.splat(hi.name, "i64", S.I64)
-    remaining=fb.ins(f'sub i64 {hi.name}, {i.name}','i64')
-    remainv=vg.splat(remaining.name,'i64',S.I64)
-    offsets='<'+', '.join(f'i64 {k}' for k in range(K))+'>'
-    active = fb.ins(f"icmp slt <{K} x i64> {offsets}, {remainv}", f"<{K} x i1>")
+    remaining = fb.ins(f'sub i64 {hi.name}, {i.name}','i64')
+    fb.cbr(fb.ins(f'icmp sge i64 {remaining.name}, {K}','i1'), body, tail); fb.block(body)
+    lanes = each(lambda b, o: f"add <{W} x i64> {b}, {o}", f"<{W} x i64>", vg.splat(i.name, 'i64', S.I64), vg.offsets())
+    vg.mask = None
+    accumulate(vg.gen_vec(e.body, {e.var: lanes}, env), None)
+    fb.store(fb.ins(f'add i64 {i.name}, {K}','i64'),ip)
+    fb.br(cond); fb.block(tail)
+    i = fb.load("i64", ip)
+    last_body, end = fb.label("vsum_last"), fb.label("vsum_end")
+    fb.cbr(fb.ins(f"icmp slt i64 {i.name}, {hi.name}", "i1"), last_body, end); fb.block(last_body)
+    lanes = each(lambda b, o: f"add <{W} x i64> {b}, {o}", f"<{W} x i64>", vg.splat(i.name, 'i64', S.I64), vg.offsets())
+    remaining = fb.ins(f'sub i64 {hi.name}, {i.name}','i64')
+    remainv = vg.splat(remaining.name,'i64',S.I64)
+    active = each(lambda o, r: f"icmp slt <{W} x i64> {o}, {r}", f"<{W} x i1>", vg.offsets(), remainv)
     last = fb.ins(f"sub i64 {hi.name}, 1", "i64")
     lastv = vg.splat(last.name, "i64", S.I64)
-    idx = fb.ins(f"select <{K} x i1> {active.name}, <{K} x i64> {lanes.name}, <{K} x i64> {lastv}", f"<{K} x i64>")
-    venv = {e.var: idx.name}                      # inactive lanes recompute the last valid index and are masked out
-    vg.mask=active.name
-    val = vg.gen_vec(e.body, venv, env)
-    masked = fb.ins(f"select <{K} x i1> {active.name}, {vt} {val}, {vt} zeroinitializer", vt)
-    old = fb.load(vt, vacc)
-    op = "fadd reassoc" if t == S.F64 else "add"
-    summed=vg.checked('add',old.name,masked.name,e) if t==S.I64 else fb.ins(f"{op} {vt} {old.name}, {masked.name}",vt).name
-    if t==S.I64:summed=fb.ins(f'select <{K} x i1> {active.name}, {vt} {summed}, {vt} {old.name}',vt).name
-    fb.store(_V(summed,vt),vacc)
-    advance=fb.ins(f'add i64 {i.name}, {K}','i64')
-    near=fb.ins(f'icmp slt i64 {remaining.name}, {K}','i1')
-    i2=fb.ins(f'select i1 {near.name}, i64 {hi.name}, i64 {advance.name}','i64');fb.store(i2,ip)
-    fb.br(cond); fb.block(end)
-    v = fb.load(vt, vacc)
+    idx = each(lambda m, x, y: f"select <{W} x i1> {m}, <{W} x i64> {x}, <{W} x i64> {y}", f"<{W} x i64>", active, lanes, lastv)
+    vg.mask = active                              # inactive lanes recompute the last valid index and are masked out
+    val = vg.gen_vec(e.body, {e.var: idx}, env)
+    accumulate(each(lambda m, x: f"select <{W} x i1> {m}, {vt} {x}, {vt} zeroinitializer", vt, active, val), active)
+    vg.mask = None
+    fb.br(end); fb.block(end)
+    v = [fb.load(vt, p).name for p in vacc]
     if t == S.F64:
-        red = fb.ins(f"call reassoc double @llvm.vector.reduce.fadd.v{K}f64(double 0.0, <{K} x double> {v.name})", "double")
+        total = v[0]
+        for other in v[1:]: total = fb.ins(f"fadd reassoc {vt} {total}, {other}", vt).name
+        red = fb.ins(f"call reassoc double @llvm.vector.reduce.fadd.v{W}f64(double 0.0, {vt} {total})", "double")
         old = fb.load("double", acc_ptr); fb.store(fb.ins(f"fadd reassoc double {old.name}, {red.name}", "double"), acc_ptr)
     else:
         old=fb.load('i64',acc_ptr)
-        for lane in range(K):
-            value=fb.ins(f'extractelement {vt} {v.name}, i64 {lane}','i64')
-            old=gen.checked_operation('+',old,value,e) if gen.checked_integer() else fb.ins(f'add {old}, {value.name}','i64')
+        for part in v:
+            for lane in range(W):
+                value=fb.ins(f'extractelement {vt} {part}, i64 {lane}','i64')
+                old=gen.checked_operation('+',old,value,e) if gen.checked_integer() else fb.ins(f'add {old}, {value.name}','i64')
         fb.store(old,acc_ptr)
