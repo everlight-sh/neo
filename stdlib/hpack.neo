@@ -1,0 +1,140 @@
+import "std:http_client"
+
+; HPACK header compression for HTTP/2 (RFC 7541). The decoder has the static table,
+; the dynamic table with size updates, and Huffman-coded strings (Appendix B). The
+; encoder writes static-table indexes and literals without indexing or Huffman
+; coding, so it never changes the peer's dynamic table.
+
+; A decoder's dynamic table, newest entry first. size counts each entry as its name
+; and value plus 32 bytes (RFC 7541 4.1). limit is the current maximum, which a size
+; update may change up to ceiling, the SETTINGS_HEADER_TABLE_SIZE sent to the peer.
+type HpackTable = { entries:Arr HttpHeader _,size:i64,limit:i64,ceiling:i64 }
+; A decoded header block: the fields in order, and the table after it.
+type HpackHeaders = { ok:bool,error:Error,table:HpackTable,headers:Arr HttpHeader _ }
+private type HpackInt = { ok:bool,value:i64,at:i64 }
+private type HpackField = { ok:bool,header:HttpHeader,at:i64 }
+private type HpackCut = { count:i64,size:i64 }
+private type HpackBits = { code:i64,first:i64,index:i64,length:i64,out:Arr u8 _,ok:bool }
+private type HpackState = { at:i64,table:HpackTable,headers:Arr HttpHeader _,ok:bool,fields:bool,list:i64 }
+
+private fn hpack_no_headers() -> Arr HttpHeader _ = arr(i in 0..0) HttpHeader { name="",value="" }
+fn hpack_table(ceiling:i64) -> HpackTable = HpackTable { entries=hpack_no_headers(),size=0,limit=ceiling,ceiling=ceiling }
+fn hpack_entry_size(header:HttpHeader) -> i64 = len(header.name)+len(header.value)+32
+
+private fn hpack_u16(bytes:Arr u8 n,at:i64) -> i64 = str_byte(bytes,at)*256+str_byte(bytes,at+1)
+; The static table (Appendix A): entry index, 1 to 61, as offsets into packed names and values.
+fn hpack_static(index:i64) -> HttpHeader
+  = let names=":authority:method:method:path:path:scheme:scheme:status:status:status:status:status:status:statusaccept-charsetaccept-encodingaccept-languageaccept-rangesacceptaccess-control-allow-originageallowauthorizationcache-controlcontent-dispositioncontent-encodingcontent-languagecontent-lengthcontent-locationcontent-rangecontent-typecookiedateetagexpectexpiresfromhostif-matchif-modified-sinceif-none-matchif-rangeif-unmodified-sincelast-modifiedlinklocationmax-forwardsproxy-authenticateproxy-authorizationrangerefererrefreshretry-afterserverset-cookiestrict-transport-securitytransfer-encodinguser-agentvaryviawww-authenticate" in let name_offsets="\x00\x00\x00\x0a\x00\x11\x00\x18\x00\x1d\x00\x22\x00\x29\x00\x30\x00\x37\x00\x3e\x00\x45\x00\x4c\x00\x53\x00\x5a\x00\x61\x00\x6f\x00\x7e\x00\x8d\x00\x9a\x00\xa0\x00\xbb\x00\xbe\x00\xc3\x00\xd0\x00\xdd\x00\xf0\x01\x00\x01\x10\x01\x1e\x01\x2e\x01\x3b\x01\x47\x01\x4d\x01\x51\x01\x55\x01\x5b\x01\x62\x01\x66\x01\x6a\x01\x72\x01\x83\x01\x90\x01\x98\x01\xab\x01\xb8\x01\xbc\x01\xc4\x01\xd0\x01\xe2\x01\xf5\x01\xfa\x02\x01\x02\x08\x02\x13\x02\x19\x02\x23\x02\x3c\x02\x4d\x02\x57\x02\x5b\x02\x5e\x02\x6e" in
+    let values="GETPOST//index.htmlhttphttps200204206304400404500gzip, deflate" in let value_offsets="\x00\x00\x00\x00\x00\x03\x00\x07\x00\x08\x00\x13\x00\x17\x00\x1c\x00\x1f\x00\x22\x00\x25\x00\x28\x00\x2b\x00\x2e\x00\x31\x00\x31\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e\x00\x3e" in
+    if index<1 || index>61 then HttpHeader { name="",value="" } else
+      HttpHeader { name=str_slice(names,hpack_u16(name_offsets,2*index-2),hpack_u16(name_offsets,2*index)),
+        value=str_slice(values,hpack_u16(value_offsets,2*index-2),hpack_u16(value_offsets,2*index)) }
+; Index 1 to 61 is static, 62 on the dynamic table, newest first.
+private fn hpack_lookup(table:HpackTable,index:i64) -> HpackField
+  = if index>=1 && index<=61 then HpackField { ok=true,header=hpack_static(index),at=0 } else
+    let at=index-62 in if at<0 || at>=len(table.entries) then HpackField { ok=false,header=HttpHeader { name="",value="" },at=0 } else
+      check at>=0 && at<len(table.entries) in HpackField { ok=true,header=table.entries[at],at=0 }
+
+; Keeps the newest entries that fit in limit (RFC 7541 4.3, 4.4).
+private fn hpack_cut(entries:Arr HttpHeader n,limit:i64) -> HpackCut
+  = loop(i=0,size=0) while i<n && (check i>=0 && i<n in size+hpack_entry_size(entries[i])<=limit)
+      next(i+1,check i>=0 && i<n in size+hpack_entry_size(entries[i])) yield HpackCut { count=i,size=size }
+private fn hpack_trim(move table:HpackTable,limit:i64) -> HpackTable
+  = let cut=hpack_cut(table.entries,limit) in let count=cut.count in let entries=table.entries in
+    check count>=0 && count<=len(entries) in
+    table with { entries=arr(i in 0..count) entries[i],size=cut.size,limit=limit }
+private fn hpack_insert(move table:HpackTable,header:HttpHeader) -> HpackTable
+  = let entries=table.entries in let count=len(entries)+1 in let limit=table.limit in
+    let grown=arr(i in 0..count) if i==0 then header else check i-1>=0 && i-1<len(entries) in entries[i-1] in
+    hpack_trim(table with { entries=grown },limit)
+
+; An integer with an N-bit prefix (RFC 7541 5.1), at most four continuation bytes.
+private fn hpack_int(block:Arr u8 n,at:i64,prefix:i64{prefix>=1 && prefix<=8}) -> HpackInt
+  = let first=str_byte(block,at) in let mask=shift_left(1,prefix)-1 in
+    if first<0 then HpackInt { ok=false,value=0,at=at } else
+    if bit_and(first,mask)<mask then HpackInt { ok=true,value=bit_and(first,mask),at=at+1 } else
+      loop(i=at+1,value=mask,shift=0,more=true,ok=true) while ok && more
+        next(i+1,value+shift_left(bit_and(str_byte(block,i),127),shift),shift+7,bit_and(str_byte(block,i),128)!=0,str_byte(block,i)>=0 && shift<=21)
+        yield HpackInt { ok=ok,value=value,at=i }
+
+; Huffman decoding (Appendix B). The code is canonical, so each length's codes are
+; consecutive: counts[L] is how many codes have L bits, symbols lists them by length
+; then value, and index 256 is EOS. Padding is at most 7 bits of the EOS prefix.
+private fn hpack_huffman_bit(move s:HpackBits,bit:i64,counts:Arr u8 c,symbols:Arr u8 y) -> HpackBits
+  = let length=s.length+1 in let width=str_byte(counts,s.length) in
+    let first=(s.first+width)*2 in let index=s.index+width in let code=s.code*2+bit in let offset=code-first in
+    if offset>=0 && offset<str_byte(counts,length) then
+      (if index+offset>=256 then s with { ok=false } else
+        s with { code=0,first=0,index=0,length=0,out=push(s.out,u8(str_byte(symbols,index+offset))) }) else
+    if length>=30 then s with { ok=false } else s with { code=code,first=first,index=index,length=length }
+fn hpack_huffman_decode(bytes:Arr u8 n) -> BytesResult
+  = let counts="\x00\x00\x00\x00\x00\x0a\x1a\x20\x06\x00\x05\x03\x02\x06\x02\x03\x00\x00\x00\x03\x08\x0d\x1a\x1d\x0c\x04\x0f\x13\x1d\x00\x04" in
+    let symbols="\x30\x31\x32\x61\x63\x65\x69\x6f\x73\x74\x20\x25\x2d\x2e\x2f\x33\x34\x35\x36\x37\x38\x39\x3d\x41\x5f\x62\x64\x66\x67\x68\x6c\x6d\x6e\x70\x72\x75\x3a\x42\x43\x44\x45\x46\x47\x48\x49\x4a\x4b\x4c\x4d\x4e\x4f\x50\x51\x52\x53\x54\x55\x56\x57\x59\x6a\x6b\x71\x76\x77\x78\x79\x7a\x26\x2a\x2c\x3b\x58\x5a\x21\x22\x28\x29\x3f\x27\x2b\x7c\x23\x3e\x00\x24\x40\x5b\x5d\x7e\x5e\x7d\x3c\x60\x7b\x5c\xc3\xd0\x80\x82\x83\xa2\xb8\xc2\xe0\xe2\x99\xa1\xa7\xac\xb0\xb1\xb3\xd1\xd8\xd9\xe3\xe5\xe6\x81\x84\x85\x86\x88\x92\x9a\x9c\xa0\xa3\xa4\xa9\xaa\xad\xb2\xb5\xb9\xba\xbb\xbd\xbe\xc4\xc6\xe4\xe8\xe9\x01\x87\x89\x8a\x8b\x8c\x8d\x8f\x93\x95\x96\x97\x98\x9b\x9d\x9e\xa5\xa6\xa8\xae\xaf\xb4\xb6\xb7\xbc\xbf\xc5\xe7\xef\x09\x8e\x90\x91\x94\x9f\xab\xce\xd7\xe1\xec\xed\xc7\xcf\xea\xeb\xc0\xc1\xc8\xc9\xca\xcd\xd2\xd5\xda\xdb\xee\xf0\xf2\xf3\xff\xcb\xcc\xd3\xd4\xd6\xdd\xde\xdf\xf1\xf4\xf5\xf6\xf7\xf8\xfa\xfb\xfc\xfd\xfe\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x10\x11\x12\x13\x14\x15\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f\xdc\xf9\x0a\x0d\x16" in
+    let state=loop(bit=0,s=HpackBits { code=0,first=0,index=0,length=0,out="",ok=true }) while s.ok && bit<n*8
+      next(bit+1,hpack_huffman_bit(s,bit_and(shift_right(str_byte(bytes,bit/8),7-bit%8),1),counts,symbols)) yield s in
+    if !state.ok || state.length>7 || state.code!=shift_left(1,state.length)-1 then bytes_error(71,"invalid HPACK Huffman string",0) else bytes_ok(state.out)
+
+; A string literal (RFC 7541 5.2): a Huffman flag and a 7-bit-prefix length.
+private fn hpack_text(block:Arr u8 n,at:i64) -> HpackField
+  = let length=hpack_int(block,at,7) in
+    if !length.ok || length.value>n-length.at then HpackField { ok=false,header=HttpHeader { name="",value="" },at=at } else
+    let raw=str_slice(block,length.at,length.at+length.value) in
+    if bit_and(str_byte(block,at),128)==0 then HpackField { ok=true,header=HttpHeader { name="",value=raw },at=length.at+length.value } else
+      let decoded=hpack_huffman_decode(raw) in HpackField { ok=decoded.ok,header=HttpHeader { name="",value=decoded.value },at=length.at+length.value }
+; A literal field (RFC 7541 6.2): an indexed name, or a literal one after a zero index, then the value.
+private fn hpack_literal(table:HpackTable,block:Arr u8 n,at:i64,prefix:i64{prefix>=1 && prefix<=8}) -> HpackField
+  = let index=hpack_int(block,at,prefix) in
+    let name=if !index.ok then HpackField { ok=false,header=HttpHeader { name="",value="" },at=at } else
+      if index.value==0 then let text=hpack_text(block,index.at) in text with { header=HttpHeader { name=text.header.value,value="" } } else
+      let found=hpack_lookup(table,index.value) in found with { at=index.at } in
+    if !name.ok then name else
+      let value=hpack_text(block,name.at) in value with { header=HttpHeader { name=name.header.name,value=value.header.value } }
+private fn hpack_emit(move s:HpackState,header:HttpHeader,limit:i64) -> HpackState
+  = let list=s.list+hpack_entry_size(header) in
+    if list>limit then s with { ok=false } else s with { headers=push(s.headers,header),fields=true,list=list }
+; One representation (RFC 7541 6): indexed, literal with incremental indexing, a
+; dynamic table size update (only before the first field), or a literal without
+; indexing or never indexed.
+private fn hpack_step(move s:HpackState,block:Arr u8 n,limit:i64) -> HpackState
+  = let first=str_byte(block,s.at) in
+    if first>=128 then
+      let index=hpack_int(block,s.at,7) in let field=hpack_lookup(s.table,index.value) in
+      if !index.ok || !field.ok then s with { ok=false } else hpack_emit(s with { at=index.at },field.header,limit) else
+    if first>=64 then
+      let field=hpack_literal(s.table,block,s.at,6) in
+      if !field.ok then s with { ok=false } else
+        let table=s.table in hpack_emit(s with { at=field.at,table=hpack_insert(table,field.header) },field.header,limit) else
+    if first>=32 then
+      let size=hpack_int(block,s.at,5) in
+      if !size.ok || s.fields || size.value>s.table.ceiling then s with { ok=false } else
+        let table=s.table in s with { at=size.at,table=hpack_trim(table,size.value) } else
+      let field=hpack_literal(s.table,block,s.at,4) in
+      if !field.ok then s with { ok=false } else hpack_emit(s with { at=field.at },field.header,limit)
+; Decodes one complete header block. limit bounds the decoded header list, counted
+; as for SETTINGS_MAX_HEADER_LIST_SIZE. On an error the table is left as it was; the
+; connection cannot continue then (COMPRESSION_ERROR).
+fn hpack_decode(table:HpackTable,block:Arr u8 n,limit:i64) -> HpackHeaders
+  = let state=loop(s=HpackState { at=0,table=table,headers=hpack_no_headers(),ok=true,fields=false,list=0 }) while s.ok && s.at<n
+      next(hpack_step(s,block,limit)) yield s in
+    if !state.ok then HpackHeaders { ok=false,error=Error { code=71,message="invalid or oversized HTTP/2 header block (HPACK)",position=state.at },table=table,headers=hpack_no_headers() } else
+      HpackHeaders { ok=true,error=no_error(),table=state.table,headers=state.headers }
+
+; Encoding: an integer with an N-bit prefix under `flags`, and a raw string literal.
+fn hpack_integer(value:i64,prefix:i64{prefix>=1 && prefix<=8},flags:i64) -> Arr u8 _
+  = let mask=shift_left(1,prefix)-1 in
+    if value<mask then arr(i in 0..1) u8(bit_or(flags,value)) else
+      loop(rest=value-mask,out=arr(i in 0..1) u8(bit_or(flags,mask))) while rest>=128
+        next(shift_right(rest,7),push(out,u8(bit_or(bit_and(rest,127),128)))) yield push(out,u8(rest))
+private fn hpack_string(text:Arr u8 n) -> Arr u8 _ = concat(hpack_integer(n,7,0),text)
+; The static index of name with value (exact) or of name alone, or 0.
+private fn hpack_static_find(name:Arr u8 n,value:Arr u8 m,exact:bool) -> i64
+  = loop(i=1,found=0) while found==0 && i<=61
+      next(i+1,let entry=hpack_static(i) in if str_equal(entry.name,name) && (!exact || str_equal(entry.value,value)) then i else 0) yield found
+; One field: indexed when the static table has it, else a literal without indexing,
+; with an indexed name when the static table has the name.
+fn hpack_encode_field(name:Arr u8 n,value:Arr u8 m) -> Arr u8 _
+  = let exact=hpack_static_find(name,value,true) in if exact>0 then hpack_integer(exact,7,128) else
+    let named=hpack_static_find(name,value,false) in
+    if named>0 then concat(hpack_integer(named,4,0),hpack_string(value)) else concat("\0",hpack_string(name),hpack_string(value))
+fn hpack_encode(headers:Arr HttpHeader n) -> Arr u8 _
+  = loop(i=0,out="") while i<n next(i+1,check i>=0 && i<n in concat(out,hpack_encode_field(headers[i].name,headers[i].value))) yield out
