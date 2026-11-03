@@ -1,0 +1,22 @@
+scripts/ab.py: nbody-default, 5 interleaved rounds of 5 s after 1 s warm-up. kq = this change; main = 6e18e65
+(poll loop); rust = hyper/tokio. Machine load average about 15 from other sessions.
+
+r0 nbody-default  main  21,839 req/s  CPU 409.88 us/req  p50 2220  p99  9640
+r0 nbody-default  rust  16,661 req/s  CPU 538.39 us/req  p50 3730  p99  8520
+r0 nbody-default  kq    21,652 req/s  CPU 407.17 us/req  p50 2180  p99 10100
+r1 nbody-default  rust  16,560 req/s  CPU 538.93 us/req  p50 3730  p99  8540
+r1 nbody-default  kq    21,715 req/s  CPU 408.87 us/req  p50 2210  p99 10180
+r1 nbody-default  main  21,872 req/s  CPU 410.38 us/req  p50 2210  p99 10360
+r2 nbody-default  kq    21,620 req/s  CPU 406.31 us/req  p50 2190  p99  9780
+r2 nbody-default  rust  16,612 req/s  CPU 536.97 us/req  p50 3710  p99  8380
+r2 nbody-default  main  21,720 req/s  CPU 406.96 us/req  p50 2220  p99 10200
+r3 nbody-default  kq    21,694 req/s  CPU 407.64 us/req  p50 2230  p99  9620
+r3 nbody-default  rust  16,508 req/s  CPU 541.39 us/req  p50 3740  p99  8510
+r3 nbody-default  main  21,740 req/s  CPU 409.51 us/req  p50 2220  p99  9970
+r4 nbody-default  main  21,808 req/s  CPU 407.76 us/req  p50 2200  p99  9480
+r4 nbody-default  rust  16,418 req/s  CPU 542.58 us/req  p50 3770  p99  8900
+r4 nbody-default  kq    21,869 req/s  CPU 409.45 us/req  p50 2210  p99  9060
+
+main  median 21,808 req/s  CPU 408.90 us/req  p99 median  9970 us
+rust  median 16,560 req/s  CPU 539.65 us/req  p99 median  8520 us
+kq    median 21,694 req/s  CPU 407.89 us/req  p99 median  9780 us

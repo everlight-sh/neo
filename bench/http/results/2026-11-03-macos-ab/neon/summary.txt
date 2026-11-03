@@ -1,0 +1,39 @@
+scripts/ab.py final=<this branch> arm64=<this branch's runtime on the arm64 compute branch> rust=<bench/rust> --scenarios smooth-10000-one-worker smooth-1000-one-worker smooth-10000-default --rounds 3 (load gate 3, up to 100 s)
+
+r0 smooth-10000-one-worker  arm64           4,195 req/s  CPU  238.41 us/req  p50    15210  p99    16230  cores 1.00 procs 1 err 0/0  load 2.43
+r0 smooth-10000-one-worker  rust            4,837 req/s  CPU  206.31 us/req  p50    13310  p99    15310  cores 1.00 procs 1 err 0/0  load 2.71
+r0 smooth-10000-one-worker  final           3,284 req/s  CPU  304.94 us/req  p50    19420  p99    19970  cores 1.00 procs 1 err 0/0  load 2.92
+r0 smooth-1000-one-worker   rust           39,560 req/s  CPU   24.77 us/req  p50     1640  p99     1800  cores 0.98 procs 1 err 0/0  load 2.84
+r0 smooth-1000-one-worker   final          28,982 req/s  CPU   34.18 us/req  p50     2200  p99     2360  cores 0.99 procs 1 err 0/0  load 2.78
+r0 smooth-1000-one-worker   arm64          35,282 req/s  CPU   27.86 us/req  p50     1810  p99     1940  cores 0.98 procs 1 err 0/0  load 2.74
+r0 smooth-10000-default     final          25,925 req/s  CPU  355.26 us/req  p50     1910  p99     7540  cores 9.19 procs 10 err 0/0  load 2.76
+r0 smooth-10000-default     rust           34,914 req/s  CPU  252.38 us/req  p50     1780  p99     3680  cores 8.79 procs 1 err 0/0  load 2.94
+r0 smooth-10000-default     arm64          32,492 req/s  CPU  271.49 us/req  p50     1470  p99     6830  cores 8.80 procs 10 err 0/0  load 5.12
+r1 smooth-10000-one-worker  final           3,269 req/s  CPU  306.37 us/req  p50    19470  p99    20250  cores 1.00 procs 1 err 0/0  load 3.34
+r1 smooth-10000-one-worker  rust            4,882 req/s  CPU  204.95 us/req  p50    13240  p99    13870  cores 1.00 procs 1 err 0/0  load 2.89
+r1 smooth-10000-one-worker  arm64           4,304 req/s  CPU  232.71 us/req  p50    14860  p99    15350  cores 1.00 procs 1 err 0/0  load 2.91
+r1 smooth-1000-one-worker   arm64          35,486 req/s  CPU   27.69 us/req  p50     1800  p99     1950  cores 0.98 procs 1 err 0/0  load 2.99
+r1 smooth-1000-one-worker   rust           40,159 req/s  CPU   24.41 us/req  p50     1610  p99     1750  cores 0.98 procs 1 err 0/0  load 2.90
+r1 smooth-1000-one-worker   final          29,259 req/s  CPU   33.88 us/req  p50     2190  p99     2340  cores 0.99 procs 1 err 0/0  load 2.85
+r1 smooth-10000-default     rust           35,554 req/s  CPU  252.96 us/req  p50     1760  p99     3540  cores 8.98 procs 1 err 0/0  load 2.94
+r1 smooth-10000-default     final          25,983 req/s  CPU  355.86 us/req  p50     1910  p99     7440  cores 9.23 procs 10 err 0/0  load 2.98
+r1 smooth-10000-default     arm64          32,815 req/s  CPU  276.84 us/req  p50     1450  p99     7340  cores 9.07 procs 10 err 0/0  load 3.10
+r2 smooth-10000-one-worker  final           3,266 req/s  CPU  306.59 us/req  p50    19480  p99    20210  cores 1.00 procs 1 err 0/0  load 2.98
+r2 smooth-10000-one-worker  rust            4,869 req/s  CPU  205.59 us/req  p50    13240  p99    14180  cores 1.00 procs 1 err 0/0  load 2.87
+r2 smooth-10000-one-worker  arm64           4,304 req/s  CPU  232.76 us/req  p50    14880  p99    15240  cores 1.00 procs 1 err 0/0  load 2.97
+r2 smooth-1000-one-worker   arm64          35,613 req/s  CPU   27.59 us/req  p50     1800  p99     1910  cores 0.98 procs 1 err 0/0  load 2.89
+r2 smooth-1000-one-worker   final          29,206 req/s  CPU   33.92 us/req  p50     2190  p99     2350  cores 0.99 procs 1 err 0/0  load 2.90
+r2 smooth-1000-one-worker   rust           40,052 req/s  CPU   24.54 us/req  p50     1620  p99     1750  cores 0.98 procs 1 err 0/0  load 2.92
+r2 smooth-10000-default     final          25,818 req/s  CPU  355.60 us/req  p50     1900  p99     7600  cores 9.16 procs 10 err 0/0  load 2.84
+r2 smooth-10000-default     arm64          32,975 req/s  CPU  277.60 us/req  p50     1480  p99     6490  cores 9.14 procs 10 err 0/0  load 3.26
+r2 smooth-10000-default     rust           35,257 req/s  CPU  253.03 us/req  p50     1770  p99     3620  cores 8.91 procs 1 err 0/0  load 2.86
+
+smooth-10000-one-worker  arm64      median      4,304 req/s  CPU  234.59 us/req  p99 med    15350  errors 0
+smooth-10000-one-worker  rust       median      4,869 req/s  CPU  205.62 us/req  p99 med    14180  errors 0
+smooth-10000-one-worker  final      median      3,269 req/s  CPU  305.97 us/req  p99 med    20210  errors 0
+smooth-1000-one-worker   rust       median     40,052 req/s  CPU   24.57 us/req  p99 med     1750  errors 0
+smooth-1000-one-worker   final      median     29,206 req/s  CPU   33.99 us/req  p99 med     2350  errors 0
+smooth-1000-one-worker   arm64      median     35,486 req/s  CPU   27.71 us/req  p99 med     1940  errors 0
+smooth-10000-default     final      median     25,925 req/s  CPU  355.57 us/req  p99 med     7540  errors 0
+smooth-10000-default     rust       median     35,257 req/s  CPU  252.79 us/req  p99 med     3620  errors 0
+smooth-10000-default     arm64      median     32,815 req/s  CPU  275.33 us/req  p99 med     6830  errors 0

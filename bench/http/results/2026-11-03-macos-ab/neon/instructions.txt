@@ -1,0 +1,15 @@
+scripts/instr.py, one worker, sequential keep-alive client, /usr/bin/time -l of the server process.
+final = this branch; arm64kq = this branch's runtime on the arm64 compute branch; rust = bench/rust.
+
+final    / n=20000  instructions/req       38,403  cycles/req       17,063  user     0.5 us  sys    5.0 us  page reclaims/req     0.0
+arm64kq  / n=20000  instructions/req       38,748  cycles/req       16,807  user     0.5 us  sys    4.5 us  page reclaims/req     0.0
+rust     / n=20000  instructions/req       55,247  cycles/req       27,075  user     2.0 us  sys    6.5 us  page reclaims/req     0.0
+final    /smooth/1000 n=4000  instructions/req      634,365  cycles/req      109,966  user    30.0 us  sys    5.0 us  page reclaims/req     0.1
+arm64kq  /smooth/1000 n=4000  instructions/req      410,858  cycles/req       91,602  user    22.5 us  sys    5.0 us  page reclaims/req     0.1
+rust     /smooth/1000 n=4000  instructions/req      392,345  cycles/req       87,407  user    20.0 us  sys    5.0 us  page reclaims/req     0.1
+final    /smooth/10000 n=400  instructions/req    5,917,721  cycles/req      945,174  user   275.0 us  sys    0.0 us  page reclaims/req     0.7
+arm64kq  /smooth/10000 n=400  instructions/req    3,677,756  cycles/req      753,926  user   225.0 us  sys    0.0 us  page reclaims/req     0.7
+rust     /smooth/10000 n=400  instructions/req    3,385,757  cycles/req      687,614  user   200.0 us  sys    0.0 us  page reclaims/req     0.8
+final    POST:/nbody n=400  instructions/req    4,677,280  cycles/req    1,115,123  user   325.0 us  sys    0.0 us  page reclaims/req     0.7
+arm64kq  POST:/nbody n=400  instructions/req    4,677,219  cycles/req    1,115,980  user   325.0 us  sys    0.0 us  page reclaims/req     0.7
+rust     POST:/nbody n=400  instructions/req    5,630,278  cycles/req    1,474,199  user   450.0 us  sys    0.0 us  page reclaims/req     0.8

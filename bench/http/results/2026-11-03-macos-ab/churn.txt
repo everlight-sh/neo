@@ -1,0 +1,15 @@
+scripts/churn.py: wrk -t2 -c16 -d3s -H 'Connection: close', server process-tree CPU per completed request.
+turn10 = this change (10 workers); herd10 = every worker keeps the listener armed (tried, not kept).
+Neo does not answer 'Connection: close' with the header, so wrk reuses the closing socket once per
+connection: the "read" errors. Round r2 collapsed for every server (client/server TIME_WAIT collisions on
+loopback) and is not used.
+
+r0 rust      24,365 conn/s  server CPU   47.8 us/conn  p99  46.76ms
+r0 turn10    22,409 conn/s  server CPU   78.4 us/conn  p99  40.79ms  connect 0, read 70578, write 0, timeout 0
+r0 herd10    17,566 conn/s  server CPU   87.5 us/conn  p99  74.95ms  connect 0, read 54308, write 0, timeout 0
+r1 herd10    17,365 conn/s  server CPU  107.0 us/conn  p99  56.40ms  connect 0, read 53918, write 0, timeout 0
+r1 turn10    21,934 conn/s  server CPU   76.6 us/conn  p99  39.44ms  connect 0, read 66175, write 0, timeout 0
+r1 rust      18,883 conn/s  server CPU   49.4 us/conn  p99 154.75ms  connect 11, read 0, write 0, timeout 0
+r2 rust          80 conn/s  server CPU   61.5 us/conn  p99 311.77ms  connect 16, read 0, write 0, timeout 0
+r2 herd10       346 conn/s  server CPU  183.1 us/conn  p99 252.22ms  connect 16, read 1061, write 0, timeout 0
+r2 turn10     2,939 conn/s  server CPU   73.0 us/conn  p99 303.57ms  connect 2, read 9120, write 0, timeout 0

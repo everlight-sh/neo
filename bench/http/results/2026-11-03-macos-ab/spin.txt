@@ -1,0 +1,11 @@
+Spinning before blocking (experiment, not kept): NEO_HTTP_SPIN=N made a worker call kevent with a zero
+timeout up to N times before a blocking wait. scripts/ab.py, interleaved rounds, medians.
+
+hello-64:  spin 0 144,833 req/s at 14.66 us/req;  spin 4 140,749 at 21.06;  spin 16 138,746 at 22.21;
+           spin 64 140,342 at 22.27;  Rust 143,504 at 17.01
+hello-256: spin 0 147,246 at 15.57;  spin 4 144,673 at 18.67;  spin 16 137,998;  spin 64 141,190;
+           Rust 145,635 at 17.77
+
+One spin-4 hello-256 run reported 40 socket errors. Its wrk log was overwritten by the next round (the
+script did not yet tag files per round), so the cause was not established; no other run in this
+experiment, and none without spinning, had errors.

@@ -1,0 +1,15 @@
+scripts/ab.py: heavy routes, 3 interleaved rounds of 5 s after 1 s warm-up. kq = this change; poll = the same
+binary with NEO_HTTP_POLL=1; main = 6e18e65; rust = hyper/tokio. Medians over rounds; p99 in us.
+
+smooth-10000-one-worker  rust  median  4,745 req/s  CPU 209.72 us/req  p99 med  14280
+smooth-10000-one-worker  kq    median  3,198 req/s  CPU 309.52 us/req  p99 med  26530
+smooth-10000-one-worker  main  median  3,185 req/s  CPU 314.33 us/req  p99 med 301310
+smooth-10000-one-worker  poll  median  3,226 req/s  CPU 309.24 us/req  p99 med 298470
+smooth-1000-one-worker   rust  median 37,907 req/s  CPU  26.09 us/req  p99 med   2090
+smooth-1000-one-worker   poll  median 27,262 req/s  CPU  36.17 us/req  p99 med   4500
+smooth-1000-one-worker   kq    median 27,625 req/s  CPU  35.88 us/req  p99 med   2560
+smooth-1000-one-worker   main  median 27,511 req/s  CPU  35.99 us/req  p99 med   4000
+smooth-10000-default     kq    median 21,455 req/s  CPU 348.61 us/req  p99 med  15670
+smooth-10000-default     main  median 22,989 req/s  CPU 351.47 us/req  p99 med  11940
+smooth-10000-default     poll  median 22,244 req/s  CPU 351.11 us/req  p99 med  16840
+smooth-10000-default     rust  median 31,550 req/s  CPU 249.51 us/req  p99 med   6930

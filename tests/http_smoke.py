@@ -2,12 +2,15 @@
 """Build and exercise the Neo HTTP runtime. Optional --binary skips the build."""
 import argparse
 import concurrent.futures
+import errno
 import http.client
 import json
 import math
 import os
 from pathlib import Path
 import platform
+import resource
+import selectors
 import socket
 import signal
 import shlex
@@ -35,11 +38,49 @@ def descriptors(pid):
     return links
 
 
+def burst(port, n):
+    """Starts n non-blocking connects at once, then one GET on each; returns how
+    many were answered. A reset leaves a connection unanswered: the kernel resets
+    what overflows the listen queue. Any other failure, such as a connection
+    closed without a full response, fails the test."""
+    sockets, answered = [], 0
+    with selectors.DefaultSelector() as selector:
+        try:
+            for i in range(n):
+                s = socket.socket(); s.setblocking(False); sockets.append(s)
+                assert s.connect_ex(('127.0.0.1', port)) in (0, errno.EINPROGRESS)
+                selector.register(s, selectors.EVENT_WRITE, [i, b''])
+            deadline = time.monotonic() + 20
+            while selector.get_map() and time.monotonic() < deadline:
+                for key, mask in selector.select(1):
+                    s, state = key.fileobj, key.data
+                    try:
+                        if mask & selectors.EVENT_WRITE:
+                            error = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                            if error: raise OSError(error, os.strerror(error))
+                            s.sendall(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+                            selector.modify(s, selectors.EVENT_READ, state); continue
+                        chunk = s.recv(4096)
+                        state[1] += chunk
+                        if chunk and not state[1].endswith(b'Hello, World!'): continue
+                        assert chunk, f'connection closed after {bytes(state[1][:80])!r}'
+                        answered += 1
+                    except (ConnectionResetError, BrokenPipeError): pass
+                    selector.unregister(s)
+        finally:
+            for s in sockets: s.close()
+    return answered
+
+
 # x86-64 Linux serves with io_uring by default; NEO_HTTP_URING=0 selects epoll.
 URING_DEFAULT = sys.platform.startswith('linux') and platform.machine() == 'x86_64'
 
 
 def verify(binary, workers=4, backend=None):
+    # The burst holds 512 client sockets, and a single worker as many (macOS defaults to 256).
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    wanted = 4096 if hard == resource.RLIM_INFINITY else min(hard, 4096)
+    if soft != resource.RLIM_INFINITY and soft < wanted: resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
@@ -95,6 +136,19 @@ def verify(binary, workers=4, backend=None):
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
                 list(pool.map(hello, range(100)))
             print('100 concurrent requests: PASS', flush=True)
+
+            # Connect far more sockets at once than macOS's listen queue holds
+            # (kern.ipc.somaxconn, 128 by default). Every accepted connection
+            # must be answered. While the machine is busy enough that no worker
+            # runs during the burst, the kernel resets the overflow, for any
+            # server; those connections are retried.
+            unanswered = 512
+            for attempt in range(5):
+                unanswered -= burst(port, unanswered)
+                if unanswered == 0: break
+                time.sleep(.2)
+            assert unanswered == 0, f'{unanswered} of 512 simultaneous connections unanswered after 5 attempts'
+            print(f'512 simultaneous connections: PASS ({attempt} retries)', flush=True)
 
             slow = []
             try:

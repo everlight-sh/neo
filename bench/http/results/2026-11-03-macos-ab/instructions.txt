@@ -1,0 +1,11 @@
+scripts/instr.py: one worker, sequential keep-alive client, /usr/bin/time -l of the server process.
+Per request: instructions retired, cycles, user and system time, page reclaims.
+
+neo   /smooth/10000  n=400    instructions/req 5,923,484  cycles/req 1,008,248  user 300.0 us  sys 0.0 us  page reclaims/req 0.7
+neo   /              n=20000  instructions/req    41,750  cycles/req    20,982  user   0.5 us  sys 6.0 us  page reclaims/req 0.0
+rust  /smooth/10000  n=400    instructions/req 3,406,876  cycles/req   699,747  user 200.0 us  sys 0.0 us  page reclaims/req 0.8
+rust  /              n=20000  instructions/req    57,400  cycles/req    30,607  user   2.5 us  sys 7.0 us  page reclaims/req 0.0
+
+Same method earlier on 2026-11-03 against the Neo binary from 2026-10-23
+(bench/http/results/2026-10-23-195216-native): /smooth/10000 3,383,211; /smooth/1000 394,163; / 47,693.
+Main 6e18e65: /smooth/10000 5,940,413; /smooth/1000 645,402; / 47,073.

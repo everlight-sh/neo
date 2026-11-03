@@ -1,5 +1,6 @@
 ; HTTP/1.x connection lifecycle and framing, written in Neo.
-; Each worker owns its connections (Linux epoll or macOS poll). No C HTTP implementation.
+; Each worker owns its connections (Linux io_uring or epoll, macOS kqueue, or poll on
+; request). No C HTTP implementation.
 ; Each connection has a 64-byte state and a bounded 64 KiB input buffer:
 ; fd@0, input@8, have@16, output@24, length@32, sent@40, close@48.
 

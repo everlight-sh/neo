@@ -1,0 +1,109 @@
+512 simultaneous connects to each server, one GET each (scripts/burst.py via scripts/burstloop.sh).
+Servers: turn10/neo10 = this change, 10 workers; neo4/herd4 = 4 workers; herd10 = all workers keep the
+listener armed (tried, not kept); rust = hyper/tokio. Bursts interleave across servers in each round.
+ECONNRESET = reset during the handshake; 'Connection reset by peer' = reset after the request was sent.
+
+## Load 7-9 from other sessions, normal priority
+r1 neo10 ok 512/512 failed 0 [] pending 0 load 8.65
+r1 neo4 ok 512/512 failed 0 [] pending 0 load 8.65
+r1 rust ok 512/512 failed 0 [] pending 0 load 8.65
+r2 neo10 ok 512/512 failed 0 [] pending 0 load 8.65
+r2 neo4 ok 512/512 failed 0 [] pending 0 load 8.65
+r2 rust ok 512/512 failed 0 [] pending 0 load 8.65
+r3 neo10 ok 512/512 failed 0 [] pending 0 load 8.65
+r3 neo4 ok 512/512 failed 0 [] pending 0 load 8.65
+r3 rust ok 512/512 failed 0 [] pending 0 load 8.65
+r4 neo10 ok 512/512 failed 0 [] pending 0 load 8.28
+r4 neo4 ok 512/512 failed 0 [] pending 0 load 8.28
+r4 rust ok 512/512 failed 0 [] pending 0 load 8.28
+r1 neo10 ok 512/512 failed 0 [] pending 0 load 7.50
+r1 neo4 ok 512/512 failed 0 [] pending 0 load 7.50
+r1 rust ok 512/512 failed 0 [] pending 0 load 7.50
+r2 neo10 ok 512/512 failed 0 [] pending 0 load 7.50
+r2 neo4 ok 512/512 failed 0 [] pending 0 load 7.50
+r2 rust ok 512/512 failed 0 [] pending 0 load 7.50
+r3 neo10 ok 512/512 failed 0 [] pending 0 load 7.50
+r3 neo4 ok 512/512 failed 0 [] pending 0 load 7.70
+r3 rust ok 512/512 failed 0 [] pending 0 load 7.70
+r4 neo10 ok 512/512 failed 0 [] pending 0 load 7.70
+r4 neo4 ok 512/512 failed 0 [] pending 0 load 7.70
+r4 rust ok 512/512 failed 0 [] pending 0 load 7.70
+r1 neo10 ok 512/512 failed 0 [] pending 0 load 7.59
+r1 neo4 ok 512/512 failed 0 [] pending 0 load 7.59
+r1 rust ok 512/512 failed 0 [] pending 0 load 7.59
+r2 neo10 ok 512/512 failed 0 [] pending 0 load 7.59
+r2 neo4 ok 512/512 failed 0 [] pending 0 load 7.59
+r2 rust ok 512/512 failed 0 [] pending 0 load 7.30
+r3 neo10 ok 512/512 failed 0 [] pending 0 load 7.30
+r3 neo4 ok 512/512 failed 0 [] pending 0 load 7.30
+r3 rust ok 512/512 failed 0 [] pending 0 load 7.30
+r4 neo10 ok 229/512 failed 283 ['ECONNRESET'] pending 0 load 7.30
+r4 neo4 ok 512/512 failed 0 [] pending 0 load 7.30
+r4 rust ok 499/512 failed 13 ['ECONNRESET'] pending 0 load 7.30
+
+## Load around 20 from other sessions, normal priority
+r1 turn10 ok 497/512 failed 15 ['Connection reset by peer'] pending 0 load 23.35
+r1 herd10 ok 293/512 failed 219 ['ECONNRESET'] pending 0 load 23.35
+r1 herd4 ok 507/512 failed 5 ['Connection reset by peer'] pending 0 load 23.35
+r1 rust ok 509/512 failed 3 ['Connection reset by peer'] pending 0 load 23.35
+r2 turn10 ok 512/512 failed 0 [] pending 0 load 23.35
+r2 herd10 ok 512/512 failed 0 [] pending 0 load 23.25
+r2 herd4 ok 512/512 failed 0 [] pending 0 load 23.25
+r2 rust ok 512/512 failed 0 [] pending 0 load 23.25
+r1 turn10 ok 483/512 failed 29 ['Connection reset by peer'] pending 0 load 19.81
+r1 herd10 ok 476/512 failed 36 ['Connection reset by peer', 'ECONNRESET'] pending 0 load 19.81
+r1 herd4 ok 512/512 failed 0 [] pending 0 load 19.81
+r1 rust ok 512/512 failed 0 [] pending 0 load 19.81
+r2 turn10 ok 414/512 failed 98 ['Connection reset by peer'] pending 0 load 19.81
+r2 herd10 ok 477/512 failed 35 ['Connection reset by peer', 'ECONNRESET'] pending 0 load 19.81
+r2 herd4 ok 322/512 failed 190 ['ECONNRESET'] pending 0 load 19.90
+r2 rust ok 256/512 failed 256 ['ECONNRESET'] pending 0 load 19.90
+r1 turn10 ok 512/512 failed 0 [] pending 0 load 16.98
+r1 herd10 ok 512/512 failed 0 [] pending 0 load 16.98
+r1 herd4 ok 512/512 failed 0 [] pending 0 load 16.98
+r1 rust ok 512/512 failed 0 [] pending 0 load 16.98
+r2 turn10 ok 512/512 failed 0 [] pending 0 load 16.98
+r2 herd10 ok 512/512 failed 0 [] pending 0 load 16.98
+r2 herd4 ok 512/512 failed 0 [] pending 0 load 16.98
+r2 rust ok 512/512 failed 0 [] pending 0 load 16.10
+r1 turn10 ok 512/512 failed 0 [] pending 0 load 15.86
+r1 herd10 ok 512/512 failed 0 [] pending 0 load 15.86
+r1 herd4 ok 512/512 failed 0 [] pending 0 load 15.86
+r1 rust ok 512/512 failed 0 [] pending 0 load 15.86
+r2 turn10 ok 512/512 failed 0 [] pending 0 load 15.86
+r2 herd10 ok 512/512 failed 0 [] pending 0 load 15.86
+r2 herd4 ok 512/512 failed 0 [] pending 0 load 15.86
+r2 rust ok 512/512 failed 0 [] pending 0 load 15.86
+
+## Servers at background QoS (taskpolicy -c background: efficiency cores, low priority)
+r1 turn10 ok 128/512 failed 384 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r1 herd10 ok 320/512 failed 192 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r1 rust ok 215/512 failed 297 ['Connection reset by peer'] pending 0
+r2 turn10 ok 238/512 failed 274 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r2 herd10 ok 328/512 failed 184 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r2 rust ok 243/512 failed 269 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r3 turn10 ok 512/512 failed 0 [] pending 0 load 8.61
+r3 herd10 ok 128/512 failed 384 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r3 rust ok 282/512 failed 230 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r1 turn10 ok 128/512 failed 384 ['Connection reset by peer'] pending 0
+r1 herd10 ok 131/512 failed 381 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r1 rust ok 357/512 failed 155 ['Connection reset by peer'] pending 0
+r2 turn10 ok 341/512 failed 171 ['Connection reset by peer'] pending 0
+r2 herd10 ok 420/512 failed 92 ['Connection reset by peer'] pending 0
+r2 rust ok 447/512 failed 65 ['Connection reset by peer'] pending 0
+r3 turn10 ok 158/512 failed 354 ['Connection reset by peer'] pending 0
+r3 herd10 ok 512/512 failed 0 [] pending 0 load 7.89
+r3 rust ok 216/512 failed 296 ['Connection reset by peer'] pending 0
+r1 turn10 ok 231/512 failed 281 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r1 herd10 ok 512/512 failed 0 [] pending 0 load 6.67
+r1 rust ok 151/512 failed 361 ['Connection reset by peer'] pending 0
+r2 turn10 ok 402/512 failed 110 ['Connection reset by peer'] pending 0
+r2 herd10 ok 138/512 failed 374 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r2 rust ok 338/512 failed 174 ['Connection reset by peer'] pending 0
+r3 turn10 ok 512/512 failed 0 [] pending 0 load 6.67
+r3 herd10 ok 357/512 failed 155 ['Connection reset by peer', 'ECONNRESET'] pending 0
+r3 rust ok 128/512 failed 384 ['Connection reset by peer', 'ECONNRESET'] pending 0
+
+## Kernel behaviour: Python listener (listen backlog 1024, capped to 128)
+does not accept for 3 s, then serves:  ok 128/512 failed 384 ['Connection reset by peer']
+single-threaded accept loop from the start:  ok 214/512 failed 298 ['Connection reset by peer']
