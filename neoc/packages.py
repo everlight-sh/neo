@@ -7,7 +7,7 @@ import shutil
 import tomllib
 from . import legacy
 
-VERSION = '0.1.1'
+VERSION = '0.1.2'
 IGNORED = {'.git','.neo-build','.kernel-build','.neo','node_modules','target','__pycache__',*legacy.IGNORED}
 
 
