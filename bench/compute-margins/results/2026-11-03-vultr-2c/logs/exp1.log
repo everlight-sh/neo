@@ -1,0 +1,195 @@
+######## THP always [madvise] never
+== round 1
+stencil_c 50M mode 0: alloc 0.0 fill 216.8 passes 1427.8 sum 11.2     wall 1.70 user 1.35 sys 0.35 minflt 195461 
+stencil_c 50M mode 1: alloc 0.0 fill 207.9 passes 2197.6 sum 12.7     wall 2.48 user 2.11 sys 0.36 minflt 195462 
+stencil_c 50M mode 2: alloc 261.4 fill 44.2 passes 1177.5 sum 12.3     wall 1.54 user 1.23 sys 0.31 minflt 195461 
+stencil_c 50M mode 3: alloc 243.5 fill 44.2 passes 2471.1 sum 12.1     wall 2.82 user 2.52 sys 0.29 minflt 195462 
+stencil_c 50M mode 4: alloc 0.0 fill 135.5 passes 1422.4 sum 10.8     wall 1.57 user 1.32 sys 0.24 minflt 8946 
+stencil_c 50M mode 5: alloc 0.0 fill 65.9 passes 1615.2 sum 10.0     wall 1.69 user 1.64 sys 0.04 minflt 767 
+stencil_c 1M mode 0: alloc 0.0 fill 4.5 passes 26.9 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4055 
+stencil_c 1M mode 1: alloc 0.0 fill 3.9 passes 42.5 sum 0.2     wall 0.04 user 0.04 sys 0.00 minflt 4057 
+stencil_c 1M mode 2: alloc 4.9 fill 0.9 passes 23.3 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4053 
+stencil_c 1M mode 4: alloc 0.0 fill 1.3 passes 24.1 sum 0.1     wall 0.02 user 0.02 sys 0.00 minflt 478 
+neo stencil 50M:     wall 1.44 user 1.39 sys 0.04 minflt 1223 
+zig stencil 50M:     wall 1.71 user 1.39 sys 0.31 minflt 195481 
+rust stencil 50M:     wall 2.32 user 1.99 sys 0.33 minflt 195478 
+neo stencil 1M:     wall 0.02 user 0.02 sys 0.00 minflt 929 
+zig stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 4081 
+sieve_c mode 0: alloc 0.0 fill 76.2 mark 412.0 count 13.6     wall 0.50 user 0.45 sys 0.04 minflt 24563 
+sieve_c mode 1: alloc 0.0 fill 75.4 mark 376.0 count 14.2     wall 0.47 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 4: alloc 31.4 fill 36.0 mark 393.7 count 13.7     wall 0.48 user 0.44 sys 0.03 minflt 24560 
+sieve_c mode 8: alloc 0.0 fill 41.4 mark 382.5 count 14.2     wall 0.43 user 0.43 sys 0.00 minflt 546 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 75.4 mark 395.7 count 13.7     wall 0.49 user 0.44 sys 0.04 minflt 24564 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 74.5 mark 378.3 count 13.7     wall 0.47 user 0.43 sys 0.03 minflt 24564 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 76.1 mark 380.0 count 13.6     wall 0.47 user 0.43 sys 0.04 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 74.2 mark 404.7 count 13.6     wall 0.50 user 0.46 sys 0.03 minflt 24561 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 74.7 mark 385.3 count 13.6     wall 0.48 user 0.44 sys 0.04 minflt 24563 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 75.0 mark 400.3 count 14.1     wall 0.49 user 0.45 sys 0.04 minflt 24561 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 77.0 mark 417.8 count 13.6     wall 0.51 user 0.46 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 75.9 mark 388.3 count 13.6     wall 0.48 user 0.44 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 74.5 mark 381.7 count 13.6     wall 0.47 user 0.43 sys 0.04 minflt 24561 
+neo sieve:     wall 0.44 user 0.44 sys 0.00 minflt 486 
+zig sieve:     wall 0.48 user 0.44 sys 0.04 minflt 24581 
+rust sieve:     wall 0.50 user 0.46 sys 0.03 minflt 24580 
+== round 2
+stencil_c 50M mode 0: alloc 0.0 fill 195.8 passes 1364.7 sum 10.6     wall 1.62 user 1.28 sys 0.33 minflt 195462 
+stencil_c 50M mode 1: alloc 0.0 fill 203.4 passes 1852.3 sum 10.7     wall 2.11 user 1.76 sys 0.34 minflt 195462 
+stencil_c 50M mode 2: alloc 231.5 fill 45.2 passes 1183.4 sum 10.5     wall 1.51 user 1.23 sys 0.27 minflt 195461 
+stencil_c 50M mode 3: alloc 225.3 fill 44.3 passes 1664.8 sum 10.6     wall 1.99 user 1.71 sys 0.27 minflt 195460 
+stencil_c 50M mode 4: alloc 0.0 fill 65.9 passes 1183.4 sum 10.1     wall 1.26 user 1.22 sys 0.03 minflt 768 
+stencil_c 50M mode 5: alloc 0.0 fill 66.6 passes 1599.2 sum 10.2     wall 1.68 user 1.63 sys 0.04 minflt 771 
+stencil_c 1M mode 0: alloc 0.0 fill 4.5 passes 27.1 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4055 
+stencil_c 1M mode 1: alloc 0.0 fill 3.7 passes 40.8 sum 0.2     wall 0.04 user 0.04 sys 0.00 minflt 4055 
+stencil_c 1M mode 2: alloc 4.5 fill 0.9 passes 23.2 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4054 
+stencil_c 1M mode 4: alloc 0.0 fill 1.3 passes 23.9 sum 0.1     wall 0.02 user 0.02 sys 0.00 minflt 478 
+neo stencil 50M:     wall 1.42 user 1.37 sys 0.04 minflt 1223 
+zig stencil 50M:     wall 1.69 user 1.35 sys 0.34 minflt 195487 
+rust stencil 50M:     wall 2.33 user 2.00 sys 0.32 minflt 195480 
+neo stencil 1M:     wall 0.02 user 0.02 sys 0.00 minflt 929 
+zig stencil 1M:     wall 0.03 user 0.03 sys 0.00 minflt 4081 
+sieve_c mode 0: alloc 0.0 fill 75.0 mark 397.1 count 13.6     wall 0.49 user 0.44 sys 0.04 minflt 24561 
+sieve_c mode 1: alloc 0.0 fill 75.0 mark 380.0 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24561 
+sieve_c mode 4: alloc 29.9 fill 36.5 mark 414.3 count 13.8     wall 0.50 user 0.46 sys 0.03 minflt 24564 
+sieve_c mode 8: alloc 0.0 fill 41.8 mark 394.0 count 14.0     wall 0.45 user 0.44 sys 0.00 minflt 544 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 77.2 mark 409.9 count 13.6     wall 0.50 user 0.46 sys 0.04 minflt 24562 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 75.5 mark 384.2 count 14.5     wall 0.48 user 0.43 sys 0.04 minflt 24563 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 74.1 mark 382.2 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 75.2 mark 399.6 count 13.6     wall 0.49 user 0.45 sys 0.04 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 74.6 mark 381.4 count 13.6     wall 0.47 user 0.43 sys 0.04 minflt 24563 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 74.9 mark 378.3 count 13.6     wall 0.47 user 0.42 sys 0.04 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 76.1 mark 397.5 count 13.6     wall 0.49 user 0.45 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 75.7 mark 377.3 count 13.7     wall 0.47 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 74.5 mark 372.9 count 13.6     wall 0.46 user 0.42 sys 0.03 minflt 24562 
+neo sieve:     wall 0.43 user 0.42 sys 0.00 minflt 484 
+zig sieve:     wall 0.47 user 0.43 sys 0.03 minflt 24585 
+rust sieve:     wall 0.48 user 0.43 sys 0.04 minflt 24577 
+== round 3
+stencil_c 50M mode 0: alloc 0.0 fill 198.7 passes 1335.3 sum 10.9     wall 1.59 user 1.27 sys 0.31 minflt 195463 
+stencil_c 50M mode 1: alloc 0.0 fill 199.4 passes 1841.5 sum 10.9     wall 2.09 user 1.74 sys 0.35 minflt 195461 
+stencil_c 50M mode 2: alloc 225.7 fill 44.3 passes 1167.9 sum 10.8     wall 1.49 user 1.22 sys 0.27 minflt 195461 
+stencil_c 50M mode 3: alloc 225.0 fill 44.3 passes 1657.7 sum 10.9     wall 1.98 user 1.71 sys 0.27 minflt 195459 
+stencil_c 50M mode 4: alloc 0.0 fill 66.5 passes 1213.6 sum 10.3     wall 1.29 user 1.24 sys 0.05 minflt 771 
+stencil_c 50M mode 5: alloc 0.0 fill 65.4 passes 1605.3 sum 10.2     wall 1.68 user 1.63 sys 0.04 minflt 772 
+stencil_c 1M mode 0: alloc 0.0 fill 4.4 passes 26.6 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4058 
+stencil_c 1M mode 1: alloc 0.0 fill 3.8 passes 42.4 sum 0.2     wall 0.04 user 0.04 sys 0.00 minflt 4053 
+stencil_c 1M mode 2: alloc 4.6 fill 0.9 passes 23.3 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4052 
+stencil_c 1M mode 4: alloc 0.0 fill 1.2 passes 23.8 sum 0.1     wall 0.02 user 0.02 sys 0.00 minflt 479 
+neo stencil 50M:     wall 1.41 user 1.36 sys 0.05 minflt 2246 
+zig stencil 50M:     wall 1.69 user 1.37 sys 0.32 minflt 195488 
+rust stencil 50M:     wall 2.34 user 2.00 sys 0.33 minflt 195480 
+neo stencil 1M:     wall 0.02 user 0.02 sys 0.00 minflt 930 
+zig stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 4080 
+sieve_c mode 0: alloc 0.0 fill 73.8 mark 390.6 count 13.7     wall 0.48 user 0.44 sys 0.03 minflt 24560 
+sieve_c mode 1: alloc 0.0 fill 73.2 mark 363.8 count 13.6     wall 0.45 user 0.41 sys 0.04 minflt 24562 
+sieve_c mode 4: alloc 28.2 fill 35.9 mark 390.6 count 13.6     wall 0.47 user 0.44 sys 0.03 minflt 24560 
+sieve_c mode 8: alloc 0.0 fill 41.1 mark 378.7 count 13.6     wall 0.43 user 0.42 sys 0.00 minflt 544 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 73.3 mark 380.3 count 13.5     wall 0.47 user 0.43 sys 0.04 minflt 24563 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 73.4 mark 383.7 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 73.3 mark 373.2 count 13.7     wall 0.46 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 73.3 mark 384.2 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24563 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 73.0 mark 368.6 count 13.7     wall 0.46 user 0.42 sys 0.03 minflt 24561 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 73.8 mark 364.8 count 13.6     wall 0.45 user 0.42 sys 0.03 minflt 24560 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 74.2 mark 372.1 count 13.6     wall 0.46 user 0.41 sys 0.05 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 73.9 mark 370.9 count 13.7     wall 0.46 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 74.0 mark 362.9 count 13.6     wall 0.45 user 0.42 sys 0.03 minflt 24564 
+neo sieve:     wall 0.42 user 0.42 sys 0.00 minflt 486 
+zig sieve:     wall 0.48 user 0.44 sys 0.04 minflt 24585 
+rust sieve:     wall 0.47 user 0.44 sys 0.03 minflt 24582 
+######## THP always madvise [never]
+== round 1
+stencil_c 50M mode 0: alloc 0.0 fill 210.8 passes 1361.5 sum 10.9     wall 1.63 user 1.30 sys 0.32 minflt 195460 
+stencil_c 50M mode 1: alloc 0.0 fill 199.5 passes 1796.9 sum 10.3     wall 2.05 user 1.70 sys 0.34 minflt 195460 
+stencil_c 50M mode 2: alloc 224.1 fill 44.5 passes 1170.4 sum 10.4     wall 1.49 user 1.22 sys 0.27 minflt 195459 
+stencil_c 50M mode 3: alloc 221.8 fill 44.3 passes 1976.0 sum 10.2     wall 2.29 user 2.02 sys 0.26 minflt 195462 
+stencil_c 50M mode 4: alloc 0.0 fill 199.4 passes 1354.7 sum 10.4     wall 1.61 user 1.30 sys 0.30 minflt 195458 
+stencil_c 50M mode 5: alloc 0.0 fill 198.5 passes 1774.5 sum 10.4     wall 2.02 user 1.69 sys 0.32 minflt 195460 
+stencil_c 1M mode 0: alloc 0.0 fill 3.8 passes 26.0 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4057 
+stencil_c 1M mode 1: alloc 0.0 fill 3.6 passes 34.6 sum 0.2     wall 0.04 user 0.03 sys 0.00 minflt 4056 
+stencil_c 1M mode 2: alloc 4.2 fill 0.9 passes 23.2 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4057 
+stencil_c 1M mode 4: alloc 0.0 fill 3.6 passes 25.9 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4055 
+neo stencil 50M:     wall 1.73 user 1.42 sys 0.30 minflt 195403 
+zig stencil 50M:     wall 1.71 user 1.39 sys 0.31 minflt 195488 
+rust stencil 50M:     wall 2.48 user 2.16 sys 0.31 minflt 195476 
+neo stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 3997 
+zig stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 4082 
+sieve_c mode 0: alloc 0.0 fill 73.1 mark 385.8 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24562 
+sieve_c mode 1: alloc 0.0 fill 73.1 mark 363.4 count 13.7     wall 0.45 user 0.41 sys 0.03 minflt 24563 
+sieve_c mode 4: alloc 27.7 fill 35.7 mark 378.2 count 13.6     wall 0.46 user 0.42 sys 0.03 minflt 24561 
+sieve_c mode 8: alloc 0.0 fill 73.2 mark 375.6 count 13.6     wall 0.46 user 0.42 sys 0.03 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 72.8 mark 373.7 count 13.6     wall 0.46 user 0.41 sys 0.04 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 73.2 mark 362.4 count 13.6     wall 0.45 user 0.42 sys 0.03 minflt 24564 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 73.2 mark 356.6 count 13.6     wall 0.45 user 0.41 sys 0.03 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 73.0 mark 377.0 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24563 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 74.7 mark 380.5 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24561 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 74.6 mark 369.0 count 13.9     wall 0.46 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 74.6 mark 395.5 count 13.6     wall 0.49 user 0.44 sys 0.04 minflt 24560 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 73.7 mark 393.1 count 13.6     wall 0.48 user 0.44 sys 0.03 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 74.7 mark 384.0 count 13.6     wall 0.47 user 0.44 sys 0.03 minflt 24562 
+neo sieve:     wall 0.46 user 0.42 sys 0.03 minflt 24502 
+zig sieve:     wall 0.45 user 0.41 sys 0.03 minflt 24587 
+rust sieve:     wall 0.46 user 0.42 sys 0.03 minflt 24577 
+== round 2
+stencil_c 50M mode 0: alloc 0.0 fill 197.0 passes 1344.0 sum 10.4     wall 1.59 user 1.28 sys 0.31 minflt 195460 
+stencil_c 50M mode 1: alloc 0.0 fill 199.4 passes 2028.8 sum 10.4     wall 2.28 user 1.93 sys 0.34 minflt 195461 
+stencil_c 50M mode 2: alloc 223.6 fill 44.9 passes 1176.8 sum 10.2     wall 1.50 user 1.23 sys 0.26 minflt 195463 
+stencil_c 50M mode 3: alloc 224.3 fill 46.1 passes 1950.2 sum 10.6     wall 2.27 user 2.00 sys 0.26 minflt 195461 
+stencil_c 50M mode 4: alloc 0.0 fill 195.1 passes 1328.1 sum 10.5     wall 1.57 user 1.26 sys 0.30 minflt 195459 
+stencil_c 50M mode 5: alloc 0.0 fill 196.4 passes 1780.3 sum 10.5     wall 2.03 user 1.71 sys 0.31 minflt 195461 
+stencil_c 1M mode 0: alloc 0.0 fill 3.8 passes 25.9 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4054 
+stencil_c 1M mode 1: alloc 0.0 fill 3.6 passes 34.6 sum 0.2     wall 0.04 user 0.03 sys 0.00 minflt 4053 
+stencil_c 1M mode 2: alloc 4.2 fill 0.9 passes 23.0 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4055 
+stencil_c 1M mode 4: alloc 0.0 fill 3.6 passes 25.9 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4054 
+neo stencil 50M:     wall 1.72 user 1.39 sys 0.32 minflt 195403 
+zig stencil 50M:     wall 1.71 user 1.40 sys 0.30 minflt 195486 
+rust stencil 50M:     wall 2.32 user 2.00 sys 0.32 minflt 195478 
+neo stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 3996 
+zig stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 4080 
+sieve_c mode 0: alloc 0.0 fill 76.2 mark 405.5 count 14.0     wall 0.50 user 0.46 sys 0.03 minflt 24562 
+sieve_c mode 1: alloc 0.0 fill 78.0 mark 374.4 count 14.0     wall 0.47 user 0.42 sys 0.04 minflt 24564 
+sieve_c mode 4: alloc 29.0 fill 37.7 mark 390.1 count 14.0     wall 0.47 user 0.44 sys 0.03 minflt 24560 
+sieve_c mode 8: alloc 0.0 fill 75.1 mark 390.4 count 14.0     wall 0.48 user 0.44 sys 0.04 minflt 24560 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 75.2 mark 381.8 count 14.0     wall 0.47 user 0.43 sys 0.04 minflt 24562 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 75.0 mark 373.6 count 13.9     wall 0.46 user 0.42 sys 0.04 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 75.1 mark 372.2 count 14.5     wall 0.46 user 0.42 sys 0.04 minflt 24562 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 75.4 mark 377.8 count 14.1     wall 0.47 user 0.43 sys 0.04 minflt 24561 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 78.1 mark 377.5 count 14.5     wall 0.47 user 0.43 sys 0.04 minflt 24560 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 77.3 mark 374.3 count 15.1     wall 0.47 user 0.43 sys 0.03 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 76.7 mark 381.1 count 14.0     wall 0.47 user 0.43 sys 0.04 minflt 24564 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 75.5 mark 372.4 count 14.2     wall 0.46 user 0.43 sys 0.03 minflt 24559 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 77.8 mark 378.0 count 13.9     wall 0.47 user 0.43 sys 0.03 minflt 24564 
+neo sieve:     wall 0.48 user 0.43 sys 0.04 minflt 24503 
+zig sieve:     wall 0.48 user 0.43 sys 0.04 minflt 24586 
+rust sieve:     wall 0.47 user 0.44 sys 0.03 minflt 24577 
+== round 3
+stencil_c 50M mode 0: alloc 0.0 fill 196.7 passes 1336.2 sum 10.3     wall 1.58 user 1.27 sys 0.31 minflt 195461 
+stencil_c 50M mode 1: alloc 0.0 fill 195.2 passes 2032.7 sum 10.1     wall 2.28 user 1.94 sys 0.33 minflt 195461 
+stencil_c 50M mode 2: alloc 220.0 fill 44.3 passes 1165.8 sum 10.3     wall 1.48 user 1.21 sys 0.26 minflt 195461 
+stencil_c 50M mode 3: alloc 230.2 fill 44.0 passes 1844.8 sum 10.4     wall 2.17 user 1.89 sys 0.27 minflt 195463 
+stencil_c 50M mode 4: alloc 0.0 fill 197.1 passes 1331.7 sum 10.5     wall 1.58 user 1.25 sys 0.33 minflt 195461 
+stencil_c 50M mode 5: alloc 0.0 fill 196.2 passes 2041.4 sum 10.5     wall 2.29 user 1.95 sys 0.33 minflt 195459 
+stencil_c 1M mode 0: alloc 0.0 fill 4.0 passes 26.2 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4057 
+stencil_c 1M mode 1: alloc 0.0 fill 3.6 passes 35.0 sum 0.2     wall 0.04 user 0.03 sys 0.00 minflt 4054 
+stencil_c 1M mode 2: alloc 4.3 fill 0.9 passes 23.4 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4055 
+stencil_c 1M mode 4: alloc 0.0 fill 3.7 passes 26.2 sum 0.1     wall 0.03 user 0.02 sys 0.00 minflt 4056 
+neo stencil 50M:     wall 1.75 user 1.42 sys 0.32 minflt 195401 
+zig stencil 50M:     wall 1.69 user 1.36 sys 0.32 minflt 195486 
+rust stencil 50M:     wall 2.30 user 1.97 sys 0.33 minflt 195480 
+neo stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 3996 
+zig stencil 1M:     wall 0.03 user 0.02 sys 0.00 minflt 4079 
+sieve_c mode 0: alloc 0.0 fill 73.8 mark 397.9 count 13.6     wall 0.49 user 0.45 sys 0.03 minflt 24562 
+sieve_c mode 1: alloc 0.0 fill 72.9 mark 369.4 count 13.6     wall 0.46 user 0.41 sys 0.04 minflt 24563 
+sieve_c mode 4: alloc 28.6 fill 36.4 mark 387.4 count 13.6     wall 0.47 user 0.43 sys 0.03 minflt 24562 
+sieve_c mode 8: alloc 0.0 fill 74.2 mark 394.8 count 13.6     wall 0.48 user 0.45 sys 0.03 minflt 24562 
+sieve_c mode 3 D=8 PFMIN=64: alloc 0.0 fill 73.5 mark 384.9 count 13.8     wall 0.47 user 0.44 sys 0.03 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=512: alloc 0.0 fill 77.9 mark 373.1 count 13.7     wall 0.47 user 0.41 sys 0.05 minflt 24561 
+sieve_c mode 3 D=8 PFMIN=4096: alloc 0.0 fill 75.6 mark 373.1 count 13.7     wall 0.46 user 0.43 sys 0.03 minflt 24563 
+sieve_c mode 3 D=16 PFMIN=64: alloc 0.0 fill 74.3 mark 377.7 count 13.8     wall 0.47 user 0.43 sys 0.03 minflt 24561 
+sieve_c mode 3 D=16 PFMIN=512: alloc 0.0 fill 73.9 mark 366.4 count 13.7     wall 0.46 user 0.41 sys 0.04 minflt 24560 
+sieve_c mode 3 D=16 PFMIN=4096: alloc 0.0 fill 73.9 mark 361.4 count 13.6     wall 0.45 user 0.41 sys 0.04 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=64: alloc 0.0 fill 74.0 mark 367.9 count 14.0     wall 0.46 user 0.42 sys 0.03 minflt 24563 
+sieve_c mode 3 D=32 PFMIN=512: alloc 0.0 fill 74.4 mark 364.3 count 13.7     wall 0.45 user 0.42 sys 0.03 minflt 24562 
+sieve_c mode 3 D=32 PFMIN=4096: alloc 0.0 fill 74.3 mark 359.3 count 13.7     wall 0.45 user 0.41 sys 0.04 minflt 24561 
+neo sieve:     wall 0.46 user 0.42 sys 0.04 minflt 24503 
+zig sieve:     wall 0.47 user 0.43 sys 0.04 minflt 24588 
+rust sieve:     wall 0.48 user 0.44 sys 0.03 minflt 24578 
+EXP1-DONE

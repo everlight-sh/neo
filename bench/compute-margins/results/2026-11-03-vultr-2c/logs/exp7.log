@@ -1,0 +1,46 @@
+u 5761455 168 1 9592 flip 0 rnd 3000
+uc8 5761455 168 1 9592 flip 0 rnd 3000
+uc16 5761455 168 1 9592 flip 0 rnd 3000
+uc32 5761455 168 1 9592 flip 0 rnd 3000
+uc64 5761455 168 1 9592 flip 0 rnd 3000
+## THP madvise
+# sieve 1e8 w=1
+  u          median     389.7 ms  range     382.0-    392.7  out ['5761455']
+  uc8        median     373.0 ms  range     362.1-    384.1  out ['5761455']
+  uc16       median     374.9 ms  range     362.4-    381.8  out ['5761455']
+  uc32       median     377.1 ms  range     362.0-    395.2  out ['5761455']
+  uc64       median     368.0 ms  range     363.1-    395.7  out ['5761455']
+  zig        median     465.7 ms  range     450.8-    480.4  out ['5761455']
+## THP never
+# sieve 1e8 w=1
+  u          median     428.8 ms  range     419.4-    446.8  out ['5761455']
+  uc8        median     410.6 ms  range     406.2-    438.7  out ['5761455']
+  uc16       median     416.6 ms  range     408.2-    437.3  out ['5761455']
+  uc32       median     412.3 ms  range     404.7-    418.7  out ['5761455']
+  uc64       median     415.2 ms  range     407.1-    428.1  out ['5761455']
+  zig        median     468.9 ms  range     459.7-    494.6  out ['5761455']
+# flip 64e6 step 16 x3
+  u          median      98.0 ms  range      97.8-    100.4  out ['0']
+  uc16       median     120.9 ms  range     119.9-    122.1  out ['0']
+  uc64       median      97.8 ms  range      97.3-     98.1  out ['0']
+# random 64e6 step 16 x3
+  u          median     289.7 ms  range     285.7-    293.2  out ['192000000']
+  uc16       median     294.5 ms  range     292.4-    295.9  out ['192000000']
+  uc64       median     287.5 ms  range     285.8-    294.3  out ['192000000']
+# flip 64e6 step 64 x3
+  u          median     318.9 ms  range     309.7-    363.7  out ['0']
+  uc16       median     326.5 ms  range     321.0-    332.3  out ['0']
+  uc64       median     325.5 ms  range     320.6-    329.4  out ['0']
+# random 64e6 step 64 x3
+  u          median     514.9 ms  range     503.6-    537.0  out ['192000000']
+  uc16       median     489.8 ms  range     473.3-    500.4  out ['192000000']
+  uc64       median     479.0 ms  range     473.9-    503.0  out ['192000000']
+# flip 64e6 step 256 x3
+  u          median    1108.7 ms  range    1081.3-   1128.8  out ['0']
+  uc16       median     968.6 ms  range     928.7-    971.4  out ['0']
+  uc64       median     948.9 ms  range     935.0-    969.8  out ['0']
+# random 64e6 step 256 x3
+  u          median    1311.0 ms  range    1299.0-   1325.7  out ['192000000']
+  uc16       median    1256.9 ms  range    1190.9-   1267.0  out ['192000000']
+  uc64       median    1248.5 ms  range    1190.2-   1262.4  out ['192000000']
+EXP7-DONE

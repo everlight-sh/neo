@@ -1,0 +1,68 @@
+## sanity
+sieve 2: after=1 before=1 zig=1 rust=1
+sieve 1000: after=168 before=168 zig=168 rust=168
+sieve 99991: after=9592 before=9592 zig=9592 rust=9592
+stencil 1 1: after=0 before=0 zig=0 rust=0
+stencil 7 3: after=3649734 before=3649734 zig=3649734 rust=3649734
+stencil 1000 5: after=498472971 before=498472971 zig=498472971 rust=498472971
+mandel 30 20 50: after=7539 before=7539 zig=7539 rust=7539
+nbody 8 2: after=-9.5555322231587264e-1 before=-9.5555322231587264e-1 zig=-0.95555322231587270 rust=-0.95555322231587259
+strided_flip 1000 7 3: after=0 before=0
+strided_random 1000 7 3: after=3000 before=3000
+strided_flip 70000000 64 1: after=0 before=0
+library_bench: after=c12e45fc344ee40bf5bb02fa7e793fa8  - before=c12e45fc344ee40bf5bb02fa7e793fa8  -
+orders_json: after=dea89119befc6cb319e2b9625cb00f40  - before=dea89119befc6cb319e2b9625cb00f40  -
+## compute rows
+thp=madvise stencil-1000000-20     w=1  Neo after     19.3  Neo before     29.9  Zig     36.4  Zig native     37.3  Rust     49.0  ok
+thp=madvise stencil-50000000-20    w=1  Neo after    918.8  Neo before   1419.5  Zig   1732.8  Zig native   1793.0  Rust   2349.9  ok
+thp=madvise sieve-100000000        w=1  Neo after    383.3  Neo before    442.0  Zig    475.9  Zig native    461.4  Rust    480.5  ok
+thp=madvise mandel-1200-1200-300   w=1  Neo after    147.1  Neo before    147.0  Zig    202.9  Zig native    209.6  Rust    203.5  ok
+thp=madvise nbody-1024-3           w=1  Neo after     11.6  Neo before     11.6  Zig     17.7  Zig native     17.6  Rust     18.3  ok
+thp=madvise nbody-4096-10          w=1  Neo after    376.5  Neo before    376.1  Zig    684.5  Zig native    684.2  Rust    686.2  ok
+thp=madvise stencil-1000000-20     w=2  Neo after     19.2  Neo before     24.9  Zig     32.4  Zig native     32.5  Rust     28.6  ok
+thp=madvise stencil-50000000-20    w=2  Neo after    539.3  Neo before    816.9  Zig   1070.8  Zig native    978.2  Rust   1241.5  ok
+thp=madvise sieve-100000000        w=2  Neo after    368.7  Neo before    413.4  Zig    440.5  Zig native    442.0  Rust    435.3  ok
+thp=madvise mandel-1200-1200-300   w=2  Neo after     74.9  Neo before     74.6  Zig    103.1  Zig native    106.9  Rust    103.7  ok
+thp=madvise nbody-1024-3           w=2  Neo after      7.1  Neo before      7.1  Zig     11.4  Zig native     11.4  Rust     10.7  ok
+thp=madvise nbody-4096-10          w=2  Neo after    194.5  Neo before    194.5  Zig    352.0  Zig native    350.0  Rust    349.8  ok
+thp=never   stencil-1000000-20     w=1  Neo after     22.5  Neo before     34.6  Zig     35.6  Zig native     37.2  Rust     49.0  ok
+thp=never   stencil-50000000-20    w=1  Neo after   1174.4  Neo before   1764.7  Zig   1758.8  Zig native   1825.9  Rust   2373.1  ok
+thp=never   sieve-100000000        w=1  Neo after    430.0  Neo before    479.7  Zig    472.6  Zig native    460.9  Rust    477.7  ok
+thp=never   mandel-1200-1200-300   w=1  Neo after    145.2  Neo before    145.8  Zig    202.5  Zig native    210.1  Rust    203.5  ok
+thp=never   nbody-1024-3           w=1  Neo after     11.9  Neo before     12.0  Zig     18.0  Zig native     17.8  Rust     19.7  ok
+thp=never   nbody-4096-10          w=1  Neo after    377.5  Neo before    376.8  Zig    685.3  Zig native    684.3  Rust    686.9  ok
+thp=never   stencil-1000000-20     w=2  Neo after     24.3  Neo before     29.3  Zig     34.4  Zig native     32.4  Rust     30.1  ok
+thp=never   stencil-50000000-20    w=2  Neo after    797.9  Neo before   1051.7  Zig   1088.0  Zig native    996.9  Rust   1248.8  ok
+thp=never   sieve-100000000        w=2  Neo after    412.6  Neo before    444.7  Zig    454.3  Zig native    445.4  Rust    439.1  ok
+thp=never   mandel-1200-1200-300   w=2  Neo after     74.6  Neo before     74.5  Zig    103.1  Zig native    106.8  Rust    103.7  ok
+thp=never   nbody-1024-3           w=2  Neo after      7.1  Neo before      7.2  Zig     11.5  Zig native     11.3  Rust     10.7  ok
+thp=never   nbody-4096-10          w=2  Neo after    196.7  Neo before    195.3  Zig    353.3  Zig native    350.1  Rust    351.5  ok
+## json rows (w=1)
+# THP madvise
+doc x1M
+  after      median     205.4 ms  range     195.7-    207.9  out ['513500000']
+  before     median     199.6 ms  range     194.8-    205.8  out ['513500000']
+orders 1000 x1000
+  after      median     190.1 ms  range     189.7-    191.4  out ['34327000']
+  before     median     190.0 ms  range     188.8-    191.3  out ['34327000']
+# THP never
+doc x1M
+  after      median     201.3 ms  range     196.3-    227.2  out ['513500000']
+  before     median     202.1 ms  range     195.2-    216.8  out ['513500000']
+orders 1000 x1000
+  after      median     194.1 ms  range     192.3-    211.8  out ['34327000']
+  before     median     195.3 ms  range     190.4-    201.2  out ['34327000']
+## strided downside (THP madvise, 64e6 flags, 3 rounds)
+# strided_flip step 64
+  after      median     335.4 ms  range     329.5-    345.6  out ['0']
+  before     median     321.6 ms  range     313.7-    337.3  out ['0']
+# strided_random step 64
+  after      median     517.2 ms  range     510.8-    537.6  out ['192000000']
+  before     median     519.4 ms  range     512.3-    528.4  out ['192000000']
+# strided_flip step 256
+  after      median    1052.5 ms  range    1015.5-   1079.2  out ['0']
+  before     median    1136.1 ms  range    1057.6-   1156.5  out ['0']
+# strided_random step 256
+  after      median    1297.2 ms  range    1272.8-   1322.0  out ['192000000']
+  before     median    1331.9 ms  range    1290.3-   1342.3  out ['192000000']
+FINAL-DONE

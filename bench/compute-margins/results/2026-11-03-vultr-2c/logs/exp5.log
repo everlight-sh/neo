@@ -1,0 +1,126 @@
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'
+base 499998359740 5761455 168
+c0 499998359740 5761455 168
+c16 499998359740 5761455 168
+np16 499998359740 5761455 168
+## THP madvise
+# sieve 1e8 w=1
+  base       median     427.2 ms  range     422.3-    448.1  out ['5761455']
+  c0         median     408.3 ms  range     400.3-    441.7  out ['5761455']
+  c16        median     408.6 ms  range     403.4-    434.8  out ['5761455']
+  np16       median     414.0 ms  range     402.5-    428.9  out ['5761455']
+  zig        median     457.5 ms  range     454.0-    478.1  out ['5761455']
+  rust       median     470.5 ms  range     461.0-    486.0  out ['5761455']
+# stencil 1M x20 w=1
+  base       median      29.1 ms  range      28.6-     30.4  out ['499998359740']
+  c0         median      17.8 ms  range      17.6-     18.5  out ['499998359740']
+  c16        median      17.8 ms  range      17.5-     20.5  out ['499998359740']
+  np16       median      18.4 ms  range      18.0-     23.4  out ['499998359740']
+  zig        median      34.9 ms  range      34.6-     35.6  out ['499998359740']
+  rust       median      49.0 ms  range      47.5-     50.3  out ['499998359740']
+# stencil 50M x20 w=1
+  base       median    1410.3 ms  range    1405.4-   1414.9  out ['25000046624222']
+  c0         median     922.8 ms  range     907.2-    940.8  out ['25000046624222']
+  c16        median     820.0 ms  range     818.2-    830.5  out ['25000046624222']
+  np16       median     823.7 ms  range     807.0-    850.7  out ['25000046624222']
+  zig        median    1724.7 ms  range    1722.0-   1771.7  out ['25000046624222']
+# sieve 1e8 w=2
+  base       median     418.0 ms  range     410.6-    440.7  out ['5761455']
+  c0         median     410.7 ms  range     406.7-    420.2  out ['5761455']
+  c16        median     409.9 ms  range     404.6-    444.2  out ['5761455']
+  np16       median     414.1 ms  range     401.1-    420.0  out ['5761455']
+  zig        median     434.2 ms  range     429.8-    465.2  out ['5761455']
+  rust       median     435.2 ms  range     431.8-    452.0  out ['5761455']
+# stencil 1M x20 w=2
+  base       median      25.6 ms  range      23.0-     27.6  out ['499998359740']
+  c0         median      18.8 ms  range      15.9-     25.4  out ['499998359740']
+  c16        median      20.0 ms  range      17.4-     24.0  out ['499998359740']
+  np16       median      22.4 ms  range      17.8-     29.2  out ['499998359740']
+  zig        median      33.7 ms  range      29.6-     36.2  out ['499998359740']
+  rust       median      27.5 ms  range      27.0-     30.9  out ['499998359740']
+# stencil 50M x20 w=2
+  base       median     827.4 ms  range     799.6-    856.4  out ['25000046624222']
+  c0         median     551.0 ms  range     545.2-    574.4  out ['25000046624222']
+  c16        median     525.0 ms  range     514.8-    541.9  out ['25000046624222']
+  np16       median     531.3 ms  range     512.4-    536.8  out ['25000046624222']
+  zig        median    1084.0 ms  range    1054.0-   1099.3  out ['25000046624222']
+## THP never
+# sieve 1e8 w=1
+  base       median     476.8 ms  range     464.5-    509.2  out ['5761455']
+  c0         median     443.6 ms  range     438.1-    456.1  out ['5761455']
+  c16        median     434.7 ms  range     425.8-    448.7  out ['5761455']
+  np16       median     447.7 ms  range     434.5-    458.7  out ['5761455']
+  zig        median     464.8 ms  range     446.7-    490.0  out ['5761455']
+  rust       median     467.7 ms  range     457.2-    480.5  out ['5761455']
+# stencil 1M x20 w=1
+  base       median      33.5 ms  range      33.4-     33.9  out ['499998359740']
+  c0         median      21.6 ms  range      21.4-     21.8  out ['499998359740']
+  c16        median      21.5 ms  range      21.3-     21.9  out ['499998359740']
+  np16       median      22.8 ms  range      22.6-     23.6  out ['499998359740']
+  zig        median      34.4 ms  range      34.2-     34.9  out ['499998359740']
+  rust       median      47.8 ms  range      47.6-     50.3  out ['499998359740']
+# stencil 50M x20 w=1
+  base       median    1776.7 ms  range    1754.0-   1816.0  out ['25000046624222']
+  c0         median    1174.9 ms  range    1169.3-   1266.4  out ['25000046624222']
+  c16        median    1244.6 ms  range    1195.7-   1415.8  out ['25000046624222']
+  np16       median    1324.6 ms  range    1234.7-   1452.6  out ['25000046624222']
+  zig        median    1752.3 ms  range    1711.6-   1770.8  out ['25000046624222']
+# sieve 1e8 w=2
+  base       median     440.8 ms  range     431.2-    455.2  out ['5761455']
+  c0         median     432.7 ms  range     422.4-    441.8  out ['5761455']
+  c16        median     427.1 ms  range     414.6-    435.1  out ['5761455']
+  np16       median     432.1 ms  range     424.3-    449.9  out ['5761455']
+  zig        median     440.4 ms  range     430.4-    460.6  out ['5761455']
+  rust       median     435.5 ms  range     427.3-    442.3  out ['5761455']
+# stencil 1M x20 w=2
+  base       median      27.0 ms  range      25.5-     32.7  out ['499998359740']
+  c0         median      23.2 ms  range      18.6-     30.0  out ['499998359740']
+  c16        median      20.5 ms  range      17.6-     27.9  out ['499998359740']
+  np16       median      22.0 ms  range      18.6-     28.1  out ['499998359740']
+  zig        median      34.1 ms  range      28.3-     35.6  out ['499998359740']
+  rust       median      28.0 ms  range      27.1-     29.7  out ['499998359740']
+# stencil 50M x20 w=2
+  base       median    1019.9 ms  range    1001.9-   1067.6  out ['25000046624222']
+  c0         median     750.5 ms  range     737.2-    873.9  out ['25000046624222']
+  c16        median     842.8 ms  range     789.8-    911.9  out ['25000046624222']
+  np16       median     780.9 ms  range     743.2-    823.3  out ['25000046624222']
+  zig        median    1072.1 ms  range    1064.3-   1077.2  out ['25000046624222']
+EXP5-DONE

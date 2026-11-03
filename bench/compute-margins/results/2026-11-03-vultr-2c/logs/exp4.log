@@ -1,0 +1,52 @@
+base 499998359740 25000046624222 501058509
+int 499998359740 25000046624222 501058509
+nt16 499998359740 25000046624222 501058509
+nt4 499998359740 25000046624222 501058509
+zig 501058509
+## THP madvise
+# stencil 1M x20 w=1
+  base       median      28.7 ms  range      28.6-     30.5  out ['499998359740']
+  int        median      19.2 ms  range      19.0-     21.2  out ['499998359740']
+  nt16       median      20.6 ms  range      19.2-     21.0  out ['499998359740']
+  nt4        median      20.4 ms  range      19.8-     22.6  out ['499998359740']
+  zig        median      34.9 ms  range      34.3-     35.3  out ['499998359740']
+# stencil 50M x20 w=1
+  base       median    1410.2 ms  range    1408.3-   1413.4  out ['25000046624222']
+  int        median     963.7 ms  range     952.4-    988.7  out ['25000046624222']
+  nt16       median     878.5 ms  range     868.6-    896.9  out ['25000046624222']
+  zig        median    1712.4 ms  range    1695.1-   1767.7  out ['25000046624222']
+# stencil 1M x20 w=2
+  base       median      25.2 ms  range      20.8-     34.2  out ['499998359740']
+  int        median      19.3 ms  range      15.9-     33.0  out ['499998359740']
+  nt16       median      18.6 ms  range      17.5-     25.3  out ['499998359740']
+  nt4        median      16.2 ms  range      14.5-     16.9  out ['499998359740']
+  zig        median      31.3 ms  range      28.4-     34.6  out ['499998359740']
+# stencil 50M x20 w=2
+  base       median     836.0 ms  range     781.0-    840.9  out ['25000046624222']
+  int        median     563.4 ms  range     536.4-    600.9  out ['25000046624222']
+  nt16       median     554.6 ms  range     546.7-    573.1  out ['25000046624222']
+  zig        median    1053.0 ms  range    1020.0-   1189.0  out ['25000046624222']
+## THP never
+# stencil 1M x20 w=1
+  base       median      33.6 ms  range      33.3-     34.3  out ['499998359740']
+  int        median      24.0 ms  range      23.7-     28.0  out ['499998359740']
+  nt16       median      24.3 ms  range      23.7-     31.4  out ['499998359740']
+  nt4        median      28.3 ms  range      27.7-     29.4  out ['499998359740']
+  zig        median      34.5 ms  range      34.3-     35.1  out ['499998359740']
+# stencil 50M x20 w=1
+  base       median    1757.4 ms  range    1733.9-   1779.3  out ['25000046624222']
+  int        median    1296.1 ms  range    1281.4-   1370.9  out ['25000046624222']
+  nt16       median    1355.2 ms  range    1261.9-   1410.1  out ['25000046624222']
+  zig        median    1719.8 ms  range    1710.1-   1741.8  out ['25000046624222']
+# stencil 1M x20 w=2
+  base       median      26.6 ms  range      24.6-     32.1  out ['499998359740']
+  int        median      19.4 ms  range      16.0-     29.3  out ['499998359740']
+  nt16       median      20.5 ms  range      15.1-     27.9  out ['499998359740']
+  nt4        median      19.8 ms  range      17.4-     21.3  out ['499998359740']
+  zig        median      30.6 ms  range      25.4-     37.2  out ['499998359740']
+# stencil 50M x20 w=2
+  base       median    1040.0 ms  range    1024.1-   1065.2  out ['25000046624222']
+  int        median     796.1 ms  range     783.3-    818.2  out ['25000046624222']
+  nt16       median     798.4 ms  range     768.5-    892.6  out ['25000046624222']
+  zig        median    1066.1 ms  range    1045.7-   1086.2  out ['25000046624222']
+EXP4-DONE

@@ -1,0 +1,49 @@
+## identical to the measured 'after' binaries?
+stencil identical
+sieve DIFFERS
+mandel identical
+nbody identical
+library_bench identical
+orders_json identical
+http identical
+strided_flip DIFFERS
+strided_random DIFFERS
+sieve 2: after2=1 before=1
+sieve 1000: after2=168 before=168
+sieve 99991: after2=9592 before=9592
+sieve 100000000: after2=5761455 before=5761455
+strided: 0 3000
+## sieve rows
+thp=madvise sieve-100000000        w=1  Neo after    383.2  Neo before    433.2  Zig    475.8  Zig native    464.5  Rust    481.0  ok
+thp=madvise sieve-100000000        w=2  Neo after    404.5  Neo before    480.8  Zig    502.2  Zig native    487.2  Rust    490.1  ok
+thp=never   sieve-100000000        w=1  Neo after    439.8  Neo before    500.2  Zig    504.4  Zig native    492.4  Rust    504.3  ok
+thp=never   sieve-100000000        w=2  Neo after    457.8  Neo before    506.4  Zig    509.4  Zig native    519.2  Rust    513.3  ok
+## sieve isolation (ab.py, w=1)
+# THP madvise
+  final      median     385.5 ms  range     370.3-    422.2  out ['5761455']
+  bytes      median     404.1 ms  range     388.6-    470.0  out ['5761455']
+  uc64       median     398.5 ms  range     380.4-    435.1  out ['5761455']
+  u          median     406.6 ms  range     400.6-    420.3  out ['5761455']
+  c16        median     439.3 ms  range     424.6-    502.1  out ['5761455']
+  before     median     450.5 ms  range     446.7-    558.6  out ['5761455']
+# THP never
+  final      median     465.0 ms  range     452.7-    501.1  out ['5761455']
+  bytes      median     477.0 ms  range     456.6-    487.6  out ['5761455']
+  uc64       median     466.8 ms  range     448.5-    494.6  out ['5761455']
+  u          median     472.3 ms  range     456.7-    482.9  out ['5761455']
+  c16        median     491.1 ms  range     457.5-    505.6  out ['5761455']
+  before     median     509.6 ms  range     477.8-    539.2  out ['5761455']
+## strided downside (THP madvise, 64e6 flags, 3 rounds)
+# strided_flip step 64
+  after      median     323.2 ms  range     316.1-    327.7  out ['0']
+  before     median     313.6 ms  range     308.4-    326.0  out ['0']
+# strided_random step 64
+  after      median     488.1 ms  range     480.5-    497.8  out ['192000000']
+  before     median     517.1 ms  range     509.2-    531.3  out ['192000000']
+# strided_flip step 256
+  after      median    1065.2 ms  range    1026.9-   1080.6  out ['0']
+  before     median    1127.4 ms  range    1115.7-   1152.9  out ['0']
+# strided_random step 256
+  after      median    1302.8 ms  range    1283.9-   1309.8  out ['192000000']
+  before     median    1336.4 ms  range    1291.6-   1354.9  out ['192000000']
+FINAL2-DONE
