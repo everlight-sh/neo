@@ -1,0 +1,46 @@
+   Compiling axon-bench v0.1.0 (/root/branch/bench/rust)
+    Finished `release` profile [optimized] target(s) in 9.60s
+stencil 1 1: branch=0 main=0 zig=0 rust=0
+stencil 7 3: branch=3649734 main=3649734 zig=3649734 rust=3649734
+stencil 1000 5: branch=498472971 main=498472971 zig=498472971 rust=498472971
+stencil 1000001 2: branch=500002135369 main=500002135369 zig=500002135369 rust=500002135369
+## machine
+CPU(s):                                  4
+Model name:                              AMD EPYC-Milan Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      2
+Socket(s):                               1
+L2 cache:                                1 MiB (2 instances)
+L3 cache:                                32 MiB (1 instance)
+NUMA node(s):                            1
+CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE
+  0    0      0    0 0:0:0:0          yes
+  1    0      0    0 0:0:0:0          yes
+  2    0      0    1 1:1:1:0          yes
+  3    0      0    1 1:1:1:0          yes
+6.8.0-146-generic
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+THP enabled: always [madvise] never
+THP defrag: always defer defer+madvise [madvise] never
+## toolchains
+Ubuntu clang version 18.1.3 (1ubuntu1)
+0.17.0
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+Python 3.12.3
+## sources
+8a165a06ef0167c330f8e7b1898c54471153a4ce6e071450de8b0ccce090f16c  /root/main.tgz
+f1fe5e60c703fd924cf590145cf0daaffccf6a19452178f982f7dd0789a606f8  /root/commit.tgz
+## binaries (sha256)
+0e42b7b3549ec3ba34b24bc674e09cb00774a4e102a2fcd7cf598bab6a9ebb18  bin-main/neo-stencil
+9bbc29309d4ee18e0702f8feb58602b6c49dc569376fe47e19692263d42db10c  bin-branch/neo-stencil
+ecb6a65ae61cc8ce23af3f5681eb1687bb9683be9059f1338ad49a3200c7dc13  rust/stencil
+2f3de234eb587689a392c2cf35fbd228d8a9abab7f2a31ef4176f23f573cedd0  zig-baseline/bin/stencil
+5f238e5d51b5384ecd7018b610db0cd7a82409110991e214d5a78005919da05b  zig-native/bin/stencil
+## 4-worker stencil
+thp=madvise stencil-1000000-20     w=4  Neo after     18.1  Neo before     20.6  Zig     30.6  Zig native     29.1  Rust     22.1  ok
+thp=madvise stencil-50000000-20    w=4  Neo after    342.1  Neo before    473.0  Zig    622.5  Zig native    586.0  Rust    691.9  ok
+thp=never   stencil-1000000-20     w=4  Neo after     19.1  Neo before     21.1  Zig     30.0  Zig native     28.1  Rust     21.4  ok
+thp=never   stencil-50000000-20    w=4  Neo after    500.7  Neo before    607.8  Zig    603.1  Zig native    583.3  Rust    688.8  ok
+FOUR-DONE

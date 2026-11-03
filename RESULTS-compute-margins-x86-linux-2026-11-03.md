@@ -4,8 +4,9 @@ Neo's x86-64 compute rows against Zig 0.17.0 and Rust, measured with transparent
 set to `madvise` and to `never`. The goal was at least 1.2× on every row against the best of Rust and
 Zig, in both THP settings, with separate ranges, and every other row the same or better.
 
-**Result: the target is met on 22 of the 24 rows. It is missed on the 2 sieve rows without huge pages
-(1 and 2 workers).**
+**Result: the target is met on 23 of the 28 rows. It is missed on the 2 sieve rows without huge pages
+(1 and 2 workers) and on 3 of the 4 four-worker stencil rows: both rows without huge pages (1.12× and
+1.16×), and 1M with huge pages, which reaches 1.22× but whose ranges overlap.**
 
 - **Stencil: met on all 8 rows** (1M and 50M × 1 and 2 workers × 2 THP settings). Neo is now 1.24–1.89× faster than the best competitor in both THP
   settings, with separate ranges. Before this change Neo ranged from 0.95× (a loss: THP never,
@@ -21,9 +22,12 @@ Zig, in both THP settings, with separate ranges, and every other row the same or
   byte-identical, and the constant `GET /` control is unchanged.
 - **CI passed** on an x86-64 box for the exact committed tree: `./neo test` and every
   `.github/workflows/verify.yml` step.
-- **4-worker stencil on a voc-c-4c box: not measured.** The Vultr account hit its monthly fee limit
-  with the other sessions' boxes running, and all four attempts to create a 4c box failed. Details are
-  under "Not done".
+- **4-worker stencil on a voc-c-4c box: met on 1 of 4 rows.** Against Rust, the original 1.05× row,
+  1M is now 1.22× with huge pages (ranges overlap) and 1.12× without. 50M is 1.71× ahead of
+  Zig native with huge pages and 1.16× without. Without huge pages, every program spends 405–426 ms of
+  system time faulting in the same two 400 MB arrays. Neo uses 1.23× less user time than Zig native, but the
+  shared fault cost dilutes the wall-time margin. Neo after is 1.11–1.38× faster than `main` on all four
+  rows, and the 50M row without huge pages turns from a loss (0.96×) into a win.
 
 ## Final table (voc-c-2c, 1 and 2 workers)
 
@@ -83,6 +87,45 @@ Before this change, the thin rows were these (Neo before vs best, same runs):
 - THP never, 1–2 workers: the sieve at 0.98–1.01× (both runs).
 - THP never, 2 workers: stencil 1M at 1.03× and stencil 50M at 0.95× (a loss to Zig native).
 - THP madvise: the sieve at 1.01–1.10×.
+
+## 4-worker stencil (voc-c-4c)
+
+Vultr instance 76, `voc-c-4c-8gb-75s-amd`: AMD EPYC-Milan, 4 vCPUs (two cores, each with two SMT
+threads). Every process was pinned to CPUs 0–3, with 4 workers and 15 interleaved rounds. All outputs
+agreed. "Before" here is `main` at `5f96ca0`. Its stencil binary is byte-identical to the 2c run's
+"before" binary, built from `6e18e65`, and Neo after's binary is byte-identical to the 2c run's
+(`meta-4c.txt`).
+
+| THP | Row | Neo after | Neo before | Zig | Zig native | Rust | vs best | Separate | Before vs best |
+|---|---|---:|---:|---:|---:|---:|---:|---|---:|
+| madvise | stencil 1M × 20 | **18.1** (16.4–22.0) | 20.6 | 30.6 | 29.1 | 22.1 (20.5–51.7) | **1.22×** Rust | no | 1.07× |
+| madvise | stencil 50M × 20 | **342.1** (315.2–394.2) | 473.0 | 622.5 | 586.0 (531.0–629.0) | 691.9 | **1.71×** Zig native | yes | 1.24× |
+| never | stencil 1M × 20 | **19.1** (18.5–20.3) | 21.1 | 30.0 | 28.1 | 21.4 (20.5–24.3) | 1.12× Rust | yes | 1.01× |
+| never | stencil 50M × 20 | **500.7** (450.7–561.7) | 607.8 | 603.1 | 583.3 (527.7–615.4) | 688.8 | 1.16× Zig native | no | 0.96× (loss) |
+
+The target is met only on 50M with huge pages. Medians of user time, system time and minor faults from
+the same runs (`final-4c.json`) show why the other rows fall short:
+
+| THP | Row | Neo after user / sys (ms) | Neo after faults | Best competitor user / sys (ms) | Its faults |
+|---|---|---:|---:|---:|---:|
+| madvise | 1M | 49.0 / 9.4 | 956 | Rust 57.8 / 16.3 | 4,105 |
+| never | 1M | 48.4 / 12.2 | 4,006 | Rust 59.5 / 12.9 | 4,105 |
+| madvise | 50M | 1,198.1 / 55.9 | 1,236 | Zig native 1,587.0 / 426.0 | 199,850 |
+| never | 50M | 1,313.5 / 415.6 | 195,412 | Zig native 1,613.1 / 425.8 | 199,851 |
+
+- **50M without huge pages.** All five programs fault in the same two 400 MB arrays page by page, at
+  405–426 ms of system time each. Neo's compute advantage remains (1.23× less user time than Zig
+  native), but it is diluted by a fault cost that every program pays equally. With huge pages, Neo's
+  `MADV_HUGEPAGE` removes almost all of those faults, giving 1.71×. The populate call in `cc6a885`
+  applies to one worker only, because a single `madvise` call would serialize faulting that four workers
+  otherwise do in parallel. Populating each worker's own chunk could recover part of this cost; it was
+  not tried.
+- **1M.** The working set is 16 MB, with about 4,000 faults for Neo and Rust alike. Neo uses the least
+  user time (48–49 ms against Rust's 58–60 ms), but its wall time barely improves with more workers:
+  22.5 ms with 1 worker on the 2c box, against 19.1 ms with 4 workers here. Rust goes from 49.0 to
+  21.4 ms over the same change, which closes most of the gap. The cause was not investigated, and
+  memory bandwidth is the likely limit. With huge pages the median ratio is 1.22×, but 4 of Neo's
+  15 runs (the slowest 22.0 ms) are slower than Rust's fastest run (20.5 ms).
 
 ## What was slow, and what changed
 
@@ -201,11 +244,8 @@ x86-64 only. ARM64 was not measured by this work.
 
 ## Not done
 
-- **The 4-worker stencil against Rust on a voc-c-4c box.** Vultr refused the 4c box four times with
-  "maximum monthly fee limit": twice while box 54 ran, once after destroying it (another session's new
-  box had taken the slot), and once after destroying the CI box. A 2c box was the largest that fit.
-  `bench/compute-margins/run.py OUT.json 9 4 madvise,never stencil:1000000:20 stencil:50000000:20`
-  runs that row once a 4c box is available.
+- **The 4-worker stencil rows without huge pages, and 1M with huge pages, miss the target.** See
+  "4-worker stencil" for the measured causes. Per-worker populate was not tried.
 - **HTTP req/s by the headline method**, which needs a separate load-generator core. The
   instruction counts above stand in for it. `bench/compute-margins/http_ab.py BEFORE AFTER` runs the
   headline method on a 4c box.
@@ -230,7 +270,8 @@ The ARM64 job of `verify.yml` was not run.
 - **Harness:** `bench/compute-margins/run.py`, following `bench/zig/run_cli.py`.
   - One warm-up round, then 9 (or 15) rounds. Variants are interleaved, and the order reverses every
     other round.
-  - Each process is pinned with `taskset`: CPU 0 for 1 worker, CPUs 0–1 for 2 workers.
+  - Each process is pinned with `taskset`: CPU 0 for 1 worker, CPUs 0–1 for 2 workers and CPUs 0–3 for
+    4 workers.
   - `NEO_THREADS`, `ZIG_THREADS` and `RAYON_NUM_THREADS` set the worker count.
   - GNU time records peak RSS and minor faults.
   - The harness writes the THP setting to `/sys/kernel/mm/transparent_hugepage/enabled` before each
@@ -244,6 +285,12 @@ The ARM64 job of `verify.yml` was not run.
   - CPU: AMD EPYC-Milan, 2 vCPUs, which are one core's two SMT threads. L2 is 512 KiB and L3 32 MiB.
   - OS: Ubuntu 24.04.5 LTS, Linux 6.8.0-146-generic. The default THP setting is `madvise`.
   - Nothing else ran during measurements.
+- **4-worker machine:** Vultr `voc-c-4c-8gb-75s-amd`, instance 76, with the same CPU model, OS, kernel
+  and toolchains. Vultr refused a 4c box with "maximum monthly fee limit" four times during the first
+  part of this work, and three more times at three-minute intervals before the fourth retry succeeded.
+  The box was destroyed after the run; Vultr's `list_instances` afterwards no longer showed it (the
+  three listed instances belong to other sessions). No Scaleway box was needed. Sources were
+  `git archive` of `main` (`5f96ca0`) and of `3f1023a`; their hashes are in `meta-4c.txt`.
 - **Neo:**
   - "Before" is `6e18e65` (Neo 0.1.1).
   - "After" is the tree of `3f1023a`. Its `neoc/` and `runtime/` are byte-identical to the measured
@@ -266,3 +313,10 @@ The ARM64 job of `verify.yml` was not run.
 - `meta.txt`.
 - `logs/`: every job script and its log, in order. `README.md` there names each experimental binary.
 - `prototypes/`: the C prototypes used to locate the sieve and stencil bottlenecks.
+
+`bench/compute-margins/results/2026-11-03-vultr-4c/` holds:
+
+- `final-4c.json`, the 4-worker stencil run.
+- `summary.md`.
+- `meta-4c.txt`.
+- `logs/`: the setup and run scripts and their logs.
