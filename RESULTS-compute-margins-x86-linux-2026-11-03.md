@@ -129,7 +129,7 @@ the same runs (`final-4c.json`) show why the other rows fall short:
 
 ## What was slow, and what changed
 
-Six commits on `claude/x86-margins-3bb69e`, each isolated in its own function or file:
+Six commits on the x86 margins branch, each isolated in its own function or file:
 
 1. **The stencil's vector interior still computed its boundary masks** (`f386df3`). `examples/stencil.neo` is
    `arr(i in 0..n) if i == 0 || i + 1 == n then xs[i] else (xs[i-1] + 2*xs[i] + xs[i+1]) % 1000003`.
