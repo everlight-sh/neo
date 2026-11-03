@@ -99,8 +99,6 @@ type GhashPower = { hi:i64,lo:i64,mid:i64 }
 type GhashKey = { p1:GhashPower,p2:GhashPower,p3:GhashPower,p4:GhashPower,p5:GhashPower,p6:GhashPower,p7:GhashPower,p8:GhashPower }
 type GhashSum = { low:Gf128,mid:Gf128,high:Gf128 }
 type GcmContext = { keys:AesKeys,hash:GhashKey,n0:i64,n2:i64 }
-type GcmRun = { y:Gf128,out:Arr u8 _ }
-type GcmResult = { tag:AesBlock,out:Arr u8 _ }
 
 private inline effect fn ani_round(s:AesBlock,k:AesBlock) -> AesBlock
   = AesBlock { low=aes_round_low(s.low,s.high,k.low,k.high),high=aes_round_high(s.low,s.high,k.low,k.high) }
@@ -152,16 +150,19 @@ private inline fn gcm_load(text:Arr u8 m,at:i64{at>=0 && at+16<=m}) -> AesBlock 
 private inline fn gcm_load8(text:Arr u8 m,at:i64{at>=0 && at+128<=m}) -> Aes8
   = Aes8 { b0=gcm_load(text,at),b1=gcm_load(text,at+16),b2=gcm_load(text,at+32),b3=gcm_load(text,at+48),
            b4=gcm_load(text,at+64),b5=gcm_load(text,at+80),b6=gcm_load(text,at+96),b7=gcm_load(text,at+112) }
-private inline fn gcm_store(move out:Arr u8 n,at:i64,b:AesBlock) -> Arr u8 _ = let out=byte_write_le(out,at,b.low,8) in byte_write_le(out,at+8,b.high,8)
+private inline effect fn gcm_store(dst:ptr,at:i64,b:AesBlock) -> unit = let low=store_i64(dst,at,b.low) in store_i64(dst,at+8,b.high)
+private inline effect fn gcm_store8(dst:ptr,at:i64,s:Aes8) -> unit
+  = let a=gcm_store(dst,at,s.b0) in let b=gcm_store(dst,at+16,s.b1) in let c=gcm_store(dst,at+32,s.b2) in let d=gcm_store(dst,at+48,s.b3) in
+    let e=gcm_store(dst,at+64,s.b4) in let f=gcm_store(dst,at+80,s.b5) in let g=gcm_store(dst,at+96,s.b6) in gcm_store(dst,at+112,s.b7)
 ; The first count (1..16) bytes of a block, zero-padded.
 private inline fn gcm_load_part(text:Arr u8 m,at:i64,count:i64) -> AesBlock
   = if count==16 then (check at>=0 && at+16<=m in gcm_load(text,at)) else
     let low=loop(i=0,v=0) while i<count && i<8 next(i+1,bit_or(v,shift_left(byte_read_le(text,at+i,1),i*8))) yield v in
     let high=loop(i=8,v=0) while i<count next(i+1,bit_or(v,shift_left(byte_read_le(text,at+i,1),(i-8)*8))) yield v in
     AesBlock { low=low,high=high }
-private inline fn gcm_store_part(move out:Arr u8 n,at:i64,b:AesBlock,count:i64) -> Arr u8 _
-  = if count==16 then gcm_store(out,at,b) else
-    loop(i=0,out=out) while i<count next(i+1,byte_write_le(out,at+i,shift_right(if i<8 then b.low else b.high,i%8*8),1)) yield out
+private inline effect fn gcm_store_part(dst:ptr,at:i64,b:AesBlock,count:i64) -> unit
+  = if count==16 then gcm_store(dst,at,b) else
+    loop(i=0) while i<count next(let stored=store_u8(dst,at+i,u8(shift_right(if i<8 then b.low else b.high,i%8*8))) in i+1) yield noop()
 private inline fn gcm_mask(count:i64) -> AesBlock
   = AesBlock { low=if count>=8 then -1 else shift_left(1,count*8)-1,high=if count>=16 then -1 else if count<=8 then 0 else shift_left(1,(count-8)*8)-1 }
 
@@ -204,41 +205,45 @@ private inline effect fn gh_eight(y:Gf128,k:GhashKey,c:Aes8) -> Gf128
 private effect fn gcm_context(key:Arr u8 n,nonce:Arr u8 m) -> GcmContext
   = check n==16 && m==12 in let keys=ani_keys(key) in
     GcmContext { keys=keys,hash=gh_key(gh_block(ani_encrypt(keys,AesBlock { low=0,high=0 }))),n0=byte_read_le(nonce,0,8),n2=byte_read_le(nonce,8,4) }
-; The output for text[at..at+128).
-private inline effect fn gcm_out8(c:GcmContext,text:Arr u8 m,at:i64{at>=0 && at+128<=m}) -> Aes8
-  = ani_xor8(gcm_load8(text,at),ani_stream8(c,2+shift_right(at,4)))
 ; One block of count (1..16) bytes; a partial block is zero-padded for GHASH.
-private inline effect fn gcm_one(c:GcmContext,move run:GcmRun,text:Arr u8 m,from:i64,at:i64,counter:i64,count:i64,seal:bool) -> GcmRun
-  = let input=gcm_load_part(text,from,count) in
+private inline effect fn gcm_one(c:GcmContext,y:Gf128,text:Arr u8 m,at:i64,counter:i64,count:i64,dst:ptr,seal:bool) -> Gf128
+  = let input=gcm_load_part(text,at,count) in
     let output=ani_and(ani_xor(input,ani_encrypt(c.keys,ani_counter(c,counter))),gcm_mask(count)) in
-    GcmRun { y=gh_multiply(gh_xor(run.y,gh_block(if seal then output else input)),c.hash.p1),out=gcm_store_part(run.out,at,output,count) }
-; CTR from counter 2 over text[0..count) into out, and the tag over aad and the ciphertext.
-private inline effect fn gcm_crypt(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,count:i64,move out:Arr u8 n,seal:bool) -> GcmResult
-  = check count>=0 && count<=m && count<=n && count<=16777216 && a<=16777216 in
+    let stored=gcm_store_part(dst,at,output,count) in gh_multiply(gh_xor(y,gh_block(if seal then output else input)),c.hash.p1)
+; CTR from counter 2 over text[0..count), written to dst[0..count), and the tag
+; over aad and the ciphertext. dst may be text itself, but no other part of it.
+private inline effect fn gcm_crypt(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,count:i64,dst:ptr,seal:bool) -> AesBlock
+  = check count>=0 && count<=m && count<=16777216 && a<=16777216 in
     let y=loop(i=0,y=Gf128 { hi=0,lo=0 }) while i<a
       next(i+16,gh_multiply(gh_xor(y,gh_block(gcm_load_part(aad,i,if a-i<16 then a-i else 16))),c.hash.p1)) yield y in
     ; Eight blocks a step. GHASH takes the ciphertext: the output when sealing,
-    ; the input when opening. out is written in place, as the loop's set-only state.
-    let run=loop(at:i64{at>=0}=0,y=y,out=out) while at+128<=count
-      next(at+128,gh_eight(y,c.hash,if seal then gcm_out8(c,text,at) else gcm_load8(text,at)),
-        let s=gcm_out8(c,text,at) in
-        byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(
-        byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(out,
-          at,s.b0.low,8),at+8,s.b0.high,8),at+16,s.b1.low,8),at+24,s.b1.high,8),at+32,s.b2.low,8),at+40,s.b2.high,8),
-          at+48,s.b3.low,8),at+56,s.b3.high,8),at+64,s.b4.low,8),at+72,s.b4.high,8),at+80,s.b5.low,8),at+88,s.b5.high,8),
-          at+96,s.b6.low,8),at+104,s.b6.high,8),at+112,s.b7.low,8),at+120,s.b7.high,8))
-      yield GcmRun { y=y,out=out } in
-    let run=loop(at=count/128*128,run=run) while at<count next(at+16,gcm_one(c,run,text,at,at,2+at/16,if count-at<16 then count-at else 16,seal)) yield run in
-    let y=gh_multiply(gh_xor(run.y,Gf128 { hi=a*8,lo=count*8 }),c.hash.p1) in let mask=ani_encrypt(c.keys,ani_counter(c,1)) in
-    GcmResult { tag=AesBlock { low=bit_xor(mask.low,byte_swap64(y.hi)),high=bit_xor(mask.high,byte_swap64(y.lo)) },out=run.out }
-private cold effect fn gcm_seal_kernel(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,move out:Arr u8 n) -> GcmResult = gcm_crypt(c,aad,text,m,out,true)
-private cold effect fn gcm_open_kernel(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,count:i64,move out:Arr u8 n) -> GcmResult = gcm_crypt(c,aad,text,count,out,false)
+    ; the input when opening.
+    let y=loop(at:i64{at>=0}=0,y=y) while at+128<=count
+      next(at+128,let input=gcm_load8(text,at) in let output=ani_xor8(input,ani_stream8(c,2+shift_right(at,4))) in
+        let stored=gcm_store8(dst,at,output) in gh_eight(y,c.hash,if seal then output else input)) yield y in
+    let y=loop(at=count/128*128,y=y) while at<count next(at+16,gcm_one(c,y,text,at,2+at/16,if count-at<16 then count-at else 16,dst,seal)) yield y in
+    let y=gh_multiply(gh_xor(y,Gf128 { hi=a*8,lo=count*8 }),c.hash.p1) in let mask=ani_encrypt(c.keys,ani_counter(c,1)) in
+    AesBlock { low=bit_xor(mask.low,byte_swap64(y.hi)),high=bit_xor(mask.high,byte_swap64(y.lo)) }
+private cold effect fn gcm_seal_kernel(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,dst:ptr) -> AesBlock = gcm_crypt(c,aad,text,m,dst,true)
+private cold effect fn gcm_open_kernel(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,count:i64,dst:ptr) -> AesBlock = gcm_crypt(c,aad,text,count,dst,false)
+private inline fn gcm_tag_equal(a:AesBlock,b:AesBlock) -> bool = bit_or(bit_xor(a.low,b.low),bit_xor(a.high,b.high))==0
 effect() fn aes128_gcm_seal_fast(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,plaintext:Arr u8 p) -> BytesResult
   = if !aes_hardware() then aes128_gcm_seal(key,nonce,aad,plaintext) else
     if n!=16 || m!=12 || a>16777216 || p>16777216 then bytes_error(22,"invalid AES-GCM input",0) else
-    let done=gcm_seal_kernel(gcm_context(key,nonce),aad,plaintext,arr(i in 0..p+16) u8(0)) in bytes_ok(gcm_store(done.out,p,done.tag))
+    let out=byte_uninit(p+16) in let tag=gcm_seal_kernel(gcm_context(key,nonce),aad,plaintext,data(out)) in
+    let stored=gcm_store(data(out),p,tag) in bytes_ok(out)
 effect() fn aes128_gcm_open_fast(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,wire:Arr u8 s) -> BytesResult
   = if !aes_hardware() then aes128_gcm_open(key,nonce,aad,wire) else
     if n!=16 || m!=12 || a>16777216 || s<16 || s>16777232 then bytes_error(22,"invalid AES-GCM input",0) else
-    let done=gcm_open_kernel(gcm_context(key,nonce),aad,wire,s-16,arr(i in 0..s-16) u8(0)) in let expected=gcm_load(wire,s-16) in
-    if bit_or(bit_xor(done.tag.low,expected.low),bit_xor(done.tag.high,expected.high))!=0 then bytes_error(74,"AES-GCM authentication failed",0) else bytes_ok(done.out)
+    let out=byte_uninit(s-16) in let tag=gcm_open_kernel(gcm_context(key,nonce),aad,wire,s-16,data(out)) in
+    if !gcm_tag_equal(tag,gcm_load(wire,s-16)) then bytes_error(74,"AES-GCM authentication failed",0) else bytes_ok(out)
+; aes128_gcm_open_fast, with the plaintext written to dst[0..len(wire)-16)
+; instead of a new array; the count, or an error. When authentication fails,
+; dst holds unauthenticated bytes: the caller must discard them.
+effect() fn aes128_gcm_open_into(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,wire:Arr u8 s,dst:ptr) -> IntResult
+  = if !aes_hardware() then let opened=aes128_gcm_open(key,nonce,aad,wire) in
+      if !opened.ok then int_error(opened.error.code,opened.error.message,0) else
+      let plaintext=opened.value in let copied=memcpy(dst,data(plaintext),len(plaintext)) in int_ok(len(plaintext)) else
+    if n!=16 || m!=12 || a>16777216 || s<16 || s>16777232 then int_error(22,"invalid AES-GCM input",0) else
+    let tag=gcm_open_kernel(gcm_context(key,nonce),aad,wire,s-16,dst) in
+    if !gcm_tag_equal(tag,gcm_load(wire,s-16)) then int_error(74,"AES-GCM authentication failed",0) else int_ok(s-16)

@@ -291,7 +291,11 @@ TLS 1.3 sessions resume with PSK tickets (psk_dhe_ke only): `tls_take_ticket`
 returns the newest NewSessionTicket with its PSK, bound to the host name and
 suite, and `tls_connect_resume` offers it once, within its lifetime, with a
 binder; a server that declines it gets a full handshake. `tls_resumed` reports
-whether the certificate exchange was skipped.
+whether the certificate exchange was skipped. `tls_read_into` reads application
+data into caller memory instead of a new array; over TLS 1.3 with AES-128-GCM
+and the CPU's AES instructions, a record whose plaintext fits is opened straight
+into it. More application data than the room given fails the session, and after
+an error that memory may hold unauthenticated bytes.
 
 This is a deliberately limited, unaudited implementation: no TLS 1.2 fallback,
 client certificates, 0-RTT, AIA fetching,
@@ -471,7 +475,9 @@ HTTP/2 (`std:http2`, one stream at a time on a kept-alive connection) with HPACK
 (`std:hpack`: static and dynamic tables, Huffman coding), CONTINUATION, padding,
 flow control in both directions, PING, RST_STREAM and GOAWAY; a request the
 server refused or never processed is sent again. Plain connections stay
-HTTP/1.1 (no h2c). `HttpExchange` carries the response's header fields and the
+HTTP/1.1 (no h2c). Over HTTP/1.1 a Content-Length body is read into one buffer
+of the announced size: from a plain socket with reads as large as it has queued,
+over TLS with `tls_read_into`. `HttpExchange` carries the response's header fields and the
 protocol used. `std:sse` incrementally frames SSE data/event/id/retry fields
 across arbitrary chunks, supports BOM/CR/LF/CRLF, and bounds pending event data.
 Feed it decoded HTTP body chunks; EOF does not dispatch an unterminated event.

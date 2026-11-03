@@ -1,0 +1,46 @@
+== perf stat main keep
+ 261.65 msec task-clock # 0.494 CPUs utilized 
+ 558029206 cycles # 2.133 GHz 
+ 1025526414 instructions # 1.84 insn per cycle 
+ 694 page-faults # 2.652 K/sec 
+ 0.529520354 seconds time elapsed
+ 0.170223000 seconds user
+ 0.089991000 seconds sys
+    44.91%  [.] ax_gcm_open_kernel__seq
+    16.46%  [.] memcpy
+     7.98%  [k] __arch_copy_to_user
+     2.70%  [.] memset
+     1.69%  [k] _raw_spin_unlock_irqrestore
+     1.43%  [.] ax_http_exchange_io__22156a23b6270386b7db__seq
+     1.11%  [k] mem_cgroup_uncharge_skmem
+     0.92%  [.] ax_gcm_context__seq
+     0.76%  [k] __skb_datagram_iter
+     0.74%  [.] ax_http_reader_headers__seq
+     0.60%  [k] get_random_u16
+     0.59%  [k] check_heap_object
+     0.57%  [.] ax_heap_alloc
+     0.57%  [k] skb_release_data
+== perf stat new keep
+ 214.56 msec task-clock # 0.459 CPUs utilized 
+ 456186496 cycles # 2.126 GHz 
+ 840813485 instructions # 1.84 insn per cycle 
+ 434 page-faults # 2.023 K/sec 
+ 0.467088564 seconds time elapsed
+ 0.116599000 seconds user
+ 0.098158000 seconds sys
+    60.52%  [.] ax_gcm_open_kernel__seq
+     9.16%  [k] __arch_copy_to_user
+     1.52%  [.] ax_gcm_context__seq
+     1.21%  [.] ax_http_reader_headers__seq
+     1.16%  [.] ax_http_exchange_io__22156a23b6270386b7db__seq
+     1.03%  [.] ax_tls_wire_record__seq
+     0.98%  [.] memcpy
+     0.91%  [k] finish_task_switch.isra.0
+     0.80%  [k] tcp_recvmsg_locked
+     0.55%  [k] get_random_u16
+     0.45%  [k] tcp_clean_rtx_queue.constprop.0
+     0.45%  [k] ksys_read
+     0.44%  [.] ax_http_client_attempt__seq
+     0.43%  [k] __skb_datagram_iter
+PROF-DONE
+

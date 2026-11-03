@@ -369,7 +369,8 @@ effect fn main () -> i64 = rt_getpid()
 
 The systems boundary is intentionally **trusted and unchecked**: `ptr_add`,
 `load_u8/i32/i64/ptr`, `store_u8/i32/i64/ptr`, `view`, `data`, `addr`,
-`invoke_region` and `handler_call` are only available in effect functions.
+`byte_uninit`, `invoke_region` and `handler_call` are only available in effect
+functions.
 The kernel boundary additionally exposes `syscall6`, `fork_syscall`,
 `stack_alloc`, `runtime_state`, pointer/integer conversions and volatile
 memory operations. Those primitives generate LLVM instructions/assembly;
@@ -387,7 +388,11 @@ false and the instructions trap.
 They do not prove pointer validity, lifetimes, callback signatures or foreign
 contracts. `data(array)` borrows a named byte array (or a static literal);
 the pointer must not outlive or invalidate that storage. `view(ptr, length)`
-creates a borrowed byte array with a nonnegative length obligation. Normal
+creates a borrowed byte array with a nonnegative length obligation.
+`byte_uninit(length)` allocates an owned byte array of that length without
+filling it, for code that then writes every byte through `data()` (a body
+read from a socket or decrypted in place); its contents are unspecified until
+then. Normal
 array bounds and refinement checking still applies to the runtime's pure
 HTTP parser and to application code. This is an initial systems interface,
 not a complete memory-safe FFI or effect capability system.

@@ -98,6 +98,9 @@ SYSTEMS = {
     "spawn_thread": ([S.PTR, S.PTR], S.I64),
     "runtime_state": ([], S.PTR),
     "stack_alloc": ([S.I64], S.PTR),
+    # An owned byte array of the given length whose contents are unspecified
+    # until the caller has written every byte through data().
+    "byte_uninit": ([S.I64], S.TArr(S.U8, "_")),
     "ptr_to_i64": ([S.PTR], S.I64),
     "ptr_from_i64": ([S.I64], S.PTR),
     "float_bits": ([S.F64], S.I64),
@@ -961,6 +964,12 @@ class Checker:
                 self.err("view takes (ptr, byte length)", e, f); return None
             self.oblige(env, "size", cmp(">=", self.to_lin(e.args[1], env), Lin.num(0)), e, "view length >= 0", ["check length >= 0 in …"])
             e.builtin = "view"; return S.TArr(S.U8, self.to_lin(e.args[1], env))
+        if e.name == "byte_uninit":
+            self.require_effect(e, env, {'unsafe'})
+            if len(e.args) != 1 or self.infer(e.args[0], env) != S.I64:
+                self.err("byte_uninit takes (byte length)", e, f); return None
+            self.oblige(env, "size", cmp(">=", self.to_lin(e.args[0], env), Lin.num(0)), e, "byte_uninit length >= 0", ["check length >= 0 in …"])
+            e.builtin = "byte_uninit"; return S.TArr(S.U8, self.to_lin(e.args[0], env))
         if e.name in SYSTEMS:
             if e.name not in ('float_bits','bits_float'): self.require_effect(e, env, set() if e.name=='aes_hardware' else {'unsafe'})
             pts, ret = SYSTEMS[e.name]

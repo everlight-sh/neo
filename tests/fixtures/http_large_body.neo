@@ -1,0 +1,26 @@
+import "std:https_client"
+
+; GET each PATH over one keep-alive HttpClient to localhost at 127.0.0.1:
+; http_large_body PORT CA.der|- PATH..., TLS when given a root. Prints, per
+; request, the status, the body's length and its FNV-1a hash (or error:CODE),
+; and how many connections the client has opened so far.
+type Step = { client:HttpClient, out:Arr u8 _ }
+
+fn fnv(borrow body:Arr u8 _) -> i64
+  = loop(i:i64{i>=0}=0,h=-3750763034362895579) while i<len(body) next(i+1,wrapping_mul(bit_xor(h,i64(body[i])),1099511628211)) yield h
+
+effect(fs,net,time,process) fn step(arena:Arena, move s:Step, path:Arr u8 k) -> Step
+  = let sent=http_send(arena,s.client,"GET",path,"",10000,2097152) in
+    let line=if sent.response.ok then concat(int_text(sent.response.status)," ",int_text(len(sent.response.body))," ",int_text(fnv(sent.response.body)))
+      else concat("error:",int_text(sent.response.error.code)) in
+    Step { client=sent.client, out=concat(s.out,line," ",int_text(sent.client.connections),"\n") }
+
+effect(fs,net,time,process,env) fn main() -> unit
+  = let port=int_parse(cli_arg(1).value) in let ca=cli_arg(2) in check port.ok && ca.present in
+    using arena=new_arena(8) in
+    let client=if !str_equal(ca.value,"-") then let der=fs_read(ca.value) in check der.ok in https_client("localhost",port.value,arr(i in 0..1) x509_parse(der.value))
+      else http_client("localhost",port.value) in
+    let done=loop(s=Step { client=http_client_at(client,"127.0.0.1"), out="" },i=3) while cli_arg(i).present
+      next(step(arena,s,cli_arg(i).value),i+1) yield s in
+    let closed=http_client_close(done.client) in
+    let shown=print_out(done.out) in noop()

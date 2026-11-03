@@ -94,6 +94,20 @@ class SystemsTests(unittest.TestCase):
         self.assertNotIn('llvm.aarch64.crypto', darwin)
         self.assertIn('call void @llvm.trap()', darwin)
 
+    def test_byte_uninit_is_unsafe_unfilled_and_sized(self):
+        with self.assertRaises(CheckError):
+            checked('fn main () -> i64 = len(byte_uninit(8))')
+        with self.assertRaises(AssertionError):
+            checked('effect fn make (n:i64) -> i64 = len(byte_uninit(n)) effect fn main () -> i64 = make(3)')
+        source = ('effect fn make (n:i64) -> Arr u8 _ = check n >= 8 in let b = byte_uninit(n) in let s = store_i64(data(b), 0, 7) in b '
+                  'effect fn main () -> i64 = let b = make(64) in byte_read_le(b, 0, 8) + len(b)')
+        program = checked(source)
+        ir = LLVMGen(program.fns, hash_program(program), 'x86_64-unknown-linux-gnu').program()
+        make = next(part for part in ir.split('\ndefine ') if '_make__seq(' in part.split('\n', 1)[0])
+        # arr(i in 0..n) u8(0) would add a fill loop (for_body) here.
+        self.assertIn('@ax_heap_alloc(', make)
+        self.assertNotIn('for_body', make)
+
     def test_syscall_requires_effect(self):
         with self.assertRaises(CheckError):
             checked('fn main () -> i64 = syscall6(20, 0, 0, 0, 0, 0, 0)')

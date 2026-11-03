@@ -1,0 +1,53 @@
+== unit
+Ran 31 tests in 0.037s
+
+OK
+== http_large_body
+PASS large bodies over TCP: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes
+PASS large bodies over TLS 1.3 (client order) TLS_AES_128_GCM_SHA256: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes
+PASS large bodies over TLS 1.3 (server order) TLS_CHACHA20_POLY1305_SHA256: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes
+PASS large bodies over TLS 1.2 ECDHE-RSA-AES128-GCM-SHA256: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes
+http_large_body exit=0
+== http_keepalive
+PASS keep-alive over TCP: 12 requests on 5 connections; reuse, server close, silent close retried for GET and not for POST, body limit, chunked body
+PASS keep-alive over TLS 1.3: 12 requests on 5 connections; reuse, server close, silent close retried for GET and not for POST, body limit, chunked body
+http_keepalive exit=0
+== aes_language
+PASS AES-128 NIST block/GCM vectors; 40 Go-oracle GCM cases through the portable and fast paths (aes_hardware True), boundary sizes, round trips and no plaintext after tag/nonce corruption
+aes_language exit=0
+== tls_language
+PASS X.509: trusted RSA certificates, DNS/IP SAN, wildcard boundaries, times, critical extensions, EKU, CA rules, bad signatures and 180+ malformed/truncated inputs
+PASS TLS 1.3: RSA/ECDSA and mixed issuer chains, independent encrypted peer, byte fragmentation, tickets, close-notify, hostname/chain rejection, corrupt tags, truncation, deadlines and KeyUpdate; a TLS 1.2-only peer over TLS 1.2
+tls_language exit=0
+== tls12_language
+PASS TLS 1.2: 56 cases
+timing (15 runs each, microseconds, tls_connect over loopback):
+  TLS 1.2 ECDHE-RSA-CHACHA20 X25519, RSA-2048: median 1243  min 1216  max 1734
+  TLS 1.2 ECDHE-RSA-AES128-GCM P-256, RSA-2048: median 1465  min 1434  max 1939
+  TLS 1.2 ECDHE-ECDSA-AES128-GCM X25519, P-256: median 820  min 792  max 1059
+  TLS 1.2 ECDHE-ECDSA-CHACHA20 X25519, P-384: median 1771  min 1756  max 1983
+  TLS 1.3 CHACHA20 X25519, RSA-2048 (comparison): median 1203  min 1169  max 1668
+  TLS 1.3 CHACHA20 X25519, P-256 (comparison): median 856  min 779  max 1191
+tls12_language exit=0
+== tls_web_language
+LIVE www.rust-lang.org: suite=4865 group=29 HTTP/1.1 301 Moved Permanently (roots=118); HttpClient: GET / -> 301 h2 connections=1 resumptions=0 body=162
+LIVE www.bbc.co.uk: suite=4865 group=29 HTTP/1.1 200 OK (roots=118); HttpClient: GET / -> 200 h2 connections=1 resumptions=0 body=724424
+LIVE www.lemonde.fr: suite=49199 group=29 HTTP/1.1 200 OK (roots=118); HttpClient: GET / -> 200 h2 connections=1 resumptions=0 body=947213
+LIVE stackoverflow.com: suite=4865 group=29 HTTP/1.1 302 Found (roots=118); HttpClient: GET / -> 403 h2 connections=1 resumptions=0 body=6206
+LIVE www.apple.com: suite=4867 group=29 HTTP/1.1 200 OK (roots=118); HttpClient: GET / -> 200 h2 connections=1 resumptions=0 body=253635
+LIVE www.microsoft.com: suite=4867 group=29 HTTP/1.1 200 OK (roots=118); HttpClient: GET / -> 200 h2 connections=1 resumptions=0 body=201253
+LIVE lightpanda.io: suite=4865 group=29 HTTP/1.1 200 OK (roots=118); HttpClient: GET / -> 200 h2 connections=1 resumptions=0 body=199445
+live sites: 17/18 answered, 17 over h2
+tls_web_language exit=0
+== http2_language
+PASS fallback to HTTP/1.1 (server without ALPN): GET / -> 200 http/1.1 connections=1 resumptions=0 body=4102 sha256=3c5f117ee775abc7dcae8eb4dec22a3f60a892ab2215e1e4f8c285433f41d7d3
+PASS PING, SETTINGS, padding, priority, CONTINUATION, trailers, 103, size updates: GET /ping -> 200 h2 connections=1 resumptions=0 body=4 sha256=9795c5ff8937f23526ccb207a5684c1fc94a7854e19c021b39d944e51f5baef2 | GET /padded -> 200 h2 connections=1 resumptions=0 body=8 sha256=9c56cc51b374c3ba189210d5b6d4bf57790d351c96c47c02190ecf1e430635ab | GET /trailers -> 200 h2 connections=1 resumptions=0 body=4 sha256=230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5 | GET /early -> 200 h2 connections=1 resumptions=0 body=5 sha256=2443630b4620165c8b173e7265e17526fe2787ae594364dd6d839ad58f2fc007 | GET /size-update -> 200 h2 connections=1 resumptions=0 body=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | GET /size-again -> 200 h2 connections=1 resumptions=0 body=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | POST /plain -> 200 h2 connections=1 resumptions=0 body=5000 sha256=69dbee893909fa17d1be397e0c07691336fe42049c29d403467d3d4a1fc3b5a1 | GET /plain -> 200 h2 connections=1 resumptions=0 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+PASS RST_STREAM fails the request and keeps the connection: GET /plain -> 200 h2 connections=1 resumptions=0 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475 | GET /rst -> error 104 HTTP/2 stream reset by the server (error code 2) | GET /plain -> 200 h2 connections=1 resumptions=0 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+PASS REFUSED_STREAM retries a POST: POST /refuse -> 200 h2 connections=1 resumptions=0 body=10 sha256=1f825aa2f0020ef7cf91dfa30da4668d791c5d4824fc8e41354b89ec05795ab3
+PASS GOAWAY before the stream retries on a new connection: POST /goaway-zero -> 200 h2 connections=2 resumptions=1 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+PASS GOAWAY after the stream: the next request reconnects: GET /goaway-after -> 200 h2 connections=1 resumptions=0 body=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | GET /plain -> 200 h2 connections=2 resumptions=1 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+PASS connection error (DATA on stream 0), then a new connection: GET /bad-frame -> error 71 invalid HTTP/2 DATA frame or flow control | GET /plain -> 200 h2 connections=2 resumptions=1 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+PASS malformed response field fails the stream only: GET /uppercase -> error 71 malformed HTTP/2 response header fields | GET /plain -> 200 h2 connections=1 resumptions=0 body=5 sha256=a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475
+http2_language exit=0
+TESTS-DONE
+

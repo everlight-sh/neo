@@ -202,7 +202,7 @@ def zero(t) -> str:
 def fresh_array_result(e):
     if isinstance(e,S.Check):return fresh_array_result(e.body)
     if isinstance(e,S.ArrC):return True
-    return isinstance(e,S.Call) and getattr(e,'builtin',None) in ('set','push','concat','byte_copy','byte_write_le')
+    return isinstance(e,S.Call) and getattr(e,'builtin',None) in ('set','push','concat','byte_copy','byte_write_le','byte_uninit')
 
 IN_PLACE_WRITERS = ('set', 'byte_write_le', 'byte_copy')
 
@@ -1957,6 +1957,10 @@ class LLVMGen:
         if b == "stack_alloc":
             size, _ = self.gen(e.args[0], env, False)
             return fb.ins(f"alloca i8, {size}, align 16", "ptr"), None
+        if b == "byte_uninit":
+            size, _ = self.gen(e.args[0], env, False)
+            out = self.new_array(e.ty, size)
+            return out, fb.ins(f"extractvalue {out}, 2", "i64")
         if b in ("ptr_to_i64", "ptr_from_i64", "float_bits", "bits_float"):
             value, _ = self.gen(e.args[0], env, False)
             operation = {"ptr_to_i64": "ptrtoint", "ptr_from_i64": "inttoptr", "float_bits": "bitcast", "bits_float": "bitcast"}[b]

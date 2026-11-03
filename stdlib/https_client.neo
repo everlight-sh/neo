@@ -92,14 +92,27 @@ private effect(fs,net,time,process) fn http_client_connect(arena:Arena,move clie
       h2=http2_connection() with { active=h2 } } in
     if !secured.ok then HttpConnect { client=http_client_disconnect(client),ok=false,error=secured.error } else HttpConnect { client=client,ok=true,error=no_error() }
 
+; The rest of a Content-Length body over TLS, each record opened straight into
+; the result, one buffer of the announced size (tls_read_into): no buffer per
+; record, no appends and no growth copies. Any other reader is returned unchanged.
+effect(net,time) fn http_read_length_body_tls(socket:Socket,session:TlsSession,move reader:HttpReader,deadline:i64) -> HttpReader
+  = let size=http_length_body_size(reader) in if size<0 then reader else
+    let buffered=reader.buffer in let body=byte_uninit(size) in let raw=data(body) in let copied=memcpy(raw,data(buffered),len(buffered)) in
+    let filled=loop(step=int_ok(len(buffered))) while step.ok && step.value<size next(
+      let read=tls_read_into(socket,session,ptr_add(raw,step.value),size-step.value,deadline) in
+      if !read.ok then read else if read.value==0 then int_error(5,"truncated HTTP body",0) else int_ok(step.value+read.value)) yield step in
+    http_length_body_read(reader,if filled.ok then bytes_ok(body) else bytes_error(filled.error.code,filled.error.message,0))
+
 ; One request and its whole response over io. retry: the connection failed
 ; before any response, as a kept-alive connection the server has closed does.
-; plain is the socket when io reads it directly, for http_read_length_body.
-private effect(net,time,process) fn http_exchange_io<C>(io:HttpIO<C>,plain:Option<Ref<Socket>>,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
+; socket is the connection, and session its TLS session if any, from which a
+; Content-Length body is read straight into one buffer.
+private effect(net,time,process) fn http_exchange_io<C>(io:HttpIO<C>,socket:Ref<Socket>,session:Option<Ref<TlsSession>>,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
   = let reader=http_start_keepalive_io(io,method,path,host,body,deadline,limit,arr(i in 0..0) HttpHeader { name="",value="" }) in
     if !reader.ok then HttpOutcome { response=net_error(reader.error.code,reader.error.message),headers=http_no_fields(),reusable=false,
       retry=reader.status==0 && (reader.error.code==5 || reader.error.code==32 || reader.error.code==104),unprocessed=false,h2=http2_connection() } else
-    let reader=match plain { None => reader, Some(socket) => http_read_length_body(borrow_ref(socket),reader,deadline) } in
+    let reader=match session { None => http_read_length_body(borrow_ref(socket),reader,deadline),
+      Some(secure) => http_read_length_body_tls(borrow_ref(socket),borrow_ref(secure),reader,deadline) } in
     loop(state=reader,out="") while state.ok && !state.done next(http_read_next_io(io,state,deadline),http_body_append(out,state.chunk))
       yield if !state.ok then HttpOutcome { response=net_error(state.error.code,state.error.message),headers=http_no_fields(),reusable=false,retry=false,unprocessed=false,h2=http2_connection() }
         else HttpOutcome { response=HttpResult { ok=true,status=state.status,body=http_body_append(out,state.chunk),error=no_error() },headers=state.headers,
@@ -112,9 +125,9 @@ private effect(net,time,process) fn http_client_exchange(client:HttpClient,metho
     match client.socket {
       None => HttpOutcome { response=net_error(9,"HTTP client is not connected"),headers=http_no_fields(),reusable=false,retry=false,unprocessed=false,h2=client.h2 },
       Some(socket) => match client.session {
-        None => http_exchange_io(http_socket_transport(socket),Some::<Ref<Socket>>(socket),method,path,host,body,deadline,limit),
+        None => http_exchange_io(http_socket_transport(socket),socket,None::<Ref<TlsSession>>(),method,path,host,body,deadline,limit),
         Some(session) => if client.h2.active then http2_outcome(http_tls_transport(socket,session),client.h2,method,path,host,body,deadline,limit)
-          else http_exchange_io(http_tls_transport(socket,session),None::<Ref<Socket>>(),method,path,host,body,deadline,limit) } }
+          else http_exchange_io(http_tls_transport(socket,session),socket,Some::<Ref<TlsSession>>(session),method,path,host,body,deadline,limit) } }
 private effect(fs,net,time,process) fn http_client_attempt(arena:Arena,move client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpAttempt
   = let connected=if option_is_some(client.socket) then HttpConnect { client=client,ok=true,error=no_error() } else http_client_connect(arena,client,deadline) in
     if !connected.ok then HttpAttempt { client=connected.client,response=net_error(connected.error.code,connected.error.message),headers=http_no_fields(),protocol="",retry=false,unprocessed=false } else

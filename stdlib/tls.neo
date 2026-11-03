@@ -20,7 +20,7 @@ import "std:io"
 ; read-iv@144,read-secret@160,write-secret@192,CCS-count@224,suite@232,
 ; group@240,version@248,bound socket token@256,cancellation@264,
 ; TLS 1.2 read phase@272,reads since the last clock check@280,
-; RX@4096(36864),handshake@40960(65536).
+; RX consumed@288,RX@4096(36864),handshake@40960(65536).
 resource type TlsSession = { token:i64,failure:Error } drop tls_release
 type TlsRecord = { ok:bool,record_type:i64,bytes:Arr u8 _,error:Error }
 type TlsWire = { ok:bool,record_type:i64,size:i64,error:Error }
@@ -56,8 +56,18 @@ private effect(net,time) fn tls_wire_read(fd:i64,p:ptr,room:i64,deadline:i64,ide
     let count=rt_read(fd,p,room) in if count>=0 then int_ok(count) else
     let code=i64(load_i32(rt_errno(),0)) in if code!=rt_again() then int_error(code,"read failed",0) else
     let ready=net_wait_cancel(fd,1,deadline,identity) in if ready.ok then int_error(4,"interrupted",0) else ready
+; The current record's header in the wire buffer: RX holds count@24 bytes, of
+; which the first consumed@288 belong to records already read.
+private effect(net) fn tls_rx(ctx:ptr) -> i64 = 4096+load_i64(ctx,288)
+; Consumed records stay in the wire buffer while the room after its bytes can
+; still hold a whole record (16645 bytes); only then do the unread bytes move to
+; the front, once for several records rather than after each one.
+private effect(net) fn tls_compact(ctx:ptr) -> unit
+  = let start=load_i64(ctx,288) in let count=load_i64(ctx,24) in
+    if start<=0 || 36864-count>=16645 then noop() else
+      let shifted=memmove(ptr_add(ctx,4096),ptr_add(ctx,4096+start),count-start) in let kept=store_i64(ctx,24,count-start) in store_i64(ctx,288,0)
 private effect(net,time) fn tls_fill(socket:Socket,ctx:ptr,deadline:i64) -> BytesResult
-  = let count=load_i64(ctx,24) in if count<0 || count>=36864 then tls_error(ctx,27,"TLS wire buffer exceeds limit") else
+  = let compacted=tls_compact(ctx) in let count=load_i64(ctx,24) in if count<0 || count>=36864 then tls_error(ctx,27,"TLS wire buffer exceeds limit") else
     let fd=rt_handle_fd(socket_identity(socket),2) in let identity=load_i64(ctx,264) in
     let reads=load_i64(ctx,280) in let counted=store_i64(ctx,280,if reads>=7 || reads<0 then 0 else reads+1) in
     let read=loop(result=int_error(4,"interrupted",0)) while !result.ok && result.error.code==4
@@ -67,26 +77,26 @@ private effect(net,time) fn tls_fill(socket:Socket,ctx:ptr,deadline:i64) -> Byte
     if read.value>36864-count then tls_error(ctx,27,"TLS wire buffer exceeds limit") else
       let saved=store_i64(ctx,24,count+read.value) in bytes_ok("")
 private effect(net) fn tls_raw_ready(ctx:ptr) -> bool
-  = let count=load_i64(ctx,24) in if count<5 then false else
-    let size=i64(load_u8(ctx,4099))*256+i64(load_u8(ctx,4100)) in
-    size>16640 || load_u8(ctx,4097)!=u8(3) || count>=5+size
+  = let count=load_i64(ctx,24)-load_i64(ctx,288) in if count<5 then false else
+    let at=tls_rx(ctx) in let size=i64(load_u8(ctx,at+3))*256+i64(load_u8(ctx,at+4)) in
+    size>16640 || load_u8(ctx,at+1)!=u8(3) || count>=5+size
 ; Buffers one whole record and checks its header; the record stays in the
 ; wire buffer until tls_consume.
 private effect(net,time) fn tls_wire_record(socket:Socket,ctx:ptr,deadline:i64) -> TlsWire
   = let received=loop(result=bytes_ok("")) while result.ok && !tls_raw_ready(ctx) next(tls_fill(socket,ctx,deadline)) yield result in
     if !received.ok then let failed=tls_error(ctx,received.error.code,received.error.message) in TlsWire { ok=false,record_type=0,size=0,error=failed.error } else
-      let kind=i64(load_u8(ctx,4096)) in let size=i64(load_u8(ctx,4099))*256+i64(load_u8(ctx,4100)) in
+      let at=tls_rx(ctx) in let kind=i64(load_u8(ctx,at)) in let size=i64(load_u8(ctx,at+3))*256+i64(load_u8(ctx,at+4)) in
       ; The minor version is legacy and ignored (RFC 8446 5.1): alerts from older
       ; servers arrive as 0x0301.
-      if load_u8(ctx,4097)!=u8(3) || size>16640 || !(kind==20 || kind==21 || kind==22 || kind==23) then
+      if load_u8(ctx,at+1)!=u8(3) || size>16640 || !(kind==20 || kind==21 || kind==22 || kind==23) then
         let failed=tls_error(ctx,71,"invalid TLS record header") in TlsWire { ok=false,record_type=0,size=0,error=failed.error } else
         TlsWire { ok=true,record_type=kind,size=size,error=no_error() }
 private effect(net) fn tls_consume(ctx:ptr,size:i64) -> unit
-  = let remaining=load_i64(ctx,24)-size-5 in
-    let shifted=memmove(ptr_add(ctx,4096),ptr_add(ctx,4101+size),remaining) in store_i64(ctx,24,remaining)
+  = let start=load_i64(ctx,288)+size+5 in
+    if start<load_i64(ctx,24) then store_i64(ctx,288,start) else let emptied=store_i64(ctx,24,0) in store_i64(ctx,288,0)
 private effect(net,time) fn tls_raw_record(socket:Socket,ctx:ptr,deadline:i64) -> TlsRecord
   = let wire=tls_wire_record(socket,ctx,deadline) in if !wire.ok then TlsRecord { ok=false,record_type=0,bytes="",error=wire.error } else
-    let bytes=tls_bytes(ctx,4101,wire.size) in let consumed=tls_consume(ctx,wire.size) in
+    let bytes=tls_bytes(ctx,tls_rx(ctx)+5,wire.size) in let consumed=tls_consume(ctx,wire.size) in
     TlsRecord { ok=true,record_type=wire.record_type,bytes=bytes,error=no_error() }
 private fn tls_nonce(iv:Arr u8 n,sequence:i64) -> Arr u8 _
   = check n==12 && sequence>=0 in arr(i in 0..12) u8(bit_xor(i64(iv[i]),if i<4 then 0 else bit_and(shift_right(sequence,(11-i)*8),255)))
@@ -95,7 +105,7 @@ private effect(net) fn tls_open_record(ctx:ptr,count:i64) -> TlsRecord
   = let sequence=load_i64(ctx,40) in
     if sequence<0 || sequence>=16777216 || count<0 || count>16640 then let consumed=tls_consume(ctx,count) in tls_bad_record(ctx,75,"TLS read key usage limit") else
       let size=tls_key_size(ctx) in let key=tls_bytes(ctx,96,size) in let iv=tls_bytes(ctx,144,12) in
-      let aad=concat("\x17\x03\x03",tls_word(count)) in let protected=view(ptr_add(ctx,4101),count) in
+      let aad=concat("\x17\x03\x03",tls_word(count)) in let protected=view(ptr_add(ctx,tls_rx(ctx)+5),count) in
       let plaintext=if size!=16 then chacha20_poly1305_open(key,tls_nonce(iv,sequence),aad,protected) else aes128_gcm_open_fast(key,tls_nonce(iv,sequence),aad,protected) in
       let consumed=tls_consume(ctx,count) in
       if !plaintext.ok then tls_bad_record(ctx,74,"TLS record authentication failed") else
@@ -108,7 +118,7 @@ private effect(net,time) fn tls_receive(socket:Socket,ctx:ptr,encrypted:bool,dea
   = if load_i64(ctx,248)==771 then tls12_receive(socket,ctx,deadline) else
     let wire=tls_wire_record(socket,ctx,deadline) in if !wire.ok then TlsRecord { ok=false,record_type=0,bytes="",error=wire.error } else
     if encrypted && wire.record_type==23 then tls_open_record(ctx,wire.size) else
-    let bytes=tls_bytes(ctx,4101,wire.size) in let consumed=tls_consume(ctx,wire.size) in
+    let bytes=tls_bytes(ctx,tls_rx(ctx)+5,wire.size) in let consumed=tls_consume(ctx,wire.size) in
     let record=TlsRecord { ok=true,record_type=wire.record_type,bytes=bytes,error=no_error() } in
     if record.record_type==20 then
       let count=load_i64(ctx,224) in
@@ -578,17 +588,59 @@ private effect(net,time) fn tls_post_handshake(socket:Socket,ctx:ptr,bytes:Arr u
             let write_secret=tls_bytes(ctx,192,32) in let next_write=hkdf_label(write_secret,"traffic upd","",32) in
             let a=tls_store(ctx,192,next_write) in let b=tls_store(ctx,64,hkdf_label(next_write,"key","",tls_key_size(ctx))) in let c=tls_store(ctx,128,hkdf_label(next_write,"iv","",12)) in
             let reset=store_i64(ctx,48,0) in bytes_ok("")) yield result
-private effect(net,time) fn tls_read_step(socket:Socket,ctx:ptr,deadline:i64) -> BytesResult
-  = let record=tls_receive(socket,ctx,true,deadline) in if !record.ok then bytes_error(record.error.code,record.error.message,0) else
+; What reading application data makes of an opened record: its bytes, or ""
+; after a post-handshake message or the peer's close_notify.
+private effect(net,time) fn tls_application(socket:Socket,ctx:ptr,record:TlsRecord,deadline:i64) -> BytesResult
+  = if !record.ok then bytes_error(record.error.code,record.error.message,0) else
     if record.record_type==23 then if load_i64(ctx,32)!=0 then tls_error(ctx,71,"application data interrupted a TLS handshake message") else bytes_ok(record.bytes) else
     if record.record_type==22 then tls_post_handshake(socket,ctx,record.bytes,deadline) else
     if record.record_type==21 && len(record.bytes)==2 && str_byte(record.bytes,1)==0 then
       let closed=store_i64(ctx,16,if load_i64(ctx,16)==3 then 4 else 2) in bytes_ok("") else tls_error(ctx,71,"TLS peer sent an alert")
+private effect(net,time) fn tls_read_step(socket:Socket,ctx:ptr,deadline:i64) -> BytesResult
+  = tls_application(socket,ctx,tls_receive(socket,ctx,true,deadline),deadline)
 effect(net,time) fn tls_read(socket:Socket,session:TlsSession,deadline:i64) -> BytesResult
   = let address=tls_context(socket,session) in if address<0 then bytes_error(9,"invalid TLS session or socket",0) else
     let ctx=ptr_from_i64(address) in
     loop(result=bytes_ok("")) while result.ok && len(result.value)==0 && (load_i64(ctx,16)==1 || load_i64(ctx,16)==3)
       next(tls_read_step(socket,ctx,deadline)) yield result
+private effect(net) fn tls_fail(ctx:ptr,code:i64,message:Arr u8 n) -> IntResult
+  = let failed=tls_error(ctx,code,message) in int_error(code,message,0)
+; A read's bytes copied to dst, if they fit in room.
+private effect(net) fn tls_copy_into(ctx:ptr,read:BytesResult,dst:ptr,room:i64) -> IntResult
+  = if !read.ok then int_error(read.error.code,read.error.message,0) else
+    let bytes=read.value in if len(bytes)>room then tls_fail(ctx,27,"TLS record exceeds the read room") else
+      let copied=memcpy(dst,data(bytes),len(bytes)) in int_ok(len(bytes))
+; One record for tls_read_into. A TLS 1.3 AES-128-GCM record (with the CPU's AES
+; instructions) whose plaintext, padding included, fits in room is opened where
+; it lies in the wire buffer straight into dst; other records go through
+; tls_read_step and are copied.
+private effect(net,time) fn tls_read_into_step(socket:Socket,ctx:ptr,dst:ptr,room:i64,deadline:i64) -> IntResult
+  = let direct=load_i64(ctx,248)==772 && tls_key_size(ctx)==16 && aes_hardware() in
+    let wire=if direct then tls_wire_record(socket,ctx,deadline) else TlsWire { ok=true,record_type=0,size=0,error=no_error() } in
+    if !wire.ok then int_error(wire.error.code,wire.error.message,0) else
+    let count=wire.size in let sequence=load_i64(ctx,40) in
+    if !direct || wire.record_type!=23 || count<17 || count-16>room || sequence<0 || sequence>=16777216 then tls_copy_into(ctx,tls_read_step(socket,ctx,deadline),dst,room) else
+      let opened=aes128_gcm_open_into(tls_bytes(ctx,96,16),tls_nonce(tls_bytes(ctx,144,12),sequence),concat("\x17\x03\x03",tls_word(count)),
+        view(ptr_add(ctx,tls_rx(ctx)+5),count),dst) in
+      let consumed=tls_consume(ctx,count) in
+      if !opened.ok then tls_fail(ctx,74,"TLS record authentication failed") else
+      let end=loop(at=count-17) while at>=0 && load_u8(dst,at)==u8(0) next(at-1) yield at in
+      let kind=if end<0 then 0 else i64(load_u8(dst,end)) in
+      if end<0 || end>16384 || !(kind==21 || kind==22 || kind==23) then tls_fail(ctx,71,"invalid TLS inner plaintext") else
+      let saved=store_i64(ctx,40,sequence+1) in
+      if kind!=23 then check end>=0 in let message=bytes_ok(view(dst,end)) in
+        tls_copy_into(ctx,tls_application(socket,ctx,TlsRecord { ok=true,record_type=kind,bytes=message.value,error=no_error() },deadline),dst,room) else
+      if load_i64(ctx,32)!=0 then tls_fail(ctx,71,"application data interrupted a TLS handshake message") else int_ok(end)
+; tls_read into dst[0..room) instead of a new array: the count, or 0 once the
+; peer has closed. A record with more than room bytes of application data fails
+; the session (27), since the rest would have nowhere to go. After an error dst
+; may hold unauthenticated bytes, which the caller must discard.
+effect(net,time) fn tls_read_into(socket:Socket,session:TlsSession,dst:ptr,room:i64,deadline:i64) -> IntResult
+  = let address=tls_context(socket,session) in if address<0 then int_error(9,"invalid TLS session or socket",0) else
+    if room<1 then int_error(22,"invalid TLS read room",0) else
+    let ctx=ptr_from_i64(address) in
+    loop(result=int_ok(0)) while result.ok && result.value==0 && (load_i64(ctx,16)==1 || load_i64(ctx,16)==3)
+      next(tls_read_into_step(socket,ctx,dst,room,deadline)) yield result
 effect(net,time) fn tls_close(socket:Socket,session:TlsSession,deadline:i64) -> IntResult
   = let address=tls_context(socket,session) in if address<0 then int_error(9,"invalid TLS session or socket",0) else
     let ctx=ptr_from_i64(address) in let state=load_i64(ctx,16) in if state==3 || state==4 then int_ok(0) else

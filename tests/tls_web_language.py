@@ -91,7 +91,7 @@ def main():
         for source, target in (('tests/fixtures/language_tls_web.neo', binary), ('tests/fixtures/language_http2.neo', http2)):
             r = subprocess.run(['python3', '-m', 'neoc', 'build', source, '-o', str(target)], cwd=ROOT, capture_output=True, text=True)
             assert r.returncode == 0, (source, r.stdout[-3000:], r.stderr[-2000:])
-        # OpenSSL follows the client's order: AES-128-GCM first with AES-NI, else ChaCha20-Poly1305.
+        # OpenSSL follows the client's order: AES-128-GCM first with the CPU's AES instructions, else ChaCha20-Poly1305.
         first = tls_language().default_suite(); name = 'AES-128-GCM' if first == 4865 else 'ChaCha20-Poly1305'
         cases = [(f'{name}, X25519', [], f'suite={first} group=29'),
                  ('AES-128-GCM only', ['-ciphersuites', 'TLS_AES_128_GCM_SHA256'], 'suite=4865 group=29'),

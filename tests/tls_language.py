@@ -11,6 +11,7 @@ import shlex
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -26,10 +27,16 @@ def openssl(*args,data=None):
 
 
 def default_suite():
-    """The TLS 1.3 suite the client lists first: AES-128-GCM (4865) on x86-64 CPUs with AES-NI,
-    PCLMULQDQ and SSE4.1 (the client's aes_hardware()), otherwise ChaCha20-Poly1305 (4867)."""
+    """The TLS 1.3 suite the client lists first: AES-128-GCM (4865) when the client's aes_hardware()
+    is true (x86-64 with AES-NI, PCLMULQDQ and SSE4.1; Linux AArch64 with AES and PMULL), otherwise
+    ChaCha20-Poly1305 (4867)."""
     import platform
-    if platform.machine().lower() not in ('x86_64', 'amd64'): return 4867
+    machine = platform.machine().lower()
+    if machine in ('aarch64', 'arm64') and sys.platform.startswith('linux'):
+        try: features = set(next(line for line in open('/proc/cpuinfo') if line.startswith('Features')).split(':', 1)[1].split())
+        except (OSError, StopIteration): return 4867
+        return 4865 if {'aes', 'pmull'} <= features else 4867
+    if machine not in ('x86_64', 'amd64'): return 4867
     try: flags = set(next(line for line in open('/proc/cpuinfo') if line.startswith('flags')).split())
     except (OSError, StopIteration):
         r = subprocess.run(['sysctl', '-n', 'machdep.cpu.features'], capture_output=True, text=True)

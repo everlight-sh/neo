@@ -1,0 +1,46 @@
+== perf stat main keep
+ 185.74 msec task-clock # 0.541 CPUs utilized 
+ 456,787,608 cycles # 2.459 GHz 
+ 908,893,138 instructions # 1.99 insn per cycle 
+ 702 page-faults # 3.779 K/sec 
+ 0.343600802 seconds time elapsed
+ 0.089494000 seconds user
+ 0.074564000 seconds sys
+    42.08%  [.] ax_gcm_open_kernel__seq
+     9.64%  [.] memcpy
+     3.99%  [k] _copy_to_iter
+     3.70%  [.] memset
+     1.78%  [k] asm_sysvec_apic_timer_interrupt
+     1.38%  [.] ax_http_stream_fill_io__22156a23b6270386b7db__seq
+     1.11%  [.] ax_http_exchange_io__22156a23b6270386b7db__seq
+     1.00%  [.] ax_http_reader_headers__seq
+     0.97%  [.] ax_gcm_context__seq
+     0.94%  [k] srso_alias_safe_ret
+     0.90%  [.] ax_http_stream_step_io__22156a23b6270386b7db__seq
+     0.70%  [k] __skb_datagram_iter
+     0.67%  [.] ax_aes128_gcm_open_fast__seq
+     0.67%  [k] vfs_read
+== perf stat new keep
+ 178.66 msec task-clock # 0.515 CPUs utilized 
+ 369,219,982 cycles # 2.067 GHz 
+ 598,256,971 instructions # 1.62 insn per cycle 
+ 440 page-faults # 2.463 K/sec 
+ 0.346783680 seconds time elapsed
+ 0.046383000 seconds user
+ 0.105596000 seconds sys
+    43.03%  [.] ax_gcm_open_kernel__seq
+     5.75%  [k] _copy_to_iter
+     3.39%  [k] asm_sysvec_apic_timer_interrupt
+     1.66%  [.] ax_gcm_context__seq
+     1.28%  [.] memcpy
+     1.06%  [k] tcp_recvmsg_locked
+     0.81%  [k] check_heap_object
+     0.73%  [k] __tcp_transmit_skb
+     0.70%  [k] release_sock
+     0.69%  [.] ax_tls_wire_record__seq
+     0.68%  [.] ax_http_reader_headers__seq
+     0.64%  [k] vfs_read
+     0.63%  [k] __skb_datagram_iter
+     0.58%  [k] kvm_clock_get_cycles
+PROF-DONE
+
