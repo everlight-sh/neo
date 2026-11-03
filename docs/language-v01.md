@@ -285,7 +285,8 @@ critical extensions. TLS read/write sequences are private, bound to one Socket,
 limited per key and updated by authenticated KeyUpdate. Records and handshake
 messages are bounded. Corrupt authentication releases no plaintext. Authenticated
 close-notify is distinct from transport truncation; use `tls_close` for graceful
-shutdown. Context cleanup clears active key storage and releases its mapping.
+shutdown. Context cleanup clears active key storage; the process keeps up to
+four cleared contexts for later connections and releases the rest.
 TLS 1.3 sessions resume with PSK tickets (psk_dhe_ke only): `tls_take_ticket`
 returns the newest NewSessionTicket with its PSK, bound to the host name and
 suite, and `tls_connect_resume` offers it once, within its lifetime, with a

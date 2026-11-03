@@ -520,7 +520,7 @@ private effect(net,time,process) fn tls_handshake(socket:Socket,ctx:ptr,host:Arr
 private effect(net,time,process) fn tls_connect_key(socket:Socket,hostname:Arr u8 n,roots:Arr Certificate m,deadline:i64,identity:i64,ticket:TlsTicket,h2:bool) -> TlsSession
   = let host=dns_normalize(hostname) in let status=socket_status(socket) in
     if !status.ok || !dns_hostname(host) || m<1 || m>256 then TlsSession { token=-22,failure=Error { code=22,message="invalid TLS destination or trust anchors",position=0 } } else
-    let address=rt_private_map(131072) in if address<0 then TlsSession { token=-12,failure=Error { code=12,message="TLS context allocation failed",position=0 } } else
+    let address=rt_context_map() in if address<0 then TlsSession { token=-12,failure=Error { code=12,message="TLS context allocation failed",position=0 } } else
       let ctx=ptr_from_i64(address) in let length=store_i64(ctx,0,131072) in let bound=store_i64(ctx,256,socket_identity(socket)) in let cancelled=store_i64(ctx,264,identity) in
       let offered=store_i64(ctx,106504,if h2 then 1 else 0) in let named=tls_store(ctx,106864,host) in let sized=store_i64(ctx,106520,len(host)) in
       let token=rt_handle_new(address,8) in if token<0 then TlsSession { token=token,failure=Error { code=0-token,message="TLS handle allocation failed",position=0 } } else
