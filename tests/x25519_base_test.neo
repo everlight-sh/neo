@@ -1,0 +1,24 @@
+; Fixed-base x25519_public against the ladder, x25519(key, 9), and the RFC 7748
+; section 6.1 key pairs. Run by `neo test`.
+import "std:sha256"
+import "std:x25519"
+
+fn base() -> Arr u8 _ = arr(i in 0..32) u8(if i==0 then 9 else 0)
+fn same(key:Arr u8 n) -> bool
+  = let public=x25519_public(key) in let ladder=x25519(key,base()) in public.ok && ladder.ok && str_equal(public.value,ladder.value)
+
+fn test_rfc7748_alice() -> bool
+  = let public=x25519_public("\x77\x07\x6d\x0a\x73\x18\xa5\x7d\x3c\x16\xc1\x72\x51\xb2\x66\x45\xdf\x4c\x2f\x87\xeb\xc0\x99\x2a\xb1\x77\xfb\xa5\x1d\xb9\x2c\x2a") in
+    public.ok && str_equal(public.value,"\x85\x20\xf0\x09\x89\x30\xa7\x54\x74\x8b\x7d\xdc\xb4\x3e\xf7\x5a\x0d\xbf\x3a\x0d\x26\x38\x1a\xf4\xeb\xa4\xa9\x8e\xaa\x9b\x4e\x6a")
+fn test_rfc7748_bob() -> bool
+  = let public=x25519_public("\x5d\xab\x08\x7e\x62\x4a\x8a\x4b\x79\xe1\x7f\x8b\x83\x80\x0e\xe6\x6f\x3b\xb1\x29\x26\x18\xb6\xfd\x1c\x2f\x8b\x27\xff\x88\xe0\xeb") in
+    public.ok && str_equal(public.value,"\xde\x9e\xdb\x7d\x7b\x7d\xc1\xb4\xd3\x5b\x61\xc2\xec\xe4\x35\x37\x3f\x83\x43\xc8\x5b\x78\x67\x4d\xad\xfc\x7e\x14\x6f\x88\x2b\x4f")
+; Clamping: keys that differ only in the cleared and forced bits give the same public key.
+fn test_edge_keys() -> bool
+  = same(arr(i in 0..32) u8(0)) && same(arr(i in 0..32) u8(255)) && same(arr(i in 0..32) u8(if i==31 then 64 else 0))
+    && same(arr(i in 0..32) u8(if i==0 then 8 else 0)) && same(arr(i in 0..32) u8(136))
+    && str_equal(x25519_public(arr(i in 0..32) u8(0)).value,x25519_public(arr(i in 0..32) u8(if i==0 then 7 else if i==31 then 192 else 0)).value)
+; 256 keys from a SHA-256 chain, so every radix-16 digit and sign is exercised.
+fn test_chain_matches_ladder() -> bool
+  = loop(i=0,key=sha256("x25519 fixed base"),ok=true) while ok && i<256 next(i+1,sha256(key),same(key)) yield ok
+fn test_wrong_length() -> bool = !x25519_public(arr(i in 0..31) u8(1)).ok
