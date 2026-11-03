@@ -1,0 +1,35 @@
+## machine
+CPU(s):                                  4
+Model name:                              AMD EPYC-Rome Processor
+BIOS Model name:                         pc-q35-8.2  CPU @ 2.0GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm rep_good nopl cpuid extd_apicid tsc_known_freq pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core ssbd ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 clflushopt clwb sha_ni xsaveopt clzero xsaveerptr wbnoinvd arat umip rdpid
+6.8.0-146-generic
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+THP enabled: always [madvise] never
+THP defrag: always defer defer+madvise [madvise] never
+## toolchains
+Ubuntu clang version 18.1.3 (1ubuntu1)
+go version go1.25.14 linux/amd64
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+1.3.13
+0.17.0
+Python 3.12.3
+## sources
+28de9c0c43324fb5a45ae533e298a27e8e97c00bc8aefc38643b210f862b2ab8  main.tgz
+429a0ccb22f0c8dcc0a00e234f657dc3306f04991b02ab6c6c8067bdb825f7a1  patch1.tgz
+ed721469ab7a60dfb3e6a59ec0816bebb7c6e70b76414361b43c28f6e5f921ab  patch2.tgz
+9ebaa29d4411fb0b26ab87cc0c14daefa5e6ea0caeee7bcaaba241789fca990f  patch3.tgz
+2988279cb960f978ffd34ea278fa2b052444b695c66ee8f5b4e6f9e1801d85d0  patch4.tgz
+## binaries (sha256)
+6e3e228143429810020f1f971c464089aa3b7f48acc8479e5ed17791ed764114  bin-main/neo-mandel
+46e2772b628c02374b930f9a4b83b47e63fecb6e932340e4e654495d9ea4e2c7  bin-main/neo-nbody
+d95044476826aa8ab08e5336138572d3b3ceffb9588a3b4a96343f2664782238  bin-main/neo-sieve
+c6dece7a9ac31f71faf0ea7fc01b55c8cd1b4c822fc8fb7ce989b62ad2b3da26  bin-main/neo-stencil
+6e3e228143429810020f1f971c464089aa3b7f48acc8479e5ed17791ed764114  bin-final/neo-mandel
+455b359579155d4b0f5e8be1fae1b6213375fdf6ee3bb5abfbbd0ad52e1775e8  bin-final/neo-nbody
+a1695d30d248ff7b2fd58330249e0f2eefb05420965690f5ab537f191e501ff1  bin-final/neo-sieve
+a9ce8ac9881f0521ce32817e65ea712d688272ac907b98c5994203526e3f782d  bin-final/neo-stencil
+8f05256d4d8581734214462d25ff8c6ad6b229d629d05d54ab5b6e1043a1daa7  fetch_main
+ba924e188795a0b559248feb79773f75ec0b56f88048d08e029a12f483270046  fetch_new

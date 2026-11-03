@@ -114,8 +114,9 @@ SYSTEMS = {
     # x86-64 AES-NI and PCLMULQDQ. A 128-bit block is two i64 halves, low
     # (bytes 0-7) and high (bytes 8-15), little-endian. aes_hardware() says
     # whether this CPU has them; the others are valid only when it is true.
+    # block_xor_low/high is the xor of two blocks, kept in a vector register.
     "aes_hardware": ([], S.BOOL),
-    **{name: ([S.I64] * 4, S.I64) for name in ("aes_round_low", "aes_round_high", "aes_final_round_low", "aes_final_round_high")},
+    **{name: ([S.I64] * 4, S.I64) for name in ("aes_round_low", "aes_round_high", "aes_final_round_low", "aes_final_round_high", "block_xor_low", "block_xor_high")},
     **{name: ([S.I64, S.I64], S.I64) for name in ("carryless_mul_low", "carryless_mul_high")},
     "invoke_region": ([S.PTR, S.PTR, S.I64], S.UNIT),
     "invoke_finalizer": ([S.PTR,S.PTR],S.UNIT),
@@ -1010,6 +1011,13 @@ class Checker:
                 e.borrowed_args={2}
             elif types[2:]!=[S.I64,S.I64]:
                 self.err('byte_write_le value and width must be integers',e,f);return None
+            else:
+                # As for byte_read_le: a constant width the lexical facts keep inside the array.
+                width=e.args[3]
+                if isinstance(width,S.Num) and width.value in (1,2,4,8):
+                    offset=self.to_lin(e.args[1],env)
+                    goal=and_(cmp('>=',offset,Lin.num(0)),cmp('<=',offset+Lin.num(width.value),self.size_lin(types[0])))
+                    e.bounds_proven=entails(env.facts,goal,diagnostics=False)[0]=='proven'
             e.builtin=e.name;return types[0]
         if e.name == 'byte_slice':
             if len(e.args)!=3:self.err('byte_slice takes (bytes, start, end)',e,f);return None

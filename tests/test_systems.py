@@ -67,22 +67,32 @@ class SystemsTests(unittest.TestCase):
         self.assertRegex(ir, r'store atomic i32 \S+, ptr \S+ release, align 4')
         self.assertRegex(ir, r'load atomic i32, ptr \S+ acquire, align 4')
 
-    def test_aes_instructions_need_unsafe_and_x86_target_features(self):
+    def test_aes_instructions_need_unsafe_and_target_features(self):
         with self.assertRaises(CheckError):
             checked('fn main () -> i64 = carryless_mul_low(1, 2)')
         with self.assertRaises(CheckError):
             checked('effect(time) fn main () -> i64 = aes_round_low(1, 2, 3, 4)')
         checked('effect(time) fn main () -> i64 = if aes_hardware() then 1 else 0')
-        source = ('inline effect fn mix (a:i64, b:i64) -> i64 = bit_xor(aes_round_low(a, b, 3, 4), carryless_mul_high(a, b)) '
+        with self.assertRaises(CheckError):
+            checked('fn main () -> i64 = block_xor_low(1, 2, 3, 4)')
+        source = ('inline effect fn mix (a:i64, b:i64) -> i64 = bit_xor(aes_round_low(a, b, 3, 4), block_xor_high(carryless_mul_high(a, b), a, b, 5)) '
                   'effect fn main () -> i64 = if aes_hardware() then mix(1, 2) else 0')
         program = checked(source)
         ir = LLVMGen(program.fns, hash_program(program), 'x86_64-unknown-linux-gnu').program()
         self.assertIn('@llvm.x86.aesni.aesenc(', ir)
         self.assertIn('@llvm.x86.pclmulqdq(', ir)
+        self.assertRegex(ir, r'xor <2 x i64> %\S+, %\S+')
         self.assertIn('"target-features"="+aes,+pclmul,+sse4.1"', ir)
         arm = LLVMGen(program.fns, hash_program(program), 'aarch64-unknown-linux-gnu').program()
         self.assertNotIn('llvm.x86', arm)
-        self.assertIn('call void @llvm.trap()', arm)
+        self.assertIn('@llvm.aarch64.crypto.aese(', arm)
+        self.assertIn('@llvm.aarch64.crypto.aesmc(', arm)
+        self.assertIn('@llvm.aarch64.neon.pmull64(', arm)
+        self.assertIn('"target-features"="+aes"', arm)
+        self.assertNotIn('call void @llvm.trap()', arm)
+        darwin = LLVMGen(program.fns, hash_program(program), 'arm64-apple-macosx14.0.0').program()
+        self.assertNotIn('llvm.aarch64.crypto', darwin)
+        self.assertIn('call void @llvm.trap()', darwin)
 
     def test_syscall_requires_effect(self):
         with self.assertRaises(CheckError):

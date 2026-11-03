@@ -1,0 +1,35 @@
+built-sieve
+/root/bin-cbs:
+neo-sieve
+
+/root/bin-sd-cbs:
+strided_flip
+strided_random
+
+/root/bin-sd-new:
+strided_flip
+strided_random
+## THP madvise: sieve 1e8, 1 worker, 9 interleaved rounds (ms)
+new  606.582 625.949 582.482 583.513 604.414 589.835 585.266 586.133 594.16
+cbs  925.08 779.244 774.901 792.357 789.893 778.573 781.766 787.899 784.565
+5761455
+5761455
+## THP never: sieve 1e8, 1 worker, 9 interleaved rounds (ms)
+new  592.457 589.743 593.631 603.625 589.416 607.99 611.064 615.2 606.49
+cbs  783.843 791.371 797.199 794.047 806.648 820.636 838.801 819.046 817.53
+5761455
+5761455
+## strided downside, 64M flags, 3 rounds, THP madvise (ms, 5 interleaved runs)
+strided_flip 67108864 64 3 new  987.884 979.573 965.125 960.879 965.03
+strided_flip 67108864 64 3 cbs  947.297 958.742 928.191 923.326 947.113
+  outputs agree
+strided_random 67108864 64 3 new  1518.76 1516.91 1516.5 1516.52 1516.69
+strided_random 67108864 64 3 cbs  1355.07 1335.88 1347.14 1340.69 1335.13
+  outputs agree
+strided_flip 67108864 256 3 new  1398.62 1392.14 1386.32 1394.77 1381.38
+strided_flip 67108864 256 3 cbs  1634.09 1637.07 1599.86 1596.69 1640.41
+  outputs agree
+strided_random 67108864 256 3 new  1948.7 1975.59 1937.31 1939.39 1951.18
+strided_random 67108864 256 3 cbs  1967.91 1948.24 1955.14 1965.59 1968.48
+  outputs agree
+CBS-DONE

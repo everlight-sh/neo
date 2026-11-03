@@ -15,6 +15,8 @@ effect fn rt_munmap (p : ptr, n : i64) -> i64 = syscall6(73, ptr_to_i64(p), n, 0
 ; Darwin has no transparent huge page advice for anonymous memory.
 effect fn rt_advise_huge (p : ptr, n : i64) -> i64 = 0
 effect fn rt_populate (p : ptr, n : i64) -> i64 = 0
+effect fn rt_collapse (p : ptr, n : i64) -> i64 = 0
+fn rt_huge_fallback () -> bool = false
 effect fn rt_getpid () -> i64 = syscall6(20, 0, 0, 0, 0, 0, 0)
 effect fn rt_getppid () -> i64 = syscall6(39, 0, 0, 0, 0, 0, 0)
 effect fn rt_socket (domain : i64, kind : i64, protocol : i64) -> i64 = rt_cloexec(rt_result(syscall6(97, domain, kind, protocol, 0, 0, 0)))

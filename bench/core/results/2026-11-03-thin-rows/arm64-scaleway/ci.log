@@ -1,0 +1,45 @@
+== neo test
+(pass) reject: Missing required prop
+(pass) reject: expects text [1.00ms]
+(pass) reject: does not accept children [1.00ms]
+(pass) diagnostics include the source location [1.00ms]
+(pass) JavaScript control characters become valid Neo byte escapes [1.00ms]
+(pass) literal attribute spacing is preserved [4.00ms]
+(pass) optimizations have an explicit baseline mode [11.00ms]
+(pass) static markup is coalesced, dynamic text escaped once, numbers formatted once [6.00ms]
+(pass) sharing never hoists conditional escaping out of its branch [1.00ms]
+
+ 31 pass
+ 0 fail
+ 46 expect() calls
+Ran 31 tests across 1 file. [1090.00ms]
+neoc: /root/new/.kernel-build/usability/ssr-linux-aarch64.building-72816  graph 37bbc7fdb70a2bdd  obligations 179/184 proven, 5 runtime checks, 3 parallel regions, 0 vectorised sums, 0 calls folded, 1 inlined, build miss
+Generated Neo: /root/new/.kernel-build/jsx-ssr/components.neo
+Run: NEO_THREADS=1 /root/new/.kernel-build/usability/ssr-linux-aarch64 8092
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+neo: serving, workers=1
+PASS: TSX->Neo vs React, all 1000 inputs, 1 worker(s); concurrent + pipelined HTTP
+neo: serving, workers=4
+PASS: TSX->Neo vs React, all 1000 inputs, 4 worker(s); concurrent + pipelined HTTP
+React reference: http://localhost:46785
+PASS: Bun/React reference HTTP routes
+neo test: 40 native cases, 0 failed
+neo test exit=0
+== freestanding smoke
+neoc: .kernel-build/ci-http  graph 197607d08fb8ac7f  obligations 256/262 proven, 6 runtime checks, 13 parallel regions, 2 vectorised sums, 1 calls folded, 1 inlined, build hit
+neo: serving, workers=4
+Test server stopped.
+HTTP PASS from an empty root containing only the executable: no /lib, /usr, /proc or runtime files.
+exit=0
+== reproducible release
+release reproducible
+== language/crypto/TLS
+neoc: .kernel-build/ci-kernel  graph d64de2a91f06737f  obligations 214/249 proven, 35 runtime checks, 4 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build hit
+neoc: .kernel-build/ci-crypto  graph 760735c34ec08bf9  obligations 324/401 proven, 77 runtime checks, 17 parallel regions, 0 vectorised sums, 0 calls folded, 0 inlined, build hit
+neoc: .kernel-build/ci-tls  graph 50dc78f9b86b93f1  obligations 584/698 proven, 114 runtime checks, 20 parallel regions, 0 vectorised sums, 10 calls folded, 3 inlined, build hit
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+Dependency audit: no undefined imports; static ELF, no interpreter/shared libraries
+PASS empty-root language/RNG/futex and SHA-256: executable only; TLS: executable plus explicit trust-anchor data, no libraries or tools
+exit=0
+CI-DONE

@@ -20,6 +20,9 @@ effect fn rt_munmap (p : ptr, n : i64) -> i64 = syscall6(11, ptr_to_i64(p), n, 0
 effect fn rt_advise_huge (p : ptr, n : i64) -> i64 = syscall6(28, ptr_to_i64(p), n, 14, 0, 0, 0)
 ; madvise(MADV_POPULATE_WRITE, Linux 5.14+): fault a fresh block in with one call. Older kernels fail it harmlessly.
 effect fn rt_populate (p : ptr, n : i64) -> i64 = syscall6(28, ptr_to_i64(p), n, 23, 0, 0, 0)
+; madvise(MADV_COLLAPSE, Linux 6.1+): back populated 2 MiB regions with huge pages, whatever the THP setting.
+effect fn rt_collapse (p : ptr, n : i64) -> i64 = syscall6(28, ptr_to_i64(p), n, 25, 0, 0, 0)
+effect fn rt_huge_fallback () -> bool = rt_thp_never()
 effect fn rt_getpid () -> i64 = syscall6(39, 0, 0, 0, 0, 0, 0)
 effect fn rt_getppid () -> i64 = syscall6(110, 0, 0, 0, 0, 0, 0)
 effect fn rt_socket (domain : i64, kind : i64, protocol : i64) -> i64 = rt_cloexec(rt_result(syscall6(41, domain, kind, protocol, 0, 0, 0)))

@@ -158,13 +158,13 @@ effect fn rt_map(bytes:i64) -> ptr = rt_map_kind(bytes,false)
 ; one worker, a fresh large private block is also faulted in over its
 ; requested bytes (which the new array writes next anyway) by one
 ; MADV_POPULATE_WRITE call instead of one page fault per 4 KiB page when
-; huge pages are off. Several workers fault their own chunks in parallel.
+; huge pages are off. Several workers fault their own chunks in parallel. THP "never": rt_thp_never.
 cold effect fn rt_large_block(bytes:i64,capacity:i64,k:i64,is_private:bool) -> ptr
   = let state=runtime_state() in let at=if is_private then 144 else 136 in let parked=load_ptr(state,at) in
     let reused=parked!=null() && load_i64(parked,-8)/4==k in
     let block=if reused then let taken=store_ptr(state,at,null()) in ptr_add(parked,-16)
       else rt_map_kind(capacity+16,is_private) in
-    let advised=if is_private && k>=18 then rt_advise_block(block,bytes) else noop() in
+    let advised=if is_private && k>=18 then rt_advise_block(block,bytes) else noop() in let collapsed=if is_private && k>=18 && !reused && rt_huge_fallback() then rt_collapse_block(block,bytes) else noop() in
     let populated=if is_private && k>=18 && !reused && rt_threads()==1 then rt_populate(block,bytes+16) else 0 in block
 ; Raw allocations preserve their cross-fork shared mapping contract. Managed
 ; arrays use private pages with one numeric worker; multiple workers retain
@@ -469,3 +469,27 @@ effect fn rt_socketpair(p:ptr) -> i64
   = let result=rt_socketpair_raw(p) in if result<0 then result else
     let first=rt_cloexec(i64(load_i32(p,0))) in let second=rt_cloexec(i64(load_i32(p,4))) in
     if first<0 || second<0 then let a=if first>=0 then rt_close(first) else 0 in let b=if second>=0 then rt_close(second) else 0 in -1 else 0
+
+; With THP set to "never", rt_advise_block's MADV_HUGEPAGE does nothing and
+; a fresh large block faults in 4 KiB at a time. MADV_COLLAPSE (Linux 6.1+)
+; is independent of that setting. rt_large_block writes one zero byte into
+; each 2 MiB region the requested bytes cover entirely, which creates its
+; page tables, then one call backs all of those regions with huge pages,
+; zero apart from those zero bytes. Linux reads the setting once (cached at
+; 1608: 1 advice, 2 collapse); an unreadable file, any other setting or a
+; failed collapse (older kernels, no free huge page) keeps the advice path.
+; Darwin's rt_huge_fallback is false.
+effect fn rt_thp_never() -> bool
+  = let known=load_i64(runtime_state(),1608) in if known!=0 then known==2 else
+    let fd=rt_open(data("/sys/kernel/mm/transparent_hugepage/enabled\0"),0) in
+    let mode=if fd<0 then 1 else
+      let text=stack_alloc(64) in let n=rt_read(fd,text,64) in let closed=rt_close(fd) in
+      let at=loop(i=0) while i+1<n && !(load_u8(text,i)=='[' && load_u8(text,i+1)=='n') next(i+1) yield i in
+      if at+1<n then 2 else 1 in
+    let saved=store_i64(runtime_state(),1608,mode) in mode==2
+effect fn rt_collapse_block(header:ptr,bytes:i64) -> unit
+  = let start=ptr_to_i64(header) in let first=bit_and(start+2097151,0-2097152) in
+    let stop=bit_and(start+16+bytes,0-2097152) in
+    if stop-first<2097152 then noop() else
+    let touched=loop(at=first) while at<stop next(let zero=store_u8(ptr_from_i64(at),2097151,u8(0)) in at+2097152) yield at in
+    if rt_collapse(ptr_from_i64(first),stop-first)==0 then noop() else let off=store_i64(runtime_state(),1608,1) in noop()

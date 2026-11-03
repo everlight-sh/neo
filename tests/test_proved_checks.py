@@ -35,6 +35,13 @@ class ProvedChecks(unittest.TestCase):
         ir = body(emit('effect fn scan(s:Arr u8 n,i:i64) -> i64 = byte_read_le(s,i,8)\neffect fn main() -> i64 = scan("abcdefghijk",1)'), 'scan')
         self.assertIn('byte read bounds', ir)
 
+    def test_guarded_word_write_has_no_runtime_bounds(self):
+        ir = body(emit('effect fn put(s:Arr u8 n,i:i64) -> Arr u8 _ = if i>=0 && i<=n-8 then byte_write_le(s,i,7,8) else s\n'
+                       'effect fn main() -> i64 = len(put("abcdefghijk",1))'), 'put')
+        self.assertNotIn('byte write', ir)
+        ir = body(emit('effect fn put(s:Arr u8 n,i:i64) -> Arr u8 _ = byte_write_le(s,i,7,8)\neffect fn main() -> i64 = len(put("abcdefghijk",1))'), 'put')
+        self.assertIn('byte write bounds', ir)
+
     def test_interval_bounds_discharge_overflow_with_relational_facts(self):
         # i <= n - 8 and count_trailing_zeros(x)/8 <= 8: the step cannot wrap.
         ir = body(emit(WORDS.replace('{next}', 'i+count_trailing_zeros(byte_read_le(s,i,8))/8,true') + 'effect fn main() -> i64 = scan("abcdefghijk",0)'), 'scan')

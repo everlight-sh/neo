@@ -61,11 +61,14 @@ class Slot:
 
 RUNTIME_LIBCALLS=frozenset({'memcpy','memmove','memset','memcmp','bcmp','bzero','calloc','memset_pattern16'})
 
-# x86-64 AES-NI and carry-less multiply builtins. Functions that use them, and
-# callers they are force-inlined into, are compiled with X86_CRYPTO_FEATURES;
-# aes_hardware() checks the same features with CPUID before such code runs.
-X86_CRYPTO = ('aes_round_low','aes_round_high','aes_final_round_low','aes_final_round_high','carryless_mul_low','carryless_mul_high')
+# AES round and carry-less multiply builtins: AES-NI and PCLMULQDQ on x86-64,
+# the ARMv8 Cryptography Extension (AESE, AESMC, PMULL) on Linux AArch64.
+# Functions that use them, and callers they are force-inlined into, are
+# compiled with that target's crypto features; aes_hardware() checks the same
+# features (CPUID, AT_HWCAP) before such code runs.
+CRYPTO = ('aes_round_low','aes_round_high','aes_final_round_low','aes_final_round_high','carryless_mul_low','carryless_mul_high','block_xor_low','block_xor_high')
 X86_CRYPTO_FEATURES = '"target-features"="+aes,+pclmul,+sse4.1"'
+ARM_CRYPTO_FEATURES = '"target-features"="+aes"'
 X86_CRYPTO_HEAD = [
     'declare <2 x i64> @llvm.x86.aesni.aesenc(<2 x i64>, <2 x i64>)', 'declare <2 x i64> @llvm.x86.aesni.aesenclast(<2 x i64>, <2 x i64>)',
     'declare <2 x i64> @llvm.x86.pclmulqdq(<2 x i64>, <2 x i64>, i8 immarg)',
@@ -77,15 +80,38 @@ X86_CRYPTO_HEAD = [
     '  %ecx = extractvalue { i32, i32, i32, i32 } %r, 2', '  %bits = and i32 %ecx, 34079234', '  %has = icmp eq i32 %bits, 34079234',
     '  %state = select i1 %has, i8 2, i8 1', '  store atomic i8 %state, ptr @ax_aes_state monotonic, align 1', '  br label %done',
     'done:', '  %final = phi i8 [ %known, %entry ], [ %state, %probe ]', '  %yes = icmp eq i8 %final, 2', '  ret i1 %yes', '}', '']
+ARM_CRYPTO_HEAD = [
+    'declare <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8>, <16 x i8>)', 'declare <16 x i8> @llvm.aarch64.crypto.aesmc(<16 x i8>)',
+    'declare <16 x i8> @llvm.aarch64.neon.pmull64(i64, i64)',
+    '@ax_aes_state = internal global i8 0',
+    # AT_HWCAP (16) in the auxiliary vector, which follows envp's null: AES (bit 3)
+    # and PMULL (bit 4). Cached as 1 (no) or 2 (yes); no envp means no.
+    'define internal i1 @ax_aes_hardware() {', 'entry:', '  %known = load atomic i8, ptr @ax_aes_state monotonic, align 1',
+    '  %ready = icmp ne i8 %known, 0', '  br i1 %ready, label %done, label %probe',
+    'probe:', '  %envp = load ptr, ptr @ax_runtime_state, align 8', '  %none = icmp eq ptr %envp, null', '  br i1 %none, label %decide, label %env',
+    'env:', '  %e = phi ptr [ %envp, %probe ], [ %e1, %env ]', '  %slot = load ptr, ptr %e, align 8', '  %e1 = getelementptr ptr, ptr %e, i64 1',
+    '  %last = icmp eq ptr %slot, null', '  br i1 %last, label %aux, label %env',
+    'aux:', '  %a = phi ptr [ %e1, %env ], [ %a1, %next ]', '  %type = load i64, ptr %a, align 8', '  %at = getelementptr i64, ptr %a, i64 1',
+    '  %value = load i64, ptr %at, align 8', '  %end = icmp eq i64 %type, 0', '  br i1 %end, label %decide, label %match',
+    'match:', '  %hwcap = icmp eq i64 %type, 16', '  br i1 %hwcap, label %decide, label %next',
+    'next:', '  %a1 = getelementptr i64, ptr %a, i64 2', '  br label %aux',
+    'decide:', '  %bits = phi i64 [ 0, %probe ], [ 0, %aux ], [ %value, %match ]', '  %crypto = and i64 %bits, 24', '  %has = icmp eq i64 %crypto, 24',
+    '  %state = select i1 %has, i8 2, i8 1', '  store atomic i8 %state, ptr @ax_aes_state monotonic, align 1', '  br label %done',
+    'done:', '  %final = phi i8 [ %known, %entry ], [ %state, %decide ]', '  %yes = icmp eq i8 %final, 2', '  ret i1 %yes', '}', '']
 
-def x86_crypto_functions(fns, inlined):
-    """Functions whose bodies, after forced inlining, contain x86 crypto builtins."""
+def crypto_isa(triple):
+    """'x86' or 'arm' where the crypto builtins have instructions; None elsewhere (macOS included)."""
+    if triple.startswith('x86_64'): return 'x86'
+    return 'arm' if triple.startswith(('aarch64','arm64')) and 'linux' in triple else None
+
+def crypto_functions(fns, inlined):
+    """Functions whose bodies, after forced inlining, contain crypto builtins."""
     def calls(node, out):
         if isinstance(node, S.Call): out.add(node.name)
         for child in S.children(node): calls(child, out)
         return out
     called = {f.name: calls(f.body, set()) for f in fns if not f.external}
-    found = {name for name, names in called.items() if names & set(X86_CRYPTO)}
+    found = {name for name, names in called.items() if names & set(CRYPTO)}
     while True:
         more = {name for name, names in called.items() if name not in found and names & found & inlined}
         if not more: return found
@@ -507,7 +533,7 @@ class LLVMGen:
         self.region_counters = {}
         self.literal_inlined = set()
         self.small_pure_inlined = set()
-        self.x86_crypto_used = self.crypto_trap_used = False
+        self.crypto_used = self.crypto_trap_used = False
         # Else-if chains over one scalar lower to an LLVM switch (NEO_SWITCH=0 disables).
         self.switches = [] if switches else None
         self.unique_flags = unique_flags
@@ -600,8 +626,8 @@ class LLVMGen:
         return self.byte_consts[b]
 
     def program(self) -> str:
-        self.x86_crypto_fns = x86_crypto_functions(self.fns, self.forced_inline | self.small_pure_inlined | self.literal_inlined) \
-            if self.triple.startswith('x86_64') else set()
+        self.crypto_fns = crypto_functions(self.fns, self.forced_inline | self.small_pure_inlined | self.literal_inlined) \
+            if crypto_isa(self.triple) else set()
         for f in self.fns:
             if f.external or getattr(f,'precompiled',False): continue
             for mode in (("seq",) if f.effect or f.exported else ("par", "seq")):
@@ -731,7 +757,7 @@ class LLVMGen:
             head += [f'declare {{ <{k} x i64>, <{k} x i1> }} @llvm.s{op}.with.overflow.v{k}i64(<{k} x i64>, <{k} x i64>)' for op in ('add','sub','mul')]
         from .kernel_workers import assembly
         head += assembly(self.triple)
-        if self.x86_crypto_used: head += X86_CRYPTO_HEAD
+        if self.crypto_used: head += X86_CRYPTO_HEAD if crypto_isa(self.triple)=='x86' else ARM_CRYPTO_HEAD
         if self.crypto_trap_used: head.append('declare void @llvm.trap()')
         for f in self.fns:
             if f.external:
@@ -825,7 +851,7 @@ class LLVMGen:
         if trusted and f.name in RUNTIME_LIBCALLS: policy+='"no-builtins" '
         # Profiling builds keep frame pointers so samplers can attribute callers.
         if os.environ.get('NEO_FRAME_POINTERS')=='1': policy+='"frame-pointer"="all" '
-        if f.name in getattr(self,'x86_crypto_fns',()): policy+=X86_CRYPTO_FEATURES+' '
+        if f.name in getattr(self,'crypto_fns',()): policy+=(X86_CRYPTO_FEATURES if crypto_isa(self.triple)=='x86' else ARM_CRYPTO_FEATURES)+' '
         fb = FuncBuilder(f"; {f.name}  graph:{self.fn_hashes.get(f.name, '')[:16]}\n"
                          f"define {'internal ' if not f.exported else ''}{'noalias align 16 ' if fresh else ''}{return_type(f.ret)} {self.fname(f, mode)}({params}) {policy.rstrip()}")
         self.fb, self.mode, self.fn = fb, mode, f
@@ -1890,20 +1916,36 @@ class LLVMGen:
             instruction='isb\\0Amrs $0, cntvct_el0' if b=='counter_ticks' else 'mrs $0, cntfrq_el0'
             return fb.ins(f'call i64 asm sideeffect "{instruction}", "=r,~{{memory}}"()','i64'),None
         if b == 'aes_hardware':
-            if not self.triple.startswith('x86_64'): return Val('false','i1'),None
-            self.x86_crypto_used=True
+            if not crypto_isa(self.triple): return Val('false','i1'),None
+            self.crypto_used=True
             return fb.ins('call i1 @ax_aes_hardware()','i1'),None
-        if b in X86_CRYPTO:
+        if b in CRYPTO:
             args=[self.gen(a,env,False)[0] for a in e.args]
-            if not self.triple.startswith('x86_64'):
+            isa=crypto_isa(self.triple)
+            if not isa:
                 self.crypto_trap_used=True;fb.emit('call void @llvm.trap()');return Val('0','i64'),None
-            self.x86_crypto_used=True
+            self.crypto_used=True
             def block(low,high):
                 v=fb.ins(f'insertelement <2 x i64> poison, {low}, i32 0','<2 x i64>')
                 return fb.ins(f'insertelement <2 x i64> {v.name}, {high}, i32 1','<2 x i64>')
-            if b.startswith('carryless'):
+            def bytes16(v): return fb.ins(f'bitcast <2 x i64> {v.name} to <16 x i8>','<16 x i8>')
+            def words(v): return fb.ins(f'bitcast <16 x i8> {v.name} to <2 x i64>','<2 x i64>')
+            if b.startswith('carryless') and isa=='arm':
+                r=words(fb.ins(f'call <16 x i8> @llvm.aarch64.neon.pmull64({args[0]}, {args[1]})','<16 x i8>'))
+            elif b.startswith('carryless'):
                 x,y=[fb.ins(f'insertelement <2 x i64> zeroinitializer, {a}, i32 0','<2 x i64>') for a in args]
                 r=fb.ins(f'call <2 x i64> @llvm.x86.pclmulqdq(<2 x i64> {x.name}, <2 x i64> {y.name}, i8 0)','<2 x i64>')
+            elif b.startswith('block_xor'):
+                # Halves extracted from other blocks fold back into their registers.
+                r=fb.ins(f'xor <2 x i64> {block(args[0],args[1]).name}, {block(args[2],args[3]).name}','<2 x i64>')
+            elif isa=='arm':
+                # AESENC is MixColumns(ShiftRows(SubBytes(s))) xor k; AESE adds its key
+                # before SubBytes, so it gets zero and the round key is added after.
+                # LLVM folds that xor into the next round's AESE.
+                state,key=bytes16(block(args[0],args[1])),bytes16(block(args[2],args[3]))
+                r=fb.ins(f'call <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8> {state.name}, <16 x i8> zeroinitializer)','<16 x i8>')
+                if 'final' not in b: r=fb.ins(f'call <16 x i8> @llvm.aarch64.crypto.aesmc(<16 x i8> {r.name})','<16 x i8>')
+                r=words(fb.ins(f'xor <16 x i8> {r.name}, {key.name}','<16 x i8>'))
             else:
                 state,key=block(args[0],args[1]),block(args[2],args[3])
                 op='aesenclast' if 'final' in b else 'aesenc'
@@ -2026,14 +2068,16 @@ class LLVMGen:
                 size=fb.ins(f'extractvalue {source}, 1','i64')
             else:
                 number,_=self.gen(e.args[2],env,par);size,_=self.gen(e.args[3],env,par)
-                valid=self.and_(fb.ins(f'icmp sge i64 {size.name}, 0','i1'),fb.ins(f'icmp sle i64 {size.name}, 8','i1'))
-                self.trap_if(fb.ins(f'xor i1 {valid.name}, true','i1'),e,'byte write width')
+                if not getattr(e,'bounds_proven',False):
+                    valid=self.and_(fb.ins(f'icmp sge i64 {size.name}, 0','i1'),fb.ins(f'icmp sle i64 {size.name}, 8','i1'))
+                    self.trap_if(fb.ins(f'xor i1 {valid.name}, true','i1'),e,'byte write width')
             value,own=self.gen(e.args[0],env,par)
             length=fb.ins(f'extractvalue {value}, 1','i64')
-            # Both sizes are non-negative, so length - size cannot wrap.
-            limit=fb.ins(f'sub nsw i64 {length.name}, {size.name}','i64')
-            valid=self.and_(fb.ins(f'icmp sge i64 {offset.name}, 0','i1'),fb.ins(f'icmp sle i64 {offset.name}, {limit.name}','i1'))
-            self.trap_if(fb.ins(f'xor i1 {valid.name}, true','i1'),e,'byte write bounds')
+            if not getattr(e,'bounds_proven',False):
+                # Both sizes are non-negative, so length - size cannot wrap.
+                limit=fb.ins(f'sub nsw i64 {length.name}, {size.name}','i64')
+                valid=self.and_(fb.ins(f'icmp sge i64 {offset.name}, 0','i1'),fb.ins(f'icmp sle i64 {offset.name}, {limit.name}','i1'))
+                self.trap_if(fb.ins(f'xor i1 {valid.name}, true','i1'),e,'byte write bounds')
             owned=self.nz(own)
             # A set-only loop state (see set_only_state) is owned and unique on
             # every iteration; when it was moved here, no test is needed.
@@ -2058,6 +2102,13 @@ class LLVMGen:
                 src=fb.ins(f'extractvalue {source}, 0','ptr')
                 fb.emit(f'call void @llvm.memcpy.p0.p0.i64(ptr {dest.name}, ptr {src.name}, i64 {size.name}, i1 false)')
                 self.drop_value(source,e.args[2].ty)
+            elif isinstance(e.args[3],S.Num) and e.args[3].value in (1,2,4,8):
+                # One little-endian store, as byte_read_le loads: LLVM does not
+                # always merge the byte stores below (clang 18 kept eight per
+                # word of an AES-GCM block).
+                bits=e.args[3].value*8
+                word=number if bits==64 else fb.ins(f'trunc {number} to i{bits}',f'i{bits}')
+                fb.emit(f'store {word}, ptr {dest.name}, align 1')
             else:
                 def write_byte(env,i):
                     shift=fb.ins(f'mul i64 {i.name}, 8','i64')

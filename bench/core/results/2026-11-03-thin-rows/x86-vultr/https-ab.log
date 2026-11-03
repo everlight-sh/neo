@@ -1,0 +1,56 @@
+round 1  main-new=2430.6  new-new=2268.9  bun-new=2440.0  main-keep=1503.8  new-keep=1378.0  rust-keep=1401.4  bun-keep=1615.8  main-res=2190.4  new-res=2030.1  rust-new=2158.2  go-new=3296.4  go-keep=2405.5
+round 2  main-new=2445.2  new-new=2272.8  bun-new=2361.0  main-keep=1500.8  new-keep=1336.2  rust-keep=1378.6  bun-keep=1588.9  main-res=2189.4  new-res=2022.7  rust-new=2188.5  go-new=3512.5  go-keep=2403.1
+round 3  main-new=2440.7  new-new=2275.5  bun-new=2499.5  main-keep=1510.5  new-keep=1344.0  rust-keep=1370.6  bun-keep=1564.7  main-res=2194.8  new-res=2035.5  rust-new=2183.2  go-new=3481.3  go-keep=2359.4
+round 4  main-new=2451.8  new-new=2268.1  bun-new=2328.4  main-keep=1505.8  new-keep=1343.9  rust-keep=1392.0  bun-keep=1572.0  main-res=2191.0  new-res=2027.8  rust-new=2185.9  go-new=3429.2  go-keep=2312.0
+round 5  main-new=2449.7  new-new=2284.3  bun-new=2364.0  main-keep=1492.0  new-keep=1337.9  rust-keep=1386.9  bun-keep=1600.7  main-res=2218.1  new-res=2035.0  rust-new=2184.5  go-new=3442.0  go-keep=2311.0
+AB-DONE
+main median 2.203 ms  p10 2.129  p90 2.296  n=400
+new median 2.182 ms  p10 2.112  p90 2.282  n=400
+ONESHOT-DONE
+always [madvise] never
+== perf stat main keep
+ 209.07 msec task-clock # 0.544 CPUs utilized 
+ 602,020,901 cycles # 2.879 GHz 
+ 1,429,233,988 instructions # 2.37 insn per cycle 
+ 702 page-faults # 3.358 K/sec 
+ 0.383996202 seconds time elapsed
+ 0.130379000 seconds user
+ 0.058620000 seconds sys
+    52.88%  [.] ax_gcm_open_kernel__seq
+     9.40%  [.] memcpy
+     3.25%  [.] memset
+     2.93%  [k] rep_movs_alternative
+     1.29%  [.] ax_gcm_context__seq
+     1.10%  [.] ax_http_exchange_io__22156a23b6270386b7db__seq
+     0.96%  [k] tcp_recvmsg_locked
+     0.93%  [.] ax_aes128_gcm_open_fast__seq
+     0.77%  [k] native_read_msr
+     0.76%  [k] native_write_msr
+     0.63%  [k] tcp_clean_rtx_queue.constprop.0
+     0.54%  [.] ax_http_tls_read__seq
+     0.52%  [.] ax_http_stream_step_io__22156a23b6270386b7db__seq
+     0.51%  [k] __skb_datagram_iter
+== perf stat new keep
+ 184.29 msec task-clock # 0.518 CPUs utilized 
+ 485,216,012 cycles # 2.633 GHz 
+ 903,950,766 instructions # 1.86 insn per cycle 
+ 702 page-faults # 3.809 K/sec 
+ 0.355958582 seconds time elapsed
+ 0.090108000 seconds user
+ 0.073917000 seconds sys
+    39.97%  [.] ax_gcm_open_kernel__seq
+    11.08%  [.] memcpy
+     4.22%  [.] memset
+     4.03%  [k] rep_movs_alternative
+     1.92%  [k] asm_sysvec_apic_timer_interrupt
+     1.91%  [k] native_write_msr
+     1.49%  [.] ax_http_stream_step_io__22156a23b6270386b7db__seq
+     1.22%  [.] ax_gcm_context__seq
+     1.06%  [.] ax_http_exchange_io__22156a23b6270386b7db__seq
+     0.90%  [k] __mod_memcg_state
+     0.89%  [k] pvclock_clocksource_read_nowd
+     0.82%  [k] native_read_msr
+     0.77%  [k] tcp_clean_rtx_queue.constprop.0
+     0.76%  [k] entry_SYSCALL_64
+PROFAB-DONE
+

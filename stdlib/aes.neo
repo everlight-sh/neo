@@ -83,19 +83,21 @@ fn aes128_gcm_open(key:Arr u8 n,nonce:Arr u8 m,aad:Arr u8 a,wire:Arr u8 s) -> By
     let expected=gcm_tag(expanded,j0,aad,ciphertext) in
     if !crypto_equal(expected,str_slice(wire,s-16,s)) then bytes_error(74,"AES-GCM authentication failed",0) else aes128_ctr(expanded,aes_counter(j0,1),ciphertext)
 
-; AES-128-GCM with AES-NI and PCLMULQDQ. aes128_gcm_seal_fast and
+; AES-128-GCM with AES-NI and PCLMULQDQ (x86-64) or the ARMv8 Cryptography
+; Extension (Linux AArch64). aes128_gcm_seal_fast and
 ; aes128_gcm_open_fast return what aes128_gcm_seal and aes128_gcm_open return,
 ; and use the CPU's AES and carry-less multiply instructions when aes_hardware()
 ; is true. An AES block is two little-endian i64 halves. A GHASH value is the
 ; block read big-endian, high half first. Eight counter blocks are encrypted
-; together, and their GHASH products (Karatsuba) share one reduction.
+; together, and their GHASH products (Karatsuba) share one reduction. Blocks
+; are combined with block_xor, which keeps them in vector registers.
 type AesBlock = { low:i64,high:i64 }
 type AesKeys = { k0:AesBlock,k1:AesBlock,k2:AesBlock,k3:AesBlock,k4:AesBlock,k5:AesBlock,k6:AesBlock,k7:AesBlock,k8:AesBlock,k9:AesBlock,k10:AesBlock }
 type Aes8 = { b0:AesBlock,b1:AesBlock,b2:AesBlock,b3:AesBlock,b4:AesBlock,b5:AesBlock,b6:AesBlock,b7:AesBlock }
 type Gf128 = { hi:i64,lo:i64 }
 type GhashPower = { hi:i64,lo:i64,mid:i64 }
 type GhashKey = { p1:GhashPower,p2:GhashPower,p3:GhashPower,p4:GhashPower,p5:GhashPower,p6:GhashPower,p7:GhashPower,p8:GhashPower }
-type GhashSum = { l0:i64,l1:i64,m0:i64,m1:i64,h0:i64,h1:i64 }
+type GhashSum = { low:Gf128,mid:Gf128,high:Gf128 }
 type GcmContext = { keys:AesKeys,hash:GhashKey,n0:i64,n2:i64 }
 type GcmRun = { y:Gf128,out:Arr u8 _ }
 type GcmResult = { tag:AesBlock,out:Arr u8 _ }
@@ -104,7 +106,8 @@ private inline effect fn ani_round(s:AesBlock,k:AesBlock) -> AesBlock
   = AesBlock { low=aes_round_low(s.low,s.high,k.low,k.high),high=aes_round_high(s.low,s.high,k.low,k.high) }
 private inline effect fn ani_final(s:AesBlock,k:AesBlock) -> AesBlock
   = AesBlock { low=aes_final_round_low(s.low,s.high,k.low,k.high),high=aes_final_round_high(s.low,s.high,k.low,k.high) }
-private inline fn ani_xor(a:AesBlock,b:AesBlock) -> AesBlock = AesBlock { low=bit_xor(a.low,b.low),high=bit_xor(a.high,b.high) }
+private inline effect fn ani_xor(a:AesBlock,b:AesBlock) -> AesBlock
+  = AesBlock { low=block_xor_low(a.low,a.high,b.low,b.high),high=block_xor_high(a.low,a.high,b.low,b.high) }
 private inline fn ani_and(a:AesBlock,b:AesBlock) -> AesBlock = AesBlock { low=bit_and(a.low,b.low),high=bit_and(a.high,b.high) }
 ; SubWord of the low 32 bits: AESENCLAST of four copies of the word, which ShiftRows leaves in place.
 private inline effect fn ani_subword(w:i64) -> i64
@@ -130,13 +133,13 @@ private inline effect fn ani_round8(s:Aes8,k:AesBlock) -> Aes8
 private inline effect fn ani_final8(s:Aes8,k:AesBlock) -> Aes8
   = Aes8 { b0=ani_final(s.b0,k),b1=ani_final(s.b1,k),b2=ani_final(s.b2,k),b3=ani_final(s.b3,k),
            b4=ani_final(s.b4,k),b5=ani_final(s.b5,k),b6=ani_final(s.b6,k),b7=ani_final(s.b7,k) }
-private inline fn ani_xor8(a:Aes8,b:Aes8) -> Aes8
+private inline effect fn ani_xor8(a:Aes8,b:Aes8) -> Aes8
   = Aes8 { b0=ani_xor(a.b0,b.b0),b1=ani_xor(a.b1,b.b1),b2=ani_xor(a.b2,b.b2),b3=ani_xor(a.b3,b.b3),
            b4=ani_xor(a.b4,b.b4),b5=ani_xor(a.b5,b.b5),b6=ani_xor(a.b6,b.b6),b7=ani_xor(a.b7,b.b7) }
 ; Counter block: the 12-byte nonce, then the 32-bit block counter big-endian.
 private inline fn ani_counter(c:GcmContext,counter:i64) -> AesBlock
   = AesBlock { low=c.n0,high=bit_or(c.n2,byte_swap64(bit_and(counter,4294967295))) }
-private inline fn ani_start(c:GcmContext,counter:i64,at:i64) -> AesBlock = ani_xor(ani_counter(c,wrapping_add(counter,at)),c.keys.k0)
+private inline effect fn ani_start(c:GcmContext,counter:i64,at:i64) -> AesBlock = ani_xor(ani_counter(c,wrapping_add(counter,at)),c.keys.k0)
 ; Keystream blocks counter..counter+7, with their rounds interleaved.
 private inline effect fn ani_stream8(c:GcmContext,counter:i64) -> Aes8
   = let k=c.keys in
@@ -145,17 +148,14 @@ private inline effect fn ani_stream8(c:GcmContext,counter:i64) -> Aes8
     let s=ani_round8(s,k.k1) in let s=ani_round8(s,k.k2) in let s=ani_round8(s,k.k3) in let s=ani_round8(s,k.k4) in let s=ani_round8(s,k.k5) in
     let s=ani_round8(s,k.k6) in let s=ani_round8(s,k.k7) in let s=ani_round8(s,k.k8) in ani_final8(ani_round8(s,k.k9),k.k10)
 
-private inline fn gcm_load(text:Arr u8 m,at:i64) -> AesBlock = AesBlock { low=byte_read_le(text,at,8),high=byte_read_le(text,at+8,8) }
-private inline fn gcm_load8(text:Arr u8 m,at:i64) -> Aes8
+private inline fn gcm_load(text:Arr u8 m,at:i64{at>=0 && at+16<=m}) -> AesBlock = AesBlock { low=byte_read_le(text,at,8),high=byte_read_le(text,at+8,8) }
+private inline fn gcm_load8(text:Arr u8 m,at:i64{at>=0 && at+128<=m}) -> Aes8
   = Aes8 { b0=gcm_load(text,at),b1=gcm_load(text,at+16),b2=gcm_load(text,at+32),b3=gcm_load(text,at+48),
            b4=gcm_load(text,at+64),b5=gcm_load(text,at+80),b6=gcm_load(text,at+96),b7=gcm_load(text,at+112) }
 private inline fn gcm_store(move out:Arr u8 n,at:i64,b:AesBlock) -> Arr u8 _ = let out=byte_write_le(out,at,b.low,8) in byte_write_le(out,at+8,b.high,8)
-private inline fn gcm_store8(move out:Arr u8 n,at:i64,s:Aes8) -> Arr u8 _
-  = let out=gcm_store(out,at,s.b0) in let out=gcm_store(out,at+16,s.b1) in let out=gcm_store(out,at+32,s.b2) in let out=gcm_store(out,at+48,s.b3) in
-    let out=gcm_store(out,at+64,s.b4) in let out=gcm_store(out,at+80,s.b5) in let out=gcm_store(out,at+96,s.b6) in gcm_store(out,at+112,s.b7)
 ; The first count (1..16) bytes of a block, zero-padded.
 private inline fn gcm_load_part(text:Arr u8 m,at:i64,count:i64) -> AesBlock
-  = if count==16 then gcm_load(text,at) else
+  = if count==16 then (check at>=0 && at+16<=m in gcm_load(text,at)) else
     let low=loop(i=0,v=0) while i<count && i<8 next(i+1,bit_or(v,shift_left(byte_read_le(text,at+i,1),i*8))) yield v in
     let high=loop(i=8,v=0) while i<count next(i+1,bit_or(v,shift_left(byte_read_le(text,at+i,1),(i-8)*8))) yield v in
     AesBlock { low=low,high=high }
@@ -166,25 +166,29 @@ private inline fn gcm_mask(count:i64) -> AesBlock
   = AesBlock { low=if count>=8 then -1 else shift_left(1,count*8)-1,high=if count>=16 then -1 else if count<=8 then 0 else shift_left(1,(count-8)*8)-1 }
 
 private inline fn gh_block(b:AesBlock) -> Gf128 = Gf128 { hi=byte_swap64(b.low),lo=byte_swap64(b.high) }
-private inline fn gh_xor(a:Gf128,b:Gf128) -> Gf128 = Gf128 { hi=bit_xor(a.hi,b.hi),lo=bit_xor(a.lo,b.lo) }
-private inline fn gh_power(g:Gf128) -> GhashPower = GhashPower { hi=g.hi,lo=g.lo,mid=bit_xor(g.hi,g.lo) }
+private inline effect fn gh_xor(a:Gf128,b:Gf128) -> Gf128
+  = Gf128 { hi=block_xor_high(a.lo,a.hi,b.lo,b.hi),lo=block_xor_low(a.lo,a.hi,b.lo,b.hi) }
+private inline effect fn gh_clmul(a:i64,b:i64) -> Gf128 = Gf128 { hi=carryless_mul_high(a,b),lo=carryless_mul_low(a,b) }
+; A key power times x^-1, so that products need no shift. Bit 127 is the
+; coefficient of x^0, so this is a left shift by one bit, and the bit shifted
+; out (x^-1) comes back as x^127 + x^6 + x + 1: bits 0, 121, 126 and 127.
+private inline fn gh_power(g:Gf128) -> GhashPower
+  = let carry=0-shift_right(g.hi,63) in
+    let hi=bit_xor(bit_or(shift_left(g.hi,1),shift_right(g.lo,63)),bit_and(carry,-4467570830351532032)) in
+    let lo=bit_xor(shift_left(g.lo,1),bit_and(carry,1)) in GhashPower { hi=hi,lo=lo,mid=bit_xor(hi,lo) }
 private inline effect fn gh_product(a:Gf128,p:GhashPower) -> GhashSum
-  = let m=bit_xor(a.hi,a.lo) in
-    GhashSum { l0=carryless_mul_low(a.lo,p.lo),l1=carryless_mul_high(a.lo,p.lo),m0=carryless_mul_low(m,p.mid),m1=carryless_mul_high(m,p.mid),
-               h0=carryless_mul_low(a.hi,p.hi),h1=carryless_mul_high(a.hi,p.hi) }
-private inline fn gh_add(a:GhashSum,b:GhashSum) -> GhashSum
-  = GhashSum { l0=bit_xor(a.l0,b.l0),l1=bit_xor(a.l1,b.l1),m0=bit_xor(a.m0,b.m0),m1=bit_xor(a.m1,b.m1),h0=bit_xor(a.h0,b.h0),h1=bit_xor(a.h1,b.h1) }
-; The 256-bit product, shifted left one bit for GCM's reflected bit order and
-; reduced modulo x^128 + x^7 + x^2 + x + 1 (Gueron and Kounavis, algorithm 5).
-private inline fn gh_reduce(s:GhashSum) -> Gf128
-  = let m0=bit_xor(s.m0,bit_xor(s.l0,s.h0)) in let m1=bit_xor(s.m1,bit_xor(s.l1,s.h1)) in
-    let x1=bit_xor(s.l1,m0) in let x2=bit_xor(s.h0,m1) in
-    let y0=shift_left(s.l0,1) in let y1=bit_or(shift_left(x1,1),shift_right(s.l0,63)) in
-    let y2=bit_or(shift_left(x2,1),shift_right(x1,63)) in let y3=bit_or(shift_left(s.h1,1),shift_right(x2,63)) in
-    let d=bit_xor(y1,bit_xor(shift_left(y0,63),bit_xor(shift_left(y0,62),shift_left(y0,57)))) in
-    let high=bit_xor(d,bit_xor(shift_right(d,1),bit_xor(shift_right(d,2),shift_right(d,7)))) in
-    let low=bit_xor(y0,bit_xor(bit_or(shift_right(y0,1),shift_left(d,63)),bit_xor(bit_or(shift_right(y0,2),shift_left(d,62)),bit_or(shift_right(y0,7),shift_left(d,57))))) in
-    Gf128 { hi=bit_xor(y3,high),lo=bit_xor(y2,low) }
+  = GhashSum { low=gh_clmul(a.lo,p.lo),mid=gh_clmul(block_xor_low(a.lo,a.hi,a.hi,a.lo),p.mid),high=gh_clmul(a.hi,p.hi) }
+private inline effect fn gh_add(a:GhashSum,b:GhashSum) -> GhashSum
+  = GhashSum { low=gh_xor(a.low,b.low),mid=gh_xor(a.mid,b.mid),high=gh_xor(a.high,b.high) }
+; The 256-bit product high:low, with Karatsuba's middle term added at bit 64,
+; reduced modulo x^128 + x^7 + x^2 + x + 1. Its lowest 64 bits hold the highest
+; powers. Twice, they move up 64 bits (their x^128 becomes 1) and their product
+; with 0xC2 << 56 (x^7 + x^2 + x) is added.
+private inline effect fn gh_reduce(s:GhashSum) -> Gf128
+  = let m=gh_xor(s.mid,gh_xor(s.low,s.high)) in
+    let low=gh_xor(s.low,Gf128 { hi=m.lo,lo=0 }) in let high=gh_xor(s.high,Gf128 { hi=0,lo=m.hi }) in
+    let t=gh_xor(Gf128 { hi=low.lo,lo=low.hi },gh_clmul(low.lo,-4467570830351532032)) in
+    gh_xor(high,gh_xor(Gf128 { hi=t.lo,lo=t.hi },gh_clmul(t.lo,-4467570830351532032)))
 private inline effect fn gh_multiply(a:Gf128,p:GhashPower) -> Gf128 = gh_reduce(gh_product(a,p))
 private effect fn gh_key(h:Gf128) -> GhashKey
   = let p1=gh_power(h) in let h2=gh_multiply(h,p1) in let h3=gh_multiply(h2,p1) in let h4=gh_multiply(h3,p1) in
@@ -200,11 +204,9 @@ private inline effect fn gh_eight(y:Gf128,k:GhashKey,c:Aes8) -> Gf128
 private effect fn gcm_context(key:Arr u8 n,nonce:Arr u8 m) -> GcmContext
   = check n==16 && m==12 in let keys=ani_keys(key) in
     GcmContext { keys=keys,hash=gh_key(gh_block(ani_encrypt(keys,AesBlock { low=0,high=0 }))),n0=byte_read_le(nonce,0,8),n2=byte_read_le(nonce,8,4) }
-; Eight blocks at text[from..), out[at..), counter blocks from counter. GHASH
-; takes the ciphertext: the output when sealing, the input when opening.
-private inline effect fn gcm_eight(c:GcmContext,move run:GcmRun,text:Arr u8 m,from:i64,at:i64,counter:i64,seal:bool) -> GcmRun
-  = let input=gcm_load8(text,from) in let output=ani_xor8(input,ani_stream8(c,counter)) in
-    GcmRun { y=gh_eight(run.y,c.hash,if seal then output else input),out=gcm_store8(run.out,at,output) }
+; The output for text[at..at+128).
+private inline effect fn gcm_out8(c:GcmContext,text:Arr u8 m,at:i64{at>=0 && at+128<=m}) -> Aes8
+  = ani_xor8(gcm_load8(text,at),ani_stream8(c,2+shift_right(at,4)))
 ; One block of count (1..16) bytes; a partial block is zero-padded for GHASH.
 private inline effect fn gcm_one(c:GcmContext,move run:GcmRun,text:Arr u8 m,from:i64,at:i64,counter:i64,count:i64,seal:bool) -> GcmRun
   = let input=gcm_load_part(text,from,count) in
@@ -215,9 +217,18 @@ private inline effect fn gcm_crypt(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,count
   = check count>=0 && count<=m && count<=n && count<=16777216 && a<=16777216 in
     let y=loop(i=0,y=Gf128 { hi=0,lo=0 }) while i<a
       next(i+16,gh_multiply(gh_xor(y,gh_block(gcm_load_part(aad,i,if a-i<16 then a-i else 16))),c.hash.p1)) yield y in
-    let full=count/128 in
-    let run=loop(i=0,run=GcmRun { y=y,out=out }) while i<full next(i+1,gcm_eight(c,run,text,i*128,i*128,2+i*8,seal)) yield run in
-    let run=loop(at=full*128,run=run) while at<count next(at+16,gcm_one(c,run,text,at,at,2+at/16,if count-at<16 then count-at else 16,seal)) yield run in
+    ; Eight blocks a step. GHASH takes the ciphertext: the output when sealing,
+    ; the input when opening. out is written in place, as the loop's set-only state.
+    let run=loop(at:i64{at>=0}=0,y=y,out=out) while at+128<=count
+      next(at+128,gh_eight(y,c.hash,if seal then gcm_out8(c,text,at) else gcm_load8(text,at)),
+        let s=gcm_out8(c,text,at) in
+        byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(
+        byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(byte_write_le(out,
+          at,s.b0.low,8),at+8,s.b0.high,8),at+16,s.b1.low,8),at+24,s.b1.high,8),at+32,s.b2.low,8),at+40,s.b2.high,8),
+          at+48,s.b3.low,8),at+56,s.b3.high,8),at+64,s.b4.low,8),at+72,s.b4.high,8),at+80,s.b5.low,8),at+88,s.b5.high,8),
+          at+96,s.b6.low,8),at+104,s.b6.high,8),at+112,s.b7.low,8),at+120,s.b7.high,8))
+      yield GcmRun { y=y,out=out } in
+    let run=loop(at=count/128*128,run=run) while at<count next(at+16,gcm_one(c,run,text,at,at,2+at/16,if count-at<16 then count-at else 16,seal)) yield run in
     let y=gh_multiply(gh_xor(run.y,Gf128 { hi=a*8,lo=count*8 }),c.hash.p1) in let mask=ani_encrypt(c.keys,ani_counter(c,1)) in
     GcmResult { tag=AesBlock { low=bit_xor(mask.low,byte_swap64(y.hi)),high=bit_xor(mask.high,byte_swap64(y.lo)) },out=run.out }
 private cold effect fn gcm_seal_kernel(c:GcmContext,aad:Arr u8 a,text:Arr u8 m,move out:Arr u8 n) -> GcmResult = gcm_crypt(c,aad,text,m,out,true)

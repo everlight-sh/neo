@@ -1,0 +1,408 @@
+{
+ "server_cpu": 0,
+ "key": "ec",
+ "rounds": 3,
+ "http": {},
+ "https": {
+  "/hello": {
+   "bytes": 13,
+   "requests": 1000,
+   "clients": {
+    "Neo": {
+     "mean_ns": 852904.08,
+     "round_means_ns": [
+      849213.628,
+      852904.08,
+      866833.377
+     ],
+     "p50_ns": 845283,
+     "p90_ns": 911406,
+     "p99_ns": 1156468,
+     "max_ns": 1761016,
+     "connections": 1000
+    },
+    "Neo, keep-alive": {
+     "mean_ns": 72327.45,
+     "round_means_ns": [
+      72768.337,
+      72327.45,
+      71170.394
+     ],
+     "p50_ns": 66965,
+     "p90_ns": 85441,
+     "p99_ns": 108294,
+     "max_ns": 960128,
+     "connections": 1
+    },
+    "Neo, resumed": {
+     "mean_ns": 608335.915,
+     "round_means_ns": [
+      608335.915,
+      609829.92,
+      606315.541
+     ],
+     "p50_ns": 599307,
+     "p90_ns": 652038,
+     "p99_ns": 867363,
+     "max_ns": 1611204,
+     "connections": 1000
+    },
+    "Bun fetch": {
+     "mean_ns": 885521.721,
+     "round_means_ns": [
+      920110.293,
+      885521.721,
+      884253.578
+     ],
+     "p50_ns": 869737,
+     "p90_ns": 1018368,
+     "p99_ns": 1276484,
+     "max_ns": 5204550,
+     "connections": 1000
+    },
+    "Bun fetch, keep-alive": {
+     "mean_ns": 140638.025,
+     "round_means_ns": [
+      160216.981,
+      139318.343,
+      140638.025
+     ],
+     "p50_ns": 127060,
+     "p90_ns": 166766,
+     "p99_ns": 356182,
+     "max_ns": 5289630,
+     "connections": 1
+    },
+    "Go net/http": {
+     "mean_ns": 1273947.126,
+     "round_means_ns": [
+      1243034.361,
+      1286124.484,
+      1273947.126
+     ],
+     "p50_ns": 1228653,
+     "p90_ns": 1394516,
+     "p99_ns": 1725309,
+     "max_ns": 2254806,
+     "connections": 1000
+    },
+    "Go net/http, keep-alive": {
+     "mean_ns": 129474.351,
+     "round_means_ns": [
+      128398.854,
+      134798.972,
+      129474.351
+     ],
+     "p50_ns": 126177,
+     "p90_ns": 149902,
+     "p99_ns": 194466,
+     "max_ns": 1825127,
+     "connections": 1
+    },
+    "Rust reqwest": {
+     "mean_ns": 655681.411,
+     "round_means_ns": [
+      656734.891,
+      655681.411,
+      653122.804
+     ],
+     "p50_ns": 643652,
+     "p90_ns": 754450,
+     "p99_ns": 943506,
+     "max_ns": 1677429,
+     "connections": 1000
+    },
+    "Rust reqwest, keep-alive": {
+     "mean_ns": 113609.63,
+     "round_means_ns": [
+      114322.505,
+      113609.63,
+      113465.984
+     ],
+     "p50_ns": 107082,
+     "p90_ns": 131467,
+     "p99_ns": 171542,
+     "max_ns": 959227,
+     "connections": 1
+    }
+   }
+  },
+  "/64k": {
+   "bytes": 65536,
+   "requests": 1000,
+   "clients": {
+    "Neo": {
+     "mean_ns": 1004088.579,
+     "round_means_ns": [
+      1004088.579,
+      1002108.15,
+      1024594.602
+     ],
+     "p50_ns": 996147,
+     "p90_ns": 1048995,
+     "p99_ns": 1395819,
+     "max_ns": 2008532,
+     "connections": 1000
+    },
+    "Neo, keep-alive": {
+     "mean_ns": 178570.511,
+     "round_means_ns": [
+      181041.023,
+      178368.84,
+      178570.511
+     ],
+     "p50_ns": 170201,
+     "p90_ns": 202321,
+     "p99_ns": 275280,
+     "max_ns": 1205732,
+     "connections": 1
+    },
+    "Neo, resumed": {
+     "mean_ns": 770275.737,
+     "round_means_ns": [
+      770275.737,
+      769704.054,
+      778605.738
+     ],
+     "p50_ns": 760223,
+     "p90_ns": 828199,
+     "p99_ns": 1036452,
+     "max_ns": 1386962,
+     "connections": 1000
+    },
+    "Bun fetch": {
+     "mean_ns": 1035322.048,
+     "round_means_ns": [
+      1032709.054,
+      1036250.985,
+      1035322.048
+     ],
+     "p50_ns": 1003070,
+     "p90_ns": 1176026,
+     "p99_ns": 1438310,
+     "max_ns": 5638510,
+     "connections": 1000
+    },
+    "Bun fetch, keep-alive": {
+     "mean_ns": 248100.824,
+     "round_means_ns": [
+      245439.968,
+      248100.824,
+      248425.76
+     ],
+     "p50_ns": 223511,
+     "p90_ns": 283053,
+     "p99_ns": 458374,
+     "max_ns": 5400403,
+     "connections": 1
+    },
+    "Go net/http": {
+     "mean_ns": 1457872.527,
+     "round_means_ns": [
+      1457872.527,
+      1461774.082,
+      1454046.181
+     ],
+     "p50_ns": 1410998,
+     "p90_ns": 1648847,
+     "p99_ns": 1929554,
+     "max_ns": 2740311,
+     "connections": 1000
+    },
+    "Go net/http, keep-alive": {
+     "mean_ns": 250787.824,
+     "round_means_ns": [
+      252418.517,
+      250141.844,
+      250787.824
+     ],
+     "p50_ns": 228210,
+     "p90_ns": 326114,
+     "p99_ns": 467221,
+     "max_ns": 2156883,
+     "connections": 1
+    },
+    "Rust reqwest": {
+     "mean_ns": 864759.03,
+     "round_means_ns": [
+      864759.03,
+      866936.742,
+      864629.877
+     ],
+     "p50_ns": 854259,
+     "p90_ns": 980065,
+     "p99_ns": 1179361,
+     "max_ns": 1840267,
+     "connections": 1000
+    },
+    "Rust reqwest, keep-alive": {
+     "mean_ns": 226571.456,
+     "round_means_ns": [
+      226571.456,
+      232937.3,
+      221876.49
+     ],
+     "p50_ns": 209754,
+     "p90_ns": 296529,
+     "p99_ns": 385195,
+     "max_ns": 1384477,
+     "connections": 1
+    }
+   }
+  },
+  "/1m": {
+   "bytes": 1048576,
+   "requests": 200,
+   "clients": {
+    "Neo": {
+     "mean_ns": 2468888.68,
+     "round_means_ns": [
+      2468888.68,
+      2423187.385,
+      2490827.08
+     ],
+     "p50_ns": 2428885,
+     "p90_ns": 2522502,
+     "p99_ns": 3271583,
+     "max_ns": 3945061,
+     "connections": 200
+    },
+    "Neo, keep-alive": {
+     "mean_ns": 1606641.8,
+     "round_means_ns": [
+      1618246.6,
+      1606641.8,
+      1606134.205
+     ],
+     "p50_ns": 1493183,
+     "p90_ns": 2104365,
+     "p99_ns": 2649449,
+     "max_ns": 3684479,
+     "connections": 1
+    },
+    "Neo, resumed": {
+     "mean_ns": 2257517.37,
+     "round_means_ns": [
+      2236231.21,
+      2280575.675,
+      2257517.37
+     ],
+     "p50_ns": 2191879,
+     "p90_ns": 2372417,
+     "p99_ns": 3391869,
+     "max_ns": 3883335,
+     "connections": 200
+    },
+    "Bun fetch": {
+     "mean_ns": 2637085.37,
+     "round_means_ns": [
+      2650543.97,
+      2637085.37,
+      2572217.425
+     ],
+     "p50_ns": 2406914,
+     "p90_ns": 3115098,
+     "p99_ns": 4939656,
+     "max_ns": 9464258,
+     "connections": 200
+    },
+    "Bun fetch, keep-alive": {
+     "mean_ns": 1825841.125,
+     "round_means_ns": [
+      1885406.46,
+      1825841.125,
+      1773672.02
+     ],
+     "p50_ns": 1527237,
+     "p90_ns": 2687662,
+     "p99_ns": 3953287,
+     "max_ns": 8766473,
+     "connections": 1
+    },
+    "Go net/http": {
+     "mean_ns": 3571689.45,
+     "round_means_ns": [
+      3571689.45,
+      3239634.0,
+      3674074.325
+     ],
+     "p50_ns": 3411947,
+     "p90_ns": 3957575,
+     "p99_ns": 5205164,
+     "max_ns": 6363317,
+     "connections": 200
+    },
+    "Go net/http, keep-alive": {
+     "mean_ns": 1965879.545,
+     "round_means_ns": [
+      2122039.205,
+      1932936.07,
+      1965879.545
+     ],
+     "p50_ns": 1890892,
+     "p90_ns": 2411833,
+     "p99_ns": 3538665,
+     "max_ns": 5968012,
+     "connections": 1
+    },
+    "Rust reqwest": {
+     "mean_ns": 2298162.78,
+     "round_means_ns": [
+      2377179.95,
+      2260703.885,
+      2298162.78
+     ],
+     "p50_ns": 2169546,
+     "p90_ns": 2756803,
+     "p99_ns": 3940644,
+     "max_ns": 5183724,
+     "connections": 200
+    },
+    "Rust reqwest, keep-alive": {
+     "mean_ns": 1585801.9,
+     "round_means_ns": [
+      1577435.48,
+      1585801.9,
+      1646416.99
+     ],
+     "p50_ns": 1371112,
+     "p90_ns": 2463229,
+     "p99_ns": 3428510,
+     "max_ns": 3847106,
+     "connections": 1
+    }
+   }
+  }
+ },
+ "oneshot": {
+  "Neo": {
+   "https": [
+    0.002174886999910086
+   ]
+  },
+  "Bun fetch": {
+   "https": [
+    0.015979782000158593
+   ]
+  },
+  "Go net/http": {
+   "https": [
+    0.0047864970001683105
+   ]
+  },
+  "Rust reqwest": {
+   "https": [
+    0.0031714149999970687
+   ]
+  }
+ },
+ "machine": {
+  "cpu": "AMD EPYC-Rome Processor",
+  "cores": 4,
+  "kernel": "6.8.0-146-generic",
+  "bun": "1.3.13",
+  "go": "go version go1.25.14 linux/amd64",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)"
+ }
+}
