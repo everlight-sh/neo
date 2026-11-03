@@ -1,6 +1,12 @@
 ; Generational process-owned handles. A stale token cannot close a reused fd.
 ; State: table@112, next generation@120, live entries@128. 4096 fixed slots.
 ; Only runtime primitives access this table; application resources are affine.
+; Dropped TLS contexts (kind 8: 128 KiB, zeroed past the length word by their
+; owner) are kept for the next connection, up to four: count@1296, addresses
+; @1304..1335. A forked child forgets them with the rest of 256..2047.
+; Owner checks compare with the process id cached at 1336 (a getpid system call
+; per lookup was hundreds of calls per HTTPS megabyte); rt_fork's child clears
+; it with the same range, so a child created by rt_fork reads its own id.
 effect fn rt_handles() -> ptr
   = let existing = load_ptr(runtime_state(),112) in
     if existing != null() then existing else
@@ -8,6 +14,21 @@ effect fn rt_handles() -> ptr
     let failed = if mapped < 0 then ax_trap(data("handle table allocation failed\0")) else noop() in
     let table = ptr_from_i64(mapped) in let clear = memset(table,i32(0),131072) in
     let saved = store_ptr(runtime_state(),112,table) in table
+
+effect fn rt_handle_pid() -> i64
+  = let cached = load_i64(runtime_state(),1336) in if cached > 0 then cached else
+    let pid = rt_getpid() in let saved = store_i64(runtime_state(),1336,pid) in pid
+
+effect fn rt_context_map() -> i64
+  = let count = load_i64(runtime_state(),1296) in
+    if count <= 0 || count > 4 then rt_private_map(131072) else
+      let taken = store_i64(runtime_state(),1296,count - 1) in load_i64(runtime_state(),1296 + count * 8)
+
+effect fn rt_context_unmap(address:i64) -> i64
+  = let count = load_i64(runtime_state(),1296) in
+    if count < 0 || count >= 4 then rt_munmap(ptr_from_i64(address),131072) else
+      let kept = store_i64(runtime_state(),1304 + count * 8,address) in
+      let counted = store_i64(runtime_state(),1296,count + 1) in 0
 
 effect fn rt_handle_new(fd:i64,kind:i64) -> i64
   = if fd < 0 then 0 - i64(load_i32(rt_errno(),0)) else
@@ -21,14 +42,14 @@ effect fn rt_handle_new(fd:i64,kind:i64) -> i64
       let generation = generation + 1 in
       let serial = store_i64(runtime_state(),120,generation) in
       let entry = ptr_add(table,slot * 32) in let g = store_i64(entry,0,generation) in let f = store_i64(entry,8,fd) in
-      let k = store_i64(entry,16,kind) in let p = store_i64(entry,24,rt_getpid()) in
+      let k = store_i64(entry,16,kind) in let p = store_i64(entry,24,rt_handle_pid()) in
       let live = store_i64(runtime_state(),128,load_i64(runtime_state(),128) + 1) in generation * 4096 + slot + 1
 
 effect fn rt_handle_fd(token:i64,kind:i64) -> i64
   = if token <= 4096 then let saved = store_i32(rt_errno(),0,i32(9)) in -1 else
     let slot = (token - 1) % 4096 in let generation = (token - 1) / 4096 in let table = rt_handles() in
     let entry = ptr_add(table,slot * 32) in
-    if load_i64(entry,0) != generation || load_i64(entry,16) != kind || ((kind<4 || kind>=7) && load_i64(entry,24) != rt_getpid()) then
+    if load_i64(entry,0) != generation || load_i64(entry,16) != kind || ((kind<4 || kind>=7) && load_i64(entry,24) != rt_handle_pid()) then
       let saved = store_i32(rt_errno(),0,i32(9)) in -1 else load_i64(entry,8)
 
 effect fn rt_handle_drop(token:i64,kind:i64) -> unit
@@ -37,7 +58,7 @@ effect fn rt_handle_drop(token:i64,kind:i64) -> unit
       let table = rt_handles() in let entry = ptr_add(table,((token - 1) % 4096) * 32) in
       let invalidate = store_i64(entry,0,0) in
       let live = store_i64(runtime_state(),128,load_i64(runtime_state(),128) - 1) in
-      let closed = if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in noop()
+      let closed = if kind == 8 then rt_context_unmap(fd) else if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in noop()
 
 effect fn rt_handle_live() -> i64 = load_i64(runtime_state(),128)
 

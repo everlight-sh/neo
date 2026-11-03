@@ -6,7 +6,8 @@ Run it after changing a limb layout here, then rerun the crypto vector tests.
 
   x25519.neo  GF(2^255-19), five unsigned limbs in radix 2^51 with 128-bit
               columns (hi and lo words, from wrapping_mul and mul_high):
-              limbs below 2^53 give columns below 2^113.
+              limbs below 2^53 give columns below 2^113. Also the fixed-base
+              table of edwards25519 multiples behind x25519_public.
   p256.neo    Montgomery products modulo the P-256 prime and group order, four
               unsigned 64-bit limbs, R = 2^256, by product scanning into a
               three-word column (wrapping_mul and mul_high per product).
@@ -83,6 +84,38 @@ def xf_words():
         for p in parts[1:]: expr = f'bit_or({expr},{p})'
         words.append(expr)
     return words
+
+# edwards25519, -x^2 + y^2 = 1 + d x^2 y^2: the twisted Edwards form of the
+# X25519 curve, where u = (1+y)/(1-y). B (u = 9) has y = 4/5 and even x.
+XP = 2**255 - 19
+XD = -121665 * pow(121666, -1, XP) % XP
+XB = (15112221349535400772501151409588531511454012693041857206046113283949847762202,
+      46316835694926478169428394003475163141307993866256225615783033603165251855960)
+
+def ed_add(p, q):
+    (x1, y1), (x2, y2) = p, q
+    t = XD * x1 * x2 * y1 * y2 % XP
+    return (x1 * y2 + y1 * x2) * pow(1 + t, -1, XP) % XP, (y1 * y2 + x1 * x2) * pow(1 - t, -1, XP) % XP
+
+def xb_table():
+    """Fixed-base rows for x25519_public: row j holds k * 16^(4j) * B for
+    k = 1..8, each as y+x, y-x and 2dxy in five 51-bit limbs (one little-endian
+    word each), 960 bytes a row. Rows are chosen by public index; entries by
+    masks."""
+    x, y = XB
+    assert (y * y - x * x - 1 - XD * x * x * y * y) % XP == 0 and (1 + y) * pow(1 - y, -1, XP) % XP == 9
+    rows, base = [], XB
+    for _ in range(16):
+        entry, data = base, b''
+        for _ in range(8):
+            x, y = entry
+            for v in ((y + x) % XP, (y - x) % XP, 2 * XD * x * y % XP):
+                data += b''.join(((v >> off) % (1 << 51)).to_bytes(8, 'little') for off in OFFSETS)
+            entry = ed_add(entry, base)
+        rows.append(''.join(f'\\x{c:02x}' for c in data))
+        for _ in range(16): base = ed_add(base, base)
+    return ('private fn xb_row(index:i64) -> Arr u8 _\n  = ' + ' else\n    '.join(
+        f'if index=={i} then "{r}"' for i, r in enumerate(rows[:-1])) + f' else\n    "{rows[-1]}"')
 
 # ---------------------------------------------------------------- P-256
 PF = 'P4'
@@ -235,6 +268,7 @@ def main():
     text = region(text, 'xf_unpack', xf_unpack())
     text = region(text, 'xf_words', f'private fn xf_bytes(h:{FE}) -> Arr u8 _\n  = let out=arr(i in 0..32) u8(0) in\n    ' +
                   ' in\n    '.join(f'let out=byte_write_le(out,{8 * k},{w[k]},8)' for k in range(4)) + ' in out')
+    text = region(text, 'xb_table', xb_table())
     path.write_text(text)
     path = ROOT / 'stdlib/p256.neo'; text = path.read_text()
     text = region(text, 'p4_carries', p4_carries())
