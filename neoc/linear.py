@@ -7,8 +7,10 @@ which makes rational Fourier-Motzkin *sound* for proving integer goals
 """
 from __future__ import annotations
 from fractions import Fraction
+from functools import wraps
 from itertools import product, islice
 from math import gcd, lcm
+from time import perf_counter
 from typing import Dict, List, Optional, Tuple
 
 def exact_number(value):
@@ -266,6 +268,18 @@ def relevant(facts: Formula, goal: Formula) -> Formula:
             if not keep[i] and n & want: keep[i] = True; want |= n; changed = True
     return and_(*[p for p, k in zip(parts, keep) if k])
 
+# Seconds spent deciding entailments in this process, for build reports.
+SPENT = [0.0]
+
+def timed(decide):
+    @wraps(decide)
+    def run(*args, **kwargs):
+        started = perf_counter()
+        try: return decide(*args, **kwargs)
+        finally: SPENT[0] += perf_counter() - started
+    return run
+
+@timed
 def entails(facts: Formula, goal: Formula, diagnostics=True):
     """facts ⇒ goal ?  Returns (status, counterexample) with status in
     proven / unproven / unknown."""
