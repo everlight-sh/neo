@@ -1,0 +1,2 @@
+cd /root && for m in 16 32; do rm -rf /root/dev-c$m; cp -r /root/dev /root/dev-c$m; sed -i "s/else if n < t \* 8 then n else t \* 8/else if n < t * $m then n else t * $m/" /root/dev-c$m/runtime/core.neo; grep -n "t \* $m" /root/dev-c$m/runtime/core.neo; sh /root/build.sh /root/dev-c$m /root/bin-c$m > /dev/null; done; cd /root/dev && python3 bench/core/compute_compare.py /root/results/chunks.json 9 --variant c8=/root/bin-dev1 --variant c16=/root/bin-c16 --variant c32=/root/bin-c32 --go /root/comp/go --workers 4
+

@@ -1,0 +1,11 @@
+# /usr/lib/linux-tools/6.8.0-147-generic/perf stat, NEO_THREADS=1 taskset -c 0 /root/bin-final/neo-stencil 1000000 20
+499998359740
+         151012753      cycles                                                                
+         293454376      instructions                     #    1.94  insn per cycle            
+       0.105271724 seconds time elapsed
+# /usr/lib/linux-tools/6.8.0-147-generic/perf stat, NEO_THREADS=1 taskset -c 0 /root/bin-main/neo-stencil 1000000 20
+499998359740
+         158438186      cycles                                                                
+         494636985      instructions                     #    3.12  insn per cycle            
+       0.101046623 seconds time elapsed
+

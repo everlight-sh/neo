@@ -1,0 +1,12 @@
+mandel final == dev1
+stencil final == dev1
+nbody final == dev1
+sieve final == dev1
+mandel-1200-1200-300   w=1  Neo final    124.3  Neo main    210.3  Rust    238.4  Go    228.4  Bun    358.1  ok
+stencil-1000000-20     w=1  Neo final     54.3  Neo main     55.7  Rust     69.4  Go     85.6  Bun    567.8  ok
+nbody-1024-3           w=1  Neo final     21.3  Neo main     21.4  Rust     24.2  Go     24.3  Bun    160.5  ok
+nbody-4096-10          w=1  Neo final    768.8  Neo main    768.9  Rust    885.4  Go    866.3  Bun   1573.8  ok
+mandel-1200-1200-300   w=4  Neo final     33.2  Neo main     55.9  Rust     64.3  Go     60.2  ok
+stencil-1000000-20     w=4  Neo final     17.5  Neo main     18.4  Rust     22.4  Go     29.9  ok
+nbody-1024-3           w=4  Neo final      8.3  Neo main      8.3  Rust      9.0  Go      9.8  ok
+nbody-4096-10          w=4  Neo final    197.8  Neo main    197.3  Rust    227.6  Go    224.4  ok

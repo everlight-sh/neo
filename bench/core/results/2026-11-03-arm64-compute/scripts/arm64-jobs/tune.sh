@@ -1,0 +1,2 @@
+cd /root/dev2 && for v in "tn1:-mtune=neoverse-n1" "cn1:-mcpu=neoverse-n1" "tv1:-mtune=neoverse-v1"; do n=${v%%:*}; f=${v#*:}; NEO_CLANG_FLAGS="$f" sh /root/build.sh /root/dev2 /root/bin-$n >/dev/null; done; sh /root/build.sh /root/dev2 /root/bin-dev2 >/dev/null; cmp /root/bin-dev1/neo-mandel /root/bin-dev2/neo-mandel && echo same-as-dev1; python3 bench/core/compute_compare.py /root/results/tune.json 7 --variant generic=/root/bin-dev2 --variant tune-n1=/root/bin-tn1 --variant tune-v1=/root/bin-tv1 --variant cpu-n1=/root/bin-cn1 --workers 1
+

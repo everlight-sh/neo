@@ -1,0 +1,8 @@
+neoc/llvm.py:1
+neoc/vectorize.py:1
+mandel fma insns: 8
+nbody fma insns: 27
+stencil fma insns: 0
+mandel-1200-1200-300   w=1  dev    124.9  contract    126.4  Rust    238.7  Go    228.9  ok
+nbody-1024-3           w=1  dev     21.4  contract     21.0  Rust     24.2  Go     24.5  ok
+nbody-4096-10          w=1  dev    769.3  contract    761.0  Rust    885.5  Go    865.3  ok

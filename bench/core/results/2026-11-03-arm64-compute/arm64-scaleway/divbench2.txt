@@ -1,0 +1,30 @@
+# clang -O2 divbench2.c; taskset -c 0 ./divbench2 (run 1, run 2)
+GHz 2.108
+fdiv v.2d              7.06 cycles/instr
+fdiv d                 3.53 cycles/instr
+fsqrt v.2d             9.88 cycles/instr
+fsqrt d                4.94 cycles/instr
+fdiv d + fsqrt d       8.47 cycles/instr
+fdiv 2d + fsqrt 2d     16.94 cycles/instr
+fmla 2d                1.76 cycles/instr
+frecpe 2d              0.71 cycles/instr
+frsqrte 2d             0.71 cycles/instr
+fmul 2d indep x8       3.09 cycles/instr
+fmla 2d indep x8       3.17 cycles/instr
+fsqrt 2d + 8 fmul      11.06 cycles/instr
+add x3 dep (cal)       -4.21 cycles/instr
+GHz 2.985
+fdiv v.2d              9.99 cycles/instr
+fdiv d                 5.00 cycles/instr
+fsqrt v.2d             13.99 cycles/instr
+fsqrt d                6.99 cycles/instr
+fdiv d + fsqrt d       11.99 cycles/instr
+fdiv 2d + fsqrt 2d     23.98 cycles/instr
+fmla 2d                2.50 cycles/instr
+frecpe 2d              1.00 cycles/instr
+frsqrte 2d             1.00 cycles/instr
+fmul 2d indep x8       4.38 cycles/instr
+fmla 2d indep x8       4.50 cycles/instr
+fsqrt 2d + 8 fmul      15.66 cycles/instr
+add x3 dep (cal)       -5.96 cycles/instr
+

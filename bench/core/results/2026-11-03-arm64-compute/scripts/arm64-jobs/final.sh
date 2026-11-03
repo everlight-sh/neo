@@ -1,0 +1,2 @@
+set -e; export PATH=/root/.bun/bin:/usr/local/go/bin:$PATH; sh /root/build.sh /root/final /root/bin-final >/dev/null; for p in mandel stencil nbody sieve; do cmp /root/bin-final/neo-$p /root/bin-dev1/neo-$p && echo "$p final == dev1"; done; sha256sum /root/bin-final/* /root/bin-main/* /root/comp/rust/* /root/comp/go/* > /root/results/final-sha256.txt; cd /root/final && python3 bench/core/compute_compare.py /root/results/final.json 9 --variant "Neo final=/root/bin-final" --variant "Neo main=/root/bin-main" --rust /root/comp/rust --go /root/comp/go --bun
+

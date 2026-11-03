@@ -1,0 +1,11 @@
+fma mandel identical to dev
+fma stencil identical to dev
+fma nbody identical to dev
+0
+0
+0
+8
+mandel-1200-1200-300   w=1  dev    124.3  fma    124.6  al32    124.5  al64    124.3  Rust    237.8  Go    228.3  ok
+stencil-1000000-20     w=1  dev     54.5  fma     54.0  al32     54.2  al64     53.5  Rust     69.1  Go     84.8  ok
+nbody-1024-3           w=1  dev     21.4  fma     21.3  al32     20.9  al64     21.2  Rust     24.2  Go     24.6  ok
+nbody-4096-10          w=1  dev    768.7  fma    768.7  al32    756.5  al64    756.5  Rust    885.3  Go    865.7  ok
