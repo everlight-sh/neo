@@ -453,6 +453,7 @@ class LLVMGen:
                                  **Ranges.analyze([f for f in fns if f.name not in self.library_names])}
         else:self.value_ranges = Ranges.analyze(fns) if ranges else {}
         self.bounded_remainders = []
+        self.assumed = {}    # id(comparison) -> value fixed for the loop being emitted (VZ.split_counted_loop)
         self.overflow_checks = []
         self.resource_finalizers = {}
         self.region_counters = {}
@@ -1319,6 +1320,7 @@ class LLVMGen:
 
     def gen(self, e: S.Node, env: Dict[str, Slot], par: bool) -> Tuple[Val, Optional[Val]]:
         fb = self.fb
+        if self.assumed and id(e) in self.assumed: return Val('true' if self.assumed[id(e)] else 'false', 'i1'), None
         if isinstance(e, S.Num): return Val(str(e.value), "i64"), None
         if isinstance(e, S.Flt): return Val(fconst(e.value), "double"), None
         if isinstance(e, S.BoolLit): return Val("true" if e.value else "false", "i1"), None
@@ -2301,7 +2303,7 @@ class LLVMGen:
                 self.counted_loop(lo,hi,e.var,env,body)
                 fb.br(ready);fb.block(ready)
                 return out,fb.ins(f'extractvalue {out}, 2','i64')
-            self.counted_loop(lo, hi, e.var, env, body)
+            VZ.split_counted_loop(self, fb, e, lo, hi, env, body)
             return (fb.load(ety, acc), None) if is_sum else (out, fb.ins(f'extractvalue {out}, 2','i64'))
 
         # ---- parallel: outline the body into @<fn>__regionK(ptr ctx, i64 chunk)
@@ -2362,7 +2364,7 @@ class LLVMGen:
                 self.store_elem(rtgt, k, e.ty, v)
         if vec: VZ.vector_sum_loop(self, rb, e, clo, chi, renv, racc, self.fn_map)
         elif varr: VZ.vector_array_loop(self,rb,e,clo,chi,renv,rtgt,rlo,reads)
-        else: self.counted_loop(clo, chi, e.var, renv, rbody)
+        else: VZ.split_counted_loop(self, rb, e, clo, chi, renv, rbody)
         if is_sum:
             p = rb.ins(f"getelementptr inbounds {ety}, ptr {rtgt.name}, i64 %chunk", "ptr")
             rb.store(rb.load(ety, racc), p.name)
