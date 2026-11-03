@@ -36,14 +36,25 @@ driver on your PATH. See [docs/getting-started.md](docs/getting-started.md).
 ## Build profiles
 
 `./neo build file.neo -o app` defaults to LLVM `-O3`.
-Use `--opt-level 0` for a faster development build (`1` and `2` are also
-supported). All levels retain type/refinement checking and checked arithmetic.
-Optimization level and `NEO_INLINE_BUDGET` participate in the build cache key;
-the latter defaults to the existing 160-node forced-inlining budget.
-`--report` includes compiler phase timings and optimization settings, and
-`inline_budget_misses`: calls inside loops and comprehensions whose callee
-exceeded that budget and so is no longer force-inlined. `inline fn` forces
-inlining of a non-recursive internal function whatever its size.
+`--dev` (also `neo run --dev`) is the fast development build: `-O1` and no
+policy inlining, so small pure helpers and calls with constant arguments stay
+ordinary calls; `inline fn` is still honoured. Its binaries run slower;
+[RESULTS-compile-time-x86-linux-2026-11-03.md](RESULTS-compile-time-x86-linux-2026-11-03.md)
+measures both profiles. `--opt-level 0..3` overrides the level in either
+profile. All levels and profiles retain type/refinement
+checking and checked arithmetic. Profile, optimization level,
+`NEO_INLINE_BUDGET` (default 160 nodes) and `NEO_INLINE_EXPANSION` participate
+in the build cache key.
+`--report` includes compiler phase timings (parse, check and the part of it
+spent proving, AST optimization, lowering, clang compile and link) and
+optimization settings, and `inline_budget_misses`: calls inside loops and
+comprehensions whose callee exceeded that budget and so is no longer
+force-inlined. `inline fn` forces inlining of a non-recursive internal function
+whatever its size. Policy inlining is transitive, so one function can grow by
+hundreds of thousands of IR lines and dominate clang's time;
+`NEO_INLINE_EXPANSION` (default 262144 IR lines, 0 for no limit) stops policy
+inlining into a function that would grow past it, and `--report` lists the
+callees it left as calls in `inline_expansion_cuts`.
 
 The proof engine keeps integral constraints in arbitrary-precision integers,
 clearing rational denominators by positive exact scaling during elimination.

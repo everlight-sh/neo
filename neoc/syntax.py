@@ -651,10 +651,14 @@ def show(e: Node) -> str:
     if isinstance(e, With): return f"{show(e.expr)} with {{…}}"
     return type(e).__name__
 
+_CHILD_FIELDS: Dict[type, Tuple[str, ...]] = {}
+
 def children(e: Node) -> List[Node]:
     out = []
-    for fld in e.__dataclass_fields__:
-        if fld in ("pos", "ty", "hash", "annots"): continue
+    fields = _CHILD_FIELDS.get(type(e))
+    if fields is None:
+        fields = _CHILD_FIELDS[type(e)] = tuple(f for f in e.__dataclass_fields__ if f not in ("pos", "ty", "hash", "annots"))
+    for fld in fields:
         v = getattr(e, fld)
         if isinstance(v, Node): out.append(v)
         elif isinstance(v, list):

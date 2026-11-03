@@ -27,6 +27,8 @@ neo fmt --check
 
 `neo.toml` selects the entry file. `neo build` and `neo run` use it when no
 file is supplied. Pass application arguments after `--`: `neo run -- 8080`.
+`neo run --dev` and `neo build --dev` make a development build: faster to
+build, slower to run, checked exactly like a release build.
 Scalar main parameters retain checked numeric argv parsing. A zero-argument
 effectful main can read arbitrary string arguments using `cli_arg`.
 

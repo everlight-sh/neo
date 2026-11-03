@@ -35,6 +35,7 @@ from . import vectorize as VZ
 from . import strided
 from . import ranges as Ranges
 from .linear import Lin, cmp, and_, entails
+from .trust import within, resolved, RUNTIME
 
 ARR = "%ax_arr"
 
@@ -90,6 +91,20 @@ def x86_crypto_functions(fns, inlined):
         if not more: return found
         found |= more
 
+def by_identity(compute):
+    """Memoise a pure function of a type object. Lowering asks about the same
+    type objects many thousands of times; hashing a nested record type costs
+    about as much as the answer, identity does not (the key holds the type)."""
+    memo = {}
+    def lookup(t):
+        hit = memo.get(id(t))
+        if hit is not None and hit[0] is t: return hit[1]
+        value = compute(t); memo[id(t)] = (t, value)
+        return value
+    lookup.__doc__ = compute.__doc__
+    return lookup
+
+@by_identity
 def lty(t) -> str:
     if isinstance(t,S.TRef):return "{ i64, i64 }"
     if isinstance(t,S.TFn):return "ptr"
@@ -199,6 +214,7 @@ def set_only_state(loop, k) -> bool:
     others = [x for j, x in enumerate(loop.nexts) if j != k]
     return reads_only(loop.cond) and all(reads_only(x) for x in others)
 
+@by_identity
 def managed(t):
     return isinstance(t, S.TArr) or isinstance(t, S.TRec) and any(managed(ft) for _, ft in t.fields)
 
@@ -464,7 +480,8 @@ class FuncBuilder:
         return "\n".join(out)
 
 class LLVMGen:
-    def __init__(self, fns: List[S.Fn], fn_hashes: Dict[str, str], triple: str, assume: bool = True, vectorize: bool = True, ranges: bool = True, literal_inline: bool = True, inline_budget: int = 160, library_roots=(), switches: bool = True, unique_flags: bool = True):
+    def __init__(self, fns: List[S.Fn], fn_hashes: Dict[str, str], triple: str, assume: bool = True, vectorize: bool = True, ranges: bool = True, literal_inline: bool = True, inline_budget: int = 160, library_roots=(), switches: bool = True, unique_flags: bool = True, inline_expansion: int = 0):
+        self.inline_expansion = inline_expansion; self.inline_cut = []
         self.fns = fns; self.fn_hashes = fn_hashes; self.triple = triple
         VZ.K = VZ.sum_lanes(triple); VZ.WIDTH = VZ.sum_width(triple); VZ.ARRAY_WIDTH = VZ.array_width(triple)
         self.assume = assume; self.vectorize = vectorize
@@ -478,7 +495,7 @@ class LLVMGen:
         self.fb: FuncBuilder = None
         self.mode = "par"; self.fn: S.Fn = None
         self.region_k = 0
-        self.library_names = {f.name for f in fns if getattr(f,'source',None) and any(Path(f.source).resolve().is_relative_to(Path(root).resolve()) for root in library_roots)}
+        self.library_names = {f.name for f in fns if getattr(f,'source',None) and any(within(f.source,resolved(root)) for root in library_roots)}
         if ranges and self.library_names:
             self.value_ranges = {**Ranges.analyze([f for f in fns if f.name in self.library_names],self.library_names),
                                  **Ranges.analyze([f for f in fns if f.name not in self.library_names])}
@@ -499,19 +516,22 @@ class LLVMGen:
         self.observed_parameters={f.name:{i for i,p in enumerate(f.params)
             if isinstance(p.ty,S.TArr) and p.ty.elem==S.U8 and i not in self.return_aliases[f.name]}
             if -1 not in self.return_aliases[f.name] else set() for f in fns}
+        # Bodies are final here: inlining policy asks each function's size and
+        # recursion once, not once per call site.
+        self.call_sets, self.node_counts, self.recursion = {}, {}, {}
         if literal_inline:
-            from .inline import node_count, is_recursive
+            node_count, is_recursive = self.node_count, self.is_recursive
             def visit(node):
                 # LLVM inlining preserves effect order and ownership lowering.
                 # Expose small policy helpers called with a constant boolean so
                 # dead policy branches disappear, including allocator variants.
                 if isinstance(node,S.Call) and any(isinstance(a,S.BoolLit) for a in node.args):
                     target=self.fn_map.get(node.name)
-                    if target and not (target.exported or target.external or getattr(target,'precompiled',False) or getattr(target,'native_library',False)) and node_count(target.body)<=256 and not is_recursive(target,self.fn_map):
+                    if target and not (target.exported or target.external or getattr(target,'precompiled',False) or getattr(target,'native_library',False)) and node_count(target)<=256 and not is_recursive(target):
                         self.literal_inlined.add(target.name)
                 if isinstance(node,S.Call) and any(isinstance(a,S.Str) for a in node.args):
                     target=self.fn_map.get(node.name)
-                    if target and not (target.effect or target.exported or target.external or getattr(target,'native_library',False)) and node_count(target.body)<=160 and not is_recursive(target,self.fn_map):
+                    if target and not (target.effect or target.exported or target.external or getattr(target,'native_library',False)) and node_count(target)<=160 and not is_recursive(target):
                         self.literal_inlined.add(target.name)
                 for child in S.children(node):visit(child)
             for function in fns:
@@ -520,22 +540,33 @@ class LLVMGen:
             # estimates. Small Neo helpers should expose their facts and
             # lifetimes to the caller before LLVM applies its cost model.
             for function in fns:
-                if function.name!='main' and not (function.effect or function.exported or function.external or getattr(function,'precompiled',False) or getattr(function,'native_library',False)) and node_count(function.body)<=inline_budget and not is_recursive(function,self.fn_map):
+                if function.name!='main' and not (function.effect or function.exported or function.external or getattr(function,'precompiled',False) or getattr(function,'native_library',False)) and node_count(function)<=inline_budget and not is_recursive(function):
                     self.small_pure_inlined.add(function.name)
         self.inline_report(fns, inline_budget)
 
+    def node_count(self, f):
+        if f.name not in self.node_counts:
+            from .inline import node_count
+            self.node_counts[f.name] = node_count(f.body)
+        return self.node_counts[f.name]
+
+    def is_recursive(self, f):
+        if f.name not in self.recursion:
+            from .inline import is_recursive
+            self.recursion[f.name] = is_recursive(f, self.fn_map, self.call_sets)
+        return self.recursion[f.name]
+
     def inline_report(self, fns, inline_budget):
         """`inline fn` forces inlining; calls in loops that silently missed the budget are listed."""
-        from .inline import node_count, is_recursive
+        node_count, is_recursive = self.node_count, self.is_recursive
         self.forced_inline, self.inline_ignored, self.inline_budget_misses = set(), [], []
         def internal(f): return not (f.exported or f.external or getattr(f,'precompiled',False) or getattr(f,'native_library',False))
         for f in fns:
             if not getattr(f,'inline',False): continue
             reason = 'main' if f.name == 'main' else None if internal(f) else 'external, exported or precompiled'
-            if reason is None and is_recursive(f, self.fn_map): reason = 'recursive'
+            if reason is None and is_recursive(f): reason = 'recursive'
             if reason: self.inline_ignored.append({'fn': getattr(f,'display_name',f.name), 'pos': list(f.pos), 'reason': reason})
             else: self.forced_inline.add(f.name)
-        runtime = Path(__file__).resolve().parents[1]/'runtime'
         sizes = {}
         def visit(node, caller, loop):
             if isinstance(node, S.Call) and loop and not getattr(node, 'builtin', None):
@@ -543,8 +574,8 @@ class LLVMGen:
                 if (callee is not None and internal(callee) and not callee.effect and callee.name != 'main'
                         and not getattr(callee,'cold',False) and callee.name not in self.forced_inline
                         and callee.name not in self.small_pure_inlined and callee.name not in self.literal_inlined):
-                    if callee.name not in sizes: sizes[callee.name] = node_count(callee.body)
-                    if sizes[callee.name] > inline_budget and not is_recursive(callee, self.fn_map):
+                    if callee.name not in sizes: sizes[callee.name] = node_count(callee)
+                    if sizes[callee.name] > inline_budget and not is_recursive(callee):
                         self.inline_budget_misses.append({'fn': getattr(caller,'display_name',caller.name), 'pos': list(node.pos), 'callee': getattr(callee,'display_name',callee.name),
                                                           'callee_nodes': sizes[callee.name], 'inline_budget': inline_budget, 'in': loop})
             if isinstance(node, S.Loop):
@@ -557,7 +588,7 @@ class LLVMGen:
             for child in S.children(node): visit(child, caller, loop)
         for f in fns:
             source = getattr(f, 'source', None)
-            if f.external or getattr(f,'precompiled',False) or source and Path(source).resolve().is_relative_to(runtime): continue
+            if f.external or getattr(f,'precompiled',False) or source and within(source,RUNTIME): continue
             visit(f.body, f, None)
 
     # ------------------------------------------------------------ module
@@ -583,8 +614,7 @@ class LLVMGen:
         bodies = {}
         roots = set()
         from pathlib import Path
-        runtime = Path(__file__).resolve().parents[1]/'runtime'
-        runtime_exports = {f.name for f in self.fns if f.exported and getattr(f,'source',None) and Path(f.source).resolve().is_relative_to(runtime)}
+        runtime_exports = {f.name for f in self.fns if f.exported and getattr(f,'source',None) and within(f.source,RUNTIME)}
         implicit_memory = {'memcpy','memmove','memset','bzero','calloc'}
         for body in self.funcs:
             match = re.search(r'^define (.*?)@([^\s(]+)\(', body, re.M)
@@ -611,6 +641,7 @@ class LLVMGen:
         self.private_heap = 'ax_par_for_shared' in reachable and 'ax_par_for' not in reachable and not prebuilt
         omitted = {bodies[name] for name in self.omitted_functions}
         self.funcs = [body for body in self.funcs if body not in omitted]
+        if self.inline_expansion: self.bound_inline_expansion()
         # A BSS-only ELF segment must start on its own page for loaders that
         # do not map the partial first page when p_filesz is zero (Rosetta).
         # Other targets retain their existing layout.
@@ -716,6 +747,50 @@ class LLVMGen:
         self.module_header = '\n'.join(head)
         return self.module_header + "\n\n".join(self.funcs) + "\n"
 
+    def bound_inline_expansion(self):
+        """Forced inlining is transitive: a small helper whose callees are
+        inlined carries all of their bodies into each of its callers, and
+        LLVM's optimizer and register allocator are superlinear in function
+        size. Bottom-up, no function may grow past `inline_expansion` IR lines
+        through forced inlining: its largest callees inlined only for being
+        small and pure become ordinary calls, left to LLVM's cost model, until
+        it fits. Constant-argument specializations and explicit `inline fn`
+        stay forced: their constants fold away code the line count includes.
+        So do callees that expand to under a sixteenth of the bound, whose
+        inlining is what hot loops gain from; a function they keep over the
+        bound is cut from its own callers instead. Programs whose expansions
+        fit are unchanged."""
+        header = re.compile(r'^define [^\n]*?@([^\s(]+)\([^\n]*', re.M)
+        call = re.compile(r'call [^@\n]*@([^\s(]+)\(')
+        optional = {self.fname(f, mode)[1:] for f in self.fns if f.name in self.small_pure_inlined
+                    and f.name not in self.literal_inlined | self.forced_inline
+                    and not f.external and f.name != 'ax_heap_small' for mode in ('par', 'seq')}
+        index, lines, calls, forced = {}, {}, {}, set()
+        for k, body in enumerate(self.funcs):
+            match = header.search(body)
+            if not match: continue
+            name = match[1]; index[name] = k; lines[name] = body.count('\n')
+            if ' alwaysinline' in match[0]: forced.add(name)
+            calls[name] = call.findall(body)
+        cut, sizes, active, least = set(), {}, set(), self.inline_expansion // 16
+        def expanded(name):
+            if name in sizes: return sizes[name]
+            if name in active: return lines[name]
+            active.add(name); parts = {}
+            for callee in calls[name]:
+                if callee in forced and callee not in cut and callee in lines: parts[callee] = parts.get(callee, 0) + expanded(callee)
+            total = lines[name] + sum(parts.values())
+            for callee, size in sorted(parts.items(), key=lambda part: (-part[1], part[0])):
+                if total <= self.inline_expansion: break
+                if callee in optional and callee not in cut and size >= least: cut.add(callee); total -= size
+            active.discard(name); sizes[name] = total
+            return total
+        for name in index: expanded(name)
+        for name in sorted(cut):
+            body = self.funcs[index[name]]; match = header.search(body)
+            self.funcs[index[name]] = body[:match.start()] + match[0].replace(') alwaysinline', ') ', 1) + body[match.end():]
+        self.inline_cut = sorted(cut)
+
     def fname(self, f: S.Fn, mode: str) -> str:
         if f.external or f.exported: return f"@{f.name}"
         if f.effect: mode = "seq"
@@ -736,8 +811,7 @@ class LLVMGen:
 
     def function(self, f: S.Fn, mode: str):
         params = ", ".join(f"{'ptr' if self.parameter_byref(f,i) else lty(p.ty)} %p_{p.name}" for i,p in enumerate(f.params))
-        runtime=Path(__file__).resolve().parents[1]/'runtime'
-        trusted=bool(getattr(f,'source',None) and Path(f.source).resolve().is_relative_to(runtime))
+        trusted=bool(getattr(f,'source',None) and within(f.source,RUNTIME))
         specialized=trusted and f.name in {'rt_heap_small_private','rt_heap_small_shared'}
         fresh=trusted and f.name in {'ax_alloc','ax_heap_alloc','ax_heap_small','calloc','rt_heap_small_private','rt_heap_small_shared'}
         inline=f.name in (self.literal_inlined | self.small_pure_inlined | self.forced_inline) or trusted and f.name=='ax_heap_small'
@@ -1316,9 +1390,8 @@ class LLVMGen:
         return value
 
     def checked_integer(self):
-        from pathlib import Path
         source=getattr(self.fn,'source',None)
-        return not source or not Path(source).resolve().is_relative_to(Path(__file__).resolve().parents[1]/'runtime')
+        return not source or not within(source,RUNTIME)
 
     def trap_if(self, condition, node, message):
         fb=self.fb;bad,good=fb.label('arithmetic_bad'),fb.label('arithmetic_ok')

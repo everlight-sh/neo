@@ -162,10 +162,10 @@ class Interp:
             fenv = dict(zip((p.name for p in f.params), args))
             for size_var, carrier in getattr(f, "size_binders", []):      # implicit size parameters
                 fenv[size_var] = len(fenv[carrier])
-            from pathlib import Path
+            from .trust import within, RUNTIME
             previous=self.unchecked
             source=getattr(f,'source',None)
-            self.unchecked=bool(source and Path(source).resolve().is_relative_to(Path(__file__).resolve().parents[1]/'runtime'))
+            self.unchecked=bool(source and within(source,RUNTIME))
             try:return self.ev(f.body, fenv)
             finally:self.unchecked=previous
         raise Unfoldable()

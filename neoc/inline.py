@@ -26,7 +26,8 @@ def calls_in(e: S.Node, out: Set[str]):
     if isinstance(e, S.Call) and not getattr(e, "builtin", None): out.add(e.name)
     for c in S.children(e): calls_in(c, out)
 
-def is_recursive(f: S.Fn, fns: Dict[str, S.Fn]) -> bool:
+def is_recursive(f: S.Fn, fns: Dict[str, S.Fn], calls: Dict[str, Set[str]] = None) -> bool:
+    """`calls` memoises each body's callees for a caller whose bodies no longer change."""
     seen, stack = set(), [f.name]
     while stack:
         n = stack.pop()
@@ -34,7 +35,10 @@ def is_recursive(f: S.Fn, fns: Dict[str, S.Fn]) -> bool:
         seen.add(n)
         callee = fns.get(n)
         if not callee: continue
-        cs: Set[str] = set(); calls_in(callee.body, cs)
+        cs = calls.get(n) if calls is not None else None
+        if cs is None:
+            cs = set(); calls_in(callee.body, cs)
+            if calls is not None: calls[n] = cs
         if f.name in cs: return True
         stack.extend(cs)
     return False

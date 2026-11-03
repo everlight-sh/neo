@@ -26,9 +26,9 @@ def entry(file=None):
     return str(root/data.get('package',{}).get('entry','src/main.neo'))
 
 
-def build_options(file,output=None,no_cache=False):
+def build_options(file,output=None,no_cache=False,dev=False):
     return Namespace(file=str(file),output=str(output) if output else None,no_cache=no_cache,
-                     allow_unproven=False,emit_llvm=False,report=False)
+                     allow_unproven=False,emit_llvm=False,report=False,dev=dev)
 
 
 def init(args):
@@ -46,7 +46,7 @@ def run(args):
     from .cli import build
     file=entry(None if args.file=='__project__' else args.file)
     output=Path(file).parent/legacy.build_dir(file)/'run'
-    with contextlib.redirect_stdout(sys.stderr): report=build(build_options(file,output))
+    with contextlib.redirect_stdout(sys.stderr): report=build(build_options(file,output,dev=args.dev))
     print('neo: build '+report['build']['cache'],file=sys.stderr)
     command=shlex.split(os.environ.get('NEO_RUNNER',''))+[str(output)]+args.arguments
     if args.arguments[:1]==['--']:command=shlex.split(os.environ.get('NEO_RUNNER',''))+[str(output)]+args.arguments[1:]

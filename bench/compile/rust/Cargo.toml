@@ -1,0 +1,11 @@
+# One package per program, each with only its own dependencies, so a cold
+# build of one compiles exactly what that program needs. The release profile
+# is the one every Rust row of the runtime benchmarks uses.
+[workspace]
+resolver = "2"
+members = ["hello", "http", "json", "nbody", "fetch"]
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"

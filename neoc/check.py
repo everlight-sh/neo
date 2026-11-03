@@ -152,11 +152,10 @@ class Checker:
         self.require_capabilities(capabilities, e, env)
 
     def require_capabilities(self, needed, node, env):
-        from pathlib import Path
-        source = Path(getattr(env.fn, 'source', '')).resolve()
-        root = Path(__file__).resolve().parents[1]
+        from .trust import within, RUNTIME, STDLIB
+        source = getattr(env.fn, 'source', '')
         # Shipped runtime/library implementations form the audited syscall boundary.
-        trusted = source.is_relative_to(root/'runtime') or source.is_relative_to(root/'stdlib')
+        trusted = within(source, RUNTIME) or within(source, STDLIB)
         declared = env.fn.capabilities
         if declared is not None and not trusted and not set(needed) <= set(declared):
             self.err('missing effect capabilities: '+', '.join(sorted(set(needed)-set(declared))), node, env.fn)
@@ -203,12 +202,17 @@ class Checker:
         return t
 
     def prove(self, env: Env, goal: Formula, diagnostics=False):
-        status, cex = entails(env.facts, goal, diagnostics=diagnostics)
+        # A counterexample search is costly and most first attempts that fail
+        # are then proven with ambient facts; search only for goals that stay
+        # unproven, from the facts whose attempt the counterexample describes.
+        status, _ = entails(env.facts, goal, diagnostics=False)
         visible = [f for f, conds in self.ambient if conds <= env.conds] if status != "proven" else []
+        described = env.facts
         if visible:
-            st2, cex2 = entails(and_(env.facts, *visible), goal, diagnostics=diagnostics)
+            st2, _ = entails(and_(env.facts, *visible), goal, diagnostics=False)
             if st2 == "proven": return st2, None
-            if st2 == "unproven": cex = cex2
+            if st2 == "unproven": described = and_(env.facts, *visible)
+        cex = entails(described, goal, diagnostics=True)[1] if diagnostics and status != "proven" else None
         return status, cex
 
     def oblige(self, env: Env, kind: str, goal: Formula, node: S.Node, source: str, fixes: List[str]):
@@ -355,16 +359,26 @@ class Checker:
                 self.err('unknown effect capabilities: '+', '.join(sorted(set(function.capabilities)-allowed)), function, function)
         self.required_caps = {fn.name: ({'unsafe'} if fn.external else set(fn.capabilities or ())) for fn in self.order}
         self.required_caps.update({name:set(caps) for name,caps in self.precompiled.items()})
-        def effects(node):
-            out = set()
+        def summary(node, fixed, names):
+            """A body's capabilities are its own plus those required by the
+            functions it names; collect both once, then iterate on names."""
             if isinstance(node, S.Call):
-                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float','aes_hardware') or node.name in ('addr','data','view'): out.add('unsafe')
+                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float','aes_hardware') or node.name in ('addr','data','view'): fixed.add('unsafe')
                 signature=getattr(node,'indirect_signature',None)
-                if signature is not None:out |= set(signature.capabilities or ())
-                else:out |= self.required_caps.get(node.name,set())
+                if signature is not None:fixed |= set(signature.capabilities or ())
+                else:names.append(node.name)
                 if node.name == 'serve_effect' and len(node.args)==2 and isinstance(node.args[1], S.Var):
-                    out |= self.required_caps.get(node.args[1].name,set()) | {'net'}
-            for child in S.children(node): out |= effects(child)
+                    names.append(node.args[1].name); fixed.add('net')
+            for child in S.children(node): summary(child, fixed, names)
+            return fixed, names
+        summaries = {}
+        def effects(node):
+            # Indirect-call signatures appear during checking: summaries are
+            # taken per phase (cleared below once bodies are checked).
+            if id(node) not in summaries: summaries[id(node)] = summary(node, set(), [])
+            fixed, names = summaries[id(node)]
+            out = set(fixed)
+            for name in names: out |= self.required_caps.get(name,set())
             return out
         for _ in range(len(self.order)+1):
             changed = False
@@ -439,6 +453,7 @@ class Checker:
             self.function_runtime_checks[f.name]=self.runtime_checks-before_checks
         # Infer indirect-call effects after expression types are known, then
         # recheck callers so unannotated helpers cannot hide callback effects.
+        summaries.clear()
         for _ in range(len(self.order)+1):
             changed=False
             for function in self.order:

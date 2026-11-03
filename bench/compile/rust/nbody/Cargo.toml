@@ -1,0 +1,11 @@
+[package]
+name = "nbody"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nbody"
+path = "../../../rust/src/nbody.rs"
+
+[dependencies]
+rayon = "1"
