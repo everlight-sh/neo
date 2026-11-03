@@ -271,7 +271,8 @@ limit up to 1 GiB. Header/trailer limits are 16 KiB; chunk/trailer lines are
 bounded. Ambiguous framing, malformed fields and truncation are errors. The
 compatibility POST API stays available. HTTP/1.1 response headers and explicit
 keep-alive framing are available; the optional sibling `axon-libs/http-client`
-package adds bounded pool bookkeeping. HTTP/2 and redirects remain absent.
+package adds bounded pool bookkeeping. HTTP/2 is available over TLS through
+`std:https_client` (below); redirects remain absent.
 The server retains kernel workers and response batching.
 
 `std:tls` is an experimental TLS 1.3 client library outside the compiler core.
@@ -463,13 +464,20 @@ connection lives in the caller's arena and is reopened after any response
 that does not leave it reusable. A GET, HEAD or OPTIONS request that finds a
 reused connection closed is sent once more; other methods return the error.
 `http_client_disconnect` closes the connection but keeps the newest TLS session
-ticket, so the next connection resumes; `http_client_close` forgets it. `std:sse` incrementally frames SSE data/event/id/retry fields
+ticket, so the next connection resumes; `http_client_close` forgets it. Over TLS
+the client offers h2 and http/1.1 with ALPN and, when the server picks h2, speaks
+HTTP/2 (`std:http2`, one stream at a time on a kept-alive connection) with HPACK
+(`std:hpack`: static and dynamic tables, Huffman coding), CONTINUATION, padding,
+flow control in both directions, PING, RST_STREAM and GOAWAY; a request the
+server refused or never processed is sent again. Plain connections stay
+HTTP/1.1 (no h2c). `HttpExchange` carries the response's header fields and the
+protocol used. `std:sse` incrementally frames SSE data/event/id/retry fields
 across arbitrary chunks, supports BOM/CR/LF/CRLF, and bounds pending event data.
 Feed it decoded HTTP body chunks; EOF does not dispatch an unterminated event.
 The optional sibling `axon-libs/http-server` package adds an explicit chunked
 streaming writer and SSE flush; `axon-libs/http-client` supplies bounded
-origin-keyed pool bookkeeping. HTTP/2, redirects, proxies, compression and IPv6
-remain absent. TLS has cancellation-aware I/O and RSA/P-256 authentication,
+origin-keyed pool bookkeeping. Server-side HTTP/2, h2c, server push, redirects,
+proxies, compression and IPv6 remain absent. TLS has cancellation-aware I/O and RSA/P-256 authentication,
 but remains experimental without a security audit or general PKIX support.
 
 These additions support bounded text-agent components and protocol prototypes.

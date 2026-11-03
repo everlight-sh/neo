@@ -143,6 +143,7 @@ atomic batches and ordered cursors with explicit systems resource ownership.
 | `std:channel`, `std:cancel` | Bounded SPSC process messages, deadlines and cancellation |
 | `std:time`, `std:random` | Monotonic clocks and direct kernel randomness |
 | `std:dns`, `std:http_client` | DNS with TCP fallback and bounded streaming HTTP |
+| `std:https_client`, `std:http2`, `std:hpack` | Keep-alive HTTP client for one origin; HTTP/2 over TLS when ALPN selects h2 |
 | `std:tls` | Experimental TLS 1.3 with explicit RSA/P-256 trust anchors; see contract |
 | `std:reactor`, `std:datagram` | Kernel poll over generational interests and scoped IPv4 UDP |
 | `std:buffer` | Scoped private mutable bytes/words with checked access and copied snapshots |
@@ -156,7 +157,8 @@ Unpaired surrogate escapes, invalid UTF-8 and nesting deeper than 128 are reject
 Object access uses the last duplicate key. Typed finite float access and construction are available through the JSON and
 number modules. The compatibility POST helper retains a 1 MiB response
 limit. New streaming HTTP uses bounded buffers and an explicit configurable body
-limit. DNS and a separate experimental TLS library are available; HTTP/2 is not.
+limit. DNS and a separate experimental TLS library are available; the HTTPS
+client speaks HTTP/2 when the server selects it with ALPN.
 Unix timestamps and monotonic deadlines now have separate APIs.
 
 ## Application examples

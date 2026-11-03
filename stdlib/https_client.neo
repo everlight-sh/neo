@@ -1,4 +1,5 @@
 import "std:http_client"
+import "std:http2"
 import "std:tls"
 import "std:arena"
 import "std:socket_cancel"
@@ -17,23 +18,30 @@ fn http_plain_transport(socket:Ref<Socket>,cancel:Ref<Cancellation>) -> HttpIO<P
 fn http_tls_transport(socket:Ref<Socket>,session:Ref<TlsSession>) -> HttpIO<TLSHTTPCapture>
   = HttpIO::<TLSHTTPCapture> { context=TLSHTTPCapture { socket=socket,session=session },read=function(http_tls_read),write=function(http_tls_write) }
 
-; A keep-alive HTTP/1.1 client for one origin, plain or TLS. The connection
+; A keep-alive HTTP client for one origin, plain or TLS. The connection
 ; lives in an arena the caller owns: http_send opens it on first use and after
-; any response that does not leave it reusable. When a reused connection turns
-; out to be closed before any response arrives, a GET, HEAD or OPTIONS request
-; is sent once more on a new connection, as Go's net/http does; other methods
-; return the error, since repeating them could repeat a side effect.
+; any response that does not leave it reusable. Over TLS the client offers h2
+; and http/1.1 with ALPN and speaks HTTP/2 (std:http2, one stream at a time) when
+; the server picks h2; plain connections use HTTP/1.1. When a reused connection
+; turns out to be closed before any response arrives, a GET, HEAD or OPTIONS
+; request is sent once more on a new connection, as Go's net/http does; other
+; methods return the error, since repeating them could repeat a side effect. A
+; request an HTTP/2 server refused or never processed (REFUSED_STREAM, or above
+; the last stream id of a GOAWAY) is sent again whatever its method.
 ; connections counts the opened ones. Over TLS, the newest session ticket is kept
 ; when a connection closes and offered once by the next one, which then resumes
 ; without a certificate exchange; resumptions counts those. http_client_disconnect
 ; closes the connection and keeps the ticket; http_client_close forgets it.
 type HttpClient = { host:Arr u8 _,address:Arr u8 _,port:i64,tls:bool,roots:Arr Certificate _,
-  socket:Option<Ref<Socket>>,session:Option<Ref<TlsSession>>,connections:i64,ticket:TlsTicket,resumptions:i64 }
-type HttpExchange = { client:HttpClient,response:HttpResult }
+  socket:Option<Ref<Socket>>,session:Option<Ref<TlsSession>>,connections:i64,ticket:TlsTicket,resumptions:i64,h2:Http2 }
+; headers: the response's header fields, names in lowercase; protocol: "h2" or
+; "http/1.1", or "" when no response arrived.
+type HttpExchange = { client:HttpClient,response:HttpResult,headers:Arr HttpHeader _,protocol:Arr u8 _ }
 type SocketHTTPCapture = { socket:Ref<Socket> }
 private type HttpConnect = { client:HttpClient,ok:bool,error:Error }
-private type HttpOutcome = { response:HttpResult,reusable:bool,retry:bool }
-private type HttpAttempt = { client:HttpClient,response:HttpResult,retry:bool }
+private type HttpOutcome = { response:HttpResult,headers:Arr HttpHeader _,reusable:bool,retry:bool,unprocessed:bool,h2:Http2 }
+private type HttpAttempt = { client:HttpClient,response:HttpResult,headers:Arr HttpHeader _,protocol:Arr u8 _,retry:bool,unprocessed:bool }
+private fn http_no_fields() -> Arr HttpHeader _ = arr(i in 0..0) HttpHeader { name="",value="" }
 
 effect(net,time,process) fn http_socket_read(context:SocketHTTPCapture,deadline:i64) -> BytesResult
   = socket_read(borrow_ref(context.socket),deadline)
@@ -45,7 +53,7 @@ fn http_socket_transport(socket:Ref<Socket>) -> HttpIO<SocketHTTPCapture>
 ; Plain HTTP to host:port, resolved when the client connects.
 fn http_client(host:Arr u8 n,port:i64) -> HttpClient
   = HttpClient { host=host,address="",port=port,tls=false,roots=arr(i in 0..0) x509_parse(""),
-      socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),connections=0,ticket=tls_no_ticket(),resumptions=0 }
+      socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),connections=0,ticket=tls_no_ticket(),resumptions=0,h2=http2_connection() }
 ; HTTPS to host:port, trusting roots.
 fn https_client(host:Arr u8 n,port:i64,roots:Arr Certificate m) -> HttpClient = http_client(host,port) with { tls=true,roots=roots }
 ; Connects to an IPv4 address instead of resolving the host, which still names
@@ -57,7 +65,7 @@ fn http_client_at(move client:HttpClient,address:Arr u8 n) -> HttpClient = clien
 effect(fs,net,process) fn http_client_close(move client:HttpClient) -> HttpClient
   = let ended=match client.session { None => noop(),Some(session) => ref_release(session) } in
     let closed=match client.socket { None => noop(),Some(socket) => ref_release(socket) } in
-    client with { socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),ticket=tls_no_ticket() }
+    client with { socket=None::<Ref<Socket>>(),session=None::<Ref<TlsSession>>(),ticket=tls_no_ticket(),h2=http2_connection() }
 ; Closes the client's connection, if any, but keeps the newest TLS session ticket,
 ; so that the next request's new connection resumes the session.
 effect(fs,net,process) fn http_client_disconnect(move client:HttpClient) -> HttpClient
@@ -77,9 +85,11 @@ private effect(fs,net,time,process) fn http_client_connect(arena:Arena,move clie
     if !connected.ok then HttpConnect { client=http_client_disconnect(client),ok=false,error=connected.error } else
     if !client.tls then HttpConnect { client=client,ok=true,error=no_error() } else
     ; The ticket is offered once, whether or not the server accepts it.
-    using session=tls_connect_resume(borrow_ref(socket_ref),client.host,client.roots,deadline,client.ticket) in
-    let secured=tls_status(session) in let resumed=secured.ok && tls_resumed(session) in let session_ref=adopt(session,arena) in
-    let client=client with { session=Some::<Ref<TlsSession>>(session_ref),ticket=tls_no_ticket(),resumptions=if resumed then client.resumptions+1 else client.resumptions } in
+    using session=tls_connect_h2(borrow_ref(socket_ref),client.host,client.roots,deadline,client.ticket) in
+    let secured=tls_status(session) in let resumed=secured.ok && tls_resumed(session) in
+    let h2=secured.ok && str_equal(tls_alpn(session),"h2") in let session_ref=adopt(session,arena) in
+    let client=client with { session=Some::<Ref<TlsSession>>(session_ref),ticket=tls_no_ticket(),resumptions=if resumed then client.resumptions+1 else client.resumptions,
+      h2=http2_connection() with { active=h2 } } in
     if !secured.ok then HttpConnect { client=http_client_disconnect(client),ok=false,error=secured.error } else HttpConnect { client=client,ok=true,error=no_error() }
 
 ; One request and its whole response over io. retry: the connection failed
@@ -87,34 +97,49 @@ private effect(fs,net,time,process) fn http_client_connect(arena:Arena,move clie
 ; plain is the socket when io reads it directly, for http_read_length_body.
 private effect(net,time,process) fn http_exchange_io<C>(io:HttpIO<C>,plain:Option<Ref<Socket>>,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
   = let reader=http_start_keepalive_io(io,method,path,host,body,deadline,limit,arr(i in 0..0) HttpHeader { name="",value="" }) in
-    if !reader.ok then HttpOutcome { response=net_error(reader.error.code,reader.error.message),reusable=false,
-      retry=reader.status==0 && (reader.error.code==5 || reader.error.code==32 || reader.error.code==104) } else
+    if !reader.ok then HttpOutcome { response=net_error(reader.error.code,reader.error.message),headers=http_no_fields(),reusable=false,
+      retry=reader.status==0 && (reader.error.code==5 || reader.error.code==32 || reader.error.code==104),unprocessed=false,h2=http2_connection() } else
     let reader=match plain { None => reader, Some(socket) => http_read_length_body(borrow_ref(socket),reader,deadline) } in
     loop(state=reader,out="") while state.ok && !state.done next(http_read_next_io(io,state,deadline),http_body_append(out,state.chunk))
-      yield if !state.ok then HttpOutcome { response=net_error(state.error.code,state.error.message),reusable=false,retry=false }
-        else HttpOutcome { response=HttpResult { ok=true,status=state.status,body=http_body_append(out,state.chunk),error=no_error() },
-          reusable=http_reader_reusable(state),retry=false }
+      yield if !state.ok then HttpOutcome { response=net_error(state.error.code,state.error.message),headers=http_no_fields(),reusable=false,retry=false,unprocessed=false,h2=http2_connection() }
+        else HttpOutcome { response=HttpResult { ok=true,status=state.status,body=http_body_append(out,state.chunk),error=no_error() },headers=state.headers,
+          reusable=http_reader_reusable(state),retry=false,unprocessed=false,h2=http2_connection() }
+private effect(net,time,process) fn http2_outcome<C>(io:HttpIO<C>,conn:Http2,method:Arr u8 m,path:Arr u8 k,host:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
+  = let result=http2_exchange(io,conn,method,path,host,body,deadline,limit) in
+    HttpOutcome { response=result.response,headers=result.headers,reusable=result.reusable,retry=result.retry,unprocessed=result.unprocessed,h2=result.conn }
 private effect(net,time,process) fn http_client_exchange(client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpOutcome
   = let host=concat(client.host,":",int_text(client.port)) in
     match client.socket {
-      None => HttpOutcome { response=net_error(9,"HTTP client is not connected"),reusable=false,retry=false },
+      None => HttpOutcome { response=net_error(9,"HTTP client is not connected"),headers=http_no_fields(),reusable=false,retry=false,unprocessed=false,h2=client.h2 },
       Some(socket) => match client.session {
         None => http_exchange_io(http_socket_transport(socket),Some::<Ref<Socket>>(socket),method,path,host,body,deadline,limit),
-        Some(session) => http_exchange_io(http_tls_transport(socket,session),None::<Ref<Socket>>(),method,path,host,body,deadline,limit) } }
+        Some(session) => if client.h2.active then http2_outcome(http_tls_transport(socket,session),client.h2,method,path,host,body,deadline,limit)
+          else http_exchange_io(http_tls_transport(socket,session),None::<Ref<Socket>>(),method,path,host,body,deadline,limit) } }
 private effect(fs,net,time,process) fn http_client_attempt(arena:Arena,move client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,deadline:i64,limit:i64) -> HttpAttempt
   = let connected=if option_is_some(client.socket) then HttpConnect { client=client,ok=true,error=no_error() } else http_client_connect(arena,client,deadline) in
-    if !connected.ok then HttpAttempt { client=connected.client,response=net_error(connected.error.code,connected.error.message),retry=false } else
+    if !connected.ok then HttpAttempt { client=connected.client,response=net_error(connected.error.code,connected.error.message),headers=http_no_fields(),protocol="",retry=false,unprocessed=false } else
+    let h2=connected.client.h2.active in
     let outcome=http_client_exchange(connected.client,method,path,body,deadline,limit) in
-    HttpAttempt { client=if outcome.reusable then connected.client else http_client_disconnect(connected.client),response=outcome.response,retry=outcome.retry }
+    let client=connected.client with { h2=outcome.h2 } in
+    HttpAttempt { client=if outcome.reusable then client else http_client_disconnect(client),response=outcome.response,headers=outcome.headers,
+      protocol=if !outcome.response.ok then "" else if h2 then "h2" else "http/1.1",retry=outcome.retry,unprocessed=outcome.unprocessed }
 
 ; One request over the client's connection, which it opens or replaces as
 ; needed. timeout covers the whole exchange, a retry included; limit bounds
 ; the body.
 effect(fs,net,time,process) fn http_send(arena:Arena,move client:HttpClient,method:Arr u8 m,path:Arr u8 k,body:Arr u8 q,timeout:i64,limit:i64) -> HttpExchange
   = let timer=deadline_after(timeout) in
-    if !timer.ok then HttpExchange { client=client,response=net_error(timer.error.code,timer.error.message) } else
+    if !timer.ok then HttpExchange { client=client,response=net_error(timer.error.code,timer.error.message),headers=http_no_fields(),protocol="" } else
     let reused=option_is_some(client.socket) in
     let first=http_client_attempt(arena,client,method,path,body,timer.value,limit) in
-    if !(reused && first.retry && http_replayable(method)) then HttpExchange { client=first.client,response=first.response } else
+    if !(first.retry && (first.unprocessed || reused && http_replayable(method))) then HttpExchange { client=first.client,response=first.response,headers=first.headers,protocol=first.protocol } else
     let second=http_client_attempt(arena,first.client,method,path,body,timer.value,limit) in
-    HttpExchange { client=second.client,response=second.response }
+    HttpExchange { client=second.client,response=second.response,headers=second.headers,protocol=second.protocol }
+
+; The value of a response header that appears once, by case-insensitive name.
+fn http_exchange_header(exchange:HttpExchange,name:Arr u8 n) -> BytesResult
+  = let wanted=http_lower(name) in
+    loop(i=0,result=bytes_error(2,"response header absent",0),seen=0) while i<len(exchange.headers) next(i+1,
+      check i>=0 && i<len(exchange.headers) in if !str_equal(exchange.headers[i].name,wanted) then result else
+        if seen>0 then bytes_error(71,"duplicate response header",0) else bytes_ok(exchange.headers[i].value),
+      check i>=0 && i<len(exchange.headers) in seen+(if str_equal(exchange.headers[i].name,wanted) then 1 else 0)) yield result

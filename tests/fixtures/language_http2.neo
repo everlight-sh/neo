@@ -1,0 +1,56 @@
+import "std:https_client"
+import "std:io"
+import "std:time"
+import "std:debug"
+import "std:sha256"
+
+; HttpClient requests over HTTPS, which negotiates h2 or http/1.1 with ALPN:
+;   language_http2 HOST PORT TRUST ADDRESS STEP...
+; TRUST is a DER root certificate file or "system"; ADDRESS an IPv4 address, or "-"
+; to resolve HOST. A STEP is METHOD:PATH, or METHOD:PATH:SIZE to send a body of
+; SIZE bytes (byte i is i mod 251), or "disconnect" (close the connection, keep the
+; session ticket) or "close" (forget the ticket too). Each request prints
+;   METHOD PATH -> STATUS PROTOCOL connections=N resumptions=M body=LENGTH sha256=HEX
+; then "  name: value" for each response header whose name starts with "x-neo",
+; or "METHOD PATH -> error CODE MESSAGE".
+type Run = { client:HttpClient, out:Arr u8 _ }
+
+fn hex(bytes:Arr u8 n) -> Arr u8 _
+  = arr(i in 0..n*2) u8(check i/2>=0 && i/2<n in let b=i64(bytes[i/2]) in let d=if i%2==0 then shift_right(b,4) else bit_and(b,15) in if d<10 then 48+d else 87+d)
+fn upload(size:i64) -> Arr u8 _ = if size<=0 then "" else arr(i in 0..size) u8(i%251)
+fn shown_headers(headers:Arr HttpHeader n) -> Arr u8 _
+  = loop(i=0,out="") while i<n next(i+1,check i>=0 && i<n in
+      if str_starts(headers[i].name,"x-neo") then concat(out,"  ",headers[i].name,": ",headers[i].value,"\n") else out) yield out
+
+effect(fs,net,time,process) fn request(arena:Arena, move run:Run, method:Arr u8 m, path:Arr u8 k, size:i64) -> Run
+  = let sent=http_send(arena,run.client,method,path,upload(size),20000,8388608) in
+    let client=sent.client in let response=sent.response in
+    let line=if !response.ok then concat(method," ",path," -> error ",int_text(response.error.code)," ",response.error.message,"\n") else
+      concat(method," ",path," -> ",int_text(response.status)," ",sent.protocol," connections=",int_text(client.connections),
+        " resumptions=",int_text(client.resumptions)," body=",int_text(len(response.body))," sha256=",hex(sha256(response.body)),"\n",shown_headers(sent.headers)) in
+    Run { client=client, out=concat(run.out,line) }
+
+effect(fs,net,time,process) fn step(arena:Arena, move run:Run, spec:Arr u8 k) -> Run
+  = if str_equal(spec,"disconnect") then run with { client=http_client_disconnect(run.client) } else
+    if str_equal(spec,"close") then run with { client=http_client_close(run.client) } else
+    let first=str_find(spec,":") in if !first.present then run with { out=concat(run.out,"bad step ",spec,"\n") } else
+    let method=str_slice(spec,0,first.value) in let rest=str_slice(spec,first.value+1,len(spec)) in
+    let second=str_find(rest,":") in
+    let path=if second.present then str_slice(rest,0,second.value) else rest in
+    let size=if second.present then int_parse(str_slice(rest,second.value+1,len(rest))) else int_parse("0") in
+    request(arena,run,method,path,if size.ok then size.value else 0)
+
+effect(fs,net,time,process,env) fn steps(arena:Arena, move run:Run) -> Run
+  = loop(i=5,run=run) while cli_arg(i).present next(i+1,step(arena,run,cli_arg(i).value)) yield run
+
+effect(fs,net,time,process,env) fn main() -> unit
+  = let host=cli_arg(1) in let port=int_parse(cli_arg(2).value) in let trust=cli_arg(3) in let address=cli_arg(4) in
+    check host.present && port.ok && trust.present && address.present in
+    let roots=if str_equal(trust.value,"system") then tls_system_roots() else
+      let der=fs_read(trust.value) in arr(i in 0..1) x509_parse(if der.ok then der.value else "") in
+    let baseline=live_resources() in
+    let client=https_client(host.value,port.value,roots) in
+    let client=if str_equal(address.value,"-") then client else http_client_at(client,address.value) in
+    let out=using arena=new_arena(8) in let run=steps(arena,Run { client=client, out="" }) in
+      let closed=http_client_close(run.client) in run.out in
+    let shown=print_out(out) in let live=live_resources() in check live==baseline in noop()

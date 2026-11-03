@@ -5,8 +5,10 @@ OpenSSL s_server is restricted to AES-128-GCM, to P-256 (a HelloRetryRequest
 naming P-256), to P-256 with a stateless cookie, and to a group the client does
 not offer (which must fail cleanly). Each case checks the negotiated suite and
 group the client reports. OpenSSL then sends KeyUpdate (requesting one back)
-before its answer, with each suite. Live sites then use the system trust store; their
-results are printed, and with --require-live every one must answer.
+before its answer, with each suite. Live sites then use the system trust store, first
+over std:tls directly (HTTP/1.1), then with std:https_client's HttpClient,
+which offers h2 with ALPN and speaks HTTP/2 to the sites that choose it; their
+results are printed, and with --require-live every one must answer both ways.
 
   python3 tests/tls_web_language.py [--require-live]
 """
@@ -85,10 +87,10 @@ def client(binary, host, port, trust):
 def main():
     require_live = '--require-live' in sys.argv
     with tempfile.TemporaryDirectory(prefix='neo-tls-web-') as tmp:
-        root = certificates(Path(tmp)); binary = root / 'tls-web'
-        r = subprocess.run(['python3', '-m', 'neoc', 'build', 'tests/fixtures/language_tls_web.neo', '-o', str(binary)],
-                           cwd=ROOT, capture_output=True, text=True)
-        assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-2000:])
+        root = certificates(Path(tmp)); binary = root / 'tls-web'; http2 = root / 'http2'
+        for source, target in (('tests/fixtures/language_tls_web.neo', binary), ('tests/fixtures/language_http2.neo', http2)):
+            r = subprocess.run(['python3', '-m', 'neoc', 'build', source, '-o', str(target)], cwd=ROOT, capture_output=True, text=True)
+            assert r.returncode == 0, (source, r.stdout[-3000:], r.stderr[-2000:])
         # OpenSSL follows the client's order: AES-128-GCM first with AES-NI, else ChaCha20-Poly1305.
         first = tls_language().default_suite(); name = 'AES-128-GCM' if first == 4865 else 'ChaCha20-Poly1305'
         cases = [(f'{name}, X25519', [], f'suite={first} group=29'),
@@ -117,15 +119,19 @@ def main():
             code, lines, err = key_update(binary, root, suite)
             assert code == 0 and lines and lines[-1] == f'suite={number} group=29 HTTP/1.0 200 after KeyUpdate', (suite, code, lines, err)
             print(f'PASS KeyUpdate with {suite}: {lines[-1]}', flush=True)
-        failures = []
+        failures, h2 = [], 0
         for site in SITES:
             code, lines, err = client(binary, site, 443, 'system')
             line = lines[-1] if lines else err[-160:]
             ok = code == 0 and 'HTTP/1.1' in line and 'suite=' in line
+            r = subprocess.run(RUNNER + [str(http2), site, '443', 'system', '-', 'GET:/'], capture_output=True, text=True, timeout=60)
+            fetched = r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else r.stderr.strip()[-160:]
+            ok = ok and r.returncode == 0 and ' -> ' in fetched and ' -> error' not in fetched
+            h2 += ' h2 ' in fetched
             if not ok:
                 failures.append(site)
-            print(f'{"LIVE" if ok else "FAIL"} {site}: {line} ({lines[0] if lines else ""})', flush=True)
-        print(f'live sites: {len(SITES) - len(failures)}/{len(SITES)} answered', flush=True)
+            print(f'{"LIVE" if ok else "FAIL"} {site}: {line} ({lines[0] if lines else ""}); HttpClient: {fetched.split(" sha256=")[0]}', flush=True)
+        print(f'live sites: {len(SITES) - len(failures)}/{len(SITES)} answered, {h2} over h2', flush=True)
         assert not (require_live and failures), failures
 
 

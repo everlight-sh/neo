@@ -1,0 +1,252 @@
+import "std:http_client"
+import "std:hpack"
+
+; The client side of an HTTP/2 connection (RFC 9113) over any HttpIO transport, in
+; practice TLS after ALPN chose h2. One stream at a time: requests on a kept-alive
+; connection use stream ids 1, 3, 5 and so on. Responses may use HPACK's dynamic
+; table and Huffman coding, CONTINUATION frames and padding, and need no
+; Content-Length: END_STREAM ends the body. Flow control: the client advertises a
+; 16 MiB stream window and raises the connection window to 16 MiB with its preface,
+; then returns credit with WINDOW_UPDATE once half of either has been used; request
+; bodies wait for the server's credit. PING is answered, PUSH_PROMISE is refused
+; (SETTINGS_ENABLE_PUSH is 0), RST_STREAM fails the request but keeps the
+; connection, and GOAWAY ends the connection after the current stream, or fails a
+; stream the server never processed so that it can be sent again elsewhere.
+
+; Connection state between requests. buffer holds received bytes not yet framed;
+; frame and window are the server's SETTINGS_MAX_FRAME_SIZE and
+; SETTINGS_INITIAL_WINDOW_SIZE; credit is the connection window for request bodies;
+; consumed counts DATA bytes since the client last returned connection credit;
+; goaway is the last stream id of a GOAWAY, or -1.
+type Http2 = { active:bool,started:bool,upcoming:i64,buffer:Arr u8 _,table:HpackTable,frame:i64,window:i64,credit:i64,consumed:i64,goaway:i64 }
+; A finished exchange: the connection state, the response and its header fields
+; (lowercase names, pseudo-header fields removed). reusable: the connection can
+; carry another request. retry: the request failed before any response, either on
+; a reused connection that turned out to be closed, or because unprocessed: the
+; server refused the stream or announced with GOAWAY that it will not process it,
+; so it can be sent again whatever its method.
+type Http2Result = { conn:Http2,response:HttpResult,headers:Arr HttpHeader _,reusable:bool,retry:bool,unprocessed:bool }
+private type Http2Frame = { ok:bool,error:Error,kind:i64,flags:i64,stream:i64,payload:Arr u8 _,conn:Http2 }
+private type Http2Fill = { ok:bool,error:Error,conn:Http2 }
+; One stream. block collects a header block until END_HEADERS (from the frame on
+; stream `owner`, with END_STREAM in `ending`); window is the stream's send window and
+; consumed the DATA bytes since the client last returned stream credit. fatal: the
+; connection cannot be used again. seen: a frame for this stream arrived.
+private type Http2Stream = { conn:Http2,id:i64,ok:bool,error:Error,fatal:bool,retry:bool,seen:bool,status:i64,headers:Arr HttpHeader _,
+  block:Arr u8 _,owner:i64,ending:bool,continuing:bool,interim:i64,body:Arr u8 _,done:bool,sent:i64,window:i64,consumed:i64,head:bool }
+private type Http2Fields = { status:i64,fields:Arr HttpHeader _ }
+
+; The window the client gives each stream and the connection.
+private fn http2_receive_window() -> i64 = 16777216
+private fn http2_header_list_limit() -> i64 = 262144
+
+; A fresh connection's state (inactive until a connection negotiates h2).
+fn http2_connection() -> Http2
+  = Http2 { active=false,started=false,upcoming=1,buffer="",table=hpack_table(4096),frame=16384,window=65535,credit=65535,consumed=0,goaway=-1 }
+
+private fn http2_u32(value:i64) -> Arr u8 _ = arr(i in 0..4) u8(shift_right(value,(3-i)*8))
+private fn http2_get32(bytes:Arr u8 n,at:i64) -> i64
+  = if at<0 || at>n-4 then -1 else str_byte(bytes,at)*16777216+str_byte(bytes,at+1)*65536+str_byte(bytes,at+2)*256+str_byte(bytes,at+3)
+private fn http2_frame(kind:i64,flags:i64,stream:i64,payload:Arr u8 n) -> Arr u8 _
+  = concat(arr(i in 0..3) u8(shift_right(n,(2-i)*8)),arr(i in 0..2) u8(if i==0 then kind else flags),http2_u32(stream),payload)
+; The connection preface, SETTINGS (no push, a 16 MiB initial stream window, a 256 KiB
+; header list) and the connection WINDOW_UPDATE to 16 MiB.
+private fn http2_preface() -> Arr u8 _
+  = concat("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",
+      http2_frame(4,0,0,concat("\0\x02",http2_u32(0),"\0\x04",http2_u32(http2_receive_window()),"\0\x06",http2_u32(http2_header_list_limit()))),
+      http2_frame(8,0,0,http2_u32(http2_receive_window()-65535)))
+; Request pseudo-header fields, indexed from the static table where it has them.
+private fn http2_request_block(method:Arr u8 m,path:Arr u8 k,authority:Arr u8 h,size:i64,length:bool) -> Arr u8 _
+  = concat(if str_equal(method,"GET") then "\x82" else if str_equal(method,"POST") then "\x83" else concat("\x02",hpack_integer(len(method),7,0),method),
+      "\x87\x01",hpack_integer(h,7,0),authority,
+      if str_equal(path,"/") then "\x84" else concat("\x04",hpack_integer(k,7,0),path),
+      if length then concat(hpack_integer(28,4,0),hpack_integer(len(int_text(size)),7,0),int_text(size)) else "")
+
+private effect(net,time,process) fn http2_write<C>(io:HttpIO<C>,bytes:Arr u8 n,deadline:i64) -> IntResult
+  = let invoke=io.write in let written=invoke(io.context,bytes,deadline) in
+    if written.ok && written.value!=n then int_error(5,"incomplete HTTP/2 write",0) else written
+private effect(net,time,process) fn http2_fill<C>(io:HttpIO<C>,move conn:Http2,deadline:i64) -> Http2Fill
+  = let invoke=io.read in let received=invoke(io.context,deadline) in
+    if !received.ok then Http2Fill { ok=false,error=received.error,conn=conn } else
+    if len(received.value)==0 then Http2Fill { ok=false,error=Error { code=5,message="HTTP/2 connection closed",position=0 },conn=conn } else
+      let buffer=conn.buffer in Http2Fill { ok=true,error=no_error(),conn=conn with { buffer=if len(buffer)==0 then received.value else concat(buffer,received.value) } }
+private fn http2_size(buffer:Arr u8 n) -> i64 = if n<3 then -1 else str_byte(buffer,0)*65536+str_byte(buffer,1)*256+str_byte(buffer,2)
+; A whole frame is buffered, or its header announces more than the 16 KiB maximum.
+private fn http2_complete(buffer:Arr u8 n) -> bool = n>=9 && (http2_size(buffer)>16384 || n>=9+http2_size(buffer))
+private effect(net,time,process) fn http2_read_frame<C>(io:HttpIO<C>,move conn:Http2,deadline:i64) -> Http2Frame
+  = let filled=loop(f=Http2Fill { ok=true,error=no_error(),conn=conn }) while f.ok && !http2_complete(f.conn.buffer)
+      next(http2_fill(io,f.conn,deadline)) yield f in
+    let buffer=filled.conn.buffer in let size=http2_size(buffer) in
+    if !filled.ok then Http2Frame { ok=false,error=filled.error,kind=0,flags=0,stream=0,payload="",conn=filled.conn } else
+    if size>16384 then Http2Frame { ok=false,error=Error { code=71,message="HTTP/2 frame exceeds SETTINGS_MAX_FRAME_SIZE",position=0 },kind=0,flags=0,stream=0,payload="",conn=filled.conn } else
+      Http2Frame { ok=true,error=no_error(),kind=str_byte(buffer,3),flags=str_byte(buffer,4),stream=bit_and(http2_get32(buffer,5),2147483647),
+        payload=str_slice(buffer,9,9+size),conn=filled.conn with { buffer=if len(buffer)==9+size then "" else str_slice(buffer,9+size,len(buffer)) } }
+
+private fn http2_fail(move s:Http2Stream,code:i64,message:Arr u8 n,fatal:bool) -> Http2Stream
+  = s with { ok=false,error=Error { code=code,message=message,position=0 },fatal=s.fatal || fatal }
+; A connection error (RFC 9113 5.4.1): the connection is not used again.
+private fn http2_broken(move s:Http2Stream,message:Arr u8 n) -> Http2Stream = http2_fail(s,71,message,true)
+private effect(net,time,process) fn http2_send<C>(io:HttpIO<C>,move s:Http2Stream,bytes:Arr u8 n,deadline:i64) -> Http2Stream
+  = let written=http2_write(io,bytes,deadline) in if written.ok then s else http2_fail(s,written.error.code,written.error.message,true)
+
+; Response header fields (RFC 9113 8.3): :status first and only once, then
+; lowercase names without connection-specific fields. status is -1 when malformed.
+private fn http2_name_valid(name:Arr u8 n) -> bool
+  = n>0 && !str_equal(name,"connection") && !str_equal(name,"keep-alive") && !str_equal(name,"proxy-connection") &&
+    !str_equal(name,"transfer-encoding") && !str_equal(name,"upgrade") &&
+    loop(i=0,valid=true) while valid && i<n next(i+1,let c=str_byte(name,i) in !(c>=65 && c<=90) && c>32 && c!=127) yield valid
+private fn http2_status(value:Arr u8 n) -> i64
+  = if n!=3 then -1 else let parsed=int_parse(value) in if parsed.ok && parsed.value>=100 && parsed.value<=599 && str_byte(value,0)!=43 then parsed.value else -1
+private fn http2_response_fields(headers:Arr HttpHeader n) -> Http2Fields
+  = loop(i=0,status=0,regular=false,fields=hpack_no_fields()) while i<n && status>=0
+      next(i+1,check i>=0 && i<n in
+        if str_starts(headers[i].name,":") then (if regular || status!=0 || !str_equal(headers[i].name,":status") then -1 else http2_status(headers[i].value)) else
+        if http2_name_valid(headers[i].name) then status else -1,
+        check i>=0 && i<n in regular || !str_starts(headers[i].name,":"),
+        check i>=0 && i<n in if str_starts(headers[i].name,":") then fields else push(fields,headers[i]))
+      yield Http2Fields { status=if status==0 then -1 else status,fields=fields }
+private fn hpack_no_fields() -> Arr HttpHeader _ = arr(i in 0..0) HttpHeader { name="",value="" }
+
+; A complete header block: decoded for every stream, which keeps the HPACK table
+; in step; on this stream it is the response (after any 1xx) or its trailers.
+private fn http2_block(move s:Http2Stream,limit:i64) -> Http2Stream
+  = let table=s.conn.table in let decoded=hpack_decode(table,s.block,http2_header_list_limit()) in
+    if !decoded.ok then http2_broken(s,"invalid HTTP/2 header block (HPACK)") else
+    let conn=s.conn in let s=s with { conn=conn with { table=decoded.table },block="",continuing=false } in
+    if s.owner!=s.id then s else
+    if s.status>0 then (if s.ending then s with { done=true } else http2_broken(s,"HTTP/2 trailers without END_STREAM")) else
+    let parsed=http2_response_fields(decoded.headers) in
+    if parsed.status<0 || parsed.status==101 then http2_fail(s,71,"malformed HTTP/2 response header fields",false) else
+    if parsed.status<200 then (if s.ending || s.interim>=8 then http2_fail(s,71,"malformed or too many HTTP/2 informational responses",false) else s with { interim=s.interim+1 }) else
+      s with { status=parsed.status,headers=parsed.fields,done=s.ending }
+
+; HEADERS: optional padding and priority, then a header block fragment.
+private fn http2_headers(move s:Http2Stream,frame:Http2Frame,limit:i64) -> Http2Stream
+  = let size=len(frame.payload) in let padded=bit_and(frame.flags,8)!=0 in let pad=if padded then str_byte(frame.payload,0) else 0 in
+    let start=(if padded then 1 else 0)+(if bit_and(frame.flags,32)!=0 then 5 else 0) in
+    if frame.stream==0 || bit_and(frame.stream,1)==0 || frame.stream>s.id || start>size-pad then http2_broken(s,"invalid HTTP/2 HEADERS frame") else
+    let s=s with { block=str_slice(frame.payload,start,size-pad),owner=frame.stream,ending=bit_and(frame.flags,1)!=0,seen=s.seen || frame.stream==s.id } in
+    if bit_and(frame.flags,4)!=0 then http2_block(s,limit) else s with { continuing=true }
+private fn http2_continuation(move s:Http2Stream,frame:Http2Frame,limit:i64) -> Http2Stream
+  = if frame.stream!=s.owner || len(s.block)+len(frame.payload)>http2_header_list_limit() then http2_broken(s,"invalid or oversized HTTP/2 CONTINUATION") else
+    let block=s.block in let s=s with { block=concat(block,frame.payload) } in
+    if bit_and(frame.flags,4)!=0 then http2_block(s,limit) else s
+
+; DATA: the whole payload counts against flow control, padding included.
+private effect(net,time,process) fn http2_data<C>(io:HttpIO<C>,move s:Http2Stream,frame:Http2Frame,deadline:i64,limit:i64) -> Http2Stream
+  = let size=len(frame.payload) in let padded=bit_and(frame.flags,8)!=0 in let pad=if padded then str_byte(frame.payload,0) else 0 in
+    let consumed=s.conn.consumed+size in let mine=frame.stream==s.id in
+    if frame.stream==0 || padded && pad>=size || consumed>http2_receive_window() then http2_broken(s,"invalid HTTP/2 DATA frame or flow control") else
+    if mine && (s.status==0 || s.done) then http2_broken(s,"HTTP/2 DATA before response headers") else
+    let data=if mine then str_slice(frame.payload,if padded then 1 else 0,size-pad) else "" in
+    if mine && len(data)>limit-len(s.body) then http2_fail(s,27,"HTTP body exceeds configured limit",true) else
+    let ending=mine && bit_and(frame.flags,1)!=0 in let stream=if mine then s.consumed+size else s.consumed in
+    let half=http2_receive_window()/2 in
+    let credit=concat(if consumed>=half then http2_frame(8,0,0,http2_u32(consumed)) else "",
+      if !ending && stream>=half then http2_frame(8,0,s.id,http2_u32(stream)) else "") in
+    let body=s.body in let conn=s.conn in
+    let s=s with { body=if len(data)==0 then body else http_body_append(body,data),done=ending,consumed=if stream>=half then 0 else stream,
+      conn=conn with { consumed=if consumed>=half then 0 else consumed },seen=s.seen || mine } in
+    if len(credit)==0 then s else http2_send(io,s,credit,deadline)
+
+; SETTINGS from the server (RFC 9113 6.5.2), acknowledged at once. A new initial
+; window moves the open stream's send window by the difference.
+private fn http2_setting_valid(id:i64,value:i64) -> bool
+  = if id==2 then value==0 else if id==4 then value>=0 && value<=2147483647 else if id==5 then value>=16384 && value<=16777215 else true
+private effect(net,time,process) fn http2_settings<C>(io:HttpIO<C>,move s:Http2Stream,frame:Http2Frame,deadline:i64) -> Http2Stream
+  = let size=len(frame.payload) in
+    if frame.stream!=0 || (bit_and(frame.flags,1)!=0 && size!=0) || size%6!=0 then http2_broken(s,"invalid HTTP/2 SETTINGS frame") else
+    if bit_and(frame.flags,1)!=0 then s else
+    let payload=frame.payload in
+    let valid=loop(at=0,valid=true) while valid && at<size next(at+6,http2_setting_valid(dns_u16(payload,at),http2_get32(payload,at+2))) yield valid in
+    if !valid then http2_broken(s,"invalid HTTP/2 SETTINGS value") else
+    let frame_size=loop(at=0,value=s.conn.frame) while at<size next(at+6,if dns_u16(payload,at)==5 then http2_get32(payload,at+2) else value) yield value in
+    let window=loop(at=0,value=s.conn.window) while at<size next(at+6,if dns_u16(payload,at)==4 then http2_get32(payload,at+2) else value) yield value in
+    let moved=s.window+window-s.conn.window in
+    if moved>2147483647 then http2_broken(s,"HTTP/2 SETTINGS overflow the stream window") else
+    let conn=s.conn in http2_send(io,s with { window=moved,conn=conn with { frame=frame_size,window=window } },http2_frame(4,1,0,""),deadline)
+
+private effect(net,time,process) fn http2_ping<C>(io:HttpIO<C>,move s:Http2Stream,frame:Http2Frame,deadline:i64) -> Http2Stream
+  = if frame.stream!=0 || len(frame.payload)!=8 then http2_broken(s,"invalid HTTP/2 PING frame") else
+    if bit_and(frame.flags,1)!=0 then s else http2_send(io,s,http2_frame(6,1,0,frame.payload),deadline)
+private fn http2_window_update(move s:Http2Stream,frame:Http2Frame) -> Http2Stream
+  = let increment=bit_and(http2_get32(frame.payload,0),2147483647) in
+    if len(frame.payload)!=4 || increment==0 then http2_broken(s,"invalid HTTP/2 WINDOW_UPDATE frame") else
+    if frame.stream==0 then
+      (if s.conn.credit+increment>2147483647 then http2_broken(s,"HTTP/2 connection window overflow") else let conn=s.conn in s with { conn=conn with { credit=conn.credit+increment } }) else
+    if frame.stream!=s.id then s else
+    if s.window+increment>2147483647 then http2_broken(s,"HTTP/2 stream window overflow") else s with { window=s.window+increment }
+; RST_STREAM ends this stream; REFUSED_STREAM means it was not processed.
+private fn http2_reset(move s:Http2Stream,frame:Http2Frame) -> Http2Stream
+  = let code=http2_get32(frame.payload,0) in
+    if frame.stream==0 || len(frame.payload)!=4 then http2_broken(s,"invalid HTTP/2 RST_STREAM frame") else
+    if frame.stream!=s.id then s else
+    let failed=http2_fail(s,if code==7 then 11 else 104,concat("HTTP/2 stream reset by the server (error code ",int_text(code),")"),false) in
+    failed with { retry=code==7 }
+; GOAWAY: streams above its last id were not processed; the connection takes no new ones.
+private fn http2_goaway(move s:Http2Stream,frame:Http2Frame) -> Http2Stream
+  = let last=bit_and(http2_get32(frame.payload,0),2147483647) in
+    if frame.stream!=0 || len(frame.payload)<8 then http2_broken(s,"invalid HTTP/2 GOAWAY frame") else
+    let conn=s.conn in let s=s with { conn=conn with { goaway=last } } in
+    if s.id<=last then s else
+      let failed=http2_fail(s,11,concat("HTTP/2 server is going away (error code ",int_text(http2_get32(frame.payload,4)),")"),true) in failed with { retry=true }
+
+private effect(net,time,process) fn http2_dispatch<C>(io:HttpIO<C>,move s:Http2Stream,frame:Http2Frame,deadline:i64,limit:i64) -> Http2Stream
+  = let kind=frame.kind in
+    if s.continuing then (if kind==9 then http2_continuation(s,frame,limit) else http2_broken(s,"HTTP/2 header block interrupted")) else
+    if kind==0 then http2_data(io,s,frame,deadline,limit) else
+    if kind==1 then http2_headers(s,frame,limit) else
+    if kind==2 then (if len(frame.payload)==5 && frame.stream!=0 then s else http2_broken(s,"invalid HTTP/2 PRIORITY frame")) else
+    if kind==3 then http2_reset(s,frame) else
+    if kind==4 then http2_settings(io,s,frame,deadline) else
+    if kind==6 then http2_ping(io,s,frame,deadline) else
+    if kind==7 then http2_goaway(s,frame) else
+    if kind==8 then http2_window_update(s,frame) else
+    if kind==5 || kind==9 then http2_broken(s,"unexpected HTTP/2 PUSH_PROMISE or CONTINUATION") else s
+
+; The next piece of the request body that the stream and connection windows allow.
+private effect(net,time,process) fn http2_upload<C>(io:HttpIO<C>,move s:Http2Stream,body:Arr u8 q,deadline:i64) -> Http2Stream
+  = let room=if s.window<s.conn.credit then s.window else s.conn.credit in
+    let size=if q-s.sent<room then q-s.sent else room in let size=if size>s.conn.frame then s.conn.frame else size in
+    let last=s.sent+size==q in let conn=s.conn in
+    http2_send(io,s with { sent=s.sent+size,window=s.window-size,conn=conn with { credit=conn.credit-size } },
+      http2_frame(0,if last then 1 else 0,s.id,str_slice(body,s.sent,s.sent+size)),deadline)
+private effect(net,time,process) fn http2_step<C>(io:HttpIO<C>,move s:Http2Stream,body:Arr u8 q,deadline:i64,limit:i64) -> Http2Stream
+  = if s.sent<q && s.window>0 && s.conn.credit>0 then http2_upload(io,s,body,deadline) else
+    let conn=s.conn in let frame=http2_read_frame(io,conn,deadline) in
+    if !frame.ok then
+      let failed=http2_fail(s with { conn=frame.conn },frame.error.code,frame.error.message,true) in
+      failed with { retry=!s.seen && (frame.error.code==5 || frame.error.code==32 || frame.error.code==104) }
+    else http2_dispatch(io,s with { conn=frame.conn },frame,deadline,limit)
+
+; The body must match a Content-Length field, except for HEAD, 204 and 304.
+private fn http2_length_matches(headers:Arr HttpHeader n,size:i64,exempt:bool) -> bool
+  = exempt || loop(i=0,valid=true,count=0) while valid && i<n
+      next(i+1,check i>=0 && i<n in if !str_equal(headers[i].name,"content-length") then valid else
+          let declared=int_parse(headers[i].value) in count==0 && declared.ok && declared.value==size && str_byte(headers[i].value,0)!=43 && str_byte(headers[i].value,0)!=45,
+        check i>=0 && i<n in if str_equal(headers[i].name,"content-length") then count+1 else count) yield valid
+
+; One request on the connection and its whole response. limit bounds the body. A
+; request on a connection that was already open and turns out to be closed before
+; any response is marked retry, as are streams the server refused or never processed.
+effect(net,time,process) fn http2_exchange<C>(io:HttpIO<C>,move conn:Http2,method:Arr u8 m,path:Arr u8 k,authority:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> Http2Result
+  = let id=conn.upcoming in let reused=conn.started in
+    if !http_method_valid(method) || !http_request_target(path) || h<1 || h>512 || !http_field_value(authority) || limit<0 || limit>1073741824 || q>1073741824 || id>2147483647 then
+      Http2Result { conn=conn,response=net_error(22,"invalid HTTP method, target, host or limit, or HTTP/2 stream ids exhausted"),headers=hpack_no_fields(),reusable=id<=2147483647,retry=false,unprocessed=false } else
+    let head=str_equal(method,"HEAD") in let length=q>0 || str_equal(method,"POST") || str_equal(method,"PUT") || str_equal(method,"PATCH") in
+    let request=concat(if reused then "" else http2_preface(),http2_frame(1,if q==0 then 5 else 4,id,http2_request_block(method,path,authority,q,length))) in
+    let written=http2_write(io,request,deadline) in
+    let conn=conn with { started=true,upcoming=id+2 } in
+    if !written.ok then Http2Result { conn=conn,response=net_error(written.error.code,written.error.message),headers=hpack_no_fields(),reusable=false,
+      retry=reused && (written.error.code==5 || written.error.code==32 || written.error.code==104),unprocessed=false } else
+    let initial=Http2Stream { conn=conn,id=id,ok=true,error=no_error(),fatal=false,retry=false,seen=false,status=0,headers=hpack_no_fields(),
+      block="",owner=0,ending=false,continuing=false,interim=0,body="",done=false,sent=0,window=conn.window,consumed=0,head=head } in
+    let s=loop(s=initial) while s.ok && !s.done next(http2_step(io,s,body,deadline,limit)) yield s in
+    ; A response that ended before the request body was sent cancels the rest of it.
+    let s=if s.ok && s.sent<q then http2_send(io,s,http2_frame(3,0,id,http2_u32(8)),deadline) else s in
+    let reusable=!s.fatal && s.conn.goaway<0 in
+    if !s.ok then Http2Result { conn=s.conn,response=net_error(s.error.code,s.error.message),headers=hpack_no_fields(),reusable=reusable,
+      retry=s.retry && (reused || s.error.code==11),unprocessed=s.retry && s.error.code==11 } else
+    if !http2_length_matches(s.headers,len(s.body),head || s.status==204 || s.status==304) then
+      Http2Result { conn=s.conn,response=net_error(71,"HTTP/2 body does not match its content-length"),headers=hpack_no_fields(),reusable=false,retry=false,unprocessed=false } else
+      Http2Result { conn=s.conn,response=HttpResult { ok=true,status=s.status,body=s.body,error=no_error() },headers=s.headers,reusable=reusable,retry=false,unprocessed=false }
