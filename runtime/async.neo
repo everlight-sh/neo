@@ -3,6 +3,7 @@
 ; remain on that stack and execute their normal cleanup when it resumes.
 ; State: slots@1744, scheduler registers@1752, current task@1760,
 ; backend descriptor+1@1768 (kind@1776), live count@1784, wait serial@1792.
+; Occupied slot range ends at slot limit@1992, exclusive.
 ; Slot (384 bytes): ABI registers@0..191, stack@192, callback@208,
 ; capture@216/224, result@232/240, status@248, wait fd/events@256/264,
 ; wake@272, deadline@280, cancelled@288, handle@304, detached@312,
@@ -12,6 +13,7 @@ effect fn rt_fiber_slots()->ptr
     let slots=ax_alloc(256*384) in let cleared=memset(slots,i32(0),256*384) in
     let registers=ax_alloc(192) in let zero=memset(registers,i32(0),192) in
     let saved=store_ptr(runtime_state(),1752,registers) in let saved=store_ptr(runtime_state(),1744,slots) in slots
+effect fn rt_fiber_limit()->i64 = load_i64(runtime_state(),1992)
 effect fn rt_fiber_current()->ptr = load_ptr(runtime_state(),1760)
 effect fn rt_fiber_cancelled()->bool
   = let job=rt_fiber_current() in if job==null() then false else
@@ -78,6 +80,7 @@ effect fn rt_fiber_spawn(callback:ptr,capture:Arr u8 n,deadline:i64)->i64
     let e=store_i64(job,280,deadline) in let f=store_i64(job,256,-1) in
     let token=rt_handle_new(ptr_to_i64(job),22) in let g=store_i64(job,304,token) in let h=store_i64(job,248,1) in
     let init=fiber_init(job,ptr_add(stack,1114112),addr(rt_fiber_entry),job) in
+    let expanded=if slot+1>rt_fiber_limit() then store_i64(runtime_state(),1992,slot+1) else noop() in
     let captured=store_i64(runtime_state(),1824,load_i64(runtime_state(),1824)+n) in
     let counted=store_i64(runtime_state(),1784,load_i64(runtime_state(),1784)+1) in token
 effect fn rt_fiber_dispose(job:ptr)->unit
@@ -86,7 +89,12 @@ effect fn rt_fiber_dispose(job:ptr)->unit
     let captured=store_i64(runtime_state(),1824,load_i64(runtime_state(),1824)-load_i64(job,224)) in
     let results=store_i64(runtime_state(),1832,load_i64(runtime_state(),1832)-load_i64(job,240)) in
     let stack=rt_munmap(load_ptr(job,192),1179648) in let dropped=rt_handle_drop(load_i64(job,304),22) in
-    let clear=memset(job,i32(0),384) in store_i64(runtime_state(),1784,load_i64(runtime_state(),1784)-1)
+    let clear=memset(job,i32(0),384) in
+    let slots=load_ptr(runtime_state(),1744) in let limit=rt_fiber_limit() in
+    let shrunk=if job!=ptr_add(slots,(limit-1)*384) then noop() else
+      let occupied=loop(i=limit-1) while i>0 && load_i64(slots,(i-1)*384+248)==0 next(i-1) yield i in
+      store_i64(runtime_state(),1992,occupied) in
+    store_i64(runtime_state(),1784,load_i64(runtime_state(),1784)-1)
 effect fn rt_fiber_cancel(token:i64)->unit
   = let job=rt_fiber_lookup(token) in if job==null() then noop() else if load_i64(job,288)!=0 then noop() else store_i64(job,288,125)
 effect fn rt_fiber_release(token:i64)->unit
@@ -97,13 +105,13 @@ effect fn rt_fiber_release(token:i64)->unit
 ; interests in their existing kqueue/epoll, without a polling timer or thread.
 effect fn rt_fiber_poll(milliseconds:i64)->unit
   = if load_i64(runtime_state(),1784)==0 then noop() else
-    let slots=load_ptr(runtime_state(),1744) in let fds=stack_alloc(2048) in
-    let filled=loop(i=0) while i<256 next(let job=ptr_add(slots,i*384) in
+    let slots=load_ptr(runtime_state(),1744) in let fds=stack_alloc(2048) in let limit=rt_fiber_limit() in
+    let filled=loop(i=0) while i<limit next(let job=ptr_add(slots,i*384) in
       let waiting=load_i64(job,248)==2 && load_i64(job,256)>=0 in
       let fd=store_i32(fds,i*8,i32(if waiting then load_i64(job,256) else -1)) in
       let events=store_i32(fds,i*8+4,i32(if waiting then load_i64(job,264) else 0)) in i+1) yield i in
-    let ready=rt_poll_timeout(fds,256,milliseconds) in
-    let collected=if ready<=0 then 0 else loop(i=0) while i<256 next(let flags=bit_and(shift_right(i64(load_i32(fds,i*8+4)),16),65535) in
+    let ready=rt_poll_timeout(fds,limit,milliseconds) in
+    let collected=if ready<=0 then 0 else loop(i=0) while i<limit next(let flags=bit_and(shift_right(i64(load_i32(fds,i*8+4)),16),65535) in
       let marked=if flags==0 then noop() else store_i64(slots,i*384+344,1) in i+1) yield i in noop()
 effect fn rt_fiber_queued_cancel(job:ptr)->bool
   = let group=load_ptr(job,320) in load_i64(job,288)==125 || group==null() || load_i64(group,32)!=0
@@ -121,18 +129,23 @@ effect fn rt_fiber_step(job:ptr,now:i64)->i64
       let clear=store_ptr(runtime_state(),1760,null()) in let restored=store_ptr(runtime_state(),1616,previous) in store_i64(runtime_state(),1624,generation) in
     let disposed=if load_i64(job,248)==3 && load_i64(job,312)!=0 then rt_fiber_dispose(job) else noop() in
     if ready then 1 else 0
-type RuntimeFiberTurn={visited:i64,ran:i64}
 effect fn rt_fiber_tick()->unit
   = if load_i64(runtime_state(),1784)==0 then noop() else
     let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in
     let polled=if load_i64(runtime_state(),1768)==0 then rt_fiber_poll(0) else noop() in
-    let start=load_i64(runtime_state(),1840) in
-    let turn=loop(i=0,ran=0) while i<256 && ran<32 next(i+1,ran+rt_fiber_step(ptr_add(slots,((start+i)%256)*384),now)) yield RuntimeFiberTurn {visited=i,ran=ran} in
-    store_i64(runtime_state(),1840,(start+turn.visited)%256)
+    let limit=rt_fiber_limit() in let cursor=load_i64(runtime_state(),1840) in
+    ; Fibers added above this range are ready on the next tick. The timeout
+    ; scan sees the expanded range and returns zero for those ready fibers.
+    let next_slot=loop(slot=if cursor<limit then cursor else 0,visited=0,ran=0)
+      while visited<limit && ran<32
+      next(if slot+1==limit then 0 else slot+1,visited+1,
+        let job=ptr_add(slots,slot*384) in
+        ran+(if load_i64(job,248)==0 then 0 else rt_fiber_step(job,now))) yield slot in
+    store_i64(runtime_state(),1840,next_slot)
 effect fn rt_fiber_timeout(maximum:i64)->i64
   = if load_i64(runtime_state(),1784)==0 then maximum else
-    let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in
-    let nearest=loop(i=0,wake=if maximum<0 then now+120000 else now+maximum) while i<256 next(i+1,
+    let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in let limit=rt_fiber_limit() in
+    let nearest=loop(i=0,wake=if maximum<0 then now+120000 else now+maximum) while i<limit && wake>now next(i+1,
       let job=ptr_add(slots,i*384) in let status=load_i64(job,248) in
       if status==1 || status==4 && rt_fiber_queued_cancel(job) || status==2 && (load_i64(job,288)!=0 || load_i64(job,344)!=0 || rt_http_fiber_writable(job)) then now else
       if status!=2 then wake else let deadline=if load_i64(job,272)<load_i64(job,280) then load_i64(job,272) else load_i64(job,280) in if deadline<wake then deadline else wake) yield wake-now in
