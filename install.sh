@@ -76,7 +76,11 @@ set -- "$tmp"/unpack/neo-*
 [ $# -eq 1 ] && [ -x "$1/neo" ] && [ -x "$1/bin/neoc" ] && [ -f "$1/VERSION" ] && [ -f "$1/PLATFORM" ] ||
   fail "$archive is not a native Neo release"
 bundle_platform=$(cat "$1/PLATFORM")
-[ "$bundle_platform" = "$platform" ] || fail "the archive is for $bundle_platform, this machine needs $platform"
+case $bundle_platform in
+  "$platform") ;;
+  multi-platform) [ -x "$1/bin/neoc-$platform" ] || fail "the archive is missing the compiler for $platform" ;;
+  *) fail "the archive is for $bundle_platform, this machine needs $platform" ;;
+esac
 release=$(cat "$1/VERSION")
 case $release in '' | .* | *[!A-Za-z0-9.-]*) fail 'invalid release version' ;; esac
 [ -z "$version" ] || [ "$release" = "$version" ] || fail "the archive holds Neo $release, not $version"
