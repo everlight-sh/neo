@@ -1,4 +1,4 @@
-name: Native ARM release bundles
+name: Native release bundles
 on:
   push:
     branches: ['release/native-*']
@@ -13,6 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
           - os: ubuntu-24.04-arm
             platform: linux-arm64
           - os: macos-15
@@ -21,26 +23,14 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        if: github.ref_name == 'release/native-0.2.0'
-        with:
-          python-version: '3.12'
-      - name: Prepare the native seed
+      - name: Install the published native seed
         shell: bash
         run: |
           if [[ $(uname -s) == Darwin ]]; then
             export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
             echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
           fi
-          mkdir -p "$RUNNER_TEMP/neo-seed"
-          if [[ $GITHUB_REF_NAME == release/native-0.2.0 ]]; then
-            # One-time bring-up for platforms without a prior native release.
-            NEO_INLINE=0 NEO_FOLD=0 NEO_INLINE_EXPANSION=0 NEO_INLINE_BUDGET=0 NEO_OPT_LEVEL=0 \
-              python3 -m neoc build compiler/src/main.neo --dev -o "$RUNNER_TEMP/neo-seed/neoc"
-          else
-            NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.0
-            ln -s bin/neo "$RUNNER_TEMP/neo-seed/neoc"
-          fi
+          NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.0
       - name: Build and package without Python
         shell: bash
         env:
@@ -54,7 +44,7 @@ jobs:
           version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' neo.toml)
           epoch=$(git show -s --format=%ct HEAD)
           native() { env -i PATH="$tools" HOME="$HOME" SDKROOT="${SDKROOT:-}" SOURCE_DATE_EPOCH="$epoch" "$@"; }
-          native ./compiler/bootstrap.sh --seed "$RUNNER_TEMP/neo-seed/neoc"
+          native ./compiler/bootstrap.sh --seed "$RUNNER_TEMP/neo-seed/bin/neo"
           native ./neo release -o "dist/neo-$version-$PLATFORM.tar.gz"
           native ./neo release -o "$RUNNER_TEMP/neo-repeat.tar.gz"
           cmp "dist/neo-$version-$PLATFORM.tar.gz" "$RUNNER_TEMP/neo-repeat.tar.gz"

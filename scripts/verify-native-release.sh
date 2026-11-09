@@ -25,5 +25,9 @@ native "$neo" init "$scratch/project"
 (
     cd "$scratch/project"
     [ "$(native "$neo" run)" = 'Hello, Neo!' ]
-    native "$neo" test
+    mkdir -p tests
+    printf '%s\n' 'fn test_release() -> bool = 2 * 3 == 6' > tests/release_test.neo
+    results=$(native "$neo" test)
+    printf '%s\n' "$results"
+    printf '%s\n' "$results" | grep -Fxq 'neo test: 1 native cases, 0 failed'
 )
