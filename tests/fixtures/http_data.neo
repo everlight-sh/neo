@@ -1,0 +1,5 @@
+import "std:http_data"
+effect fn main(mode:i64)->unit
+  = let name=if mode==0 then "rows-a_2" else if mode==1 then "" else if mode==2 then "x\" onclick=\"bad" else arr(i in 0..65) u8(97) in
+    let parsed=json_parse(concat("{\"note\":",json_quote("</template><script>bad()</script> & café \"quotes\""),",\"count\":10000}")) in check parsed.ok in
+    let output=print_out(web_data(name,parsed.value).bytes) in noop()

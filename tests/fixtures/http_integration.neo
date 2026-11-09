@@ -1,0 +1,59 @@
+; Live HTTP integration over loopback, with the server in a child of this
+; executable. Keep request fragmentation and pipelining in the test driver.
+import "std:io"
+import "std:json"
+import "std:net"
+import "../../bench/http/probe.neo"
+import "std:process"
+import "std:socket"
+import "std:strings"
+import "std:time"
+
+fn hi_reply(borrow status:Arr u8 _, borrow body:Arr u8 _) -> Arr u8 _
+  = concat("HTTP/1.1 ",status,"\r\nContent-Length: ",int_text(len(body)),"\r\n\r\n",body)
+
+fn hi_handler(borrow request:Arr u8 _) -> Arr u8 _
+  = if str_starts(request,"GET / ") then hi_reply("200 OK","Hello, World!")
+    else if str_starts(request,"GET /page/3 ") then
+      let tail=arr(i in 0..32768) u8(32) in
+      hi_reply("200 OK",concat("<!DOCTYPE html><p>Ben &amp; Jerry</p>",tail))
+    else if str_starts(request,"POST /nbody ") && str_find(request,"\r\n\r\n{\"n\":10,\"steps\":2}").present then
+      hi_reply("200 OK","{\"n\":10,\"steps\":2}")
+    else hi_reply("404 Not Found","Not Found")
+
+effect(net,time) fn hi_pipeline(port:i64) -> bool
+  = let deadline=deadline_after(5000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let body="{\"n\":10,\"steps\":2}" in
+    let headers=concat("POST /nbody HTTP/1.1\r\nHost: localhost\r\ncontent-length: ",int_text(len(body)),"\r\n\r\n") in
+    let first=socket_write(socket,concat(headers,str_slice(body,0,3)),deadline.value) in if !first.ok then false else
+    let pause=sleep_ms(2) in
+    let second=socket_write(socket,concat(str_slice(body,3,len(body)),
+      "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: Keep-Alive, Close\r\n\r\n"),deadline.value) in
+    if !second.ok then false else let raw=hp_receive(socket,deadline.value) in if !raw.ok then false else
+    let response=hp_frame(raw.value) in
+    let next_response=hp_frame(response.rest) in
+    let json=json_parse(response.body) in if response.status!=200 || !json.ok then false else
+    let n=json_int(json_get(json.value,"n").value) in let steps=json_int(json_get(json.value,"steps").value) in
+    n.ok && n.value==10 && steps.ok && steps.value==2 && next_response.status==200 &&
+    str_equal(next_response.body,"Hello, World!") && len(next_response.rest)==0
+
+effect fn hi_scenario(port:i64) -> bool
+  = let hello=hp_get(port,"/") in let missing=hp_get(port,"/missing") in let page=hp_get(port,"/page/3") in
+    if hello.status!=200 || !str_equal(hello.body,"Hello, World!") || missing.status!=404 || !str_equal(missing.body,"Not Found") ||
+      page.status!=200 || !str_starts(page.body,"<!DOCTYPE html>") || !str_find(page.body,"Ben &amp; Jerry").present then false else hi_pipeline(port)
+
+effect fn hi_test() -> bool
+  = let port=hp_port() in
+    let args=arr(i in 0..2) if i==0 then "server" else int_text(port) in
+    using server=process_start(cli_arg(0).value,args,arr(i in 0..2) if i==0 then "NEO_THREADS=2" else "NEO_HTTP_URING=0") in
+    let ready=hp_wait(port) in
+    let passed=if ready then hi_scenario(port) else false in
+    let stopped=process_signal(server,15) in stopped.ok && passed
+
+effect fn main() -> unit
+  = if str_equal(cli_arg(1).value,"server") then
+      let port=int_parse(cli_arg(2).value) in check port.ok in
+      let result=serve(port.value,hi_handler) in process_exit(result)
+    else if hi_test() then let output=print_out("HTTP integration OK\n") in noop()
+    else let output=print_error("HTTP integration failed\n") in process_exit(1)

@@ -1,6 +1,6 @@
 # Building applications with Neo
 
-The compiler needs Python 3.11+, Clang and binutils. Linux supports ARM64 and
+The native compiler needs Clang and a linker. Linux targets include ARM64 and
 x86-64; macOS supports ARM64. Linux executables are static, with no libc, CRT,
 loader or shared-library dependency. macOS still requires its system loader
 and libSystem load command, with no imported functions.
@@ -12,18 +12,32 @@ curl -fsSL https://neolang.dev/install.sh | sh
 neo doctor
 ```
 
-The installer puts Neo in `~/.neo` and links `~/.neo/bin/neo`. It installs
-neither Python nor Clang nor a linker: `neo doctor` checks them, builds and runs
-a one-line program, and prints the command that installs anything missing. From
-a checkout, link the driver onto your PATH instead: `ln -s "$PWD/neo" ~/.local/bin/neo`.
+The installer puts the platform's native bundle in `~/.neo` and links
+`~/.neo/bin/neo`. `neo doctor` checks Clang and the linker by building and
+running a small program. From a checkout, build the compiler with the installed
+native release:
 
 ```sh
-neo init my-app
-cd my-app
-neo run
-neo test
-neo fmt --check
+./compiler/bootstrap.sh
 ```
+
+The script writes `.neo-build/bin/neoc`. Pass `--seed /path/to/neoc` to select
+an existing native compiler explicitly. Python is used by the separate
+reference and differential test suite.
+
+For an offline install, create an archive with `./neo release -o neo-native.tar.gz`
+and run `./install.sh --archive neo-native.tar.gz` on the matching platform.
+`neo release` uses the system `gzip` and accepts `--native /path/to/neoc` to
+package a different executable.
+
+```sh
+neo init hello-app
+cd hello-app
+neo run
+```
+
+`neo init PATH` creates `neo.toml` and a starter `src/main.neo` in a new or
+empty directory.
 
 `neo.toml` selects the entry file. `neo build` and `neo run` use it when no
 file is supplied. Pass application arguments after `--`: `neo run -- 8080`.
@@ -31,6 +45,13 @@ file is supplied. Pass application arguments after `--`: `neo run -- 8080`.
 build, slower to run, checked exactly like a release build.
 Scalar main parameters retain checked numeric argv parsing. A zero-argument
 effectful main can read arbitrary string arguments using `cli_arg`.
+
+Configure your editor to launch `neo lsp` over stdio. It checks unsaved buffers
+and provides completion, hover, definitions, symbols, and formatting.
+`neo graph FILE --full` emits the content-addressed graph as JSON.
+Use `neo check FILE --library` to check code without a `main` function.
+Add `--diagnostic-format json` or `--diagnostic-format human` for structured or
+human-readable diagnostics.
 
 These complete documentation examples are also native test fixtures.
 
@@ -64,7 +85,16 @@ files, duplicate declarations and imported main functions are errors. This
 module system supports `import "helpers.neo" as helpers` and qualified names
 such as `helpers::answer()`. Declarations are public by default; `private` hides
 them. Exact local packages, lockfiles and offline vendoring are available; there
-is no remote registry or version-range solver. See the [language contract](language-v01.md).
+is no remote registry or version-range solver. Run `neo pkg lock` after changing
+dependencies, `neo pkg verify` to check the lock against disk, and
+`neo pkg vendor` to copy locked dependencies into `.neo/vendor` for offline use.
+Each command accepts a project path and defaults to the current directory.
+Import a locked dependency with `import "pkg:math" as math` or select a module
+with `import "pkg:math/sub"`. Native builds verify the lock and can use the
+vendor tree after the original dependency directories are removed. If a
+generated entry file lives outside the project, pass `--package-root PATH`
+when building it so imports of project modules can use the project's lock.
+See the [language contract](language-v01.md).
 
 Records may contain strings, arrays, other records and nested arrays. Recursive
 value types are rejected. Array fields use existential length `_`, for example
@@ -124,8 +154,10 @@ the signed i64 interpretation; these operations do not imply arithmetic bounds.
 The constant folder, independent interpreter and native backend agree on these
 operations, including negative values and the sign bit.
 
-ZetaDB, a separate project written in Neo, demonstrates binary persistence,
-atomic batches and ordered cursors with explicit systems resource ownership.
+zetaDB, a separate project written in Neo, demonstrates persistent document
+collections, computed fields, atomic batches, snapshots and HTTP/SSE watches
+with explicit systems resource ownership. Its sources use `.neo` and build
+with the current `neoc` compiler.
 
 ## Standard library
 
@@ -198,27 +230,75 @@ durability of newly created directory entries or arbitrary storage hardware.
 
 ## Tests, formatting and cross-target verification
 
-`./neo test` runs Python compiler tests, native fixtures, executable documentation,
+`neo test [PROJECT]` runs the project's Neo tests. It reads `[[test]]`
+cases, paired Markdown examples from `doc-tests`, and zero-argument boolean
+`test_*` functions from `test-globs` or the default `tests/*_test.neo` and
+`tests/*_test.ax` patterns. Manifest cases can check stdout, exit status,
+and compiler rejection, and set arguments, environment variables, and timeouts.
+An `integration` entry can name a TOML file of native cases, resolved relative
+to the project. `--unit-only` skips those cases. You can run that file directly
+with `neo test tests/integration.neo.toml`. Cases can set `build-env`, supply
+`stdin` or `stdin-hex`, and check binary output with `stdout-hex` or numeric
+output with `stdout-tolerance`.
+
+`./neoc.sh test` runs Python compiler tests, native fixtures, executable documentation,
 application failure/restart tests, independent-evaluator differentials, fuzzing,
 and existing compute/HTTP/TSX regression suites. `--unit-only` skips the integration
 driver. Project `[[test]]` entries define executable files/arguments/expected output;
 `tests/*_test.neo` libraries may define zero-argument `test_*` boolean functions.
 
-The formatter preserves tokens, comments and string literals. Its first version
-normalizes whitespace, tabs, trailing blank lines and final newlines; it is
-intentionally conservative rather than a full AST pretty-printer.
+`neo fmt [PATH...]` formats the specified files or recursively finds `.neo` and
+`.ax` sources in directories. With no paths it uses the current directory.
+`neo fmt --check` lists files that would change and exits with status 1 when
+any file needs formatting. The formatter normalizes whitespace, indentation,
+and final newlines while preserving tokens, comments, and literal spelling.
 
-Cached builds verify source/dependency/compiler/options/target hashes and the
-cached executable's content hash. Artifact publication is atomic, including
-concurrent builds and rebuilding an executable already running on macOS.
+`neo build --report` emits JSON with frontend, LLVM compile, and link timings,
+binary and source digests, and counts of optimization remarks emitted by LLVM.
+`neo build --allow-unproven` permits experimental builds with unproven
+obligations. Type, effect, and ownership checks still apply.
 
-An unchanged rebuild does not parse. Each build records, beside its cached
+`neo build --library-cache DIR --library-root PATH` prepares and reuses a
+native object for the dependency closure. `--library-root` can be repeated.
+The object cache keys include dependency sources, generated IR and ABI, the
+target, Clang, and optimization level. The compiler verifies artifact hashes
+before linking and checks the source program on every build. `--no-cache`
+rebuilds the prepared object. Prepared libraries require fully checked code.
+
+The reference compiler separately caches checked dependency objects and
+executables. Its warm builds retain verified return-alias
+contracts, so ownership lowering agrees with a cold build. Integrity-checked
+`hints.ll` contains dependency bodies before LLVM optimization; the application
+can specialize them with Neo's small-helper and constant-argument inlining
+policy, including allocator helpers. Cold decoder paths retain `noinline`.
+The object, optimized IR, hints and proof metadata are checked before reuse;
+application bodies and application checks remain outside the library cache.
+
+An unchanged reference rebuild skips parsing. Each build records, beside its cached
 executable, a hash of every source it read, the file each import resolved to and
-the package manifest that named each module. A later `neo build` or `neo run`
+the package manifest that named each module. A later `./neoc.sh build` or `./neoc.sh run`
 with the same entry, compiler, clang, flags and `NEO_*` variables publishes the
 cached executable when all of those still match, and otherwise takes the full
 path. Programs with `pkg:` imports always take the full path. `NEO_QUICK=0`
 turns the lookup off.
+
+Run native benchmarks from the checkout. The compute and compile modes use
+GNU `time` for child CPU and RSS measurements.
+
+```sh
+./neo run --dev bench/run.neo -- compute 7
+./neo run --dev bench/run.neo -- compile 3
+./neo run --dev bench/run.neo -- http 3
+./neo run --dev bench/run.neo -- maps 3
+```
+
+The runner writes one JSON record per sample. Pass a TOML manifest as the last
+argument to select workloads. `NEO_BENCH_COMPARE` points to a directory of
+comparison binaries named after the compute cases. Compile measurements use a
+scratch copy and report cold, unchanged, and incremental builds. The HTTP
+mode validates each response in a loopback pipeline. The maps mode samples
+Linux RSS and PSS at the workload's seven checkpoints. To measure the JSON
+workload, pass `bench/json/neo.toml` to the compute mode.
 
 On ARM64 Linux with Clang/lld and QEMU installed:
 

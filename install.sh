@@ -6,8 +6,7 @@
 # Downloads a release from GitHub, checks it against the release's SHA256SUMS,
 # unpacks it to $NEO_HOME/versions/<version> (NEO_HOME defaults to ~/.neo) and
 # links $NEO_HOME/bin/neo to it. --archive installs a local release archive
-# instead. Neo needs Python 3.11+, Clang and a linker: this script installs none
-# of them, and runs `neo doctor` to say what is missing. Uninstall: rm -rf ~/.neo
+# instead. Neo builds need Clang and a linker. Uninstall: rm -rf ~/.neo
 set -eu
 
 REPO=${NEO_REPO:-everlight-sh/neo}
@@ -29,7 +28,9 @@ while [ $# -gt 0 ]; do
 done
 
 case "$(uname -s) $(uname -m)" in
-  'Linux x86_64' | 'Linux aarch64' | 'Linux arm64' | 'Darwin arm64') ;;
+  'Linux x86_64') platform=linux-x86_64 ;;
+  'Linux aarch64' | 'Linux arm64') platform=linux-arm64 ;;
+  'Darwin arm64') platform=darwin-arm64 ;;
   *) fail "Neo supports x86-64 and ARM64 Linux and ARM64 macOS, not $(uname -s) $(uname -m)" ;;
 esac
 
@@ -56,7 +57,7 @@ if [ -z "$archive" ]; then
     version=$(sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
     [ -n "$version" ] || fail "cannot read the latest version of $REPO"
   fi
-  name=neo-$version.tar.gz
+  name=neo-$version-$platform.tar.gz
   say "Downloading Neo $version"
   fetch "$DOWNLOAD/v$version/$name" "$tmp/$name" || fail "cannot download $DOWNLOAD/v$version/$name"
   fetch "$DOWNLOAD/v$version/SHA256SUMS" "$tmp/SHA256SUMS" || fail "cannot download the release's SHA256SUMS"
@@ -72,8 +73,12 @@ fi
 mkdir "$tmp/unpack"
 tar -xzf "$archive" -C "$tmp/unpack" || fail "cannot unpack $archive"
 set -- "$tmp"/unpack/neo-*
-[ $# -eq 1 ] && [ -x "$1/neo" ] && [ -f "$1/VERSION" ] || fail "$archive is not a Neo release"
+[ $# -eq 1 ] && [ -x "$1/neo" ] && [ -x "$1/bin/neoc" ] && [ -f "$1/VERSION" ] && [ -f "$1/PLATFORM" ] ||
+  fail "$archive is not a native Neo release"
+bundle_platform=$(cat "$1/PLATFORM")
+[ "$bundle_platform" = "$platform" ] || fail "the archive is for $bundle_platform, this machine needs $platform"
 release=$(cat "$1/VERSION")
+case $release in '' | .* | *[!A-Za-z0-9.-]*) fail 'invalid release version' ;; esac
 [ -z "$version" ] || [ "$release" = "$version" ] || fail "the archive holds Neo $release, not $version"
 
 target=$NEO_HOME/versions/$release
@@ -86,7 +91,7 @@ ln -sf "../versions/$release/neo" "$NEO_HOME/bin/neo"
 say "Installed Neo $release in $target"
 say ''
 
-if "$NEO_HOME/bin/neo" doctor; then ready=yes; else ready=; fi
+if NEOC= NEO_ROOT= "$NEO_HOME/bin/neo" doctor; then ready=yes; else ready=; fi
 
 case ":$PATH:" in
   *":$NEO_HOME/bin:"*) on_path=yes ;;

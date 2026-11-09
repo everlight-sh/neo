@@ -73,6 +73,7 @@ fn fl_visible() -> i64 = 64
 ; n_type flags.
 fn fl_sealed() -> i64 = 1
 fn fl_type_visible() -> i64 = 2
+fn fl_enum_storage() -> i64 = 4
 
 fn ast_none() -> Node = Node { kind=0, a=-1, b=-1, c=-1, d=-1, e=-1, f=-1, g=-1, h=-1, line=0, col=0 }
 fn ast_node_at(borrow nodes:Arr i64 _, id:i64) -> Node

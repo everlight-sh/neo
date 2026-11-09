@@ -1,0 +1,42 @@
+; Bounded process-private immutable prepared frames. No pointers escape the
+; runtime: borrowed cache tokens carry a generation and the owning PID.
+; Slots@1928, hits@1936, misses@1944, count@1952, generation@1976.
+; Each of 64 slots: namespace/version/epoch@0/8/16, key@24, lengths@32/40,
+; frame@48, frame length@56, generation@64 (72 bytes total).
+effect fn rt_frame_cache_table()->ptr
+  = let table=load_ptr(runtime_state(),1928) in if table!=null() then table else
+    let table=ax_alloc(64*72) in let clear=memset(table,i32(0),64*72) in
+    let saved=store_ptr(runtime_state(),1928,table) in table
+effect fn rt_frame_equal(p:ptr,bytes:Arr u8 n)->bool
+  = let words=loop(i=0,ok=true) while ok && i<=n-8 next(i+8,load_i64(p,i)==load_i64(data(bytes),i)) yield if ok then i else -1 in
+    words>=0 && loop(i=if words<0 then n else words,ok=true) while ok && i<n next(i+1,load_u8(p,i)==load_u8(data(bytes),i)) yield ok
+effect fn rt_frame_cache_find(namespace:i64,version:i64,epoch:i64,key:Arr u8 n,variant:Arr u8 m)->i64
+  = let table=load_ptr(runtime_state(),1928) in let slot=bit_and(bit_xor(namespace,version),63) in
+    let entry=if table==null() then null() else ptr_add(table,slot*72) in
+    let found=entry!=null() && load_ptr(entry,48)!=null() && load_i64(entry,0)==namespace && load_i64(entry,8)==version && load_i64(entry,16)==epoch && load_i64(entry,32)==n && load_i64(entry,40)==m && rt_frame_equal(load_ptr(entry,24),key) && rt_frame_equal(ptr_add(load_ptr(entry,24),n),variant) in
+    let counted=store_i64(runtime_state(),if found then 1936 else 1944,load_i64(runtime_state(),if found then 1936 else 1944)+1) in
+    if found then load_i64(entry,64)*64+slot+1 else -11
+effect fn rt_frame_cache_store(namespace:i64,version:i64,epoch:i64,key:Arr u8 n,variant:Arr u8 m,frame:Arr u8 k)->i64
+  = if n>16384 || m>16384 || n+m>16384 || k<1 || k>49184 || load_i64(runtime_state(),1976)>=140737488355327 then -22 else
+    let table=rt_frame_cache_table() in let slot=bit_and(bit_xor(namespace,version),63) in let entry=ptr_add(table,slot*72) in
+    let keys=ax_alloc(if n+m==0 then 1 else n+m) in let a=memcpy(keys,data(key),n) in let b=memcpy(ptr_add(keys,n),data(variant),m) in
+    let bytes=ax_alloc(k) in let copy=memcpy(bytes,data(frame),k) in
+    let old=load_ptr(entry,48) in let count=if old==null() then store_i64(runtime_state(),1952,load_i64(runtime_state(),1952)+1) else
+      let released=ax_release(old) in ax_release(load_ptr(entry,24)) in
+    let serial=load_i64(runtime_state(),1976)+1 in let saved=store_i64(runtime_state(),1976,serial) in
+    let c=store_i64(entry,0,namespace) in let d=store_i64(entry,8,version) in let e=store_i64(entry,16,epoch) in
+    let f=store_ptr(entry,24,keys) in let g=store_i64(entry,32,n) in let h=store_i64(entry,40,m) in
+    let i=store_ptr(entry,48,bytes) in let j=store_i64(entry,56,k) in let l=store_i64(entry,64,serial) in serial*64+slot+1
+effect fn rt_frame_cache_entry(token:i64,owner:i64)->ptr
+  = let table=load_ptr(runtime_state(),1928) in
+    if token<1 || owner!=rt_handle_pid() || table==null() then null() else
+    let slot=(token-1)%64 in let serial=(token-1)/64 in let entry=ptr_add(table,slot*72) in
+    if load_i64(entry,64)!=serial || load_ptr(entry,48)==null() then null() else entry
+effect fn rt_frame_cache_size(token:i64,owner:i64)->i64
+  = let entry=rt_frame_cache_entry(token,owner) in if entry==null() then -11 else load_i64(entry,56)
+effect fn rt_frame_cache_bytes(token:i64,owner:i64)->Arr u8 _
+  = let entry=rt_frame_cache_entry(token,owner) in if entry==null() then "" else
+    let size=load_i64(entry,56) in check size>=0 && size<=49184 in view(load_ptr(entry,48),size)
+effect fn rt_frame_cache_send(token:i64,owner:i64,wake:i64)->i64
+  = let entry=rt_frame_cache_entry(token,owner) in if entry==null() then -11 else
+    rt_async_direct(load_ptr(entry,48),load_i64(entry,56),wake)

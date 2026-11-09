@@ -6,10 +6,10 @@ Pipeline, same shape as rustc:
 
 ```
 source (.neo)  ->  content-addressed graph  ->  refinement checker  ->  LLVM IR  ->  native binary
-                  (every node hashed)         (proof obligations)     (neoc/llvm.py)   (LLVM -O3 + link)
+                  (module loading)            (proof obligations)     (Neo backend)    (Clang + link)
 ```
 
-The compiler emits LLVM IR directly (`neoc/llvm.py`). The application and
+The native compiler emits LLVM IR directly from `compiler/src/llvm.neo`. The application and
 the runtime in `runtime/*.neo` compile together into one LLVM module and then
 a native executable. Allocation, memory operations, formatting, scheduling and
 HTTP handling are Neo source. OS services use direct ARM64 or x86-64 kernel syscalls,
@@ -17,8 +17,8 @@ with no libc function imports. Linux builds a static ELF with no interpreter,
 shared libraries or CRT. Native ARM64 macOS still loads `libSystem`: Apple's
 loader requires it and rejects static executables, even though Neo imports
 none of its functions. The kernel remains a runtime requirement on both.
-Python implements the compiler, and Clang/LLVM supplies code generation and
-linking; compiler self-hosting and eliminating those build tools are not done.
+Native `neoc` builds itself and compiles runtime sources by default. Clang and a
+linker supply machine code generation and linking.
 The macOS restriction comes from Apple's
 [ARM64 executable loader](https://github.com/apple/darwin-xnu/blob/main/bsd/kern/mach_loader.c).
 
@@ -29,16 +29,23 @@ curl -fsSL https://neolang.dev/install.sh | sh
 neo doctor
 ```
 
-`neo doctor` checks Python 3.11+, Clang and the linker, then builds and runs a
-one-line program. From a checkout, `ln -s "$PWD/neo" ~/.local/bin/neo` puts the
-driver on your PATH. See [docs/getting-started.md](docs/getting-started.md).
+`neo doctor` checks the compiler and linker by building and running a small
+program. Native bundles include the compiler and runtime sources.
+From a checkout, run `./compiler/bootstrap.sh` with an installed native release,
+or pass `--seed /path/to/neoc` to select a native compiler.
+See [docs/getting-started.md](docs/getting-started.md).
 
 ## Build profiles
 
-`./neo build file.neo -o app` defaults to LLVM `-O3`.
-`--dev` (also `neo run --dev`) is the fast development build: `-O1` and no
-policy inlining, so small pure helpers and calls with constant arguments stay
-ordinary calls; `inline fn` is still honoured. Its binaries run slower;
+`./neo build file.neo -o app` uses the native compiler at LLVM `-O2`.
+`--dev` selects `-O1`, and `--opt-level 0..3` overrides either profile.
+`--target TRIPLE` overrides Clang's detected target. To rebuild the compiler
+from the checkout, run `./compiler/bootstrap.sh`.
+
+The Python reference remains available explicitly through `./neoc.sh`.
+Its default build uses LLVM `-O3`. Its `--dev` profile uses `-O1` and leaves
+small pure helpers and calls with constant arguments as ordinary calls.
+The reference compiler still honours `inline fn` in this profile.
 [RESULTS-compile-time-x86-linux-2026-11-03.md](RESULTS-compile-time-x86-linux-2026-11-03.md)
 measures both profiles. `--opt-level 0..3` overrides the level in either
 profile. All levels and profiles retain type/refinement
@@ -56,6 +63,14 @@ hundreds of thousands of IR lines and dominate clang's time;
 inlining into a function that would grow past it, and `--report` lists the
 callees it left as calls in `inline_expansion_cuts`.
 
+The reference library preparation also measures the emitted bodies. Generic managed
+records can produce thousands of ownership instructions from a small source
+helper. Heuristic library inlining is limited to 2,048 IR lines per helper and
+8,192 expanded lines (or a smaller `NEO_INLINE_EXPANSION` setting); a zero
+expansion limit disables the latter bound. Explicit `inline fn` requests remain
+forced. Application imports re-evaluate this policy rather than retaining stale
+forced-inline annotations from the cache.
+
 The proof engine keeps integral constraints in arbitrary-precision integers,
 clearing rational denominators by positive exact scaling during elimination.
 The optional `--library-cache DIR --library-root dependency-path` path reuses
@@ -64,7 +79,7 @@ executable. All application bodies/signatures remain checked. Changes in
 dependency sources, imported types, compiler or flags invalidate the artifact;
 corrupt artifacts are rebuilt. Neo Web uses `./web prepare` for this step.
 
-LLVM receives only reachable internal bodies; public ABI entries and
+Whole-program builds send LLVM only reachable internal bodies; public ABI entries and
 address-taken callbacks/parallel regions are preserved. These are build-time
 changes and add no runtime dependencies.
 
@@ -155,7 +170,8 @@ local packages, LSP and release tooling, with their current limits.
 
 The [application guide](docs/getting-started.md) covers modules, owned data,
 structured errors, capabilities, project commands, the JSON CLI, persistent notes,
-and durable webhook delivery. Run `./neo test` for the complete verification suite.
+and durable webhook delivery. Run `./neo test` for native project cases and
+`./neoc.sh test` for the Python reference verification suite.
 
 The [JSON optimization report](RESULTS-json-optimized-linux-2026-10-24.md) compares
 the unchanged dynamic JSON workload against the preserved Neo binary, Rust/serde
@@ -167,23 +183,24 @@ The [JSX-to-Neo prototype](examples/jsx-ssr/README.md) compiles a small subset
 of React-style TSX components into ordinary Neo functions, outside the language core.
 
 ```bash
-./neoc.sh build examples/mandel.neo -o mandel && ./mandel 3000 3000 2000
-./neoc.sh build examples/http.neo -o http && ./http 8080   # HTTP server: / and /smooth/N
-./neoc.sh build examples/sieve.neo -o sieve && ./sieve 100000000   # in-place sieve via set
-./neoc.sh build examples/nbody.neo -o nbody && ./nbody 4096 20     # records, SoA layout
-./neoc.sh check examples/unproven.neo        # JSON obligations, exit 1
-./neoc.sh build examples/stencil.neo --emit-llvm | less
-./neoc.sh graph examples/mandel.neo          # content hashes
+./neo build examples/mandel.neo -o mandel && ./mandel 3000 3000 2000
+./neo build examples/http.neo -o http && ./http 8080   # HTTP server: / and /smooth/N
+./neo build examples/sieve.neo -o sieve && ./sieve 100000000   # sieve via set
+./neo build examples/nbody.neo -o nbody && ./nbody 4096 20     # numeric record reductions
+./neo check examples/unproven.neo --diagnostic-format json   # proof diagnostic, exit 1
+./neo build examples/stencil.neo --emit-llvm | less
+./neo graph examples/mandel.neo              # content hashes
 ```
 
-Requirements: clang (15 or newer, for opaque pointers) and Python 3.11+, on
+The native build needs Clang (15 or newer, for opaque pointers) and a linker on
 ARM64 macOS/Linux or x86-64 Linux (little-endian kernel syscall backends;
 `docker build -f Dockerfile.linux-test -t neo-linux-test . && docker run --rm neo-linux-test`
 runs the verification on ARM64 Ubuntu). Both use HTTP worker processes and
 event loops written in Neo over kernel epoll (Linux) or poll (macOS) syscalls. Other CPU
 architectures need their own kernel ABI backends before they can build.
 
-Verification:
+Run the native project cases with `./neo test`. To run the Python reference
+compiler tests and its application verification harness, use the following commands.
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -410,14 +427,19 @@ range. Results: `RESULTS-http-compute.md` and `RESULTS-http-ssr.md`.
 program boundary, which is the only place a runtime check is inserted
 without the program asking for one.
 
-ZetaDB, a separate project written in Neo, implements a persistent byte-key/value
-store with atomic batches, persisted indexes, compaction, numeric aggregation and crash recovery, using kernel calls
-directly. Its own reports compare it with embedded SurrealDB on document loading,
-updates/deletes, fresh-process reopen and independently checked aggregation.
+zetaDB, a separate project written in Neo, implements a persistent document
+database with collections, computed fields, maintained aggregates, indexes,
+transactions, snapshots and resumable HTTP/SSE watches, using kernel calls
+directly. Its historical byte-key/value engine and benchmark reports remain
+available in that project.
 
 ## Layout
 
 ```
+compiler/src/    native lexer, parser, module loader, checker, LLVM backend and driver
+neo              native launcher
+compiler/bootstrap.sh  native compiler rebuild from a released seed
+neoc.sh          explicit Python compiler and verification reference
 neoc/syntax.py   lexer, AST, parser (the textual projection)
 neoc/graph.py    content-addressed hashing (de Bruijn variables)
 neoc/linear.py   linear integer constraints, Fourier-Motzkin, counterexamples
@@ -462,8 +484,15 @@ decimal conversion implementation. The standard library includes generic records
 JSON, files, collections, DNS, bounded IPv4 TCP/UDP, a kernel poll reactor,
 streaming HTTP/1.1 and experimental pure-Neo TLS with RSA/P-256 authentication.
 Optional application protocols live in a separate package workspace.
-Full WebRTC/Opus support remains unfinished. An
-OS-enforced capability sandbox and self-hosted compiler are not implemented. The
+[Prepared-library inlining budgets](docs/prepared-library-inlining.md) preserve
+small-helper optimization across large callers and cache boundaries. Escaped
+JSON strings decode into an exact-sized output buffer with plain-run copies.
+
+[Cooperative byte-result tasks and HTTP rendering](docs/async-rendering.md) preserve native
+call stacks across socket waits, including shared PostgreSQL clients, and provide
+streaming backpressure, cancellation and shutdown draining. CPU work must yield;
+regular disk transfers remain synchronous.
+Full WebRTC/Opus support and an OS-enforced capability sandbox remain unfinished. The
 allocator and syscall/pointer boundary are trusted code rather than fully
 proved memory-safe implementations.
 

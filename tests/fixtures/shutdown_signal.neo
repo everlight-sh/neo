@@ -1,0 +1,7 @@
+import "std:signals"
+import "std:debug"
+effect fn main()->unit
+  = using signal=shutdown_signal() in let status=shutdown_signal_status(signal) in check status.ok in
+    let ready=print_out("READY\n") in
+    let value=loop(value=0) while value==0 next(let event=shutdown_signal_poll(signal) in check event.ok in let slept=if event.value==0 then sleep_ms(2) else int_ok(0) in event.value) yield value in
+    let printed=print_out(concat("SIGNAL:",int_text(value),"\n")) in noop()

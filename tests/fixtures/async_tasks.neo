@@ -1,0 +1,20 @@
+import "std:async"
+private effect(fs,net,env,time,process) fn work(capture:Arr u8 n)->Arr u8 _
+  = let waited=sleep_ms(if str_equal(capture,"slow") then 200 else 50) in
+    concat(capture,if waited.ok then "-done" else "-cancelled")
+private effect(fs,net,env,time,process) fn nested(capture:Arr u8 n)->Arr u8 _
+  = let deadline=deadline_after(1000) in using child=async_bytes(function(work),capture,deadline.value) in
+    let result=async_bytes_await(child,deadline.value) in if result.ok then result.value else "failed"
+private effect(fs,net,env,time,process) fn lock_work(path:Arr u8 n)->Arr u8 _
+  = if n==0 then "skipped" else let opened=file_open(path,3) in
+    if !opened.ok then "open failed" else let locked=file_lock(opened.value,true) in let closed=file_close(opened.value) in
+    if locked.ok then "locked" else "lock failed"
+effect fn main()->i64
+  = let start=monotonic_ms() in let deadline=deadline_after(2000) in
+    let path=env_get("NEO_ASYNC_LOCK_FILE") in
+    using locker=async_bytes(function(lock_work),if path.present then path.value else "",deadline.value) in
+    using slow=async_bytes(function(work),"slow",deadline.value) in
+    using fast=async_bytes(function(nested),"fast",deadline.value) in
+    let first=async_bytes_await(fast,deadline.value) in let at=monotonic_ms() in
+    check first.ok && str_equal(first.value,"fast-done") && at.value-start.value<150 in
+    let second=async_bytes_await(slow,deadline.value) in check second.ok && str_equal(second.value,"slow-done") in let locked=async_bytes_await(locker,deadline.value) in check locked.ok && str_equal(locked.value,if path.present then "locked" else "skipped") in 42

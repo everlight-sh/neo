@@ -329,15 +329,15 @@ install/build scripts. There is no registry or range-version solver.
 `neo lsp` speaks stdio LSP with full-document UTF-16 synchronization, checking of
 unsaved buffers, completion, hover, definitions, symbols and formatting. Configure
 an editor's generic LSP client to run that command. `neo check --library file.neo`
-checks a module without main. JSON diagnostics remain the default; select
-`--diagnostic-format human` for source locations and caret messages. `neo fmt`
+checks a module without main. Select `--diagnostic-format json` for structured
+errors or `--diagnostic-format human` for source locations. `neo fmt`
 normalizes token spacing while preserving deliberate line breaks, comments and
 literal contents; it verifies lexical equivalence and is idempotent.
 
 `neo version` reports the development version. `neo release -o bundle.tar.gz`
 creates a deterministic compiler-source/tool bundle with a SHA-256 manifest,
 fixed ownership/timestamps and no application examples. SOURCE_DATE_EPOCH may
-set its timestamp. The bundle still requires Python/LLVM to build programs.
+set its timestamp. The native bundle builds programs with Clang and a linker.
 
 ## Compatibility and evidence
 

@@ -1,3 +1,4 @@
+import "std:transport"
 import "std:dns"
 import "std:vec"
 
@@ -145,19 +146,10 @@ effect(fs,net,time,process) fn http_request(host:Arr u8 n,port:i64,method:Arr u8
 
 ; Optional transport callbacks let the same framing/parser run over TLS or
 ; cancellation-aware sockets. The capture record holds typed arena references.
-type HttpIO<C> = { context:C,read:Effect<net,time,process>(C,i64)->BytesResult,write:Effect<net,time,process>(C,Arr u8 _,i64)->IntResult }
-type HttpHeader = { name:Arr u8 _,value:Arr u8 _ }
 private effect(net,time,process) fn http_io_read<C>(io:HttpIO<C>,deadline:i64) -> BytesResult
   = let invoke=io.read in invoke(io.context,deadline)
 private effect(net,time,process) fn http_io_write<C>(io:HttpIO<C>,bytes:Arr u8 n,deadline:i64) -> IntResult
   = let invoke=io.write in invoke(io.context,bytes,deadline)
-fn http_headers_encode(headers:Arr HttpHeader n) -> BytesResult
-  = loop(i=0,out="",valid=n<=128) while valid && i<n next(i+1,
-      check i>=0 && i<n in concat(out,headers[i].name,": ",headers[i].value,"\r\n"),
-      check i>=0 && i<n in let name=http_lower(headers[i].name) in
-        http_token(headers[i].name) && http_field_value(headers[i].value) && len(out)+len(headers[i].name)+len(headers[i].value)+4<=16384 &&
-        !str_equal(name,"host") && !str_equal(name,"content-length") && !str_equal(name,"transfer-encoding") && !str_equal(name,"connection") && !str_equal(name,"upgrade"))
-      yield if valid then bytes_ok(out) else bytes_error(22,"invalid, reserved or excessive request headers",i)
 
 private effect(net,time,process) fn http_headers_step_io<C>(io:HttpIO<C>,move result:BytesResult,deadline:i64) -> BytesResult
   = let chunk=http_io_read(io,deadline) in

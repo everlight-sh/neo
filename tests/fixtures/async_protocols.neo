@@ -1,0 +1,29 @@
+import "std:async"
+import "std:https_client"
+private effect(fs,net,env,time,process) fn protocol(kind:Arr u8 n)->Arr u8 _
+  = let deadline=deadline_after(8000) in
+    if str_equal(kind,"dns") then let port=int_parse(env_get("NEO_ASYNC_DNS_PORT").value) in
+      let result=dns_lookup_at("test.neo","127.0.0.1",port.value,deadline.value) in if result.ok then dns_address(result.value) else concat("dns error ",int_text(result.error.code)) else
+    if str_equal(kind,"tls") then let port=int_parse(env_get("NEO_ASYNC_TLS_PORT").value) in let root=fs_read(env_get("NEO_ASYNC_CA").value) in
+      using arena=new_arena(8) in
+      let client=http_client_at(https_client("localhost",port.value,arr(i in 0..1) x509_parse(root.value)),"127.0.0.1") in
+      let result=http_send(arena,client,"GET","/tls","",8000,1048576) in if result.response.ok then result.response.body else concat("tls error ",int_text(result.response.error.code)," ",result.response.error.message) else
+    let port=int_parse(env_get("NEO_ASYNC_HTTP_PORT").value) in let result=http_request("127.0.0.1",port.value,"GET",if str_equal(kind,"cancel") then "/hold" else "/http","",8000,1048576) in
+      if result.ok then result.body else concat("http error ",int_text(result.error.code))
+private effect(fs,net,env,time,process) fn batch()->i64
+  = let deadline=deadline_after(10000) in let begin=monotonic_ms() in
+    using http=async_bytes(function(protocol),"http",deadline.value) in
+    using tls=async_bytes(function(protocol),"tls",deadline.value) in
+    using dns=async_bytes(function(protocol),"dns",deadline.value) in
+    let secure=async_bytes_await(tls,deadline.value) in let plain=async_bytes_await(http,deadline.value) in let name=async_bytes_await(dns,deadline.value) in
+    let clock=monotonic_ms() in
+    let shown=print_out(concat(if secure.ok then secure.value else "future error",",",plain.value,",",name.value," ",int_text(clock.value-begin.value),"ms\n")) in
+    check secure.ok && plain.ok && name.ok && str_equal(secure.value,"TLS OK") && str_equal(plain.value,"HTTP OK") && str_equal(name.value,"127.0.0.1") in 42
+private effect(fs,net,env,time,process) fn cancelled()->bool
+  = let deadline=deadline_after(10000) in let brief=deadline_after(50) in
+    using task=async_bytes(function(protocol),"cancel",deadline.value) in
+    let result=async_bytes_await(task,brief.value) in !result.ok && result.error.code==110
+effect fn main()->i64
+  = let result=batch() in check result==42 in let cancellation=cancelled() in check cancellation in
+    let deadline=deadline_after(1000) in let drained=async_drain(deadline.value) in
+    let stats=async_stats() in let handles=rt_handle_live() in check drained.ok && stats.live==0 && stats.capture_bytes==0 && stats.result_bytes==0 && handles==0 in 42

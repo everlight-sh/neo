@@ -21,7 +21,15 @@ def target_triple() -> str:
     """The triple clang itself would stamp on a module for this host."""
     return os.environ.get('NEO_TARGET') or subprocess.check_output(["clang", "-print-target-triple"], text=True).strip()
 
-def load(path: str, overlays=None, target=None):
+def runtime_files(target):
+    """Keep builds and editor analysis on the same runtime module set."""
+    platform = 'linux' if 'linux' in target else 'macos'
+    binding = 'linux_x86_64' if platform == 'linux' and target.startswith('x86_64-') else platform
+    names = ['core.neo', f'platform_{binding}.neo', 'http.neo', 'handles.neo', 'http_async.neo', 'async.neo', 'events.neo', 'timers.neo', 'frame_cache.neo']
+    if platform == 'linux': names += ['http_linux.neo', 'http_uring.neo']
+    return [os.path.join(RUNTIME, name) for name in names]
+
+def load(path: str, overlays=None, target=None, package_root=None):
     if sys.platform not in ("darwin", "linux"):
         raise SystemExit("Neo currently supports macOS and Linux")
     if sys.maxsize <= 2**32 or sys.byteorder != "little":
@@ -31,11 +39,8 @@ def load(path: str, overlays=None, target=None):
     arch = target.split('-')[0]
     if not platform or arch not in ('arm64', 'aarch64', 'x86_64') or platform == 'macos' and arch == 'x86_64':
         raise SystemExit('Supported targets: ARM64 macOS/Linux and x86-64 Linux')
-    binding = 'linux_x86_64' if platform == 'linux' and arch == 'x86_64' else platform
-    names = ["core.neo", f"platform_{binding}.neo", "http.neo", "handles.neo"]
-    if platform == "linux": names += ["http_linux.neo", "http_uring.neo"]
     from .modules import sources, SourceError
-    try: prog = sources(path, [os.path.join(RUNTIME, name) for name in names],overlays)
+    try: prog = sources(path, runtime_files(target),overlays,package_root=package_root)
     except SourceError as ex:
         emit_json({"ok": False, "errors": [ex.diagnostic]}); sys.exit(1)
     fn_hashes = hash_program(prog)
@@ -106,7 +111,9 @@ def build(args, want_binary=True):
     library_salt=h.copy()
     library_salt.update(repr({'profile':profile,'inline_budget':inline_budget,'inline_expansion':inline_expansion,'library_roots':library_roots}).encode())
     h.update(repr(optimization).encode())
-    fns, fn_hashes = load(args.file,target=target)
+    package_root=getattr(args,'package_root',None)
+    if package_root:h.update(os.path.realpath(package_root).encode())
+    fns, fn_hashes = load(args.file,target=target,package_root=package_root)
     parse_seconds = time.monotonic() - started
     for path,text in sorted(fns.sources.items()): h.update(path.encode()); h.update(text.encode())
     # Module prefixes come from the nearest package manifest and appear in symbols.
@@ -115,7 +122,7 @@ def build(args, want_binary=True):
     outdir = os.path.join(os.path.dirname(os.path.abspath(args.file)), legacy.build_dir(args.file))
     def remember(report):
         entry = quick.resolved(args.file)
-        if library_cache or quick.folder(entry) != outdir: return
+        if library_cache or package_root or quick.folder(entry) != outdir: return
         # A record only saves time later; failing to write one never fails a build.
         try: quick.remember(quick_key, entry, fns, cache_key, report)
         except (OSError, KeyError, TypeError, ValueError): pass
@@ -138,10 +145,13 @@ def build(args, want_binary=True):
         from .elaborate import prepare
         prepare(fns)
         library_identity,library_names=native_libraries.library_identity(fns,library_roots,library_salt.digest())
-        if not args.no_cache:prepared=native_libraries.lookup(library_cache,library_identity,library_names)
+        if not args.no_cache:prepared=native_libraries.lookup(library_cache,library_identity,library_names,fns.fns)
         for fn in fns.fns:fn.native_library=fn.name in library_names
     proving = linear.SPENT[0]
     ck, report = check(fns, fn_hashes,precompiled=prepared['capabilities'] if prepared else None)
+    if prepared:
+        for fn in fns.fns:
+            if fn.precompiled:fn.precompiled_return_aliases=prepared['return_aliases'][fn.name]
     check_seconds = time.monotonic() - stage
     prove_seconds = linear.SPENT[0] - proving
     if not report["ok"] and not (args.allow_unproven and "errors" not in report):
@@ -193,7 +203,7 @@ def build(args, want_binary=True):
             library_report['prechecked_runtime_checks']=prepared['checked_runtime_checks']
         else:
             library_ir,library_objects,library_report=apply(gen,library_cache,target,force=args.no_cache)
-            native_libraries.publish_index(library_cache,library_identity,library_names,library_report,ck)
+            native_libraries.publish_index(library_cache,library_identity,library_names,library_report,ck,gen.return_aliases)
         report['native_libraries']=library_report
         if library_ir is not None:ir=library_ir
     phash = report["program"]
@@ -231,20 +241,28 @@ def build(args, want_binary=True):
     if 'apple' in target: cmd += ["-lSystem", "-Wl,-dead_strip"]  # required by Apple's ARM64 loader; no function imports
     else:
         cmd += ["-static", "-no-pie", "-Wl,-e,_start", "-Wl,--no-undefined", "-Wl,--gc-sections"]
-        if target.split('-')[0] != host_platform.machine().replace('arm64','aarch64'): cmd += ['-fuse-ld=lld']
+        # Same-architecture cross-OS builds still need an ELF linker; Apple's
+        # ld cannot link aarch64 Linux objects on an arm64 Darwin host.
+        if sys.platform=='darwin' or target.split('-')[0] != host_platform.machine().replace('arm64','aarch64'): cmd += ['-fuse-ld=lld']
     # Explicit exports remain ABI roots even when no local call reaches them.
     for function in fns.fns:
         if function.exported and not function.external and not (bool(function.source) and os.path.realpath(function.source).startswith(os.path.realpath(RUNTIME)+os.sep)):
             symbol=('_' if 'apple' in target else '')+function.name
             cmd += ['-Wl,-u,'+symbol]
-    binary_stage=binpath+'.'+str(os.getpid())+'.building'
+    # Darwin's ad-hoc code signature embeds the output basename. Keep it
+    # stable across processes while isolating concurrent link operations.
+    import tempfile
+    link_stage=tempfile.mkdtemp(prefix=cache_key+'.link-',dir=outdir)
+    binary_stage=os.path.join(link_stage,os.path.basename(binpath))
     cmd += ["-o", binary_stage]
     r = subprocess.run(cmd, capture_output=True, text=True)
     os.unlink(object_stage)
     if r.returncode != 0:
         if os.path.exists(binary_stage):os.unlink(binary_stage)
+        os.rmdir(link_stage)
         emit_json({'ok':False,'errors':[{'kind':'link','msg':r.stderr}]});sys.exit(1)
     os.replace(binary_stage,binpath)
+    os.rmdir(link_stage)
     t2 = time.monotonic()
     # llvm_seconds covers both invocations, as it did when they were one.
     report["build"] = {"cache": "miss", "graph": phash[:16], "llvm_seconds": round(t2 - t0, 4),
@@ -323,6 +341,7 @@ def command(argv=None):
     b.add_argument('--dev',action='store_true',help='fast development build: LLVM -O1 unless --opt-level, no policy inlining')
     b.add_argument('--library-cache',help='content-addressed directory for statically linked checked native libraries')
     b.add_argument('--library-root',action='append',default=[],help='dependency source directory to precompile (repeatable)')
+    b.add_argument('--package-root',help='locked source project for generated entry files outside its directory')
     b.set_defaults(fn=cmd_build)
     c = sub.add_parser("check"); c.add_argument("file"); c.add_argument('--library',action='store_true'); c.set_defaults(fn=cmd_check)
     g = sub.add_parser("graph"); g.add_argument("file"); g.add_argument("--full", action="store_true"); g.set_defaults(fn=cmd_graph)
@@ -337,7 +356,7 @@ def command(argv=None):
     from . import lsp
     l=sub.add_parser('lsp');l.set_defaults(fn=lsp.command)
     from . import release
-    rel=sub.add_parser('release');rel.add_argument('-o','--output',required=True);rel.set_defaults(fn=release.command)
+    rel=sub.add_parser('release');rel.add_argument('-o','--output',required=True);rel.add_argument('--native');rel.set_defaults(fn=release.command)
     from . import doctor
     sub.add_parser('doctor',help='check that this machine can build Neo programs').set_defaults(fn=doctor.command)
     for parser in (b,c,g):parser.add_argument('--diagnostic-format',choices=['json','human'],default='json')

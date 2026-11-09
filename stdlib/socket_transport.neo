@@ -1,0 +1,10 @@
+import "std:transport"
+import "std:socket_cancel"
+import "std:arena"
+type PlainHTTPCapture = { socket:Ref<Socket>,cancel:Ref<Cancellation> }
+effect(net,time,process) fn http_plain_read(context:PlainHTTPCapture,deadline:i64) -> BytesResult
+  = socket_read_cancel(borrow_ref(context.socket),borrow_ref(context.cancel),deadline)
+effect(net,time,process) fn http_plain_write(context:PlainHTTPCapture,bytes:Arr u8 n,deadline:i64) -> IntResult
+  = socket_write_cancel(borrow_ref(context.socket),bytes,borrow_ref(context.cancel),deadline)
+fn http_plain_transport(socket:Ref<Socket>,cancel:Ref<Cancellation>) -> HttpIO<PlainHTTPCapture>
+  = HttpIO::<PlainHTTPCapture> { context=PlainHTTPCapture { socket=socket,cancel=cancel },read=function(http_plain_read),write=function(http_plain_write) }

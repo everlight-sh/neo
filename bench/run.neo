@@ -1,0 +1,184 @@
+; Native benchmark driver. Build commands and workload binaries run as
+; children. Incremental edits and all generated files stay in scratch space.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:numbers"
+import "std:process"
+import "std:random"
+import "std:strings"
+import "../compiler/src/build.neo"
+import "../compiler/src/build_report.neo"
+import "../compiler/src/modules.neo"
+import "../compiler/src/packages.neo"
+import "../compiler/src/paths.neo"
+import "../compiler/src/project_fs.neo"
+import "../compiler/src/test_manifest.neo"
+import "../compiler/src/test_process.neo"
+import "../compiler/src/text.neo"
+import "http/probe.neo"
+import "maps/measure.neo"
+
+type Bw = { compiler:Arr u8 _, time_tool:Arr u8 _, scratch:Arr u8 _, environment:Arr Arr u8 _ _ }
+type BwSample = { run:NtProcess, wall:i64, cpu:f64, rss:i64, valid:bool }
+
+effect fn bw_fail(borrow message:Arr u8 _) -> unit
+  = let shown=print_error(concat("neo benchmark: ",message,"\n")) in process_exit(1)
+
+effect fn bw_clean(borrow path:Arr u8 _) -> unit
+  = if pf_kind(path,false)!=4 then let removed=fs_remove(path) in noop() else
+    let entries=pf_directory(path) in
+    let done=loop (i=0) while i<len(entries)
+      next (let removed=bw_clean(pt_join(path,pf_dirent(entries,i).name)) in i+1) yield i in
+    let removed=fs_rmdir(path) in noop()
+
+effect fn bw_abort(borrow config:Bw, borrow message:Arr u8 _) -> unit
+  = let removed=bw_clean(config.scratch) in bw_fail(message)
+
+effect fn bw_timed(borrow config:Bw, borrow executable:Arr u8 _, borrow args:Arr Arr u8 _ _) -> BwSample
+  = let stats=pt_join(config.scratch,"time.txt") in
+    let base=push(push(push(push(push(md_words(),"-f"),"%U %S %M"),"-o"),stats),executable) in
+    let command=nt_extend(base,args,0) in
+    let before=bd_clock() in
+    let run=nt_process(config.time_tool,command,config.environment,-1,8388608) in
+    let wall=bd_elapsed(before,bd_clock()) in
+    let read=fs_read(stats) in let removed=fs_remove(stats) in let fields=nt_words(read.value).words in
+    let user=float_parse(md_word(fields,0)) in let system=float_parse(md_word(fields,1)) in
+    let rss=int_parse(md_word(fields,2)) in
+    BwSample { run=run,wall=wall,cpu=user.value+system.value,rss=rss.value,
+      valid=read.ok && user.ok && system.ok && rss.ok }
+
+fn bw_sample_fields(borrow s:BwSample) -> Arr u8 _
+  = concat("\"wall\":",br_seconds(s.wall),",\"cpu\":",float_text(s.cpu).value,",\"rss_kb\":",int_text(s.rss))
+
+fn bw_args(borrow source:Arr u8 _, borrow binary:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(push(push(md_words(),"build"),source),"-o"),binary)
+
+effect fn bw_build(borrow config:Bw, borrow c:NtCase, borrow source:Arr u8 _, borrow binary:Arr u8 _) -> unit
+  = let args=bw_args(source,binary) in
+    let result=nt_process(config.compiler,args,nt_env_merge(config.environment,c.build_environment),-1,16384) in
+    if !result.ok || result.code!=0 then bw_abort(config,concat(c.name," build failed\n",nt_diagnostic(result))) else noop()
+
+effect fn bw_compute_sample(borrow config:Bw, borrow c:NtCase, borrow binary:Arr u8 _, borrow label:Arr u8 _,
+                            borrow expected:Arr u8 _, round:i64) -> Arr u8 _
+  = let sample=bw_timed(config with { environment=nt_env_merge(config.environment,c.environment) },binary,c.args) in
+    let got=str_trim(sample.run.output) in
+    let expected_case=c with { expected=expected } in
+    let matches=if len(expected)==0 then len(got)>0 else nt_stdout_matches(expected_case,sample.run.output) in
+    if !sample.valid || !sample.run.ok || sample.run.code!=0 || sample.run.overflow || !matches then
+      let failed=bw_abort(config,concat(c.name," output check failed\n",nt_diagnostic(sample.run))) in "" else
+    let printed=print_out(concat("{\"suite\":\"compute\",\"program\":",json_quote(c.name),",\"implementation\":",json_quote(label),
+      ",\"round\":",int_text(round),",\"output\":",json_quote(got),",",bw_sample_fields(sample),"}\n")) in sample.run.output
+
+effect fn bw_compute(borrow config:Bw, borrow c:NtCase, borrow source:Arr u8 _, rounds:i64) -> unit
+  = let binary=pt_join(config.scratch,"program") in let built=bw_build(config,c,source,binary) in
+    let compare=env_get("NEO_BENCH_COMPARE").value in
+    let alternate=if len(compare)==0 then "" else pt_realpath(pt_join(compare,c.name)) in
+    let done=loop (i=0, expected=if c.has_stdout then c.expected else "") while i<rounds
+      next (i+1,let actual=bw_compute_sample(config,c,binary,"Neo",expected,i+1) in
+        let checked=if len(alternate)==0 then actual else bw_compute_sample(config,c,alternate,"comparison",actual,i+1) in
+        if len(expected)==0 then actual else expected) yield expected in
+    let removed=fs_remove(binary) in noop()
+
+effect fn bw_http_run(borrow config:Bw, borrow c:NtCase, borrow binary:Arr u8 _, connections:i64, depth:i64) -> IntResult
+  = let port=hp_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),nt_env(config.environment,c.environment)) in
+    let ready=hp_wait(port) in let started=bd_clock() in
+    let good=loop (i=0, ok=ready) while i<connections && ok
+      next (i+1,hp_batch(port,depth,c.expected)) yield ok in
+    let elapsed=bd_elapsed(started,bd_clock()) in let stopped=process_signal(server,15) in
+    if !good || !stopped.ok || elapsed==0 then int_error(5,"HTTP response validation failed",0) else int_ok(elapsed)
+
+effect fn bw_http(borrow config:Bw, borrow c:NtCase, borrow source:Arr u8 _, rounds:i64) -> unit
+  = let connections=int_parse(md_word(c.args,0)) in let depth=int_parse(md_word(c.args,1)) in
+    if !c.has_stdout || !connections.ok || !depth.ok || connections.value<1 || connections.value>1000000 || depth.value<1 || depth.value>128 then
+      bw_abort(config,concat(c.name," requires a connection count, pipeline depth and expected HTTP body")) else
+    let binary=pt_join(config.scratch,"program") in let built=bw_build(config,c,source,binary) in
+    let total=connections.value*depth.value in
+    let done=loop (i=0) while i<rounds next (
+      let result=bw_http_run(config,c,binary,connections.value,depth.value) in
+      let checked=if !result.ok then bw_abort(config,result.error.message) else noop() in
+      let printed=print_out(concat("{\"suite\":\"http\",\"program\":",json_quote(c.name),",\"round\":",int_text(i+1),
+        ",\"requests\":",int_text(total),",\"pipeline_depth\":",int_text(depth.value),",\"wall\":",br_seconds(result.value),
+        ",\"requests_per_second\":",float_text(f64(total)*1000000000.0/f64(result.value)).value,"}\n")) in i+1) yield i in
+    let removed=fs_remove(binary) in noop()
+
+effect fn bw_maps(borrow config:Bw, borrow c:NtCase, borrow source:Arr u8 _, rounds:i64) -> unit
+  = let count=int_parse(md_word(c.args,0)) in let reserved=int_parse(md_word(c.args,1)) in
+    if !count.ok || count.value<0 || count.value>1000000 || !reserved.ok || (reserved.value!=0 && reserved.value!=1) then
+      bw_abort(config,concat(c.name," requires a size and a 0/1 reservation flag")) else
+    let binary=pt_join(config.scratch,"program") in let built=bw_build(config,c,source,binary) in
+    let environment=nt_env(config.environment,c.environment) in
+    let done=loop (i= -2) while i<rounds next (
+      let result=bm_measure(binary,environment,count.value,reserved.value) in
+      let checked=if !result.ok then bw_abort(config,result.error.message) else noop() in
+      let printed=if i<0 then int_ok(0) else print_out(concat("{\"suite\":\"maps\",\"program\":",json_quote(c.name),
+        ",\"round\":",int_text(i+1),",\"size\":",int_text(count.value),",\"reserved\":",int_text(reserved.value),
+        ",\"phases\":",result.value,"}\n")) in i+1) yield i in
+    let removed=fs_remove(binary) in noop()
+
+effect fn bw_clone(borrow config:Bw, borrow source:Arr u8 _, borrow folder:Arr u8 _) -> Arr u8 _
+  = let created=fs_mkdir(folder) in
+    let ready=if !created.ok then bw_abort(config,created.error.message) else noop() in
+    let parent=pt_head(source) in let entries=pf_directory(parent) in
+    let done=loop (i=0) while i<len(entries) next (
+      let item=pf_dirent(entries,i) in let name=item.name in
+      let copy=if len(name)<4 || !tx_equal(pt_slice(name,len(name)-4,len(name)),".neo") then int_ok(0) else
+        let text=fs_read(pt_join(parent,name)) in
+        if !text.ok then int_error(text.error.code,text.error.message,0) else fs_write(pt_join(folder,name),text.value) in
+      let checked=if !copy.ok then bw_abort(config,copy.error.message) else noop() in i+1) yield i in
+    pt_join(folder,pt_tail(source))
+
+effect fn bw_compile_sample(borrow config:Bw, borrow c:NtCase, borrow args:Arr Arr u8 _ _, borrow phase:Arr u8 _, round:i64) -> unit
+  = let sample=bw_timed(config with { environment=nt_env_merge(config.environment,c.build_environment) },config.compiler,args) in
+    let report=json_parse(sample.run.output) in
+    if !sample.valid || !sample.run.ok || sample.run.code!=0 || sample.run.overflow || !report.ok then
+      bw_abort(config,concat(c.name," ",phase," build failed\n",nt_diagnostic(sample.run))) else
+    let printed=print_out(concat("{\"suite\":\"compile\",\"program\":",json_quote(c.name),",\"phase\":",json_quote(phase),
+      ",\"round\":",int_text(round),",",bw_sample_fields(sample),",\"build_stages\":",json_encode(pk_get(report.value,"build_stages")),
+      ",\"build\":",json_encode(pk_get(report.value,"build")),",\"native_libraries\":",
+      json_encode(pk_get(report.value,"native_libraries")),"}\n")) in noop()
+
+effect fn bw_compile_round(borrow config:Bw, borrow c:NtCase, borrow source:Arr u8 _, round:i64) -> unit
+  = let cache=pt_join(config.scratch,"cache") in let folder=pt_join(config.scratch,"source") in
+    let copy=bw_clone(config,source,folder) in let binary=pt_join(config.scratch,"program") in
+    let args=push(push(push(bw_args(copy,binary),"--report"),"--library-cache"),cache) in
+    let cold=bw_compile_sample(config,c,args,"cold",round) in
+    let warm=bw_compile_sample(config,c,args,"unchanged",round) in
+    let edited=fs_append(copy,"\n; compile-time benchmark edit\n") in
+    let checked=if !edited.ok then bw_abort(config,edited.error.message) else noop() in
+    let incremental=bw_compile_sample(config,c,args,"incremental",round) in
+    let removed=fs_remove(binary) in let clean_source=bw_clean(folder) in bw_clean(cache)
+
+effect fn main() -> unit
+  = let suite=cli_arg(1).value in let repeat=cli_arg(2) in let rounds=if repeat.present then int_parse(repeat.value) else int_ok(7) in
+    if (!tx_equal(suite,"compute") && !tx_equal(suite,"compile") && !tx_equal(suite,"http") && !tx_equal(suite,"maps")) ||
+      !rounds.ok || rounds.value<1 || rounds.value>1000 then
+      bw_fail("usage: neo run bench/run.neo -- {compute|compile|http|maps} [ROUNDS] [MANIFEST]") else
+    let root=env_get("NEO_ROOT") in let root=pt_realpath(if root.present then root.value else fs_cwd().value) in
+    let manifest=cli_arg(3) in
+    let path=pt_realpath(if manifest.present then manifest.value else
+      pt_join(root,if tx_equal(suite,"compute") then "bench/compute.neo.toml" else
+        if tx_equal(suite,"http") then "bench/http/neo.toml" else
+        if tx_equal(suite,"maps") then "bench/maps/neo.toml" else "bench/compile/neo.toml")) in
+    let input=fs_read(path) in if !input.ok then bw_fail(input.error.message) else
+    let plan=nt_plan(input.value) in
+    if !plan.valid || len(plan.cases)==0 then bw_fail("invalid or empty benchmark manifest") else
+    let compiler=env_get("NEOC") in let compiler=bd_find_tool(if compiler.present then compiler.value else pt_join(root,"neo")) in
+    let tool=bd_find_tool("time") in
+    if len(compiler)==0 || (len(tool)==0 && (tx_equal(suite,"compile") || tx_equal(suite,"compute"))) then
+      bw_fail("native neoc and GNU time are required") else
+    let token=random_bytes(16) in if !token.ok then bw_fail(token.error.message) else
+    let temporary=env_get("TMPDIR") in
+    let scratch=pt_abspath(pt_join(if temporary.present && len(temporary.value)>0 then temporary.value else "/tmp",
+      concat("neo-bench-",tx_hex_bytes("",token.value)))) in
+    let created=fs_mkdir(scratch) in if !created.ok then bw_fail(created.error.message) else
+    let config=Bw { compiler=compiler,time_tool=tool,scratch=scratch,
+      environment=nt_env_put(bd_environment(),concat("NEO_ROOT=",root)) } in
+    let done=loop (i=0) while i<len(plan.cases) next (
+      let c=nt_case_at(plan.cases,i) in let source=pt_realpath(pt_join(pt_head(path),c.file)) in
+      let checked=if !c.valid then bw_abort(config,c.name) else if tx_equal(suite,"compute") then bw_compute(config,c,source,rounds.value)
+        else if tx_equal(suite,"http") then bw_http(config,c,source,rounds.value) else
+        if tx_equal(suite,"maps") then bw_maps(config,c,source,rounds.value) else
+        let measured=loop (k=0) while k<rounds.value next (let one=bw_compile_round(config,c,source,k+1) in k+1) yield k in noop() in
+      i+1) yield i in bw_clean(scratch)

@@ -1,0 +1,113 @@
+import "std:io"
+import "std:json"
+import "std:strings"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+import "toml.neo"
+
+effect(fs,unsafe) fn pk_pick(borrow root:Arr u8 _, borrow name:Arr u8 _, borrow legacy:Arr u8 _) -> Arr u8 _
+  = let primary=pt_join(root,name) in let old=pt_join(root,legacy) in
+    if pf_kind(primary,true)!=8 && pf_kind(old,true)==8 then old else primary
+
+effect(fs,unsafe) fn pk_manifest_path(borrow root:Arr u8 _) -> Arr u8 _
+  = pk_pick(root,"neo.toml","axon.toml")
+effect(fs,unsafe) fn pk_lock_path(borrow root:Arr u8 _) -> Arr u8 _
+  = pk_pick(root,"neo.lock","axon.lock")
+
+effect(fs,unsafe) fn pk_root(borrow input:Arr u8 _) -> BytesResult
+  = let path=pt_realpath(pt_pathname(input)) in
+    let first=if pf_kind(path,true)==4 then path else pt_parent(path) in
+    let dir=loop (dir=first) while len(dir)>0 && !tx_equal(dir,"/") && pf_kind(pk_manifest_path(dir),true)!=8
+      next (pt_parent(dir)) yield dir in
+    if len(dir)>0 && pf_kind(pk_manifest_path(dir),true)==8 then bytes_ok(dir)
+    else bytes_error(2,concat("package requires an ancestor neo.toml: ",path),0)
+
+fn pk_alpha(c:i64) -> bool = (c>=65 && c<=90) || (c>=97 && c<=122)
+fn pk_digit(c:i64) -> bool = c>=48 && c<=57
+fn pk_name(borrow name:Arr u8 _) -> bool
+  = pk_alpha(tx_byte(name,0)) && loop (i=1, ok=true) while ok && i<len(name)
+    next (i+1,tm_bare(tx_byte(name,i))) yield ok
+fn pk_version(borrow version:Arr u8 _) -> bool
+  = let major=json_digits(version,0) in let minor=json_digits(version,major+1) in
+    let patch=json_digits(version,minor+1) in
+    major>0 && tx_byte(version,major)==46 && minor>major+1 &&
+    tx_byte(version,minor)==46 && patch>minor+1 &&
+    (patch==len(version) || (tx_byte(version,patch)==45 && patch+1<len(version) &&
+      loop (i=patch+1, ok=true) while ok && i<len(version)
+        next (i+1,let c=tx_byte(version,i) in pk_alpha(c) || pk_digit(c) || c==45 || c==46) yield ok))
+
+type PkSpec = { alias:Arr u8 _, path:Arr u8 _, version:Arr u8 _ }
+type PkMeta = { name:Arr u8 _, version:Arr u8 _, entry:Arr u8 _, has_entry:bool, specs:Arr PkSpec _, error:Arr u8 _ }
+fn pk_meta_empty() -> PkMeta
+  = PkMeta { name="", version="", entry="", has_entry=false, specs=arr(i in 0..0) PkSpec { alias="",path="",version="" }, error="" }
+fn pk_field(borrow fields:Arr TmPackageField _, i:i64) -> TmPackageField
+  = if i>=0 && i<len(fields) then fields[i] else TmPackageField { path=tm_words(),value="",kind=0 }
+fn pk_path_prefix(borrow left:Arr Arr u8 _ _, borrow right:Arr Arr u8 _ _) -> bool
+  = len(left)<=len(right) && loop (i=0, ok=true) while ok && i<len(left)
+    next (i+1,tx_equal(tx_word(left,i),tx_word(right,i))) yield ok
+
+fn pk_dep_error(borrow alias:Arr u8 _) -> Arr u8 _
+  = concat("dependency ",alias," requires only path and exact version")
+
+type PkSpecRead = { path:Arr u8 _, version:Arr u8 _, has_path:bool, has_version:bool, error:Arr u8 _ }
+fn pk_read_spec(borrow fields:Arr TmPackageField _, borrow alias:Arr u8 _, strict:bool) -> PkSpecRead
+  = loop (i=0, spec=PkSpecRead { path="",version="",has_path=false,has_version=false,error="" })
+      while i<len(fields) && len(spec.error)==0
+      next (i+1, let field=pk_field(fields,i) in let keys=field.path in
+        if len(keys)<2 || !tx_equal(tx_word(keys,0),"dependencies") || !tx_equal(tx_word(keys,1),alias) then spec
+        else if len(keys)==2 then
+          if field.kind==2 || field.kind==4 then spec else spec with { error=pk_dep_error(alias) }
+        else let key=tx_word(keys,2) in
+        if !tx_equal(key,"path") && !tx_equal(key,"version") then
+          if strict then spec with { error=pk_dep_error(alias) } else spec
+        else if len(keys)!=3 || field.kind!=1 then spec with { error=concat("dependency path and version must be strings: ",alias) }
+        else if tx_equal(key,"path") then spec with { path=field.value, has_path=true }
+        else spec with { version=field.value, has_version=true }) yield spec
+
+type PkMetaRead = { name:Arr u8 _, version:Arr u8 _, entry:Arr u8 _, has_entry:bool, aliases:Arr Arr u8 _ _, error:Arr u8 _ }
+fn pk_metadata_field(move meta:PkMetaRead, borrow fields:Arr TmPackageField _, i:i64, borrow root:Arr u8 _) -> PkMetaRead
+  = let field=pk_field(fields,i) in let keys=field.path in
+    let repeated=loop (j=0, conflict=false) while j<i && !conflict
+      next (j+1,let prior=pk_field(fields,j) in
+        (pk_path_prefix(prior.path,keys) && (len(keys)==len(prior.path) || prior.kind<=3)) ||
+        (field.kind!=2 && field.kind!=4 && pk_path_prefix(keys,prior.path))) yield conflict in
+    let package=tx_equal(tx_word(keys,0),"package") in
+    let key=tx_word(keys,1) in
+    if repeated then meta with { error=concat("invalid package manifest at ",root,": duplicate TOML key") }
+    else if len(keys)==1 then
+      if field.kind==2 || field.kind==4 then meta
+      else meta with { error=concat("package and dependencies must be tables at ",root) }
+    else if !package then meta with { aliases=tx_insert_word(meta.aliases,key) }
+    else if tx_equal(key,"name") then meta with { name=if len(keys)==2 && field.kind==1 then field.value else "" }
+    else if tx_equal(key,"version") then meta with { version=if len(keys)==2 && field.kind==1 then field.value else "" }
+    else if tx_equal(key,"entry") then
+      if len(keys)!=2 || field.kind!=1 then meta with { error=concat("package entry must be a string at ",root) }
+      else meta with { entry=field.value, has_entry=true }
+    else meta
+
+effect(fs,unsafe) fn pk_metadata(borrow root:Arr u8 _, strict:bool) -> PkMeta
+  = let file=pk_manifest_path(root) in
+    let read=if pf_kind(file,true)==8 then fs_read(file) else bytes_error(2,"missing manifest",0) in
+    let empty=pk_meta_empty() in
+    if !read.ok then empty with { error=concat("cannot read package manifest at ",root) } else
+    if !utf8_valid(read.value) then empty with { error=concat("invalid UTF-8 in package manifest at ",root) } else
+    let parsed=tm_package_read(tx_newlines(read.value)) in let fields=parsed.package_fields in
+    if !parsed.ok then empty with { error=concat("invalid package manifest at ",root) } else
+    let data=loop (i=0, meta=PkMetaRead { name="",version="",entry="",has_entry=false,aliases=tm_words(),error="" })
+      while i<len(fields) && len(meta.error)==0 next (i+1,pk_metadata_field(meta,fields,i,root)) yield meta in
+    if len(data.error)>0 then empty with { error=data.error }
+    else if !pk_name(data.name) then empty with { error=concat("invalid package name at ",root) }
+    else if !pk_version(data.version) then empty with { error=concat("package requires an exact version at ",root) }
+    else loop (i=0, meta=empty with { name=data.name,version=data.version,entry=data.entry,has_entry=data.has_entry })
+      while i<len(data.aliases) && len(meta.error)==0
+      next (i+1,let alias=tx_word(data.aliases,i) in let spec=pk_read_spec(fields,alias,strict) in
+        if strict && !pk_name(alias) then meta with { error=pk_dep_error(alias) }
+        else if len(spec.error)>0 then meta with { error=spec.error }
+        else if !spec.has_path || !spec.has_version then meta with { error=pk_dep_error(alias) }
+        else if tx_has(spec.path,0) then meta with { error=concat("invalid dependency path: ",alias) }
+        else meta with { specs=push(meta.specs,PkSpec { alias=alias,path=spec.path,version=spec.version }) }) yield meta
+
+fn pk_identity(borrow meta:PkMeta) -> Arr u8 _ = concat(meta.name,"@",meta.version)
+fn pk_spec(borrow specs:Arr PkSpec _, i:i64) -> PkSpec
+  = if i>=0 && i<len(specs) then specs[i] else PkSpec { alias="",path="",version="" }

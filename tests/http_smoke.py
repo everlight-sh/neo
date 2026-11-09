@@ -201,8 +201,8 @@ def verify(binary, workers=4, backend=None):
                 stream.close()
             print('512 pipelined responses cross batch limits and preserve close/order: PASS', flush=True)
 
-            def read_response(stream):
-                assert stream.readline().startswith(b'HTTP/1.1 200')
+            def read_response(stream,status=200):
+                assert stream.readline().startswith(b'HTTP/1.1 '+str(status).encode())
                 length = None
                 while (line := stream.readline()) != b'\r\n':
                     assert line
@@ -256,11 +256,19 @@ def verify(binary, workers=4, backend=None):
             print('Backpressure drains 80 large responses, resumes buffered work and closes: PASS', flush=True)
 
             # Unsupported/ambiguous framing is rejected by closing the connection.
-            for headers in (b'Content-Length: -1', b'Content-Length: 1\r\nContent-Length: 1', b'Transfer-Encoding: chunked', b'Content-Length: 9999999999999999999999999'):
+            for headers in (b'Content-Length: -1', b'Content-Length: 1\r\nContent-Length: 1', b'Transfer-Encoding: gzip', b'Content-Length: 0\r\nTransfer-Encoding: chunked', b'Content-Length: 16777217', b'Content-Length: 9999999999999999999999999'):
                 with socket.create_connection(('127.0.0.1', port), timeout=3) as s:
                     s.sendall(b'POST / HTTP/1.1\r\nHost: x\r\n' + headers + b'\r\n\r\n')
                     assert s.recv(1) == b''
             print('Invalid, duplicate, overflowing and unsupported body framing: PASS', flush=True)
+            with socket.create_connection(('127.0.0.1',port),timeout=5) as s:
+                s.sendall(b'POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhe')
+                time.sleep(.01)
+                s.sendall(b'llo\r\n0\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n')
+                stream=s.makefile('rb')
+                assert read_response(stream,405)==b''
+                assert read_response(stream)==b'Hello, World!' and stream.read(1)==b''
+            print('Fragmented chunked request preserves the next pipelined response: PASS',flush=True)
             subprocess.run(['python3', str(ROOT / 'bench/http/protocol_test.py'), str(port)], check=True, timeout=20)
             assert process.poll() is None
             # Worker 0 has served by now, so its ring exists exactly when io_uring is in use.

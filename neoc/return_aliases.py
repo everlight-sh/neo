@@ -11,17 +11,23 @@ def managed(t):
 
 def summaries(functions):
     known={f.name:f for f in functions}
-    opaque={f.name for f in functions if f.external or f.exported or f.effect or getattr(f,'precompiled',False)}
+    # Prechecked bodies lack expression types on a warm cache hit. Restore
+    # only the checked, artifact-bound ownership summaries; inspecting their
+    # untyped syntax would either invent facts or lose every fresh-return fact.
+    certified={f.name:set(f.precompiled_return_aliases) for f in functions
+               if getattr(f,'precompiled',False) and hasattr(f,'precompiled_return_aliases')}
+    opaque={f.name for f in functions if f.external or f.exported or f.effect or getattr(f,'precompiled',False) and f.name not in certified}
     def calls(e):
         if not isinstance(e,S.Node):return set()
         out={e.name} if isinstance(e,S.Call) and not getattr(e,'builtin',None) else set()
         return out|set().union(*(calls(c) for c in S.children(e)))
-    dependencies={f.name:calls(f.body) if f.name not in opaque else set() for f in functions}
+    dependencies={f.name:calls(f.body) if f.name not in opaque and f.name not in certified else set() for f in functions}
     while True:
         updated=opaque|{name for name,targets in dependencies.items() if any(t not in known or t in opaque for t in targets)}
         if updated==opaque:break
         opaque=updated
     result={f.name:{i for i,p in enumerate(f.params) if managed(p.ty)}|({-1} if f.name in opaque else set()) for f in functions}
+    result.update(certified)
     def aliases(e,env):
         if getattr(e,'ty',None) is None:return {-1}|set().union(*env.values())
         if not managed(e.ty):return set()
@@ -56,6 +62,7 @@ def summaries(functions):
     while True:
         updated={}
         for f in functions:
+            if f.name in certified:updated[f.name]=certified[f.name];continue
             if f.name in opaque:updated[f.name]=result[f.name];continue
             scope={p.name:{i} if managed(p.ty) else set() for i,p in enumerate(f.params)}
             updated[f.name]=aliases(f.body,scope)

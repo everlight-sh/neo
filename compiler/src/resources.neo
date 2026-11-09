@@ -1,0 +1,173 @@
+; Affine ownership of direct resource values. Ordinary record/array
+; reference counts are independent of the resource's destructor.
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "modules.neo"
+import "check.neo"
+
+type RsBinding = { name:i64, record_id:i64, live:bool, owned:bool }
+type RsState = { m:Mods, env:Arr RsBinding _, module:i64 }
+type RsExpr = { state:RsState, record_id:i64 }
+
+fn rs_value() -> i64 = 0
+fn rs_borrow() -> i64 = 1
+fn rs_consume() -> i64 = 2
+fn rs_factory() -> i64 = 3
+fn rs_initializer() -> i64 = 4
+
+fn rs_binding(borrow env:Arr RsBinding _, i:i64) -> RsBinding
+  = if i>=0 && i<len(env) then env[i] else RsBinding { name=-1, record_id=-1, live=false, owned=false }
+fn rs_mask(move s:RsState, name:i64) -> RsState
+  = s with { env=push(s.env,RsBinding { name=name, record_id=-1, live=false, owned=false }) }
+fn rs_find(borrow s:RsState, name:i64) -> i64
+  = let word=md_str(s.m,name) in
+    loop (i=len(s.env)-1) while i>=0 && !tx_equal(word,md_str(s.m,rs_binding(s.env,i).name)) next (i-1) yield i
+fn rs_fail(move s:RsState, id:i64, borrow message:Arr u8 _) -> RsState
+  = let n=md_node(s.m,id) in let path=md_path(s.m,s.module) in
+    s with { m=md_fail(s.m,message,path,n.line,n.col) }
+fn rs_result(move s:RsState, id:i64, record_id:i64, context:i64) -> RsExpr
+  = let s=if record_id<0 then s else if context==rs_initializer() then rs_fail(s,id,"bind resource owners with using")
+    else if context==rs_value() then rs_fail(s,id,"resource value requires a using scope; it cannot escape or be copied") else s in
+    RsExpr { state=s, record_id=record_id }
+
+fn rs_var(move s:RsState, id:i64, n:Node, context:i64) -> RsExpr
+  = let slot=rs_find(s,n.a) in let bound=rs_binding(s.env,slot) in let record_id=bound.record_id in
+    if record_id<0 then rs_result(s,id,record_id,context) else
+    let name=md_str(s.m,n.a) in
+    if !bound.live then rs_result(rs_fail(s,id,concat("resource ",name," used after move or outside its scope")),id,record_id,context)
+    else if context==rs_factory() then rs_result(rs_fail(s,id,"a resource factory must construct a new owner"),id,record_id,context)
+    else if context==rs_consume() && !bound.owned then rs_result(rs_fail(s,id,concat("cannot move borrowed resource ",name)),id,record_id,context)
+    else let s=if context==rs_consume() && slot>=0 && slot<len(s.env) then
+      s with { env=set(s.env,slot,bound with { live=false }) } else s in
+    rs_result(s,id,record_id,context)
+
+fn rs_list(move s:RsState, borrow fns:Arr i64 _, list:i64, field:i64) -> RsState
+  = loop (i=0, out=s) while out.m.ok && i<ast_list_len(out.m.ast,list)
+      next (i+1,let item=ast_list_at(out.m.ast,list,i) in let n=md_node(out.m,item) in
+        rs_walk(out,fns,if field==2 then n.b else if field==3 then n.c else item,rs_value()).state) yield out
+fn rs_call(move s:RsState, borrow fns:Arr i64 _, id:i64, n:Node, context:i64) -> RsExpr
+  = let name=md_str(s.m,n.a) in
+    if tx_equal(name,"adopt") then
+      let owner=rs_walk(s,fns,ast_list_at(s.m.ast,n.b,0),rs_consume()) in
+      let arena=rs_walk(owner.state,fns,ast_list_at(owner.state.m.ast,n.b,1),rs_borrow()) in
+      rs_result(arena.state,id,-1,context)
+    else if tx_equal(name,"borrow_ref") then
+      let ref=rs_walk(s,fns,ast_list_at(s.m.ast,n.b,0),rs_value()) in
+      let checked=if context==rs_borrow() then ref.state else rs_fail(ref.state,id,"borrow_ref may only supply a scoped borrow") in
+      rs_result(checked,id,md_resource_type(checked.m,n.e),context)
+    else let f=md_node(s.m,md_find_decl(s.m,fns,n.a)) in let record_id=md_resource_type(s.m,f.c) in
+    let s=if record_id>=0 && context==rs_borrow() then
+      rs_fail(s,id,"temporary resource must be bound with using before borrowing") else s in
+    let s=loop (i=0, out=s) while out.m.ok && i<ast_list_len(out.m.ast,n.b)
+      next (i+1,let arg=ast_list_at(out.m.ast,n.b,i) in let p=md_node(out.m,ast_list_at(out.m.ast,f.b,i)) in
+        let mode=if md_resource_type(out.m,p.b)<0 then rs_value()
+          else if md_resource_consumed(out.m,f,p) then rs_consume() else rs_borrow() in
+        let value=rs_walk(out,fns,arg,mode) in
+        let supplied=md_node(value.state.m,arg) in
+        let ref=mode==rs_borrow() && supplied.kind==n_call() && tx_equal(md_str(value.state.m,supplied.a),"borrow_ref") in
+        if value.record_id>=0 && supplied.kind!=n_var() && !ref then
+          rs_fail(value.state,arg,"resource call arguments must name an existing owner or borrow") else value.state) yield out in
+    rs_result(s,id,record_id,context)
+fn rs_scope(move s:RsState, borrow fns:Arr i64 _, id:i64, n:Node, context:i64) -> RsExpr
+  = let scoped=n.kind==n_using() in
+    let mode=if !scoped then rs_initializer()
+      else if md_node(s.m,n.b).kind==n_var() then rs_consume() else rs_factory() in
+    let value=rs_walk(s,fns,n.b,mode) in let s=value.state in let record_id=value.record_id in
+    let outer=len(s.env) in
+    let slot=rs_find(s,n.a) in
+    if !s.m.ok then value else
+    if scoped && record_id<0 then rs_result(rs_fail(s,id,"using requires a resource type"),id,-1,context) else
+    if !scoped && rs_binding(s.env,slot).record_id>=0 then
+      rs_result(rs_fail(s,id,concat("cannot shadow an active resource ",md_str(s.m,n.a))),id,-1,context) else
+    let s=if !scoped then s else
+      let destructor=md_resource_drop(s.m,fns,record_id) in
+      s with { m=md_set(s.m,id,5,destructor), env=push(s.env,RsBinding { name=n.a, record_id=record_id, live=true, owned=true }) } in
+    let body=rs_walk(s,fns,n.c,context) in let inner=body.state in
+    body with { state=inner with { env=arr(i in 0..outer) rs_binding(inner.env,i) } }
+fn rs_branch(move s:RsState, borrow fns:Arr i64 _, n:Node, context:i64) -> RsExpr
+  = let base=rs_walk(s,fns,n.a,rs_value()).state in
+    let yes=rs_walk(base,fns,n.b,context) in
+    let no=rs_walk(yes.state with { env=base.env },fns,n.c,context) in
+    let env=arr(i in 0..len(base.env))
+      rs_binding(base.env,i) with { live=rs_binding(yes.state.env,i).live && rs_binding(no.state.env,i).live } in
+    RsExpr { state=no.state with { env=env }, record_id=if yes.record_id>=0 then yes.record_id else no.record_id }
+fn rs_repeat(move s:RsState, borrow fns:Arr i64 _, id:i64, n:Node) -> RsState
+  = let before=s.env in
+    let out=if n.kind==n_loop() then
+      let inits=rs_list(s,fns,n.a,3) in
+      let bound=loop (i=0, inner=inits) while i<ast_list_len(inner.m.ast,n.a)
+        next (i+1,rs_mask(inner,md_node(inner.m,ast_list_at(inner.m.ast,n.a,i)).a)) yield inner in
+      let cond=rs_walk(bound,fns,n.b,rs_value()).state in
+      let nexts=rs_list(cond,fns,n.c,0) in rs_walk(nexts,fns,n.d,rs_value()).state
+    else let lo=rs_walk(s,fns,n.b,rs_value()).state in
+      let hi=rs_walk(lo,fns,n.c,rs_value()).state in rs_walk(rs_mask(hi,n.a),fns,n.d,rs_value()).state in
+    let moved=loop (i=0, found=false) while !found && i<len(before)
+      next (i+1,rs_binding(before,i).live && !rs_binding(out.env,i).live) yield found in
+    if moved then rs_fail(out,id,"cannot move an outer resource from a repeating region") else
+    out with { env=arr(i in 0..len(before)) rs_binding(out.env,i) }
+fn rs_walk(move s:RsState, borrow fns:Arr i64 _, id:i64, context:i64) -> RsExpr
+  = let n=md_node(s.m,id) in let k=n.kind in
+    if !s.m.ok then RsExpr { state=s, record_id=-1 }
+    else if k==n_var() then rs_var(s,id,n,context)
+    else if k==n_call() then rs_call(s,fns,id,n,context)
+    else if k==n_let() || k==n_using() then rs_scope(s,fns,id,n,context)
+    else if k==n_if() then rs_branch(s,fns,n,context)
+    else if k==n_check() then rs_walk(rs_walk(s,fns,n.a,rs_value()).state,fns,n.b,context)
+    else if k==n_reclit() then
+      let decl=md_find_type(s.m,n.a) in let record_id=if md_node(s.m,decl).e>=0 then decl else -1 in
+      let s=if record_id>=0 && context==rs_borrow() then rs_fail(s,id,"resource construction requires a using scope") else s in
+      rs_result(rs_list(s,fns,n.b,2),id,record_id,context)
+    else if k==n_field() || k==n_with() then
+      let base=rs_walk(s,fns,n.a,rs_borrow()) in let s=base.state in
+      let s=if base.record_id<0 then s
+        else if k==n_with() then rs_fail(s,id,"resources cannot be copied with record updates")
+        else if tx_at(s.m.owners,base.record_id)!=s.module then
+          rs_fail(s,id,"resource representation is private; use its borrowing operations") else s in
+      rs_result(if k==n_with() then rs_list(s,fns,n.b,2) else s,id,-1,context)
+    else let s=if k==n_loop() || k==n_arrc() || k==n_sum() then rs_repeat(s,fns,id,n)
+      else if k==n_bin() then rs_walk(rs_walk(s,fns,n.b,rs_value()).state,fns,n.c,rs_value()).state
+      else if k==n_index() then rs_walk(rs_walk(s,fns,n.a,rs_value()).state,fns,n.b,rs_value()).state
+      else if k==n_un() || k==n_cast() then rs_walk(s,fns,n.b,rs_value()).state
+      else if k==n_len() || k==n_try() then rs_walk(s,fns,n.a,rs_value()).state else s in
+    rs_result(s,id,-1,context)
+
+fn rs_contains(borrow m:Mods, id:i64) -> bool
+  = let n=md_node(m,id) in
+    if n.kind==n_t_arr() then rs_contains(m,n.a) else md_resource_type(m,id)>=0
+fn rs_decl(move s:RsState, borrow fns:Arr i64 _, id:i64) -> RsState
+  = let decl=md_node(s.m,id) in
+    let bad=loop (i=0, bad=false) while !bad && i<ast_list_len(s.m.ast,decl.b)
+      next (i+1,rs_contains(s.m,md_node(s.m,ast_list_at(s.m.ast,decl.b,i)).b)) yield bad in
+    if bad then rs_fail(s,id,"resources cannot be stored in value records, enums or arrays") else
+    if decl.e<0 then s else
+    let destructor=md_node(s.m,md_resource_drop(s.m,fns,id)) in
+    let p=md_node(s.m,ast_list_at(s.m.ast,destructor.b,0)) in
+    if !ast_flag(destructor,fl_effect()) || md_node(s.m,destructor.c).kind!=n_t_unit() ||
+      ast_list_len(s.m.ast,destructor.b)!=1 || md_resource_type(s.m,p.b)!=id || p.f==1 then
+      rs_fail(s,id,"resource destructor must be an effect function borrowing one resource and returning unit") else s
+fn rs_function(move s:RsState, borrow fns:Arr i64 _, id:i64) -> RsState
+  = let f=md_node(s.m,id) in let record_id=md_resource_type(s.m,f.c) in
+    if record_id<0 && rs_contains(s.m,f.c) then rs_fail(s,id,"resources cannot escape inside a return value") else
+    if record_id>=0 && (tx_at(s.m.owners,record_id)!=s.module || tc_abi_boundary(f) || tx_equal(md_str(s.m,f.a),"main")) then
+      rs_fail(s,id,"only the declaring module can define resource factories") else
+    let s=loop (i=0, out=s) while out.m.ok && i<ast_list_len(out.m.ast,f.b)
+      next (i+1,let id=ast_list_at(out.m.ast,f.b,i) in let p=md_node(out.m,id) in let record_id=md_resource_type(out.m,p.b) in
+        if record_id>=0 then out with { env=push(out.env,RsBinding { name=p.a, record_id=record_id, live=true, owned=p.f==1 }) }
+        else if rs_contains(out.m,p.b) then rs_fail(out,id,"resource parameters must be direct borrows or moves") else out) yield out in
+    rs_walk(s,fns,f.d,if record_id>=0 then rs_factory() else rs_value()).state
+fn rs_empty(move m:Mods, module:i64) -> RsState
+  = RsState { m=m, module=module, env=arr(i in 0..0) RsBinding { name=-1, record_id=-1, live=false, owned=false } }
+fn rs_program(move m:Mods) -> Mods
+  = if !m.ok then m else
+    let needed=loop (i=0, needed=false) while !needed && i<len(m.ast.nodes)/11
+      next (i+1,let n=md_node(m,i) in n.kind==n_using() || (n.kind==n_type() && n.e>=0)) yield needed in
+    if !needed then m else
+    let fns=tc_functions(m) in
+    let m=loop (k=0, out=m) while out.ok && k<len(out.types)
+      next (k+1,let types=md_list(out.types,k) in
+        loop (i=0, state=out) while state.ok && i<len(types)
+          next (i+1,rs_decl(rs_empty(state,k),fns,tx_at(types,i)).m) yield state) yield out in
+    loop (i=0, out=m) while out.ok && i<len(fns)
+      next (i+1,let id=tx_at(fns,i) in let module=tx_at(out.owners,id) in
+        rs_function(rs_empty(out,module),fns,id).m) yield out

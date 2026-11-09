@@ -78,7 +78,7 @@ def cases():
         for label, tree in TREES:
             for profile in ([], ['--dev']) if label in dev else ([],):
                 out.append({'program': program, 'impl': 'Neo ' + label + (' dev' if profile else ''), 'cwd': tree,
-                            'source': str(Path(tree) / path), 'argv': ['./neo', 'build', path, '-o', '{out}', '--report', *profile],
+                            'source': str(Path(tree) / path), 'argv': ['./neoc.sh', 'build', path, '-o', '{out}', '--report', *profile],
                             'cache': [str(Path(tree) / Path(path).parent / '.neo-build')]})
         for impl, (cwd, argv, source) in OTHER.get(program, {}).items():
             if not (SOURCES / source).exists(): continue

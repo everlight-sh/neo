@@ -4,7 +4,7 @@ private fn base64_digit(value:i64,url:bool) -> u8
     if value<62 then u8(48+value-52) else if value==62 then if url then '-' else '+' else if url then '_' else '/'
 fn base64_encode_mode(bytes:Arr u8 n,url:bool,padding:bool) -> Arr u8 _
   = check n<=4611686018427387900 in let length=(n/3)*4+(if n%3==0 then 0 else if padding then 4 else n%3+1) in
-    arr(i in 0..length) let group=i/4*3 in let part=i%4 in
+    check length>=0 in arr(i in 0..length) let group=i/4*3 in let part=i%4 in
       check group>=0 && group<n in let a=i64(bytes[group]) in
       let b=if group+1<n then i64(bytes[group+1]) else 0 in let c=if group+2<n then i64(bytes[group+2]) else 0 in
       if part==0 then base64_digit(a/4,url) else if part==1 then base64_digit((a%4)*16+b/16,url) else

@@ -1,0 +1,54 @@
+; Scaffold a project with the reference layout and umask-filtered modes.
+import "std:fs"
+import "std:io"
+import "std:unicode"
+import "build.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+
+fn ni_alpha(c:i64) -> bool = (c>=65 && c<=90) || (c>=97 && c<=122)
+
+fn ni_name(borrow name:Arr u8 _) -> Arr u8 _
+  = let safe=loop (i=0, word=tx_empty()) while i<len(name)
+      next (if tx_byte(name,i)<128 then i+1 else let rune=unicode_next(name,i) in if rune.ok then rune.end else i+1,
+        let c=tx_byte(name,i) in
+        push(word,if ni_alpha(c) || (c>=48 && c<=57) || c==95 then u8(c) else '-')) yield word in
+    if ni_alpha(tx_byte(safe,0)) then safe else concat("neo-",safe)
+
+type NiDirectory = { count:i64, empty:bool }
+effect(fs,unsafe) fn ni_empty(borrow path:Arr u8 _) -> IntResult
+  = let name=concat(path,"\0") in let fd=rt_open_directory(data(name)) in
+    if fd<0 then int_error(i64(load_i32(rt_errno(),0)),concat("cannot open project directory ",path),0) else
+    let buffer=stack_alloc(32768) in
+    let read=loop (s=NiDirectory { count=pf_read_directory(fd,buffer), empty=true })
+      while s.empty && s.count>0 && s.count<=32768
+      next (if len(pf_dir_batch(pf_entries(),buffer,s.count))>0 then s with { empty=false }
+        else s with { count=pf_read_directory(fd,buffer) }) yield s in
+    let result=if read.count<0 || read.count>32768 then int_error(5,concat("cannot read project directory ",path),0)
+      else int_ok(if read.empty then 1 else 0) in
+    let closed=file_close(fd) in if !result.ok then result else if !closed.ok then closed else result
+
+effect(fs,unsafe) fn ni_scaffold(borrow root:Arr u8 _, borrow resolved:Arr u8 _) -> IntResult
+  = let empty=ni_empty(root) in if !empty.ok then empty else
+    if empty.value==0 then int_error(17,"init requires an empty directory",0) else
+    let src=pt_join(root,"src") in let made=pf_mkdir(src) in
+    if !made.ok then
+      if made.error.code==17 then int_error(17,"init requires an empty directory",0) else made
+    else let entry=pt_join(src,"main.neo") in
+    let saved=pf_write_new(entry,"fn main () -> Arr u8 _ = \"Hello, Neo!\\n\"\n") in
+    let manifest=concat("[package]\nname = \"",ni_name(pt_tail(resolved)),"\"\nversion = \"0.1.0\"\nentry = \"src/main.neo\"\n") in
+    ; The manifest marks the project ready. Exclusive creates protect both
+    ; files if another process writes into the directory during initialization.
+    let ready=if saved.ok then pf_write_new(pt_join(root,"neo.toml"),manifest) else saved in
+    if ready.ok then ready else
+    let removed_entry=if saved.ok then fs_remove(entry) else int_ok(0) in
+    let removed_src=fs_rmdir(src) in ready
+
+effect fn ni_init(borrow path:Arr u8 _) -> unit
+  = let root=pt_pathname(path) in if !io_path_valid(root) then bd_error("invalid project path") else
+    let created=pf_parents(root) in if !created.ok then bd_error(created.error.message) else
+    let resolved=pt_realpath(root) in let result=ni_scaffold(root,resolved) in
+    if !result.ok then
+      let removed=if created.value==1 then fs_rmdir(root) else int_ok(0) in bd_error(result.error.message)
+    else let shown=print_out(concat("Created ",resolved,"\n")) in noop()

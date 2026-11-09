@@ -522,6 +522,8 @@ class LLVMGen:
         self.mode = "par"; self.fn: S.Fn = None
         self.region_k = 0
         self.library_names = {f.name for f in fns if getattr(f,'source',None) and any(within(f.source,resolved(root)) for root in library_roots)}
+        self.inline_budget = inline_budget
+        self.policy_inline_enabled = literal_inline
         if ranges and self.library_names:
             self.value_ranges = {**Ranges.analyze([f for f in fns if f.name in self.library_names],self.library_names),
                                  **Ranges.analyze([f for f in fns if f.name not in self.library_names])}
@@ -534,6 +536,7 @@ class LLVMGen:
         self.literal_inlined = set()
         self.small_pure_inlined = set()
         self.crypto_used = self.crypto_trap_used = False
+        self.seed_runtime = False
         # Else-if chains over one scalar lower to an LLVM switch (NEO_SWITCH=0 disables).
         self.switches = [] if switches else None
         self.unique_flags = unique_flags
@@ -625,23 +628,25 @@ class LLVMGen:
         if b not in self.byte_consts: self.byte_consts[b] = '@ax_bytes_'+hashlib.sha256(b).hexdigest() if self.library_names else f"@.bytes.{len(self.byte_consts) + 1}"
         return self.byte_consts[b]
 
-    def program(self) -> str:
+    def program(self, *, runtime_roots=()) -> str:
+        self.seed_runtime = bool(runtime_roots)
         self.crypto_fns = crypto_functions(self.fns, self.forced_inline | self.small_pure_inlined | self.literal_inlined) \
             if crypto_isa(self.triple) else set()
         for f in self.fns:
             if f.external or getattr(f,'precompiled',False): continue
             for mode in (("seq",) if f.effect or f.exported else ("par", "seq")):
                 self.function(f, mode)
-        self.main_wrapper()
+        if not runtime_roots:
+            self.main_wrapper()
         self.all_function_bodies = list(self.funcs)
         # Drop unreachable internal bodies before LLVM's inliner and codegen.
         # Keep every public ABI entry, and follow symbol references including
         # address-taken callbacks/outlined regions, rather than just calls.
         bodies = {}
-        roots = set()
+        roots = set(runtime_roots)
         from pathlib import Path
         runtime_exports = {f.name for f in self.fns if f.exported and getattr(f,'source',None) and within(f.source,RUNTIME)}
-        implicit_memory = {'memcpy','memmove','memset','bzero','calloc'}
+        implicit_memory = RUNTIME_LIBCALLS  # LLVM may introduce these after reachability pruning.
         for body in self.funcs:
             match = re.search(r'^define (.*?)@([^\s(]+)\(', body, re.M)
             if match:
@@ -672,13 +677,16 @@ class LLVMGen:
         # do not map the partial first page when p_filesz is zero (Rosetta).
         # Other targets retain their existing layout.
         state_alignment = 4096 if self.triple.startswith('x86_64-') and 'linux' in self.triple else 16
+        state_linkage = 'hidden' if runtime_roots else 'internal'
         head = ['source_filename = "neo"' ,f'target triple = "{self.triple}"', "",
                 f"{ARR} = type {{ ptr, i64, i64, ptr }}", "",
-                f"@ax_runtime_state = internal global [256 x i64] zeroinitializer, align {state_alignment}",
+                f"@ax_runtime_state = {state_linkage} global [256 x i64] zeroinitializer, align {state_alignment}",
                 f"@ax_default_heap_mode = internal constant i64 {1 if self.private_heap else 0}",
                 "declare double @llvm.sqrt.f64(double)", "declare void @llvm.assume(i1)",
                 "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)", "declare i64 @llvm.ctlz.i64(i64, i1)", "declare i64 @llvm.cttz.i64(i64, i1)", 'declare i64 @llvm.bswap.i64(i64)', ""]
         head += ['declare { i64, i1 } @llvm.s'+op+'.with.overflow.i64(i64, i64)' for op in ('add','sub','mul')]
+        if self.seed_runtime:
+            head.append('@ax_native_alloc_stats = external hidden constant i1')
         # Decimal length and in-place formatting for int_text fused into concat.
         # Magnitudes are unsigned, so i64 minimum formats correctly.
         # Below 10000 the digit count is three comparisons, with no division loop.
@@ -757,6 +765,9 @@ class LLVMGen:
             head += [f'declare {{ <{k} x i64>, <{k} x i1> }} @llvm.s{op}.with.overflow.v{k}i64(<{k} x i64>, <{k} x i64>)' for op in ('add','sub','mul')]
         from .kernel_workers import assembly
         head += assembly(self.triple)
+        if self.library_names or any("@ax_fiber_" in body for body in self.funcs):
+            from .fibers import assembly as fiber_assembly
+            head += fiber_assembly(self.triple)
         if self.crypto_used: head += X86_CRYPTO_HEAD if crypto_isa(self.triple)=='x86' else ARM_CRYPTO_HEAD
         if self.crypto_trap_used: head.append('declare void @llvm.trap()')
         for f in self.fns:
@@ -1836,7 +1847,9 @@ class LLVMGen:
             value=fb.load(lty(e.ty),pointer.name);return self.clone_value(value,e.ty) if managed(e.ty) else value,None
         if b=='function_null':return Val('null','ptr'),None
         if b=='function':return Val(self.fname(e.target,'seq'),'ptr'),None
-        if b=='allocation_stats_enabled':return Val('true' if os.environ.get('NEO_ALLOC_STATS')=='1' else 'false','i1'),None
+        if b=='allocation_stats_enabled':
+            if self.seed_runtime: return fb.ins('load i1, ptr @ax_native_alloc_stats, align 1','i1'),None
+            return Val('true' if os.environ.get('NEO_ALLOC_STATS')=='1' else 'false','i1'),None
         if b=='byte_equal':
             # Retain before evaluating an argument that may consume a borrowed
             # source; plain lexical observers cannot mutate either operand.
@@ -1997,6 +2010,7 @@ class LLVMGen:
             if rty != "i64": result = fb.ins(f"extractvalue {result}, 0", "i64")
             return result, None
         if b == "addr": return Val(self.fname(e.target, "seq"), "ptr"), None
+        if b == "callback_address": return self.gen(e.args[0], env, False)[0], None
         if b == "data":
             a, _ = self.gen(e.args[0], env, False)
             return fb.ins(f"extractvalue {a}, 0", "ptr"), None
@@ -2018,8 +2032,14 @@ class LLVMGen:
             if "load_" in b: return fb.ins(f"load {volatile}{lty(e.ty)}, {p}, align 1", lty(e.ty)), None
             fb.emit(f"store {volatile}{args[2]}, {p}, align 1")
             return Val("0", "i8"), None
+        if b in ('fiber_swap','fiber_init'):
+            args=[self.gen(a,env,False)[0] for a in e.args]
+            fb.emit('call void @ax_'+b+'('+', '.join(map(str,args))+')');return Val('0','i8'),None
         if b=='invoke_finalizer':
             fn,context=[self.gen(arg,env,False)[0] for arg in e.args];fb.emit(f'call void {fn.name}({context})');return Val('0','i8'),None
+        if b == "invoke_clock_gettime":
+            fn, clock, timestamp = [self.gen(a, env, False)[0] for a in e.args]
+            return fb.ins(f"call i32 {fn.name}({clock}, {timestamp})", "i32"), None
         if b == "invoke_region":
             fn, ctx, chunk = [self.gen(a, env, False)[0] for a in e.args]
             fb.emit(f"call void {fn.name}({ctx}, {chunk})")
@@ -2376,7 +2396,7 @@ class LLVMGen:
                 # Flag 2 is a call-local proof, never a property propagated by
                 # arbitrary returned values or other argument contracts.
                 observed=argument_index in self.observed_parameters.get(callee.name if hasattr(callee,'name') else '',set())
-                fresh=fresh_array_result(a) or isinstance(a,S.Call) and a.name in self.fn_map and not (self.fn_map[a.name].effect or self.fn_map[a.name].external or self.fn_map[a.name].exported or getattr(self.fn_map[a.name],'precompiled',False)) and not self.return_aliases[a.name]
+                fresh=fresh_array_result(a) or isinstance(a,S.Call) and a.name in self.fn_map and not (self.fn_map[a.name].effect or self.fn_map[a.name].external or self.fn_map[a.name].exported) and not self.return_aliases[a.name]
                 proof=2 if observed and fresh else 1
                 owned=self.nz(own)
                 normalized=fb.ins(f'zext i1 {owned.name if owned is not None else "false"} to i64','i64')

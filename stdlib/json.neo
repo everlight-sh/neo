@@ -175,16 +175,35 @@ fn json_text (value: Json) -> BytesResult
   = if value.kind != 4 then bytes_error(1, "expected JSON string", 0) else
     let source = value.raw in
     if json_plain_end(source, 1) == len(source) - 1 then bytes_ok(str_slice(source, 1, len(source) - 1)) else json_text_decode(source)
-private cold fn json_text_decode (source: Arr u8 _) -> BytesResult
-  = loop (i = 1, out = "") while i < len(source) - 1
-      next (i + (if str_byte(source, i) == 92 then json_escape_width(source, i) else 1),
-        if str_byte(source, i) != 92 then concat(out, str_slice(source, i, i + 1)) else
-          let c = str_byte(source, i + 1) in
-          if c == 117 then let high = json_hex4(source, i + 2) in
-            let code = if high >= 55296 && high <= 56319 then 65536 + (high - 55296) * 1024 + json_hex4(source, i + 8) - 56320 else high in
-            let encoded = utf8_encode(code) in concat(out, encoded.value)
-          else concat(out, arr(k in 0..1) u8(if c == 98 then 8 else if c == 102 then 12 else if c == 110 then 10 else if c == 114 then 13 else if c == 116 then 9 else c)))
-      yield bytes_ok(out)
+type JsonDecodeUnit = {following:i64,plain_end:i64,code:i64,width:i64}
+private fn json_text_decode_unit(borrow source:Arr u8 n,from:i64)->JsonDecodeUnit
+  = let end=json_plain_end(source,from) in
+    if end>=n-1 then JsonDecodeUnit {following=end,plain_end=end,code=0,width=0} else
+    let c=str_byte(source,end+1) in
+    let high=if c==117 then json_hex4(source,end+2) else 0 in
+    let pair=c==117 && high>=55296 && high<=56319 in
+    let code=if c==117 then if pair then 65536+(high-55296)*1024+json_hex4(source,end+8)-56320 else high else
+      if c==98 then 8 else if c==102 then 12 else if c==110 then 10 else if c==114 then 13 else if c==116 then 9 else c in
+    JsonDecodeUnit {following=end+(if c!=117 then 2 else if pair then 12 else 6),plain_end=end,code=code,
+      width=if code<128 then 1 else if code<2048 then 2 else if code<65536 then 3 else 4}
+type JsonDecodeMeasure = {from:i64,size:i64}
+type JsonDecodeWrite = {from:i64,at:i64,raw:Arr u8 _}
+private fn json_text_decode_write(move state:JsonDecodeWrite,borrow source:Arr u8 _)->JsonDecodeWrite
+  = let piece=json_text_decode_unit(source,state.from) in let at=state.at+piece.plain_end-state.from in
+    let raw=byte_copy(state.raw,state.at,byte_slice(source,state.from,piece.plain_end)) in
+    let raw=if piece.width==0 then raw else if piece.width==1 then byte_write_le(raw,at,piece.code,1) else
+      let encoded=utf8_encode(piece.code) in byte_copy(raw,at,encoded.value) in
+    JsonDecodeWrite {from=piece.following,at=at+piece.width,raw=raw}
+; A validated string is measured once, then decoded into one exact buffer.
+; Copy plain runs instead of building a new temporary for every input byte.
+private cold fn json_text_decode (source: Arr u8 n) -> BytesResult
+  = let size=loop(state=JsonDecodeMeasure {from=1,size=0}) while state.from<n-1 next(
+      let piece=json_text_decode_unit(source,state.from) in
+      JsonDecodeMeasure {from=piece.following,size=state.size+piece.plain_end-state.from+piece.width}) yield state.size in
+    check size>=0 in
+    let written=loop(state=JsonDecodeWrite {from=1,at=0,raw=arr(i in 0..size) u8(0)}) while state.from<n-1
+      next(json_text_decode_write(state,source)) yield state in
+    check written.at==size in bytes_ok(written.raw)
 fn json_int (value: Json) -> IntResult
   = if value.kind != 3 then int_error(1, "expected JSON integer", 0) else int_parse(value.raw)
 fn json_array_len (value: Json) -> i64 {result >= 0}
@@ -715,6 +734,14 @@ fn json_object_value_at(value:Json,index:i64) -> JsonOption
   = if value.kind!=6 || index<0 || index>=value.count then json_none() else
     let slot=index*4 in let offsets=value.offsets in check slot>=0 && slot+3<len(offsets) in
     JsonOption {present=true,value=json_valid_slice(value.raw,offsets[slot+2],offsets[slot+3])}
+
+; Reject ambiguous object members, including differently escaped equal keys.
+; This checks the immediate object only; protocol callers bound member counts.
+fn json_object_unique(value:Json) -> bool
+  = value.kind==6 && loop(i=0,ok=true) while ok && i<value.count next(i+1,
+      let key=json_object_key_at(value,i) in key.ok &&
+      loop(j=0,unique=true) while unique && j<i next(j+1,
+        !str_equal(key.value,json_object_key_at(value,j).value)) yield unique) yield ok
 
 ; Structured streaming construction. The stack enforces commas, key/value
 ; transitions and the parser's nesting bound before a sealed Json is produced.

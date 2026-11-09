@@ -75,8 +75,9 @@ fn rt_epoll_event_bytes () -> i64 = 12
 fn rt_epoll_data_offset () -> i64 = 4
 
 ; Files, time, and outbound sockets; all direct kernel calls.
-effect fn rt_open (path: ptr, flags: i64) -> i64 = rt_result(syscall6(257, -100, ptr_to_i64(path), bit_or(flags,524288), 384, 0, 0))
-effect fn rt_flock (fd: i64, mode: i64) -> i64 = rt_result(syscall6(73, fd, mode, 0, 0, 0, 0))
+effect fn rt_open_mode(path:ptr, flags:i64, mode:i64) -> i64 = rt_result(syscall6(257, -100, ptr_to_i64(path), bit_or(flags,524288), mode, 0, 0))
+effect fn rt_open (path: ptr, flags: i64) -> i64 = rt_open_mode(path,flags,384)
+effect fn rt_flock_kernel (fd: i64, mode: i64) -> i64 = rt_result(syscall6(73, fd, mode, 0, 0, 0, 0))
 effect fn rt_fsync (fd: i64) -> i64 = rt_result(syscall6(74, fd, 0, 0, 0, 0, 0))
 effect fn rt_truncate (fd: i64, length: i64) -> i64 = rt_result(syscall6(77, fd, length, 0, 0, 0, 0))
 effect fn rt_connect (fd: i64, address: ptr) -> i64 = rt_result(syscall6(42, fd, ptr_to_i64(address), 16, 0, 0, 0))
@@ -87,7 +88,7 @@ effect fn rt_now_ms () -> i64
   = let buffer = stack_alloc(32) in let cleared = memset(buffer, i32(0), 32) in
     let result = rt_result(syscall6(228, 0, ptr_to_i64(buffer), 0, 0, 0, 0)) in
     if result < 0 then -1 else load_i64(buffer, 0) * 1000 + load_i64(buffer, 8) / 1000000
-effect fn rt_wait_ready (fd: i64, events: i64, milliseconds: i64) -> i64
+effect fn rt_wait_ready_kernel (fd: i64, events: i64, milliseconds: i64) -> i64
   = let fds = stack_alloc(16) in let descriptor = store_i32(fds, 0, i32(fd)) in let mask = store_i32(fds, 4, i32(events)) in
     let timeout = stack_alloc(16) in let seconds = store_i64(timeout, 0, milliseconds / 1000) in let nanos = store_i64(timeout, 8, milliseconds % 1000 * 1000000) in
     rt_result(syscall6(271, ptr_to_i64(fds), if fd < 0 then 0 else 1, ptr_to_i64(timeout), 0, 0, 0))
@@ -109,11 +110,58 @@ effect fn rt_futex_wake(word: ptr, count: i64) -> i64 = syscall6(202, ptr_to_i64
 
 effect fn rt_file_size(fd: i64) -> i64 = rt_result(syscall6(8, fd, 0, 2, 0, 0, 0))
 effect fn rt_map_file(fd: i64, size: i64) -> i64 = syscall6(9, 0, size, 1, 2, fd, 0)
-effect fn rt_mkdir(path: ptr) -> i64 = rt_result(syscall6(83, ptr_to_i64(path), 448, 0, 0, 0, 0))
+; File type in the same numbering as directory entries (directory 4, file 8, symlink 10).
+effect fn rt_path_kind(path:ptr, follow:bool) -> i64
+  = let info=stack_alloc(256) in let status=rt_result(syscall6(332,-100,ptr_to_i64(path),if follow then 0 else 256,1,ptr_to_i64(info),0)) in
+    if status<0 then -1 else bit_and(shift_right(i64(load_i32(info,28)),12),15)
+effect fn rt_mkdir_mode(path:ptr, mode:i64) -> i64 = rt_result(syscall6(83, ptr_to_i64(path), mode, 0, 0, 0, 0))
+effect fn rt_mkdir(path: ptr) -> i64 = rt_mkdir_mode(path,448)
 effect fn rt_sync_full(fd: i64) -> i64 = rt_fsync(fd)
+; The kernel supplies the vDSO ELF image in AT_SYSINFO_EHDR. Look up
+; __vdso_clock_gettime in its dynamic symbol table, with a syscall fallback
+; for a missing image, an unsupported layout or a rejected vDSO call.
+effect fn rt_vdso_base() -> ptr
+  = let env=load_ptr(runtime_state(),0) in if env==null() then null() else
+    let end=loop(i=0) while load_ptr(env,i)!=null() next(i+8) yield i in
+    let aux=ptr_add(env,end+8) in
+    let offset=loop(i=0) while load_i64(aux,i)!=0 && load_i64(aux,i)!=33 next(i+16) yield i in
+    if load_i64(aux,offset)==33 then load_ptr(aux,offset+8) else null()
+effect fn rt_vdso_tag(image:ptr,start:i64,size:i64,tag:i64) -> i64
+  = loop(i=start) while i<start+size && load_i64(image,i)!=0 && load_i64(image,i)!=tag next(i+16) yield
+    if i<start+size && load_i64(image,i)==tag then load_i64(image,i+8) else -1
+effect fn rt_vdso_clock_address() -> i64
+  = let image=rt_vdso_base() in
+    if image==null() || load_i32(image,0)!=i32(1179403647) || load_u8(image,4)!=u8(2) || load_u8(image,5)!=u8(1) then -1 else
+    let ph=load_i64(image,32) in let width=bit_and(i64(load_i32(image,54)),65535) in
+    let count=bit_and(i64(load_i32(image,56)),65535) in
+    if width!=56 || ph<64 || count<1 || count>32 || ph>4096-width*count then -1 else
+    let mapped=loop(i=0,size=0) while i<count && size==0 next(i+1,
+      let at=ph+56*i in if load_i32(image,at)==i32(1) && load_i64(image,at+8)==0 && load_i64(image,at+16)==0 then load_i64(image,at+32) else 0) yield size in
+    let dynamic=loop(i=0,at= -1) while i<count && at<0 next(i+1,
+      let here=ph+56*i in if load_i32(image,here)==i32(2) then here else -1) yield at in
+    if dynamic<0 || mapped<64 || mapped>1048576 then -1 else
+    let first=load_i64(image,dynamic+8) in let size=load_i64(image,dynamic+32) in
+    if first<0 || size<16 || size%16!=0 || first>mapped-size then -1 else
+    let hashes=rt_vdso_tag(image,first,size,4) in let strings=rt_vdso_tag(image,first,size,5) in
+    let symbols=rt_vdso_tag(image,first,size,6) in let string_bytes=rt_vdso_tag(image,first,size,10) in
+    let symbol_width=rt_vdso_tag(image,first,size,11) in
+    if hashes<0 || hashes>mapped-8 || strings<0 || string_bytes<0 || strings>mapped-string_bytes ||
+      symbols<0 || symbols>mapped || symbol_width!=24 then -1 else
+    let symbols_count=i64(load_i32(image,hashes+4)) in
+    if symbols_count<1 || symbols_count>(mapped-symbols)/24 then -1 else
+    let name="__vdso_clock_gettime\0" in
+    loop(i=1,address= -1) while address<0 && i<symbols_count next(i+1,
+      let symbol=symbols+24*i in let offset=i64(load_i32(image,symbol)) in let value=load_i64(image,symbol+8) in
+      if offset<0 || offset>string_bytes-len(name) || value<=0 || value>=mapped ||
+        bit_and(i64(load_u8(image,symbol+4)),15)!=2 || bit_and(i64(load_i32(image,symbol+6)),65535)==0 then -1 else
+      if memcmp(ptr_add(image,strings+offset),data(name),len(name))==i32(0) then ptr_to_i64(image)+value else -1) yield address
 effect fn rt_clock_ns() -> i64
-  = let p = stack_alloc(16) in let result = syscall6(228, 1, ptr_to_i64(p), 0, 0, 0, 0) in
-    if result < 0 then -1 else load_i64(p,0) * 1000000000 + load_i64(p,8)
+  = let p=stack_alloc(16) in let cache=ptr_add(runtime_state(),2000) in
+    let known=atomic_load_i64(cache,0) in
+    let address=if known!=0 then known else let found=rt_vdso_clock_address() in let saved=atomic_store_i64(cache,0,found) in found in
+    let fast=address>0 && invoke_clock_gettime(ptr_from_i64(address),i32(1),p)==i32(0) in
+    if !fast && syscall6(228,1,ptr_to_i64(p),0,0,0,0)<0 then -1 else
+      load_i64(p,0)*1000000000+load_i64(p,8)
 effect fn rt_cpu_ns() -> i64
   = let p = stack_alloc(256) in let r = syscall6(98, 0, ptr_to_i64(p), 0, 0, 0, 0) in
     if r < 0 then -1 else (load_i64(p,0) + load_i64(p,16)) * 1000000000 + (load_i64(p,8) + load_i64(p,24)) * 1000
@@ -132,6 +180,8 @@ effect fn rt_file_identity(fd: i64, out: ptr) -> i64
     0
 effect fn rt_rename(old: ptr, new: ptr) -> i64 = rt_result(syscall6(82,ptr_to_i64(old),ptr_to_i64(new),0,0,0,0))
 effect fn rt_unlink(path: ptr) -> i64 = rt_result(syscall6(87,ptr_to_i64(path),0,0,0,0,0))
+effect fn rt_rmdir(path: ptr) -> i64 = rt_result(syscall6(84,ptr_to_i64(path),0,0,0,0,0))
+effect fn rt_access_exec(path: ptr) -> i64 = rt_result(syscall6(21,ptr_to_i64(path),1,0,0,0,0))
 ; A symbolic link's target bytes (not terminated): their count, or -1 with errno.
 effect fn rt_readlink(path: ptr, out: ptr, n: i64) -> i64 = rt_result(syscall6(89,ptr_to_i64(path),ptr_to_i64(out),n,0,0,0))
 ; The working directory, NUL-terminated: its size with the NUL, or -1 with errno.
@@ -161,3 +211,23 @@ effect fn rt_socket_name(fd:i64,address:ptr,length:ptr) -> i64 = rt_result(sysca
 ; Persist data and all metadata required to retrieve it. Directory names need
 ; a separate directory sync. Darwin retains its full hardware-cache barrier.
 effect fn rt_sync_data(fd:i64) -> i64 = rt_result(syscall6(75,fd,0,0,0,0,0))
+
+; SIGINT/SIGTERM are consumed through signalfd, never an async signal handler.
+effect fn rt_signal_mask(how:i64,mask:ptr,old:ptr)->i64 = rt_result(syscall6(14,how,ptr_to_i64(mask),ptr_to_i64(old),8,0,0))
+fn rt_signal_block_mode()->i64=0
+fn rt_signal_restore_mode()->i64=2
+effect fn rt_signal_open(mask:ptr)->i64 = rt_result(syscall6(289,-1,ptr_to_i64(mask),8,526336,0,0))
+effect fn rt_signal_take(fd:i64)->i64
+  = let event=stack_alloc(128) in let received=rt_read(fd,event,128) in if received==128 then i64(load_i32(event,0)) else 0
+
+effect fn rt_epoll_wait_timeout(epfd:i64,events:ptr,maximum:i64,milliseconds:i64)->i64 = rt_result(syscall6(281,epfd,ptr_to_i64(events),maximum,milliseconds,0,8))
+
+; Guard pages protect each cooperative task stack.
+effect fn rt_protect(p:ptr,n:i64,mode:i64)->i64 = rt_result(syscall6(10,ptr_to_i64(p),n,mode,0,0,0))
+
+effect fn rt_fiber_watch_kernel(backend:i64,fd:i64,events:i64,token:i64,add:bool)->i64
+  = rt_epoll_ctl(backend,if add then 1 else 2,fd,if add then bit_or(events,1073741824) else 0,token)
+
+effect fn rt_open_directory(path:ptr) -> i64 = rt_open(path,65536)
+effect fn rt_read_directory(fd:i64,buffer:ptr,size:i64) -> i64 = rt_result(syscall6(217,fd,ptr_to_i64(buffer),size,0,0,0))
+fn rt_directory_name_offset() -> i64 = 19

@@ -1,0 +1,313 @@
+; Content-addressed native AST. Records use sorted JSON keys in their hashes.
+import "std:hashmap"
+import "std:io"
+import "std:numbers"
+import "std:option"
+import "std:sha256"
+import "std:strings"
+import "ast.neo"
+import "lex.neo"
+import "modules.neo"
+import "packages.neo"
+import "paths.neo"
+import "text.neo"
+import "tool_type.neo"
+
+type NgNode = { hash:Arr u8 _, op:Arr u8 _, raw:Arr u8 _ }
+type NgState = { seen:HashMap<Arr u8 _,bool>, nodes:Arr NgNode _, hashes:HashMap<Arr u8 _,Arr u8 _>,
+                 active:HashMap<Arr u8 _,bool>, types:Arr i64 _, functions:Arr i64 _, index:HashMap<Arr u8 _,i64> }
+type NgValue = { state:NgState, text:Arr u8 _ }
+fn ng_hash(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes(tx_empty(),sha256(bytes))
+fn ng_node(borrow nodes:Arr NgNode _, i:i64) -> NgNode
+  = if i>=0 && i<len(nodes) then nodes[i] else NgNode { hash="",op="",raw="" }
+fn ng_record(move s:NgState, borrow op:Arr u8 _, borrow raw:Arr u8 _) -> NgValue
+  = let hash=ng_hash(raw) in
+    let out=if option_is_some(hashmap_get(s.seen,hash)) then s else
+      s with { seen=hashmap_put(s.seen,hash,true),nodes=push(s.nodes,NgNode { hash=hash,op=op,raw=raw }) } in
+    NgValue { state=out,text=pk_quote(hash) }
+fn ng_lit(move s:NgState, borrow op:Arr u8 _, borrow value:Arr u8 _) -> NgValue
+  = ng_record(s,op,concat("{\"op\":",pk_quote(op),",\"v\":",value,"}"))
+
+fn ng_binder(borrow m:Mods, borrow scope:Arr i64 _, name:i64) -> i64
+  = let word=md_str(m,name) in
+    let n=loop (i=0) while i<len(scope) && !tx_equal(md_str(m,tx_at(scope,len(scope)-1-i)),word) next (i+1) yield i in
+    if n<len(scope) then n else -1
+fn ng_var(borrow m:Mods, borrow scope:Arr i64 _, name:i64) -> Arr u8 _
+  = let distance=ng_binder(m,scope,name) in
+    if distance>=0 then int_text(distance) else pk_quote(concat("free:",md_str(m,name)))
+fn ng_callee(borrow s:NgState, borrow name:Arr u8 _) -> Arr u8 _
+  = pk_quote(option_or(hashmap_get(s.hashes,name),concat("rec:",name)))
+
+fn ng_append(borrow old:Arr u8 _, borrow value:Arr u8 _) -> Arr u8 _
+  = concat(old,if len(old)>1 then "," else "",value)
+fn ng_op(move s:NgState, borrow op:Arr u8 _, borrow args:Arr u8 _) -> NgValue
+  = ng_record(s,op,concat("{\"in\":",args,",\"op\":",pk_quote(op),"}"))
+fn ng_exprs(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, borrow ids:Arr i64 _) -> NgValue
+  = let out=loop (i=0, out=NgValue { state=s,text="[" }) while i<len(ids)
+      next (i+1,let expr=ng_expr(out.state,m,scope,tx_at(ids,i)) in
+        NgValue { state=expr.state,text=ng_append(out.text,expr.text) }) yield out in
+    out with { text=concat(out.text,"]") }
+fn ng_list(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, list:i64) -> NgValue
+  = ng_exprs(s,m,scope,md_ids(m,list))
+fn ng_args2(a:i64,b:i64) -> Arr i64 _ = push(push(tx_ints(),a),b)
+fn ng_args3(a:i64,b:i64,c:i64) -> Arr i64 _ = push(ng_args2(a,b),c)
+
+fn ng_field(borrow s:NgState, borrow m:Mods, name:i64) -> Arr u8 _
+  = let text=md_str(m,name) in
+    let result=loop (i=0, count=0, field= -1) while count<2 && i<len(s.types) next (i+1,
+      let fields=md_node(m,tx_at(s.types,i)).b in let at=ng_field_in(m,fields,text) in count+(if at>=0 then 1 else 0),
+      let fields=md_node(m,tx_at(s.types,i)).b in let at=ng_field_in(m,fields,text) in if at>=0 then at else field) yield
+        if count==1 then field else -1 in
+    if result<0 then pk_quote(text) else int_text(result)
+fn ng_field_in(borrow m:Mods, list:i64, borrow name:Arr u8 _) -> i64
+  = let n=ast_list_len(m.ast,list) in
+    let i=loop (i=0) while i<n && !tx_equal(md_str(m,md_node(m,ast_list_at(m.ast,list,i)).a),name) next (i+1) yield i in
+    if i<n then i else -1
+
+fn ng_ty_list(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, borrow seen:Arr i64 _, list:i64, fields:bool) -> NgValue
+  = let out=loop (i=0, out=NgValue { state=s,text="[" }) while i<ast_list_len(m.ast,list) next (i+1,
+      let id=ast_list_at(m.ast,list,i) in let item=ng_ty(out.state,m,scope,seen,if fields then md_node(m,id).b else id) in
+      NgValue { state=item.state,text=ng_append(out.text,item.text) }) yield out in
+    out with { text=concat(out.text,"]") }
+fn ng_strings(borrow strings:Arr Arr u8 _ _) -> Arr u8 _
+  = let out=loop (i=0, out="[") while i<len(strings) next (i+1,ng_append(out,pk_quote(tx_word(strings,i)))) yield out in
+    concat(out,"]")
+fn ng_ty(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, borrow seen:Arr i64 _, id:i64) -> NgValue
+  = let n=md_node(m,id) in
+    if n.kind==n_t_arr() then
+      let element=ng_ty(s,m,scope,seen,n.a) in
+      let size=if n.c!=0 then ng_expr(element.state,m,scope,n.b) else
+        NgValue { state=element.state,text=if tx_equal(md_str(m,n.b),"_") then "\"_\"" else ng_var(m,scope,n.b) } in
+      NgValue { state=size.state,text=concat("{\"arr\":",element.text,",\"size\":",size.text,"}") }
+    else if n.kind==n_t_fn() then
+      let params=ng_ty_list(s,m,scope,seen,n.a,false) in let ret=ng_ty(params.state,m,scope,seen,n.b) in
+      NgValue { state=ret.state,text=concat("{\"effects\":",if n.c<0 then "null" else ng_strings(tool_caps(m,n.c)),
+        ",\"function\":",params.text,",\"return\":",ret.text,"}") }
+    else if n.kind==n_t_ref() then
+      let child=md_node(m,n.a) in let ref=if child.kind==n_t_rec() then NgValue { state=s,text=pk_quote(md_str(m,child.a)) }
+        else ng_ty(s,m,scope,seen,n.a) in
+      ref with { text=concat("{\"ref\":",ref.text,"}") }
+    else if n.kind==n_t_rec() then ng_record_type(s,m,scope,seen,n.a)
+    else NgValue { state=s,text=pk_quote(tool_type(m,id)) }
+
+fn ng_record_type(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, borrow seen:Arr i64 _, name:i64) -> NgValue
+  = let word=md_str(m,name) in
+    let id=md_find_type(m,name) in
+    if id<0 then NgValue { state=s,text=concat("{\"rec\":",pk_quote(word),"}") }
+    else if md_in(m,seen,word) then NgValue { state=s,text=concat("{\"recursive\":",pk_quote(word),"}") }
+    else let decl=md_node(m,id) in let fields=ng_ty_list(s,m,scope,md_with(seen,name),decl.b,true) in
+    fields with { text=concat("{\"rec\":",fields.text,
+      if decl.e>=0 then concat(",\"resource_drop\":",pk_quote(md_str(m,decl.e))) else "",
+      if ast_flag(decl,fl_sealed()) then ",\"sealed\":true" else "","}") }
+
+fn ng_call(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, n:Node) -> NgValue
+  = let name=md_str(m,n.a) in let count=ast_list_len(m.ast,n.b) in
+    let first=md_node(m,ast_list_at(m.ast,n.b,0)) in let second=md_node(m,ast_list_at(m.ast,n.b,1)) in
+    if count==1 && first.kind==n_var() && (tx_equal(name,"addr") || tx_equal(name,"function")) then
+      let fn_hash=ng_callee(s,md_str(m,first.a)) in ng_record(s,name,concat("{\"fn\":",fn_hash,",\"op\":",pk_quote(name),"}"))
+    else if count==2 && second.kind==n_var() && (tx_equal(name,"serve") || tx_equal(name,"serve_effect")) then
+      let handler=ng_callee(s,md_str(m,second.a)) in let args=ng_expr(s,m,scope,ast_list_at(m.ast,n.b,0)) in
+      ng_record(args.state,name,concat("{\"handler\":",handler,",\"in\":[",args.text,"],\"op\":",pk_quote(name),"}"))
+    else let args=ng_list(s,m,scope,n.b) in
+    if tx_equal(name,"set") || tx_equal(name,"sqrt") || tx_equal(name,"concat") then ng_op(args.state,name,args.text)
+    else let distance=ng_binder(m,scope,n.a) in
+    if distance>=0 then ng_record(args.state,"indirect",concat("{\"in\":",args.text,",\"op\":\"indirect\",\"target\":",int_text(distance),"}"))
+    else let hash=ng_callee(args.state,name) in
+      ng_record(args.state,"call",concat("{\"fn\":",hash,",\"in\":",args.text,",\"op\":\"call\"}"))
+
+fn ng_rec(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, n:Node) -> NgValue
+  = let type_id=md_find_type(m,n.a) in let fields=md_node(m,type_id).b in
+    let ids=if type_id<0 then md_ids(m,n.b) else
+      loop (i=0, out=tx_ints()) while i<ast_list_len(m.ast,fields)
+        next (i+1,let name=md_str(m,md_node(m,ast_list_at(m.ast,fields,i)).a) in
+          let at=ng_field_in(m,n.b,name) in if at<0 then out else push(out,ast_list_at(m.ast,n.b,at))) yield out in
+    let values=ng_exprs(s,m,scope,arr(i in 0..len(ids)) md_node(m,tx_at(ids,i)).b) in
+    let ty=ng_record_type(values.state,m,scope,tx_ints(),n.a) in
+    ng_record(ty.state,"rec",concat("{\"in\":",values.text,",\"op\":\"rec\",\"ty\":",ty.text,"}"))
+
+type NgUpdate = { state:NgState, keys:Arr Arr u8 _ _, pairs:HashMap<Arr u8 _,Arr u8 _> }
+fn ng_with(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, n:Node) -> NgValue
+  = let base=ng_expr(s,m,scope,n.a) in
+    let out=loop (i=0, out=NgUpdate { state=base.state,keys=tx_words(),
+      pairs=hashmap_empty::<Arr u8 _,Arr u8 _>(19,23) }) while i<ast_list_len(m.ast,n.b)
+      next (i+1,let field=md_node(m,ast_list_at(m.ast,n.b,i)) in
+        let key=ng_field(out.state,m,field.a) in let value=ng_expr(out.state,m,scope,field.b) in
+        let sort=if tx_byte(key,0)==34 then md_str(m,field.a) else key in
+        NgUpdate { state=value.state,keys=tx_insert_word(out.keys,sort),
+          pairs=hashmap_put(out.pairs,sort,concat("[",key,",",value.text,"]")) }) yield out in
+    let ordered=loop (i=0, list="[") while i<len(out.keys)
+      next (i+1,ng_append(list,option_or(hashmap_get(out.pairs,tx_word(out.keys,i)),""))) yield list in
+    ng_record(out.state,"with",concat("{\"in\":[",base.text,"],\"op\":\"with\",\"set\":",ordered,"]}"))
+
+fn ng_loop(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, n:Node) -> NgValue
+  = let slots=md_ids(m,n.a) in let count=len(slots) in
+    let inner=md_with_all(scope,arr(i in 0..count) md_node(m,tx_at(slots,i)).a) in
+    let initial=ng_exprs(s,m,scope,arr(i in 0..count) md_node(m,tx_at(slots,i)).c) in
+    let cond=ng_expr(initial.state,m,inner,n.b) in let nexts=ng_list(cond.state,m,inner,n.c) in
+    let result=ng_expr(nexts.state,m,inner,n.d) in
+    let inv=loop (i=0, out=NgValue { state=result.state,text="[" }) while i<count next (i+1,
+      let id=md_node(m,tx_at(slots,i)).b in
+      if id<0 then out with { text=ng_append(out.text,"null") } else
+      let ann=md_node(m,id) in let ty=ng_ty(out.state,m,inner,tx_ints(),ann.a) in
+      let pre=ng_list(ty.state,m,inner,ann.b) in
+      NgValue { state=pre.state,text=ng_append(out.text,concat("{\"pre\":",pre.text,",\"ty\":",ty.text,"}")) }) yield out in
+    ng_record(inv.state,"loop",concat("{\"cond\":",cond.text,",\"init\":",initial.text,",\"inv\":",inv.text,
+      "],\"n\":",int_text(count),",\"next\":",nexts.text,",\"op\":\"loop\",\"yield\":",result.text,"}"))
+
+fn ng_expr(move s:NgState, borrow m:Mods, borrow scope:Arr i64 _, id:i64) -> NgValue
+  = let n=md_node(m,id) in let k=n.kind in
+    if k==n_num() then ng_lit(s,"i64",if n.b==0 then int_text(n.a) else md_str(m,n.c))
+    else if k==n_byte() then ng_lit(s,"u8",int_text(n.a))
+    else if k==n_bool() then ng_lit(s,"bool",if n.a==1 then "true" else "false")
+    else if k==n_str() then ng_lit(s,"bytes",pk_quote(tx_hex_bytes(tx_empty(),md_str(m,n.a))))
+    else if k==n_flt() then ng_lit(s,"f64",pk_quote(ng_float(bits_float(n.a))))
+    else if k==n_var() then ng_record(s,"var",concat("{\"d\":",ng_var(m,scope,n.a),",\"op\":\"var\"}"))
+    else if k==n_call() then ng_call(s,m,scope,n)
+    else if k==n_reclit() then ng_rec(s,m,scope,n)
+    else if k==n_with() then ng_with(s,m,scope,n)
+    else if k==n_loop() then ng_loop(s,m,scope,n)
+    else if k==n_let() || k==n_using() then
+      let value=ng_expr(s,m,scope,n.b) in let body=ng_expr(value.state,m,md_with(scope,n.a),n.c) in
+      ng_op(body.state,if k==n_using() then "using" else "let",concat("[",value.text,",",body.text,"]"))
+    else if k==n_sum() || k==n_arrc() then
+      let range=ng_exprs(s,m,scope,ng_args2(n.b,n.c)) in let body=ng_expr(range.state,m,md_with(scope,n.a),n.d) in
+      ng_op(body.state,if k==n_sum() then "sum" else "arr",concat(pt_slice(range.text,0,len(range.text)-1),",",body.text,"]"))
+    else if k==n_cast() || k==n_field() then
+      let value=ng_expr(s,m,scope,if k==n_cast() then n.b else n.a) in
+      if k==n_cast() then ng_record(value.state,"cast",concat("{\"in\":[",value.text,"],\"op\":\"cast\",\"to\":",pk_quote(tool_type(m,n.a)),"}"))
+      else let field=ng_field(value.state,m,n.b) in ng_record(value.state,"field",concat("{\"in\":[",value.text,"],\"k\":",field,",\"op\":\"field\"}"))
+    else let op=if k==n_bin() then lx_sym_text(n.a) else if k==n_un() then concat("u",lx_sym_text(n.a))
+      else if k==n_index() then "index" else if k==n_if() then "if" else if k==n_check() then "check" else if k==n_len() then "len"
+      else if k==n_try() then "try" else "unknown" in
+    let ids=if k==n_bin() then ng_args2(n.b,n.c) else if k==n_if() then ng_args3(n.a,n.b,n.c)
+      else if k==n_index() || k==n_check() then ng_args2(n.a,n.b)
+      else if k==n_un() then push(tx_ints(),n.b) else if k==n_len() || k==n_try() then push(tx_ints(),n.a) else tx_ints() in
+    let args=ng_exprs(s,m,scope,ids) in ng_op(args.state,op,args.text)
+
+fn ng_float_round(borrow digits:Arr u8 _, count:i64) -> Arr u8 _
+  = if count>=len(digits) then digits else
+    let prefix=int_parse(pt_slice(digits,0,count)).value in let last=tx_byte(digits,count) in
+    let rest=loop (i=count+1, more=false) while i<len(digits) && !more next (i+1,tx_byte(digits,i)!=48) yield more in
+    int_text(prefix+(if last>53 || (last==53 && (rest || prefix%2==1)) then 1 else 0))
+
+fn ng_float_scientific(borrow digits:Arr u8 _, exponent:i64) -> Arr u8 _
+  = let tail=pt_slice(digits,1,len(digits)) in
+    concat(pt_slice(digits,0,1),if len(tail)>0 then concat(".",tail) else "", "e",int_text(exponent))
+
+fn ng_float(value:f64) -> Arr u8 _
+  = let raw=float_text(value).value in
+    if value==0.0 then (if float_bits(value)<0 then "-0.0" else "0.0")
+    else if !float_finite(value) then (if value!=value then "nan" else if value<0.0 then "-inf" else "inf")
+    else let negative=tx_byte(raw,0)==45 in let start=if negative then 1 else 0 in
+    let split=str_find(raw,"e").value in let exponent=int_parse(pt_slice(raw,split+1,len(raw))).value in
+    let digits=loop (i=start, out="") while i<split next (i+1,
+      if tx_byte(raw,i)==46 then out else push(out,u8(tx_byte(raw,i)))) yield out in
+    let sign=if negative then "-" else "" in
+    let count=loop (n=1) while n<len(digits) && (let rounded=ng_float_round(digits,n) in
+      float_parse(concat(sign,ng_float_scientific(rounded,exponent+len(rounded)-n))).value!=value) next (n+1) yield n in
+    let rounded=ng_float_round(digits,count) in let exp=exponent+len(rounded)-count in
+    let end=loop (i=len(rounded)) while i>1 && tx_byte(rounded,i-1)==48 next (i-1) yield i in
+    let d=pt_slice(rounded,0,end) in let decimal=exp+1 in
+    if exp< -4 || exp>=16 then
+      let exp_abs=if exp<0 then 0-exp else exp in let tail=pt_slice(d,1,len(d)) in
+      concat(sign,pt_slice(d,0,1),if len(tail)>0 then concat(".",tail) else "",
+        "e",if exp<0 then "-" else "+",if exp_abs<10 then "0" else "",int_text(exp_abs))
+    else if decimal<=0 then
+      let zeros=0-decimal in check zeros>=0 in concat(sign,"0.",arr(i in 0..zeros) '0',d)
+    else if decimal>=len(d) then
+      let zeros=decimal-len(d) in check zeros>=0 in concat(sign,d,arr(i in 0..zeros) '0',".0")
+    else concat(sign,pt_slice(d,0,decimal),".",pt_slice(d,decimal,len(d)))
+
+fn ng_params_scope(borrow m:Mods, n:Node) -> Arr i64 _
+  = let params=md_ids(m,n.b) in let names=arr(i in 0..len(params)) md_node(m,tx_at(params,i)).a in
+    loop (i=0, scope=names) while i<len(params) next (i+1,
+      let param=md_node(m,tx_at(params,i)) in let ty=md_node(m,param.b) in
+      let size=md_str(m,ty.b) in
+      if ty.kind==n_t_arr() && ty.c==0 && !tx_equal(size,"_") && !md_in(m,scope,size) then push(scope,ty.b) else scope) yield scope
+fn ng_function(move s:NgState, borrow m:Mods, n:Node) -> NgValue
+  = let scope=ng_params_scope(m,n) in
+    let params=loop (i=0, out=NgValue { state=s,text="[" }) while i<ast_list_len(m.ast,n.b)
+      next (i+1,let param=md_node(m,ast_list_at(m.ast,n.b,i)) in
+        let ty=ng_ty(out.state,m,scope,tx_ints(),param.b) in let pre=ng_list(ty.state,m,scope,param.c) in
+        let item=concat("{",if param.f==2 then "\"borrow\":true," else if param.f==1 then "\"move\":true," else "",
+          "\"pre\":",pre.text,",\"ty\":",ty.text,"}") in
+        NgValue { state=pre.state,text=ng_append(out.text,item) }) yield out in
+    let body=ng_expr(params.state,m,scope,n.d) in
+    let post=ng_list(body.state,m,md_with(scope,m.result),n.e) in
+    let ret=ng_ty(post.state,m,scope,tx_ints(),n.c) in
+    let name=pk_quote(md_str(m,n.a)) in let external=ast_flag(n,fl_external()) in
+    let raw=concat("{\"body\":",body.text,
+      if n.g>=0 then concat(",\"capabilities\":",ng_strings(tool_caps(m,n.g))) else "",
+      if ast_flag(n,fl_cold()) then ",\"cold\":true" else "",
+      if ast_flag(n,fl_effect()) then ",\"effect\":true" else "",
+      if ast_flag(n,fl_exported()) then concat(",\"export\":",name) else "",
+      if external then concat(",\"extern\":",name) else "",
+      if ast_flag(n,fl_inline()) then ",\"inline\":true" else "",
+      ",\"op\":\"fn\",\"params\":",params.text,"],\"post\":",post.text,",\"ret\":",ret.text,
+      if external then (if ast_flag(n,fl_variadic()) then ",\"variadic\":true" else ",\"variadic\":false") else "", "}") in
+    ng_record(ret.state,"fn",raw)
+
+fn ng_children(borrow m:Mods, n:Node) -> Arr i64 _
+  = let k=n.kind in
+    if k==n_call() then md_ids(m,n.b)
+    else if k==n_un() || k==n_cast() then push(tx_ints(),n.b)
+    else if k==n_len() || k==n_field() || k==n_try() then push(tx_ints(),n.a)
+    else if k==n_bin() || k==n_let() || k==n_using() then ng_args2(n.b,n.c)
+    else if k==n_index() || k==n_check() then ng_args2(n.a,n.b)
+    else if k==n_if() then ng_args3(n.a,n.b,n.c)
+    else if k==n_sum() || k==n_arrc() then ng_args3(n.b,n.c,n.d)
+    else if k==n_loop() then let slots=md_ids(m,n.a) in
+      let items=loop (i=0, ids=ng_args2(n.b,n.d)) while i<len(slots) next (i+1,
+        let slot=md_node(m,tx_at(slots,i)) in md_with_all(push(ids,slot.c),md_ids(m,md_node(m,slot.b).b))) yield ids in
+      md_with_all(items,md_ids(m,n.c))
+    else if k==n_reclit() || k==n_with() then let fields=md_ids(m,n.b) in
+      let vals=arr(i in 0..len(fields)) md_node(m,tx_at(fields,i)).b in if k==n_with() then push(vals,n.a) else vals
+    else tx_ints()
+
+fn ng_deps(move names:Arr Arr u8 _ _, borrow m:Mods, id:i64) -> Arr Arr u8 _ _
+  = let n=md_node(m,id) in let callee=md_str(m,n.a) in
+    let local=if n.kind!=n_call() then names else
+      let names=tx_insert_word(names,callee) in
+      let at=if tx_equal(callee,"addr") || tx_equal(callee,"function") then 0
+        else if tx_equal(callee,"serve") || tx_equal(callee,"serve_effect") then 1 else -1 in
+      if at<0 then names else let arg=md_node(m,ast_list_at(m.ast,n.b,at)) in
+      if arg.kind==n_var() then tx_insert_word(names,md_str(m,arg.a)) else names in
+    let children=ng_children(m,n) in
+    loop (i=0, out=local) while i<len(children) next (i+1,ng_deps(out,m,tx_at(children,i))) yield out
+
+fn ng_visit(move s:NgState, borrow m:Mods, id:i64) -> NgState
+  = let n=md_node(m,id) in let name=md_str(m,n.a) in
+    if id<0 || option_is_some(hashmap_get(s.hashes,name)) || option_or(hashmap_get(s.active,name),false) then s else
+    let deps=loop (i=0, out=md_with_all(push(tx_ints(),n.d),md_ids(m,n.e))) while i<ast_list_len(m.ast,n.b)
+      next (i+1,md_with_all(out,md_ids(m,md_node(m,ast_list_at(m.ast,n.b,i)).c))) yield out in
+    let names=loop (i=0, names=tx_words()) while i<len(deps) next (i+1,ng_deps(names,m,tx_at(deps,i))) yield names in
+    let s=s with { active=hashmap_put(s.active,name,true) } in
+    let s=loop (i=0, s=s) while i<len(names) next (i+1,
+      let dep=option_or(hashmap_get(s.index,tx_word(names,i)),-1) in
+      if dep>=0 then ng_visit(s,m,dep) else s) yield s in
+    let record=ng_function(s,m,n) in let hash=pt_slice(record.text,1,len(record.text)-1) in
+    record.state with { hashes=hashmap_put(record.state.hashes,name,hash),active=hashmap_put(record.state.active,name,false) }
+
+fn ng_collect(borrow m:Mods) -> NgState
+  = let funcs=loop (k=0, all=tx_ints()) while k<len(m.fns) next (k+1,md_with_all(all,md_list(m.fns,k))) yield all in
+    let types=loop (k=0, all=tx_ints()) while k<len(m.types) next (k+1,md_with_all(all,md_list(m.types,k))) yield all in
+    let index=loop (i=0, table=hashmap_empty::<Arr u8 _,i64>(43,47)) while i<len(funcs) next (i+1,
+      let id=tx_at(funcs,i) in hashmap_put(table,md_str(m,md_node(m,id).a),id)) yield table in
+    let empty=NgState { nodes=arr(i in 0..0) NgNode { hash="",op="",raw="" },types=types,functions=funcs,index=index,
+      seen=hashmap_empty::<Arr u8 _,bool>(5,7),hashes=hashmap_empty::<Arr u8 _,Arr u8 _>(11,13),
+      active=hashmap_empty::<Arr u8 _,bool>(17,19) } in
+    loop (i=0, s=empty) while i<len(funcs) next (i+1,ng_visit(s,m,tx_at(funcs,i))) yield s
+
+fn ng_report(borrow m:Mods, full:bool) -> Arr u8 _
+  = let graph=ng_collect(m) in let count=len(graph.functions) in
+    let names=arr(i in 0..count) md_str(m,md_node(m,tx_at(graph.functions,i)).a) in
+    let hashes=arr(i in 0..count) option_or(hashmap_get(graph.hashes,tx_word(names,i)),"") in
+    let sorted=loop (i=0, out=tx_words()) while i<len(hashes) next (i+1,
+      let hash=tx_word(hashes,i) in
+      let at=loop (j=0) while j<len(out) && tx_less(tx_word(out,j),hash) next (j+1) yield j in
+      arr(j in 0..len(out)+1) if j<at then tx_word(out,j) else if j==at then hash else tx_word(out,j-1)) yield out in
+    let functions=arr(i in 0..count) concat(if i==0 then "" else ",",pk_quote(tx_word(names,i)),":",pk_quote(tx_word(hashes,i))) in
+    let nodes=arr(i in 0..len(graph.nodes)) let node=ng_node(graph.nodes,i) in
+      concat(if i==0 then "" else ",",pk_quote(node.hash),":",if full then node.raw else pk_quote(node.op)) in
+    concat("{\"program\":",pk_quote(ng_hash(ng_strings(sorted))),",\"functions\":{",str_concat_parts(functions),
+      "},\"nodes\":",int_text(len(graph.nodes)),",\"graph\":{",str_concat_parts(nodes),"}}\n")

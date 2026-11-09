@@ -1,0 +1,9 @@
+import "std:pbkdf2"
+import "std:base64"
+import "std:io"
+effect(fs) fn main() -> unit
+  = let first=pbkdf2_sha256("password","salt",2,32) in check first.ok && str_equal(base64_encode(first.value),"rk0Mla9rRtMtCt/5KPBt0CowP47zwlHf1uLYWpVHTEM=") in
+    let key=arr(i in 0..130) u8(i%256) in let message="reusable HMAC schedule" in
+    check crypto_equal(hmac_sha256(key,message),hmac_sha256_prepared(hmac_sha256_prepare(key),message)) in
+    check !pbkdf2_sha256("x","y",0,32).ok && !pbkdf2_sha256("x","y",2,0).ok in
+    let printed=print_out("PBKDF2 and reusable HMAC OK\n") in noop()

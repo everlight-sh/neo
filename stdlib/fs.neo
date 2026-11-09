@@ -24,24 +24,31 @@ effect(fs) fn fs_remove(path:Arr u8 n) -> IntResult
 effect(fs) fn fs_mkdir(path:Arr u8 n) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
     let result=rt_mkdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"mkdir failed",0) else int_ok(0)
+effect(fs) fn fs_rmdir(path:Arr u8 n) -> IntResult
+  = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
+    let result=rt_rmdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"rmdir failed",0) else int_ok(0)
+effect(fs) fn fs_executable(path:Arr u8 n) -> bool
+  = io_path_valid(path) && let text=concat(path,"\0") in rt_access_exec(data(text))==0
 effect(fs) fn fs_rename(old:Arr u8 n,new:Arr u8 m) -> IntResult
   = if !io_path_valid(old) || !io_path_valid(new) then int_error(22,"invalid path",0) else
     let from=concat(old,"\0") in let to=concat(new,"\0") in let result=rt_rename(data(from),data(to)) in
     if result<0 then int_error(i64(load_i32(rt_errno(),0)),"rename failed",0) else int_ok(0)
-; Exclusive 0600 temporary file in the destination directory, file sync, rename,
+; Exclusive temporary file in the destination directory, file sync, rename,
 ; then parent directory sync. A directory-sync failure can follow a committed
 ; rename; callers must treat that error as an uncertain durability outcome.
-effect(fs,process) fn fs_atomic_replace(path:Arr u8 n,bytes:Arr u8 m) -> IntResult
+effect(fs,process) fn fs_atomic_replace_mode(path:Arr u8 n,bytes:Arr u8 m,mode:i64) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else
     let entropy=random_bytes(16) in if !entropy.ok then int_error(entropy.error.code,entropy.error.message,0) else
       let hex="0123456789abcdef" in let tag=arr(i in 0..32) let at=i/2 in
         check at>=0 && at<len(entropy.value) in let digit=if i%2==0 then i64(entropy.value[at])/16 else i64(entropy.value[at])%16 in
         check digit>=0 && digit<16 in hex[digit] in
       let temporary=concat(path,".tmp.",tag) in let terminated=concat(temporary,"\0") in
-      let fd=rt_open(data(terminated),rt_open_exclusive()) in
+      let fd=rt_open_mode(data(terminated),rt_open_exclusive(),mode) in
       if fd<0 then int_error(i64(load_i32(rt_errno(),0)),"exclusive temporary open failed",0) else
-        let written=file_write(fd,bytes) in let synced=if written.ok then file_sync(fd) else written in let closed=file_close(fd) in
+        let written=file_write(fd,bytes) in let synced=if written.ok then file_sync_full(fd) else written in let closed=file_close(fd) in
         let moved=if synced.ok && closed.ok then fs_rename(temporary,path) else if !synced.ok then synced else closed in
         if !moved.ok then let removed=fs_remove(temporary) in moved else
           let parent=file_open(fs_parent(path),0) in if !parent.ok then parent else
-            let synced=file_sync(parent.value) in let closed=file_close(parent.value) in if !synced.ok then synced else if !closed.ok then closed else int_ok(m)
+            let synced=file_sync_full(parent.value) in let closed=file_close(parent.value) in if !synced.ok then synced else if !closed.ok then closed else int_ok(m)
+effect(fs,process) fn fs_atomic_replace(path:Arr u8 n,bytes:Arr u8 m) -> IntResult
+  = fs_atomic_replace_mode(path,bytes,384)

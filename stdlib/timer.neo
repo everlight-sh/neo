@@ -1,0 +1,13 @@
+import "std:time"
+
+; Short producer callbacks, independent of subscriber activity. A callback must
+; return promptly and never perform blocking I/O. HTTP drives them automatically;
+; standalone programs can drive the same timers with timer_poll.
+effect(process,time) fn timer_interval_start(milliseconds:i64,callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,capture:Arr u8 n)->IntResult
+  = let token=rt_timer_start(milliseconds,callback_address(callback),capture) in
+    if token<0 then int_error(0-token,"Timer admission failed",0) else int_ok(token)
+effect(process) fn timer_interval_stop(token:i64)->unit = rt_timer_stop(token)
+effect(process) fn timer_interval_count()->i64 = load_i64(runtime_state(),1904)
+effect(process,time) fn timer_poll(milliseconds:i64{milliseconds>=0,milliseconds<=120000})->unit
+  = let before=rt_timer_tick() in let wait=rt_timer_timeout(milliseconds) in
+    let ready=rt_wait_ready(-1,0,wait) in rt_timer_tick()

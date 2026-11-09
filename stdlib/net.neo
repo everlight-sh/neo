@@ -18,7 +18,7 @@ fn net_ipv4 (host: Arr u8 n) -> Arr i64 _
         if (i == len(text) || str_byte(text, i) == 46) && part >= 0 && part < 4 then set(result, part, acc) else result)
       yield if valid && part == 4 then result else arr(i in 0..0) i
 effect(time) fn net_remaining (deadline: i64) -> i64
-  = deadline_remaining(deadline)
+  = let yielded=rt_fiber_checkpoint() in if rt_fiber_cancelled() then 0 else deadline_remaining(deadline)
 effect(net,time) fn net_wait_once(fd:i64,mask:i64,deadline:i64) -> IntResult
   = let remaining=net_remaining(deadline) in if remaining==0 then int_ok(0) else
     let result=rt_wait_ready(fd,mask,remaining) in
@@ -90,7 +90,7 @@ effect(net,time) fn http_post_ipv4 (host: Arr u8 n, port: i64, path: Arr u8 m, b
 ; A zero cancellation identity means no cancellation. Nonzero identities are
 ; resolved through the generational table on every wait; stale fails closed.
 effect(net) fn net_is_cancelled(identity:i64) -> bool
-  = if identity==0 then false else let address=rt_handle_fd(identity,5) in address<0 || atomic_load_i64(ptr_from_i64(address),8)!=0
+  = if rt_fiber_cancelled() then true else if identity==0 then false else let address=rt_handle_fd(identity,5) in address<0 || atomic_load_i64(ptr_from_i64(address),8)!=0
 effect(net,time) fn net_wait_cancel(fd:i64,events:i64,deadline:i64,identity:i64) -> IntResult
   = loop(result=int_error(11,"pending",0)) while !result.ok && result.error.code==11 next(
       if net_is_cancelled(identity) then int_error(125,"operation cancelled",0) else

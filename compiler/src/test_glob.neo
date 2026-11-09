@@ -1,0 +1,56 @@
+; Native directory traversal for project test patterns.
+import "std:strings"
+import "paths.neo"
+import "text.neo"
+import "project_fs.neo"
+
+fn nt_bracket_end(borrow pattern:Arr u8 _, start:i64) -> i64
+  = let first=if tx_byte(pattern,start)==33 then start+1 else start in
+    loop (i=first+1) while i<len(pattern) && tx_byte(pattern,i)!=93 next (i+1) yield i
+
+fn nt_bracket(borrow pattern:Arr u8 _, start:i64, end:i64, byte:i64) -> bool
+  = let invert=tx_byte(pattern,start)==33 in
+    let found=loop (i=if invert then start+1 else start, match_byte=false) while i<end && !match_byte
+      next (let range=i+2<end && tx_byte(pattern,i+1)==45 in if range then i+3 else i+1,
+        if i+2<end && tx_byte(pattern,i+1)==45 then tx_byte(pattern,i)<=byte && byte<=tx_byte(pattern,i+2)
+        else tx_byte(pattern,i)==byte) yield match_byte in
+    if invert then !found else found
+
+; Retry the last star on a mismatch. The indices move only within a single
+; path component, so a star cannot consume a directory separator.
+type NtMatch = { p:i64, n:i64, star:i64, retry:i64, failed:bool }
+fn nt_match_step(borrow pattern:Arr u8 _, borrow name:Arr u8 _, s:NtMatch) -> NtMatch
+  = let c=tx_byte(pattern,s.p) in let b=tx_byte(name,s.n) in
+    let close=if c==91 then nt_bracket_end(pattern,s.p+1) else len(pattern) in
+    let bracket=c==91 && close<len(pattern) in
+    if c==42 then s with { p=s.p+1, star=s.p, retry=s.n }
+    else if b>=0 && (c==63 || (if bracket then nt_bracket(pattern,s.p+1,close,b) else c==b)) then
+      s with { p=if bracket then close+1 else s.p+1, n=s.n+1 }
+    else if s.star>=0 && s.retry<len(name) then s with { p=s.star+1, n=s.retry+1, retry=s.retry+1 }
+    else s with { failed=true }
+
+fn nt_component(borrow pattern:Arr u8 _, borrow name:Arr u8 _) -> bool
+  = let m=loop (s=NtMatch { p=0,n=0,star=-1,retry=0,failed=false }) while !s.failed && (s.p<len(pattern) || s.n<len(name))
+      next (nt_match_step(pattern,name,s)) yield s in !m.failed
+
+effect(fs,unsafe) fn nt_walk(borrow path:Arr u8 _, borrow pattern:Arr u8 _, borrow parts:Arr i64 _, k:i64, move out:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let segment=pt_slice(pattern,tx_at(parts,k),tx_at(parts,k+1)) in
+    let recursive=tx_equal(segment,"**") in let last=k+2>=len(parts) in
+    let initial=if recursive && !last then nt_walk(path,pattern,parts,k+2,out) else out in
+    let entries=pf_directory(path) in
+    loop (i=0, result=initial) while i<len(entries)
+      next (i+1,let entry=pf_dirent(entries,i) in let child=pt_join(path,entry.name) in
+        if recursive then
+          if entry.kind==4 then nt_walk(child,pattern,parts,k,result)
+          else if last && (entry.kind==8 || entry.kind==10 || entry.kind==0) then push(result,child) else result
+        else if !nt_component(segment,entry.name) then result
+        else if last then
+          if entry.kind==8 || entry.kind==10 || entry.kind==0 then push(result,child) else result
+        else if entry.kind==4 || entry.kind==10 || entry.kind==0 then nt_walk(child,pattern,parts,k+2,result)
+        else result) yield result
+
+effect(fs,unsafe) fn nt_glob(borrow root:Arr u8 _, borrow pattern:Arr u8 _) -> Arr Arr u8 _ _
+  = let parts=pt_parts(pattern) in if len(parts)==0 || pt_abs(pattern) then tx_words() else
+    let found=nt_walk(root,pattern,parts,0,tx_words()) in
+    loop (i=0, sorted=tx_words()) while i<len(found)
+      next (i+1,tx_insert_word(sorted,tx_word(found,i))) yield sorted

@@ -61,5 +61,21 @@ class Packages(unittest.TestCase):
             (lib/'neo.toml').write_text('[package]\nname=7\nversion="1.2.3"\n')
             with self.assertRaisesRegex(ValueError,'name'):packages.write(app)
 
+    def test_generated_entry_uses_explicit_locked_source_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);app,lib=self.setup_tree(base);packages.write(app)
+            page=app/'src/page.neo'
+            page.write_text('import "pkg:math"\nfn page_value()->i64=answer()\n')
+            generated=base/'build/server.neo';generated.parent.mkdir()
+            generated.write_text('import '+json.dumps(str(page))+'\nfn main()->i64=page_value()\n')
+            with self.assertRaisesRegex(SourceError,'ancestor neo.toml'):
+                sources(generated)
+            program=sources(generated,package_root=app)
+            hash_program(program);Checker(program).run()
+            self.assertEqual(Reference(program).call('main',[]),42)
+            (lib/'src/lib.neo').write_text('fn answer()->i64=99\n')
+            with self.assertRaisesRegex(SourceError,'source changed'):
+                sources(generated,package_root=app)
+
 
 if __name__=='__main__':unittest.main()

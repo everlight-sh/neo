@@ -1,0 +1,899 @@
+; Semantic checking over the loaded AST. Positive types are AST kinds.
+; Zero denotes a type error, -1 an unsupported case, and -2 a failed proof.
+import "std:strings"
+import "text.neo"
+import "lex.neo"
+import "ast.neo"
+import "dump.neo"
+import "modules.neo"
+import "linear.neo"
+import "effects.neo"
+import "intrinsics.neo"
+import "tool_type.neo"
+
+; A linear term models either an i64 value or an array's length. Array
+; element types are a leaf and a list of lengths for inner dimensions.
+; Boolean values retain the constraints guaranteed when true or false.
+type TcValue = { ty:i64, elem:i64, record:i64, origin:i64, name:Arr u8 _, term:Arr i64 _, inner:Arr Arr i64 _ _,
+                 yes:TlFormula, no:TlFormula, known:TlFormula }
+type TcResult = { value:TcValue, at:i64, message:Arr u8 _ }
+type TcReport = { result:TcResult, module:i64 }
+type TcBinding = { name:i64, value:TcValue }
+type TcEnv = { bindings:Arr TcBinding _, facts:TlFormula, effectful:bool, pure:bool, allowed:i64, required:Arr i64 _, trusted:bool, allow_unproven:bool, module:i64 }
+
+fn tc_value(ty:i64) -> TcValue = TcValue { ty=ty, elem=0, record=-1, origin=-1, name=tx_empty(), term=tx_ints(), inner=tl_rows(),
+                                        yes=tl_true(), no=tl_true(), known=tl_true() }
+fn tc_success(value:TcValue) -> TcResult = TcResult { value=value, at=-1, message=tx_empty() }
+fn tc_type(ty:i64) -> TcResult = tc_success(tc_value(ty))
+fn tc_problem(ty:i64, at:i64, borrow message:Arr u8 _) -> TcResult = TcResult { value=tc_value(ty), at=at, message=message }
+fn tc_error(at:i64, borrow message:Arr u8 _) -> TcResult = tc_problem(0,at,message)
+fn tc_unsupported(at:i64, borrow message:Arr u8 _) -> TcResult = tc_problem(-1,at,message)
+fn tc_proof(allow_unproven:bool, at:i64, status:i64, borrow obligation:Arr u8 _, good:TcResult) -> TcResult
+  = if status==1 || allow_unproven then good else if status==0 then tc_problem(-2,at,obligation)
+    else tc_unsupported(at,concat(obligation," proof exceeds the current checker"))
+fn tc_scalar(ty:i64) -> bool = ty>=n_t_i64() && ty<=n_t_unit()
+fn tc_numeric(ty:i64) -> bool = ty==n_t_i64() || ty==n_t_f64()
+fn tc_small_int(ty:i64) -> bool = ty==n_t_u8() || ty==n_t_u16() || ty==n_t_i32()
+fn tc_abi_scalar(ty:i64) -> bool = tc_numeric(ty) || ty==n_t_i32() || ty==n_t_ptr()
+fn tc_abi_boundary(f:Node) -> bool = bit_and(f.f,fl_external()+fl_exported())!=0
+fn tc_integer(term:Arr i64 _) -> TcValue = tc_value(n_t_i64()) with { term=term }
+fn tc_array(elem:i64, term:Arr i64 _) -> TcValue = tc_value(n_t_arr()) with { elem=elem, term=term }
+fn tc_array_of(borrow elem:TcValue, term:Arr i64 _) -> TcValue
+  = let value=tc_array(if elem.ty==n_t_arr() then elem.elem else elem.ty,term) with { record=elem.record, name=elem.name } in
+    if elem.ty!=n_t_arr() then value
+    else value with { inner=arr(i in 0..len(elem.inner)+1) if i==0 then elem.term else tl_row(elem.inner,i-1) }
+fn tc_element(borrow array:TcValue) -> TcValue
+  = let value=if len(array.inner)==0 then tc_value(array.elem) else
+      tc_array(array.elem,tl_row(array.inner,0)) with { inner=arr(i in 1..len(array.inner)) tl_row(array.inner,i) } in
+    value with { record=array.record, name=array.name }
+fn tc_shape_equal(borrow a:TcValue, borrow b:TcValue) -> bool
+  = a.ty==b.ty && a.elem==b.elem && len(a.inner)==len(b.inner) &&
+    (if a.ty==n_t_fn() || a.elem==n_t_fn() then tx_equal(a.name,b.name) else a.record==b.record)
+fn tc_show_size(borrow term:Arr i64 _) -> Arr u8 _ = if len(term)==0 then " _" else " (…)"
+fn tc_show(borrow value:TcValue) -> Arr u8 _
+  = if value.ty!=n_t_arr() then if value.ty==n_t_rec() || value.ty==n_t_fn() || value.ty==n_t_ref() then value.name else dp_scalar(value.ty)
+    else let leaf=if value.elem==n_t_rec() || value.elem==n_t_fn() || value.elem==n_t_ref() then value.name else dp_scalar(value.elem) in
+    let element=loop (i=len(value.inner)-1, text=leaf) while i>=0
+      next (i-1,concat("Arr ",text,tc_show_size(tl_row(value.inner,i)))) yield text in
+    concat("Arr ",element,tc_show_size(value.term))
+
+fn tc_length_fits(borrow facts:TlFormula, borrow actual:Arr i64 _, borrow expected:Arr i64 _) -> i64
+  = if len(expected)==0 then 1 else tl_equal(facts,actual,expected)
+fn tc_inner_fits(borrow facts:TlFormula, borrow actual:TcValue, borrow expected:TcValue) -> i64
+  = loop (i=0, status=1) while status==1 && i<len(expected.inner)
+      next (i+1,tc_length_fits(facts,tl_row(actual.inner,i),tl_row(expected.inner,i))) yield status
+fn tc_value_fits(borrow facts:TlFormula, borrow actual:TcValue, borrow expected:TcValue) -> i64
+  = if !tc_shape_equal(actual,expected) then 0 else let inner=tc_inner_fits(facts,actual,expected) in
+    if inner!=1 then inner else tc_length_fits(facts,actual.term,expected.term)
+
+; Local identifiers have distinct string IDs at each use, so lookup compares
+; their text. The newest binding wins and has its own symbolic value.
+fn tc_env(module:i64) -> TcEnv = TcEnv { bindings=arr(i in 0..0) TcBinding { name=-1, value=tc_value(0) }, facts=tl_true(),
+  effectful=false, pure=false, allowed=-1, required=tx_ints(), trusted=false, allow_unproven=false, module=module }
+fn tc_binding(borrow env:TcEnv, i:i64) -> TcBinding
+  = if i>=0 && i<len(env.bindings) then env.bindings[i] else TcBinding { name=-1, value=tc_value(0) }
+fn tc_lookup(borrow m:Mods, borrow env:TcEnv, name:i64) -> TcValue
+  = let i=loop (i=len(env.bindings)-1) while i>=0 && !tx_equal(md_str(m,tc_binding(env,i).name),md_str(m,name)) next (i-1) yield i in
+    tc_binding(env,i).value
+fn tc_domain(borrow value:TcValue) -> TlFormula
+  = if len(value.term)==0 || (value.ty!=n_t_i64() && value.ty!=n_t_arr()) then tl_true() else
+    let minimum=tl_constant(if value.ty==n_t_arr() then 0 else -9223372036854775808) in
+    let maximum=tl_constant(9223372036854775807) in
+    tl_and(tl_atom(tl_sub(minimum,value.term)),tl_atom(tl_sub(value.term,maximum)))
+fn tc_bind(move env:TcEnv, name:i64, value:TcValue) -> TcEnv
+  = let domain=tc_domain(value) in tc_assume(env with { bindings=push(env.bindings,TcBinding { name=name, value=value }) },domain)
+fn tc_assume(move env:TcEnv, borrow facts:TlFormula) -> TcEnv = env with { facts=tl_and(env.facts,facts) }
+fn tc_known(move result:TcResult, borrow facts:TlFormula) -> TcResult
+  = if result.value.ty<=0 then result else result with { value=result.value with { known=tl_and(facts,result.value.known) } }
+fn tc_need_effect(borrow env:TcEnv, at:i64, borrow name:Arr u8 _, required:i64) -> TcResult
+  = if !env.effectful || env.pure then tc_error(at,concat(name," requires an effect function and cannot run in a refinement or comprehension")) else
+    let missing=bit_and(required,bit_xor(env.allowed,63)) in
+    if env.allowed>=0 && !env.trusted && missing!=0 then tc_error(at,concat("missing effect capabilities: ",te_names(missing)))
+    else tc_type(n_t_unit())
+; Separate symbols for opaque expressions, implicit lengths, comprehension
+; variables, and record projections. Projections use a positional encoding
+; whose digits are AST IDs plus one, with zero reserved.
+fn tc_symbol(id:i64, role:i64) -> Arr i64 _ = tl_symbol(id*4+role)
+fn tc_projection(borrow m:Mods, origin:i64, field:i64) -> i64
+  = let base=len(m.ast.nodes)/11+1 in let digit=field+1 in
+    if origin<=0 || digit<=0 || digit>=base then -1 else
+    if origin>(2305843009213693951-digit)/base then -1 else origin*base+digit
+
+fn tc_condition(borrow a:Arr i64 _, borrow b:Arr i64 _, op:i64) -> TcValue
+  = let difference=tl_sub(a,b) in let reverse=tl_scaled(difference,-1) in
+    let less=tl_atom(tl_add(difference,tl_constant(1))) in let greater=tl_atom(tl_add(reverse,tl_constant(1))) in
+    let le=tl_atom(difference) in let ge=tl_atom(reverse) in
+    let equal=tl_and(le,ge) in let unequal=tl_or(less,greater) in
+    tc_value(n_t_bool()) with {
+      yes=if op==6 then equal else if op==7 then unequal else if op==8 then le else if op==9 then ge else if op==22 then less else greater,
+      no=if op==6 then unequal else if op==7 then equal else if op==8 then greater else if op==9 then less else if op==22 then ge else le }
+
+fn tc_same_term(borrow a:Arr i64 _, borrow b:Arr i64 _) -> bool
+  = len(a)>0 && len(a)==len(b) &&
+    loop (i=0, same=true) while same && i<len(a) next (i+1,tx_at(a,i)==tx_at(b,i)) yield same
+
+fn tc_binary(borrow env:TcEnv, at:i64, op:i64, borrow a:TcValue, borrow b:TcValue) -> TcResult
+  = let left=a.ty in let right=b.ty in let same=tc_shape_equal(a,b) in
+    if op>=24 && op<=28 then
+      if !same || !tc_numeric(left) || (op==28 && left!=n_t_i64()) then
+        tc_error(at,concat("operator ",lx_sym_text(op)," on ",tc_show(a)," and ",tc_show(b)))
+      else if left==n_t_f64() then tc_type(left)
+      else if op<=26 then
+        let term=if op==24 then tl_add(a.term,b.term) else if op==25 then tl_sub(a.term,b.term) else tl_mul(a.term,b.term) in
+        let result=tc_integer(if len(term)>0 then term else tc_symbol(at,0)) in
+        if op==26 && len(term)==0 && tc_same_term(a.term,b.term) then
+          tc_known(tc_success(result),tc_condition(result.term,tl_constant(0),9).yes)
+        else tc_success(result)
+      else if len(b.term)==0 && !env.allow_unproven then tc_unsupported(at,"division proof exceeds the current checker")
+      else let zero=tc_condition(b.term,tl_constant(0),6) in
+        let proof=tl_entails(tl_and(env.facts,zero.yes),tl_constant(1)) in
+        let result=tc_symbol(at,0) in
+        tc_proof(env.allow_unproven,at,proof,"division",tc_success(tc_integer(result) with { known=tl_division(env.facts,a.term,b.term,result,op==27) }))
+    else if op==8 || op==9 || op==22 || op==23 then
+      if same && (tc_numeric(left) || tc_small_int(left)) then
+        tc_success(if left==n_t_i64() then tc_condition(a.term,b.term,op) else tc_value(n_t_bool()))
+      else tc_error(at,concat("comparison ",lx_sym_text(op)," on ",tc_show(a)," and ",tc_show(b)))
+    else if op==6 || op==7 then
+      if same && left!=n_t_arr() && left!=n_t_rec() then tc_success(if left==n_t_i64() then tc_condition(a.term,b.term,op) else tc_value(n_t_bool()))
+      else tc_error(at,concat("equality on ",tc_show(a)," and ",tc_show(b)))
+    else if op==10 || op==11 then
+      if same && left==n_t_bool() then tc_success(tc_value(n_t_bool()) with {
+        yes=if op==10 then tl_and(a.yes,b.yes) else tl_or(a.yes,b.yes),
+        no=if op==11 then tl_and(a.no,b.no) else tl_or(a.no,b.no) })
+      else tc_error(at,concat(lx_sym_text(op)," needs bool operands"))
+    else tc_unsupported(at,"binary operator")
+
+fn tc_unary(at:i64, op:i64, borrow value:TcValue) -> TcResult
+  = if op==25 && value.ty==n_t_i64() then tc_success(tc_integer(tl_scaled(value.term,-1)))
+    else if op==25 && value.ty==n_t_f64() then tc_type(value.ty)
+    else if op==29 && value.ty==n_t_bool() then tc_success(tc_value(n_t_bool()) with { yes=value.no, no=value.yes })
+    else tc_error(at,concat("unary ",lx_sym_text(op)," on ",tc_show(value)))
+
+fn tc_cast(at:i64, borrow from:TcValue, to:i64) -> TcResult
+  = if from.ty==n_t_i64() && (to==n_t_f64() || tc_small_int(to)) then tc_type(to)
+    else if to==n_t_i64() && (from.ty==n_t_f64() || tc_small_int(from.ty)) then tc_success(tc_integer(tc_symbol(at,0)))
+    else tc_error(at,concat("cannot cast ",tc_show(from)," to ",dp_scalar(to)))
+
+; Module loading rewrites direct calls to the declaration's canonical name
+; ID. All signatures are available before any body is checked.
+fn tc_find_record(borrow m:Mods, name:i64) -> i64
+  = md_find_type(m,name)
+fn tc_record_value(borrow m:Mods, id:i64) -> TcValue
+  = tc_value(n_t_rec()) with { record=id, name=md_str(m,md_node(m,id).a) }
+
+fn tc_decl_type(borrow m:Mods, id:i64) -> TcValue
+  = let t=md_node(m,id) in
+    if t.kind==n_t_arr() then tc_array_of(tc_decl_type(m,t.a),tx_ints())
+    else if t.kind==n_t_rec() then tc_record_value(m,tc_find_record(m,t.a))
+    else if t.kind==n_t_fn() then tc_value(n_t_fn()) with { record=id,name=tool_type(m,id) }
+    else if t.kind==n_t_ref() then tc_value(n_t_ref()) with { record=md_resource_type(m,t.a),name=tool_type(m,id) }
+    else tc_value(t.kind)
+
+fn tc_decl_supported(borrow m:Mods, id:i64, outer:bool) -> bool
+  = let t=md_node(m,id) in if tc_scalar(t.kind) then true else
+    if t.kind==n_t_rec() then ast_list_len(m.ast,t.b)==0 && tc_find_record(m,t.a)>=0
+    else if t.kind==n_t_ref() then md_resource_type(m,t.a)>=0
+    else if t.kind==n_t_fn() then tc_decl_supported(m,t.b,false) &&
+      loop (i=0, ok=true) while ok && i<ast_list_len(m.ast,t.a)
+        next (i+1,tc_decl_supported(m,ast_list_at(m.ast,t.a,i),false)) yield ok
+    else t.kind==n_t_arr() && (outer || (t.c==0 && tx_equal(md_str(m,t.b),"_"))) && tc_decl_supported(m,t.a,false)
+
+fn tc_named_node(borrow m:Mods, list:i64, name:i64) -> i64
+  = let text=md_str(m,name) in
+    loop (i=0, id=-1) while id<0 && i<ast_list_len(m.ast,list)
+      next (i+1, let candidate=ast_list_at(m.ast,list,i) in
+            if tx_equal(md_str(m,md_node(m,candidate).a),text) then candidate else -1) yield id
+
+fn tc_field_names(borrow m:Mods, list:i64) -> Arr u8 _
+  = loop (i=0, names=push(tx_empty(),'[')) while i<ast_list_len(m.ast,list)
+      next (i+1, concat(if i==0 then names else concat(names,", "),
+                        tx_repr(md_str(m,md_node(m,ast_list_at(m.ast,list,i)).a),false))) yield push(names,']')
+
+fn tc_record_inits(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, borrow value:TcValue, at:i64, list:i64, literal:bool) -> TcResult
+  = let decl=md_node(m,value.record) in let generated=md_node(m,at).h==1 in
+    if ast_flag(decl,fl_enum_storage()) && !generated then
+      tc_error(at,if literal then "enum storage is private; use its alternative constructors" else "enum storage is private; construct an alternative") else
+    if ast_flag(decl,fl_sealed()) && !generated && tx_at(m.owners,value.record)!=env.module then
+      let name=md_str(m,tx_at(m.display,value.record)) in
+      tc_error(at,concat("sealed type ",name," can only be ",if literal then "constructed" else "updated"," in its declaring module")) else
+    let fields=decl.b in let count=ast_list_len(m.ast,list) in
+    let complete=if !literal then true else count==ast_list_len(m.ast,fields) &&
+      loop (i=0, ok=true) while ok && i<count
+        next (i+1,tc_named_node(m,list,md_node(m,ast_list_at(m.ast,fields,i)).a)>=0) yield ok in
+    if !complete then tc_error(at,concat(value.name," literal must set exactly the fields ",tc_field_names(m,fields))) else
+    loop (i=0, result=tc_success(value)) while result.value.ty>0 && i<count
+      next (i+1, let field_name=md_node(m,ast_list_at(m.ast,fields,i)).a in
+            let init=md_node(m,if literal then tc_named_node(m,list,field_name) else ast_list_at(m.ast,list,i)) in
+            let field=tc_named_node(m,fields,init.a) in
+            let name=md_str(m,init.a) in
+            if field<0 then tc_error(init.b,concat(value.name," has no field ",name)) else
+            let actual=tc_infer(m,fns,tc_assume(env,result.value.known),init.b) in
+            if actual.value.ty<=0 then actual else let expected=tc_decl_type(m,md_node(m,field).b) in
+            if tc_value_fits(env.facts,actual.value,expected)!=1 then
+              tc_error(init.b,concat("field ",name," has type ",tc_show(actual.value),", expected ",tc_show(expected)))
+            else tc_known(result,actual.value.known)) yield result
+
+fn tc_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
+  = if n.kind==n_reclit() then
+      let record=tc_find_record(m,n.a) in
+      if ast_list_len(m.ast,n.c)>0 then tc_unsupported(id,"generic record literal")
+      else if record<0 then tc_error(id,concat("unknown type ",md_str(m,n.a)))
+      else tc_record_inits(m,fns,env,tc_record_value(m,record) with { origin=id+1 },id,n.b,true)
+    else let base=tc_infer(m,fns,env,n.a) in if base.value.ty<=0 then base else
+    if base.value.ty!=n_t_rec() then
+      tc_error(id,concat(if n.kind==n_field() then "field access on " else "`with` on ",tc_show(base.value)))
+    else if n.kind==n_with() then tc_record_inits(m,fns,env,base.value with { origin=id+1 },id,n.b,false)
+    else if ast_flag(md_node(m,base.value.record),fl_enum_storage()) && n.h!=1 then
+      tc_error(id,"enum storage is private; use exhaustive match")
+    else let field=tc_named_node(m,md_node(m,base.value.record).b,n.b) in
+      if field<0 then tc_error(id,concat(base.value.name," has no field ",md_str(m,n.b)))
+      else let value=tc_fresh_result(tc_decl_type(m,md_node(m,field).b),id) in
+      let key=tc_projection(m,base.value.origin,field) in
+      let value=if key<0 then value else if value.ty==n_t_rec() then value with { origin=key }
+        else if value.ty==n_t_i64() || value.ty==n_t_arr() then value with { term=tc_symbol(key,3) } else value in
+      tc_known(tc_success(value),tl_and(base.value.known,tc_domain(value)))
+
+fn tc_numeric_record(borrow m:Mods, borrow value:TcValue) -> bool
+  = if value.ty!=n_t_rec() then false else let fields=md_node(m,value.record).b in
+    loop (i=0, ok=true) while ok && i<ast_list_len(m.ast,fields)
+      next (i+1, tc_numeric(md_node(m,md_node(m,ast_list_at(m.ast,fields,i)).b).kind)) yield ok
+
+type TcArgs = { values:Arr TcValue _, result:TcResult, known:TlFormula }
+type TcContext = { env:TcEnv, result:TcResult }
+fn tc_arg(borrow args:Arr TcValue _, i:i64) -> TcValue = if i>=0 && i<len(args) then args[i] else tc_value(0)
+fn tc_args(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, list:i64) -> TcArgs
+  = loop (i=0, a=TcArgs { values=arr(j in 0..0) tc_value(0), result=tc_type(n_t_unit()), known=tl_true() })
+      while a.result.value.ty>0 && i<ast_list_len(m.ast,list)
+      next (i+1, let result=tc_infer(m,fns,tc_assume(env,a.known),ast_list_at(m.ast,list,i)) in
+            TcArgs { values=push(a.values,result.value), result=result, known=tl_and(a.known,result.value.known) }) yield a
+
+fn tc_bounds(borrow env:TcEnv, at:i64, borrow index:Arr i64 _, borrow size:Arr i64 _, good:TcResult) -> TcResult
+  = let low=tl_entails(env.facts,tl_scaled(index,-1)) in
+    let high=if low==1 then tl_entails(env.facts,tl_add(tl_sub(index,size),tl_constant(1))) else low in
+    tc_proof(env.allow_unproven,at,high,"bounds",good)
+
+fn tc_array_builtin(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
+  = let count=ast_list_len(m.ast,n.b) in
+    let concat_call=tx_equal(name,"concat") in let set_call=tx_equal(name,"set") in
+    if concat_call && count<2 then tc_error(at,"concat takes at least two byte arrays")
+    else if set_call && count!=3 then tc_error(at,"set takes (array, index, value)")
+    else if !concat_call && !set_call && count!=2 then tc_error(at,"push takes (array, value)")
+    else let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let first=tc_arg(args.values,0) in
+    let result=if concat_call then
+      loop (i=0, result=tc_success(tc_array(first.elem,tl_constant(0)))) while result.value.ty>0 && i<count
+        next (i+1, let part=tc_arg(args.values,i) in
+              if part.ty==n_t_arr() && len(part.inner)==0 && part.elem==first.elem && (part.elem==n_t_u8() || part.elem==n_t_u16()) then
+                tc_success(tc_array(first.elem,tl_add(result.value.term,part.term)))
+              else tc_error(ast_list_at(m.ast,n.b,i),concat("concat: argument must be Arr u8",
+                if i>0 && first.elem==n_t_u16() then " or Arr u16 like the first part" else ""))) yield result
+    else if first.ty!=n_t_arr() then tc_error(at,if set_call then "set: first argument must be an array" else "push requires an array")
+    else let second=tc_arg(args.values,1) in let expected=tc_element(first) in
+    let proof_env=tc_assume(env,args.known) in
+    if !set_call then
+      let fits=tc_value_fits(proof_env.facts,second,expected) in
+      if fits==0 then tc_error(at,"push value does not match array element type")
+      else if fits<0 then tc_unsupported(at,"push element length proof exceeds the current checker")
+      else tc_success(first with { term=tl_add(first.term,tl_constant(1)) })
+    else if second.ty!=n_t_i64() then tc_error(ast_list_at(m.ast,n.b,1),"set: index must be i64")
+    else let value=tc_arg(args.values,2) in
+      let fits=tc_value_fits(proof_env.facts,value,expected) in
+      if fits==0 then tc_error(ast_list_at(m.ast,n.b,2),concat("set: value has type ",tc_show(value),", expected ",tc_show(expected)))
+      else if fits<0 then tc_unsupported(at,"set element length proof exceeds the current checker")
+      else tc_bounds(proof_env,at,second.term,first.term,tc_success(first)) in
+    tc_known(result,args.known)
+
+fn tc_bytes(borrow value:TcValue) -> bool = value.ty==n_t_arr() && value.elem==n_t_u8() && len(value.inner)==0
+fn tc_byte_builtin(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
+  = let equal=tx_equal(name,"byte_equal") in let copy=tx_equal(name,"byte_copy") in
+    let read=tx_equal(name,"byte_read_le") in let write=tx_equal(name,"byte_write_le") in
+    let count=if equal then 2 else if write then 4 else 3 in
+    if ast_list_len(m.ast,n.b)!=count then tc_error(at,concat(name," has the wrong number of arguments")) else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let first=tc_arg(args.values,0) in let second=tc_arg(args.values,1) in let third=tc_arg(args.values,2) in
+    let valid=tc_bytes(first) && (if equal then tc_bytes(second)
+      else second.ty==n_t_i64() && (if copy then tc_bytes(third) else third.ty==n_t_i64() && (!write || tc_arg(args.values,3).ty==n_t_i64()))) in
+    if !valid then tc_error(at,concat("invalid arguments to ",name)) else
+    let result=if equal then tc_value(n_t_bool()) else if read then tc_integer(tc_symbol(at,0))
+      else if copy || write then first else tc_array(n_t_u8(),tc_symbol(at,0)) in
+    tc_known(tc_success(result),tl_and(args.known,if result.ty==n_t_arr() then tc_domain(result) else tl_true()))
+
+fn tc_match_arg(borrow m:Mods, arg:i64, borrow actual:TcValue, p:Node) -> TcResult
+  = let expected=tc_decl_type(m,p.b) in
+    if tc_shape_equal(actual,expected) then tc_type(n_t_unit()) else
+    let expected=if expected.ty==n_t_arr() then expected with { term=tl_constant(0) } else expected in
+    tc_error(arg,concat("argument has type ",tc_show(actual),", expected ",tc_show(expected)))
+
+fn tc_substitute_arg(borrow m:Mods, borrow caller:TcEnv, move context:TcContext, arg:i64, borrow actual:TcValue, p:Node) -> TcContext
+  = let declared=md_node(m,p.b) in
+    if declared.kind!=n_t_arr() then context
+    else let old=tc_lookup(m,context.env,declared.b) in let named=!tx_equal(md_str(m,declared.b),"_") in
+    if named && old.ty>0 then
+      context with { env=tc_bind(context.env,p.a,actual),
+        result=tc_proof(caller.allow_unproven,arg,tl_equal(caller.facts,actual.term,old.term),"size",tc_type(n_t_unit())) }
+    else let sub=if named then tc_bind(context.env,declared.b,tc_integer(actual.term)) else context.env in
+      context with { env=tc_bind(sub,p.a,actual) }
+
+fn tc_call_user(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, id:i64) -> TcResult
+  = let f=md_node(m,id) in let count=ast_list_len(m.ast,n.b) in let params=ast_list_len(m.ast,f.b) in
+    if count<params || (count!=params && !ast_flag(f,fl_variadic())) then
+      tc_error(at,concat(md_str(m,n.a)," takes ",int_text(params)," args")) else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let abi=loop (i=params, ok=true) while ok && i<count next (i+1,tc_abi_scalar(tc_arg(args.values,i).ty)) yield ok in
+    if !abi then tc_error(at,"variadic arguments must use ABI scalar types (promote small integers to i32)") else
+    let caller=tc_assume(env,args.known) in
+    let shapes=loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<params
+      next (i+1, tc_match_arg(m,ast_list_at(m.ast,n.b,i),tc_arg(args.values,i),md_node(m,ast_list_at(m.ast,f.b,i)))) yield result in
+    if shapes.value.ty<=0 then shapes else
+    let sub=loop (i=0, sub=tc_env(tx_at(m.owners,id))) while i<params
+      next (i+1, let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let actual=tc_arg(args.values,i) in
+            if md_node(m,p.b).kind!=n_t_arr() then tc_bind(sub,p.a,actual) else sub) yield sub in
+    let sub=loop (i=0, sub=TcContext { env=sub, result=tc_type(n_t_unit()) }) while sub.result.value.ty>0 && i<params
+      next (i+1, tc_substitute_arg(m,caller,sub,ast_list_at(m.ast,n.b,i),tc_arg(args.values,i),md_node(m,ast_list_at(m.ast,f.b,i)))) yield sub in
+    if sub.result.value.ty<=0 then sub.result else
+    let pre=tc_preconditions(m,fns,sub.env with { facts=caller.facts, allow_unproven=caller.allow_unproven },f,n.b) in
+    if pre.value.ty<=0 then pre else
+    let ret=tc_return_type(m,sub.env,id) in
+    if ret.value.ty<=0 then ret else
+    let value=tc_fresh_result(ret.value,at) in
+    if ast_list_len(m.ast,f.e)==0 then tc_known(tc_success(value),args.known) else
+    let post=tc_contracts(m,fns,tc_bind(sub.env,m.result,value),f.e,0,-1,"postcondition") in
+    if post.result.value.ty<=0 then post.result else tc_known(tc_success(value with { known=post.env.facts }),args.known)
+
+fn tc_fresh_result(borrow value:TcValue, at:i64) -> TcValue
+  = if value.ty==n_t_i64() then tc_integer(tc_symbol(at,0))
+    else if value.ty==n_t_arr() && len(value.term)==0 then value with { term=tc_symbol(at,0) }
+    else if value.ty==n_t_rec() then value with { origin=at+1 } else value
+
+fn tc_bit_mask(borrow m:Mods, list:i64) -> i64
+  = loop (i=0, mask=-1) while i<ast_list_len(m.ast,list)
+      next (i+1,let n=md_node(m,ast_list_at(m.ast,list,i)) in
+        if n.kind==n_num() && n.b==0 && n.a>=0 && (mask<0 || n.a<mask) then n.a else mask) yield mask
+fn tc_intrinsic(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
+  = let signature=bi_signature(name) in
+    if signature.result<=0 then tc_unsupported(at,concat("builtin ",name)) else
+    let gate=if signature.unsafe_call then tc_need_effect(env,at,name,32) else tc_type(n_t_unit()) in
+    if gate.value.ty<=0 then gate else
+    if ast_list_len(m.ast,n.b)!=len(signature.params) then tc_error(at,signature.message) else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let valid=loop (i=0, ok=true) while ok && i<len(signature.params)
+      next (i+1,tc_arg(args.values,i).ty==tx_at(signature.params,i)) yield ok in
+    if !valid then tc_error(at,signature.message) else
+    let result=if tx_equal(name,"handler_call") then tc_array(n_t_u8(),tx_ints()) else tc_value(signature.result) in
+    let value=tc_fresh_result(result,at) in
+    let mask=if tx_equal(name,"bit_and") then tc_bit_mask(m,n.b) else -1 in
+    let known=if mask<0 then args.known else
+      tl_and(args.known,tl_and(tc_condition(tl_constant(0),value.term,8).yes,tc_condition(value.term,tl_constant(mask),8).yes)) in
+    tc_known(tc_success(value),if signature.result==n_t_arr() then tl_and(known,tc_domain(value)) else known)
+
+fn tc_system_array(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, list:i64, borrow name:Arr u8 _) -> TcResult
+  = let gate=tc_need_effect(env,at,name,32) in if gate.value.ty<=0 then gate else
+    let view=tx_equal(name,"view") in let count=if view then 2 else 1 in
+    let message=if view then "view takes (ptr, byte length)" else "byte_uninit takes (byte length)" in
+    if ast_list_len(m.ast,list)!=count then tc_error(at,message) else
+    let args=tc_args(m,fns,env,list) in if args.result.value.ty<=0 then args.result else
+    let length=tc_arg(args.values,count-1) in
+    if length.ty!=n_t_i64() || (view && tc_arg(args.values,0).ty!=n_t_ptr()) then tc_error(at,message) else
+    let fits=tl_entails(tl_and(env.facts,args.known),tl_scaled(length.term,-1)) in
+    tc_proof(env.allow_unproven,at,fits,"size",tc_known(tc_success(tc_array(n_t_u8(),length.term)),args.known))
+
+fn tc_address(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, list:i64, borrow name:Arr u8 _) -> TcResult
+  = let gate=tc_need_effect(env,at,name,32) in if gate.value.ty<=0 then gate else
+    let id=ast_list_at(m.ast,list,0) in let arg=md_node(m,id) in let count=ast_list_len(m.ast,list) in
+    if tx_equal(name,"addr") then
+      if count==1 && arg.kind==n_var() && md_find_decl(m,fns,arg.a)>=0 then tc_type(n_t_ptr()) else tc_error(at,"addr takes a function name")
+    else let value=if count==1 && (arg.kind==n_var() || arg.kind==n_str()) then tc_infer(m,fns,env,id).value else tc_value(0) in
+    if value.ty==n_t_arr() && value.elem==n_t_u8() && len(value.inner)==0 then tc_type(n_t_ptr())
+    else tc_error(at,"data takes a byte array; its pointer borrows the array's storage")
+
+fn tc_callback(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
+  = let signature=md_node(m,n.e) in
+    if tx_equal(name,"function_null") then
+      if signature.kind==n_t_fn() then tc_type_value(m,n.e) else tc_error(at,"function_null is compiler-internal inactive storage")
+    else if tx_equal(name,"callback_address") then
+      let gate=tc_need_effect(env,at,name,32) in if gate.value.ty<=0 then gate else
+      let arg=tc_infer(m,fns,env,ast_list_at(m.ast,n.b,0)) in let ty=md_node(m,arg.value.record) in
+      if ast_list_len(m.ast,n.b)==1 && arg.value.ty==n_t_fn() && ast_list_len(m.ast,ty.a)==1 &&
+        tc_bytes(tc_decl_type(m,ast_list_at(m.ast,ty.a,0))) && tc_bytes(tc_decl_type(m,ty.b)) then tc_type(n_t_ptr())
+      else tc_error(at,"callback_address requires a byte-array callback")
+    else let arg=md_node(m,ast_list_at(m.ast,n.b,0)) in let f=md_node(m,md_find_decl(m,fns,arg.a)) in
+    if signature.kind!=n_t_fn() || tc_lookup(m,env,arg.a).ty>0 || tc_abi_boundary(f) || ast_list_len(m.ast,f.e)>0 then
+      tc_error(at,"function requires an internal function without owned parameters or refinements")
+    else if ast_flag(f,fl_effect()) && f.g<0 then tc_error(at,"effect function values require explicit capabilities")
+    else let valid=loop (i=0, valid=true, sizes=tx_words()) while valid && i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in let size=md_str(m,ty.b) in
+        p.f==0 && ast_list_len(m.ast,p.c)==0 && (ty.kind!=n_t_arr() || (ty.c==0 &&
+          (tx_equal(size,"_") || len(tx_insert_word(sizes,size))>len(sizes)))),
+        let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in
+        if ty.kind==n_t_arr() then tx_insert_word(sizes,md_str(m,ty.b)) else sizes) yield valid in
+    if !valid then tc_error(at,"function values require independent lengths and no owned parameters or refinements")
+    else tc_type_value(m,n.e)
+
+fn tc_type_value(borrow m:Mods, id:i64) -> TcResult = tc_success(tc_decl_type(m,id))
+
+fn tc_indirect(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow binding:TcValue) -> TcResult
+  = let signature=md_node(m,binding.record) in
+    let flags=te_declared(m,signature with { g=signature.c }) in
+    let gate=if flags<0 then tc_type(n_t_unit()) else tc_need_effect(env,at,md_str(m,n.a),flags) in
+    if gate.value.ty<=0 then gate else
+    let count=ast_list_len(m.ast,n.b) in
+    if count!=ast_list_len(m.ast,signature.a) then tc_error(at,"function-value argument arity mismatch") else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let valid=loop (i=0, ok=true) while ok && i<count next (i+1,
+      tc_shape_equal(tc_arg(args.values,i),tc_decl_type(m,ast_list_at(m.ast,signature.a,i)))) yield ok in
+    if !valid then tc_error(at,"function-value argument type mismatch") else
+    let ret=tc_fresh_result(tc_decl_type(m,signature.b),at) in
+    tc_known(tc_success(ret),if ret.ty==n_t_arr() then tl_and(args.known,tc_domain(ret)) else args.known)
+
+fn tc_named_fn(borrow m:Mods, borrow fns:Arr i64 _, borrow name:Arr u8 _) -> i64
+  = loop (i=0, found= -1) while found<0 && i<len(fns) next (i+1,
+      let id=tx_at(fns,i) in if tx_equal(md_str(m,md_node(m,id).a),name) then id else -1) yield found
+
+fn tc_arena(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
+  = if tx_equal(name,"ref_null") then
+      if md_node(m,n.e).kind==n_t_ref() then tc_type_value(m,n.e) else tc_error(at,"ref_null is compiler-internal inactive storage")
+    else let adopt=tx_equal(name,"adopt") in let release=tx_equal(name,"ref_release") in
+    let gate=tc_need_effect(env,at,name,if release then 14 else 8) in
+    if gate.value.ty<=0 then gate else
+    if ast_list_len(m.ast,n.b)!=(if adopt then 2 else 1) then tc_error(at,concat("incorrect argument count for ",name)) else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let first=tc_arg(args.values,0) in
+    if adopt then
+      let arena=tc_arg(args.values,1) in let owner=md_node(m,ast_list_at(m.ast,n.b,0)) in
+      let destructor=md_resource_drop(m,fns,first.record) in
+      if first.ty!=n_t_rec() || owner.kind!=n_var() || destructor<0 || arena.ty!=n_t_rec() || !tx_equal(arena.name,"Arena") then
+        tc_error(at,"adopt requires a named resource owner and an Arena")
+      else if bit_and(tx_at(env.required,destructor),49)!=0 then tc_error(at,"arena finalizers support fs/net/process capabilities")
+      else if tc_named_fn(m,fns,"rt_arena_register")<0 then tc_error(at,"import std:arena before adopting resources")
+      else tc_known(tc_type_value(m,n.e),args.known)
+    else if first.ty!=n_t_ref() || first.record<0 then tc_error(at,concat(name," requires Ref<T>"))
+    else if tc_named_fn(m,fns,"rt_arena_lookup")<0 then tc_error(at,"import std:arena before accessing references")
+    else if tx_equal(name,"borrow_ref") then tc_known(tc_success(tc_record_value(m,first.record)),args.known)
+    else tc_known(tc_type(if release then n_t_unit() else n_t_bool()),args.known)
+
+fn tc_serve(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, effects:bool) -> TcResult
+  = let gate=tc_need_effect(env,at,"serve",4) in if gate.value.ty<=0 then gate else
+    let arg=md_node(m,ast_list_at(m.ast,n.b,1)) in
+    if ast_list_len(m.ast,n.b)!=2 || arg.kind!=n_var() then tc_error(at,"serve takes (port : i64, handler : function name)") else
+    let port=tc_infer(m,fns,env,ast_list_at(m.ast,n.b,0)) in
+    if port.value.ty<=0 then port else if port.value.ty!=n_t_i64() then tc_error(at,"serve: port must be i64") else
+    let handler=md_find_decl(m,fns,arg.a) in let f=md_node(m,handler) in
+    let req=md_node(m,ast_list_at(m.ast,f.b,0)) in let effectful=ast_flag(f,fl_effect()) in
+    if handler<0 || ast_list_len(m.ast,f.b)!=1 || !tc_bytes(tc_decl_type(m,req.b)) || !tc_bytes(tc_decl_type(m,f.c)) ||
+      ast_list_len(m.ast,req.c)>0 || ast_list_len(m.ast,f.e)>0 || (effectful && !effects) then
+      tc_error(at,"serve: handler must take a byte array and return a byte array without refinements")
+    else let gate=if effectful then tc_need_effect(env,at,"serve_effect",tx_at(env.required,handler)) else tc_type(n_t_unit()) in
+    if gate.value.ty<=0 then gate else tc_known(tc_success(tc_integer(tc_symbol(at,0))),port.value.known)
+
+fn tc_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node) -> TcResult
+  = let name=md_str(m,n.a) in let count=ast_list_len(m.ast,n.b) in
+    if ast_list_len(m.ast,n.c)>0 then tc_unsupported(at,"generic call")
+    else if tx_equal(name,"noop") || tx_equal(name,"null") then
+      if count!=0 then tc_error(at,concat(name," takes no arguments"))
+      else tc_type(if tx_equal(name,"noop") then n_t_unit() else n_t_ptr())
+    else if tx_equal(name,"concat") || tx_equal(name,"push") || tx_equal(name,"set") then tc_array_builtin(m,fns,env,at,n,name)
+    else if bi_bytes(name) then tc_byte_builtin(m,fns,env,at,n,name)
+    else if tx_equal(name,"addr") || tx_equal(name,"data") then tc_address(m,fns,env,at,n.b,name)
+    else if tx_equal(name,"view") || tx_equal(name,"byte_uninit") then tc_system_array(m,fns,env,at,n.b,name)
+    else if tx_equal(name,"serve") || tx_equal(name,"serve_effect") then tc_serve(m,fns,env,at,n,tx_equal(name,"serve_effect"))
+    else if tx_equal(name,"function") || tx_equal(name,"function_null") || tx_equal(name,"callback_address") then tc_callback(m,fns,env,at,n,name)
+    else if tx_equal(name,"adopt") || tx_equal(name,"borrow_ref") || tx_equal(name,"ref_live") ||
+      tx_equal(name,"ref_release") || tx_equal(name,"ref_null") then tc_arena(m,fns,env,at,n,name)
+    else if md_is_builtin(m,name) then tc_intrinsic(m,fns,env,at,n,name)
+    else let binding=tc_lookup(m,env,n.a) in
+    if binding.ty==n_t_fn() then tc_indirect(m,fns,env,at,n,binding) else
+    let id=md_find_decl(m,fns,n.a) in
+    if id<0 then tc_error(at,concat("unknown function ",name)) else
+    let gate=if ast_flag(md_node(m,id),fl_effect()) then tc_need_effect(env,at,name,tx_at(env.required,id)) else tc_type(n_t_unit()) in
+    if gate.value.ty<=0 then gate else tc_call_user(m,fns,env,at,n,id)
+
+type TcInnerJoin = { lengths:Arr Arr i64 _ _, status:i64 }
+fn tc_join_inner(borrow facts:TlFormula, borrow a:TcValue, borrow b:TcValue) -> TcInnerJoin
+  = loop (i=0, join=TcInnerJoin { lengths=tl_rows(), status=1 }) while join.status==1 && i<len(a.inner)
+      next (i+1, let left=tl_row(a.inner,i) in let right=tl_row(b.inner,i) in
+            if len(left)==0 || len(right)==0 then join with { lengths=push(join.lengths,tx_ints()) }
+            else TcInnerJoin { lengths=push(join.lengths,left), status=tl_equal(facts,left,right) }) yield join
+
+fn tc_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
+  = let condition=tc_infer(m,fns,env,n.a) in if condition.value.ty<=0 then condition
+    else if condition.value.ty!=n_t_bool() then tc_error(n.a,"if condition must be bool")
+    else let env=tc_assume(env,condition.value.known) in
+    let yes=tc_infer(m,fns,tc_assume(env,condition.value.yes),n.b) in if yes.value.ty<=0 then yes else
+    let no=tc_infer(m,fns,tc_assume(env,condition.value.no),n.c) in if no.value.ty<=0 then no else
+    if !tc_shape_equal(yes.value,no.value) then tc_error(id,concat("branches differ: ",tc_show(yes.value)," vs ",tc_show(no.value)))
+    else let joined=tc_join_inner(env.facts,yes.value,no.value) in
+    if joined.status==0 then tc_error(id,concat("branches differ: ",tc_show(yes.value)," vs ",tc_show(no.value)))
+    else if joined.status<0 then tc_unsupported(id,"branch element length proof exceeds the current checker") else
+    let result=if yes.value.ty==n_t_arr() then
+      let size=if tl_equal(env.facts,yes.value.term,no.value.term)==1 then yes.value.term else tc_symbol(id,0) in
+      tc_success(tc_array(yes.value.elem,size) with { inner=joined.lengths, record=yes.value.record, name=yes.value.name })
+    else if yes.value.ty==n_t_i64() then tc_success(tc_integer(tc_symbol(id,0)))
+    else if yes.value.ty==n_t_rec() then tc_success(tc_fresh_result(tc_record_value(m,yes.value.record),id)) else tc_type(yes.value.ty) in
+    let then_facts=tl_and(condition.value.yes,yes.value.known) in
+    let else_facts=tl_and(condition.value.no,no.value.known) in
+    let branches=if result.value.ty!=n_t_i64() then
+      if tl_is_true(yes.value.known) && tl_is_true(no.value.known) then tl_true() else tl_or(then_facts,else_facts)
+      else
+      tl_or(tl_and(then_facts,tc_condition(result.value.term,yes.value.term,6).yes),
+            tl_and(else_facts,tc_condition(result.value.term,no.value.term,6).yes)) in
+    tc_known(result,tl_and(condition.value.known,branches))
+
+fn tc_value_has_symbol(borrow value:TcValue, symbol:i64) -> bool
+  = tl_coefficient(value.term,symbol)>=0 || loop (i=0, found=false) while !found && i<len(value.inner)
+      next (i+1,tl_coefficient(tl_row(value.inner,i),symbol)>=0) yield found
+fn tc_environment_has_symbol(borrow env:TcEnv, symbol:i64) -> bool
+  = loop (i=0, found=false) while !found && i<len(env.bindings)
+      next (i+1,tc_value_has_symbol(tc_binding(env,i).value,symbol)) yield found
+fn tc_uniform_size(borrow env:TcEnv, borrow term:Arr i64 _) -> Arr i64 _
+  = let visible=loop (i=tl_end(term,0), ok=true) while ok && i<len(term)
+      next (tl_end(term,i+1),tc_environment_has_symbol(env,tx_at(term,i))) yield ok in
+    if visible then term else tx_ints()
+
+fn tc_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
+  = let lo=tc_infer(m,fns,env,n.b) in if lo.value.ty<=0 then lo else
+    let hi=tc_infer(m,fns,tc_assume(env,lo.value.known),n.c) in if hi.value.ty<=0 then hi else
+    if lo.value.ty!=n_t_i64() || hi.value.ty!=n_t_i64() then tc_error(id,"range bounds must be i64") else
+    let known=tl_and(lo.value.known,hi.value.known) in let env=tc_assume(env,known) in
+    let term=tc_symbol(id,2) in let span=tl_sub(hi.value.term,lo.value.term) in
+    let inner=tc_bind(env,n.a,tc_integer(term)) in
+    let inner=tc_assume(tc_assume(inner,tc_condition(lo.value.term,term,8).yes),tc_condition(term,hi.value.term,22).yes) in
+    let value=tc_infer(m,fns,inner with { pure=true },n.d) in if value.value.ty<=0 then value else
+    if n.kind==n_sum() then
+      if tc_numeric(value.value.ty) || tc_numeric_record(m,value.value) then
+        let result=tc_fresh_result(value.value,id) in
+        let sign=if value.value.ty==n_t_i64() &&
+          tl_entails(tl_and(inner.facts,value.value.known),tl_scaled(value.value.term,-1))==1 then
+          tc_condition(result.term,tl_constant(0),9).yes else tl_true() in
+        tc_known(tc_success(result),tl_and(known,sign))
+      else tc_error(n.d,concat("sum body must be numeric or a numeric record, got ",tc_show(value.value)))
+    else
+      ; Each iteration can produce a different nested length. Retain only
+      ; terms from outside the comprehension, which are stable across rows.
+      let array=tc_array_of(value.value,span) in
+      let inner=arr(i in 0..len(array.inner)) tc_uniform_size(env,tl_row(array.inner,i)) in
+      tc_known(tc_proof(env.allow_unproven,id,tl_entails(env.facts,tl_scaled(span,-1)),"range",tc_success(array with { inner=inner })),known)
+
+fn tc_infer(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64) -> TcResult
+  = let n=md_node(m,id) in let kind=n.kind in
+    if kind==n_num() then if n.b==1 then tc_error(id,"integer literal outside i64") else tc_success(tc_integer(tl_constant(n.a)))
+    else if kind==n_flt() then tc_type(n_t_f64())
+    else if kind==n_bool() then
+      tc_success(tc_value(n_t_bool()) with { yes=if n.a==0 then tl_false() else tl_true(), no=if n.a==0 then tl_true() else tl_false() })
+    else if kind==n_byte() then tc_type(n_t_u8())
+    else if kind==n_str() then tc_success(tc_array(n_t_u8(),tl_constant(len(md_str(m,n.a)))))
+    else if kind==n_var() then
+      let value=tc_lookup(m,env,n.a) in if value.ty>0 then tc_success(value) else tc_error(id,concat("unbound variable ",md_str(m,n.a)))
+    else if kind==n_bin() then
+      let left=tc_infer(m,fns,env,n.b) in if left.value.ty<=0 then left else
+      let after_left=tc_assume(env,left.value.known) in
+      let inner=if n.a==10 then tc_assume(after_left,left.value.yes) else if n.a==11 then tc_assume(after_left,left.value.no) else after_left in
+      let right=tc_infer(m,fns,inner,n.c) in if right.value.ty<=0 then right else
+      let known=if n.a==10 || n.a==11 then left.value.known else tl_and(left.value.known,right.value.known) in
+      tc_known(tc_binary(tc_assume(env,known),id,n.a,left.value,right.value),known)
+    else if kind==n_un() || kind==n_cast() then
+      let value=tc_infer(m,fns,env,n.b) in if value.value.ty<=0 then value
+      else tc_known(if kind==n_un() then tc_unary(id,n.a,value.value) else tc_cast(id,value.value,md_node(m,n.a).kind),value.value.known)
+    else if kind==n_let() || kind==n_using() then
+      let value=tc_infer(m,fns,env,n.b) in if value.value.ty<=0 then value else
+      let inner=tc_assume(env,value.value.known) in
+      ; The binding's evaluation facts are already in scope. Reusing the
+      ; value must not multiply the same disjunction at each read.
+      let bound=value.value with { known=tl_true() } in
+      let body=tc_infer(m,fns,tc_bind(inner,n.a,bound),n.c) in
+      if body.value.ty<=0 then body else
+      let cleanup=if kind==n_using() then tc_cleanup_check(m,fns,tc_assume(inner,body.value.known),id,n.e,bound)
+        else tc_type(n_t_unit()) in
+      if cleanup.value.ty<=0 then cleanup else tc_known(body,value.value.known)
+    else if kind==n_if() then tc_if(m,fns,env,id,n)
+    else if kind==n_len() then
+      let array=tc_infer(m,fns,env,n.a) in if array.value.ty<=0 then array
+      else if array.value.ty!=n_t_arr() then tc_error(id,"len of a non-array") else
+      tc_known(tc_success(tc_integer(array.value.term)),array.value.known)
+    else if kind==n_index() then
+      let array=tc_infer(m,fns,env,n.a) in if array.value.ty<=0 then array else
+      let index=tc_infer(m,fns,tc_assume(env,array.value.known),n.b) in if index.value.ty<=0 then index else
+      if array.value.ty!=n_t_arr() then tc_error(id,"indexing a non-array")
+      else if index.value.ty!=n_t_i64() then tc_error(n.b,"index must be i64")
+      else let value=tc_fresh_result(tc_element(array.value),id) in
+      let known=tl_and(array.value.known,index.value.known) in
+      tc_known(tc_bounds(tc_assume(env,known),id,index.value.term,array.value.term,tc_success(value)),known)
+    else if kind==n_arrc() || kind==n_sum() then tc_range(m,fns,env,id,n)
+    else if kind==n_loop() then tc_loop(m,fns,env,id,n)
+    else if kind==n_reclit() || kind==n_field() || kind==n_with() then tc_record_expr(m,fns,env,id,n)
+    else if kind==n_check() then
+      let condition=tc_infer(m,fns,env with { pure=true },n.a) in if condition.value.ty<=0 then condition
+      else if condition.value.ty!=n_t_bool() then tc_error(n.a,"check predicate must be bool")
+      else tc_infer(m,fns,tc_assume(env,tl_and(condition.value.known,condition.value.yes)),n.b)
+    else if kind==n_call() then tc_call(m,fns,env,id,n)
+    else tc_unsupported(id,"expression outside the current checker")
+
+fn tc_size_expr(borrow m:Mods, borrow env:TcEnv, id:i64) -> Arr i64 _
+  = let n=md_node(m,id) in
+    if n.kind==n_num() && n.b==0 then tl_constant(n.a)
+    else if n.kind==n_var() then let v=tc_lookup(m,env,n.a) in if v.ty==n_t_i64() then v.term else tx_ints()
+    else if n.kind==n_len() then
+      let array=md_node(m,n.a) in let v=tc_lookup(m,env,array.a) in
+      if array.kind==n_var() && v.ty==n_t_arr() then v.term else tx_ints()
+    else if n.kind==n_un() && n.a==25 then tl_scaled(tc_size_expr(m,env,n.b),-1)
+    else if n.kind==n_bin() && n.a>=24 && n.a<=26 then
+      let a=tc_size_expr(m,env,n.b) in let b=tc_size_expr(m,env,n.c) in
+      if n.a==24 then tl_add(a,b) else if n.a==25 then tl_sub(a,b) else tl_mul(a,b)
+    else tx_ints()
+
+; Contracts are re-evaluated under argument substitution. Restrict them to
+; expressions without calls or opaque numeric terms, whose symbols would
+; otherwise be shared incorrectly across separate call sites.
+fn tc_contract_syntax(borrow m:Mods, borrow env:TcEnv, id:i64) -> bool
+  = let n=md_node(m,id) in
+    if n.kind==n_var() || n.kind==n_bool() || n.kind==n_flt() || n.kind==n_byte() then true
+    else if n.kind==n_num() then n.b==0
+    else if n.kind==n_len() then md_node(m,n.a).kind==n_var()
+    else if n.kind==n_un() then
+      if n.a==25 then len(tc_size_expr(m,env,id))>0 else tc_contract_syntax(m,env,n.b)
+    else if n.kind==n_bin() then
+      if n.a>=24 && n.a<=26 then len(tc_size_expr(m,env,id))>0
+      else n.a!=27 && n.a!=28 && tc_contract_syntax(m,env,n.b) && tc_contract_syntax(m,env,n.c)
+    else false
+
+; Mode 0 assumes a predicate, 1 proves it, and 2 validates its type only.
+fn tc_contract_step(borrow m:Mods, borrow fns:Arr i64 _, move context:TcContext, id:i64, mode:i64, site:i64, borrow kind:Arr u8 _) -> TcContext
+  = if !tc_contract_syntax(m,context.env,id) then context with { result=tc_unsupported(if site<0 then id else site,"refinement outside the affine subset") }
+    else let predicate=tc_infer(m,fns,context.env with { pure=true },id) in
+    if predicate.value.ty<=0 then context with { result=predicate }
+    else if predicate.value.ty!=n_t_bool() then
+      context with { result=tc_error(id,if tx_equal(kind,"postcondition") then "return refinement must be bool"
+        else if tx_equal(kind,"invariant") then "invariant must be bool" else "refinement must be bool") }
+    else if mode==0 then context with { env=tc_assume(context.env,predicate.value.yes) }
+    else if mode==1 then context with { result=tc_proof(context.env.allow_unproven,if site<0 then id else site,
+      tl_entails(tl_and(context.env.facts,predicate.value.no),tl_constant(1)),
+      kind,tc_type(n_t_unit())) }
+    else context
+
+fn tc_contracts(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, list:i64, mode:i64, site:i64, borrow kind:Arr u8 _) -> TcContext
+  = loop (i=0, context=TcContext { env=env, result=tc_type(n_t_unit()) })
+      while context.result.value.ty>0 && i<ast_list_len(m.ast,list)
+      next (i+1,tc_contract_step(m,fns,context,ast_list_at(m.ast,list,i),mode,site,kind)) yield context
+
+fn tc_parameter_contracts(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, f:Node, mode:i64, args:i64) -> TcContext
+  = loop (i=0, context=TcContext { env=env, result=tc_type(n_t_unit()) })
+      while context.result.value.ty>0 && i<ast_list_len(m.ast,f.b)
+      next (i+1, let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+            tc_contracts(m,fns,context.env,p.c,mode,if args<0 then -1 else ast_list_at(m.ast,args,i),"precondition")) yield context
+
+fn tc_preconditions(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, f:Node, args:i64) -> TcResult
+  = tc_parameter_contracts(m,fns,env,f,1,args).result
+
+fn tc_loop_inits(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, states:i64) -> TcArgs
+  = loop (i=0, a=TcArgs { values=arr(j in 0..0) tc_value(0), result=tc_type(n_t_unit()), known=tl_true() })
+      while a.result.value.ty>0 && i<ast_list_len(m.ast,states)
+      next (i+1, let s=md_node(m,ast_list_at(m.ast,states,i)) in let ann=md_node(m,s.b) in
+            let value=tc_infer(m,fns,tc_assume(env,a.known),s.c) in
+            let declared=tc_decl_type(m,ann.a) in
+            let result=if value.value.ty<=0 || s.b<0 then value
+              else if !tc_decl_supported(m,ann.a,false) then tc_unsupported(s.b,"loop state annotation outside the current checker")
+              else if !tc_shape_equal(value.value,declared) then tc_error(id,concat("loop state ",md_str(m,s.a),
+                " initialised with ",tc_show(value.value),", declared ",tc_show(declared))) else value in
+            TcArgs { values=push(a.values,result.value), result=result, known=tl_and(a.known,result.value.known) }) yield a
+
+; Actual values are used for initial/preserved obligations. At the loop head,
+; scalar state has fresh symbols and array state keeps its length only when
+; every next expression has been shown to preserve it.
+fn tc_loop_bind(borrow m:Mods, move env:TcEnv, states:i64, borrow values:Arr TcValue _, symbolic:bool, borrow widen:Arr i64 _) -> TcEnv
+  = loop (i=0, env=env) while i<len(values)
+      next (i+1, let id=ast_list_at(m.ast,states,i) in let s=md_node(m,id) in let v=tc_arg(values,i) in
+            if !symbolic then tc_bind(env,s.a,v)
+            else if v.ty==n_t_i64() then tc_bind(env,s.a,tc_integer(tc_symbol(id,0)))
+            else if v.ty==n_t_rec() then tc_bind(env,s.a,tc_fresh_result(tc_record_value(m,v.record),id))
+            else if v.ty!=n_t_arr() then tc_bind(env,s.a,tc_value(v.ty))
+            else let term=if tx_at(widen,i)!=0 || len(v.term)==0 then tc_symbol(id,1) else v.term in
+              tc_bind(env,s.a,v with { term=term, known=tl_true() })) yield env
+
+fn tc_invariants(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, states:i64, mode:i64, successors:i64) -> TcContext
+  = loop (i=0, context=TcContext { env=env, result=tc_type(n_t_unit()) })
+      while context.result.value.ty>0 && i<ast_list_len(m.ast,states)
+      next (i+1, let s=md_node(m,ast_list_at(m.ast,states,i)) in
+            if s.b<0 then context else
+            let site=if successors>=0 then ast_list_at(m.ast,successors,i) else s.c in
+            tc_contracts(m,fns,context.env,md_node(m,s.b).b,mode,site,"invariant")) yield context
+
+type TcWiden = { flags:Arr i64 _, changed:bool, result:TcResult }
+fn tc_loop_types(borrow m:Mods, borrow env:TcEnv, n:Node, borrow initial:Arr TcValue _, borrow values:Arr TcValue _, borrow flags:Arr i64 _) -> TcWiden
+  = loop (i=0, w=TcWiden { flags=tx_ints(), changed=false, result=tc_type(n_t_unit()) })
+      while w.result.value.ty>0 && i<len(values)
+      next (i+1, let previous=tc_arg(initial,i) in let updated=tc_arg(values,i) in let at=ast_list_at(m.ast,n.c,i) in
+            let fits=if tc_shape_equal(previous,updated) then tc_inner_fits(env.facts,updated,previous) else 0 in
+            if fits==0 then w with { result=tc_error(at,concat("loop state changes type: ",tc_show(previous)," -> ",tc_show(updated))) }
+            else if fits<0 then w with { result=tc_unsupported(at,"loop element length proof exceeds the current checker") }
+            else let old=tx_at(flags,i) in
+            let needs=old==0 && previous.ty==n_t_arr() && tl_equal(env.facts,previous.term,updated.term)!=1 in
+            w with { changed=w.changed || needs, flags=push(w.flags,if needs then 1 else old) }) yield w
+
+fn tc_loop_body(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, n:Node, borrow initial:Arr TcValue _, borrow flags:Arr i64 _) -> TcResult
+  = let state=tc_loop_bind(m,env,n.a,initial,true,flags) in
+    let inv=tc_invariants(m,fns,state,n.a,0,-1) in if inv.result.value.ty<=0 then inv.result else
+    let head=inv.env in let condition=tc_infer(m,fns,head,n.b) in if condition.value.ty<=0 then condition
+    else if condition.value.ty!=n_t_bool() then tc_error(n.b,"loop condition must be bool") else
+    let head=tc_assume(head,condition.value.known) in
+    let step=tc_assume(head,condition.value.yes) in let nexts=tc_args(m,fns,step,n.c) in
+    if nexts.result.value.ty<=0 then nexts.result else
+    let step=tc_assume(step,nexts.known) in let widening=tc_loop_types(m,step,n,initial,nexts.values,flags) in
+    if widening.result.value.ty<=0 then widening.result
+    else if widening.changed then tc_loop_body(m,fns,env,n,initial,widening.flags) else
+    let updated=tc_loop_bind(m,step,n.a,nexts.values,false,tx_ints()) in
+    let preserved=tc_invariants(m,fns,updated,n.a,1,n.c) in if preserved.result.value.ty<=0 then preserved.result else
+    let after=tc_assume(head,condition.value.no) in tc_known(tc_infer(m,fns,after,n.d),after.facts)
+
+fn tc_loop(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
+  = let init=tc_loop_inits(m,fns,env,id,n.a) in if init.result.value.ty<=0 then init.result else
+    let env=tc_assume(env,init.known) in let actual=tc_loop_bind(m,env,n.a,init.values,false,tx_ints()) in
+    let inv=tc_invariants(m,fns,actual,n.a,1,-1) in if inv.result.value.ty<=0 then inv.result else
+    tc_loop_body(m,fns,env,n,init.values,tx_ints())
+
+fn tc_return_type(borrow m:Mods, borrow env:TcEnv, id:i64) -> TcResult
+  = let f=md_node(m,id) in let t=md_node(m,f.c) in let value=tc_decl_type(m,f.c) in
+    if value.ty!=n_t_arr() then tc_success(value)
+    else if t.c==1 then
+      let term=tc_size_expr(m,env,t.b) in
+      if len(term)==0 then tc_unsupported(t.b,"return size expression outside the affine subset")
+      else tc_success(value with { term=term })
+    else let name=md_str(m,t.b) in if tx_equal(name,"_") then tc_success(value) else
+    let size=tc_lookup(m,env,t.b) in
+    if size.ty!=n_t_i64() then tc_error(id,concat("return size variable ",name," is not bound by a parameter"))
+    else if len(size.term)==0 then tc_unsupported(id,"return size exceeds the current checker")
+    else tc_success(value with { term=size.term })
+
+fn tc_param(borrow m:Mods, id:i64, main:bool, boundary:bool) -> TcResult
+  = let p=md_node(m,id) in let value=tc_decl_type(m,p.b) in let array=value.ty==n_t_arr() in
+    if !tc_decl_supported(m,p.b,true) then
+      tc_unsupported(id,"parameter outside the current checker")
+    else if array && md_node(m,p.b).c!=0 then tc_error(id,"array parameter sizes must be variables")
+    else if p.f==2 && (boundary || (!array && value.ty!=n_t_rec())) then tc_error(id,"borrow parameters require an internal array or record type")
+    else if main && value.ty!=n_t_i64() then tc_error(id,"main parameters must be i64 (parsed from argv)")
+    else tc_success(value)
+
+fn tc_bind_parameter_array(borrow m:Mods, move context:TcContext, id:i64) -> TcContext
+  = let p=md_node(m,id) in let t=md_node(m,p.b) in if t.kind!=n_t_arr() then context else
+    let named=!tx_equal(md_str(m,t.b),"_") in let old=tc_lookup(m,context.env,t.b) in
+    if named && old.ty>0 && old.ty!=n_t_i64() then
+      context with { result=tc_error(id,concat("size variable ",md_str(m,t.b)," must be i64")) }
+    else let fresh=!named || old.ty==0 in let term=if fresh then tc_symbol(id,1) else old.term in
+    let env=if named && fresh then tc_bind(context.env,t.b,tc_integer(term)) else context.env in
+    context with { env=tc_bind(env,p.a,tc_decl_type(m,p.b) with { term=term }) }
+
+fn tc_parameters(borrow m:Mods, f:Node, module:i64) -> TcContext
+  = let count=ast_list_len(m.ast,f.b) in
+    let env=loop (i=0, env=tc_env(module)) while i<count
+      next (i+1, let id=ast_list_at(m.ast,f.b,i) in let p=md_node(m,id) in let t=md_node(m,p.b) in
+            if t.kind==n_t_arr() then env else tc_bind(env,p.a,tc_fresh_result(tc_decl_type(m,p.b),id))) yield env in
+    loop (i=0, context=TcContext { env=env, result=tc_type(n_t_unit()) }) while context.result.value.ty>0 && i<count
+      next (i+1, tc_bind_parameter_array(m,context,ast_list_at(m.ast,f.b,i))) yield context
+
+fn tc_abi_signature(borrow m:Mods, f:Node) -> bool
+  = let external=ast_flag(f,fl_external()) in let ret=md_node(m,f.c).kind in
+    (tc_abi_scalar(ret) || ret==n_t_unit()) && (!external || ast_list_len(m.ast,f.e)==0) &&
+    loop (i=0, ok=true) while ok && i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        tc_abi_scalar(md_node(m,p.b).kind) && (!external || ast_list_len(m.ast,p.c)==0)) yield ok
+
+fn tc_signature(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> TcResult
+  = let f=md_node(m,id) in let main=tx_equal(md_str(m,f.a),"main") in let ret=tc_decl_type(m,f.c) in
+    let boundary=tc_abi_boundary(f) in let external=ast_flag(f,fl_external()) in
+    let unknown=te_unknown(m,f) in
+    if len(unknown)>0 then tc_error(id,concat("unknown effect capabilities: ",unknown))
+    else if main && boundary then tc_error(id,"main must be a Neo entry point without extern/export")
+    else if boundary && tc_abi_duplicate(m,fns,id) then tc_error(id,concat("duplicate function ",md_str(m,f.a)))
+    else if ast_list_len(m.ast,f.h)>0 || !tc_decl_supported(m,f.c,true) then
+      tc_unsupported(id,"function signature outside the current checker")
+    else let params=loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
+      next (i+1, tc_param(m,ast_list_at(m.ast,f.b,i),main,boundary)) yield result in
+    if params.value.ty<=0 then params
+    else if boundary && !tc_abi_signature(m,f) then
+      tc_error(id,if external then "extern signatures support unrefined i64, i32, f64, ptr and unit returns" else "export signatures must use ABI scalar types")
+    else if main && !(tc_numeric(ret.ty) || ret.ty==n_t_unit() || (ret.ty==n_t_arr() && ret.elem==n_t_u8() && len(ret.inner)==0)) then
+      tc_error(id,"main must return i64, f64 or Arr u8 (written to stdout)")
+    else let context=tc_parameters(m,f,tx_at(m.owners,id)) in
+    if context.result.value.ty<=0 then context.result else
+    let ret=tc_return_type(m,context.env,id) in if ret.value.ty<=0 then ret else
+    let contracts=tc_parameter_contracts(m,fns,context.env,f,2,-1) in
+    if contracts.result.value.ty<=0 then contracts.result else
+    tc_contracts(m,fns,tc_bind(context.env,m.result,tc_fresh_result(ret.value,id)),f.e,2,-1,"postcondition").result
+
+fn tc_abi_duplicate(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> bool
+  = let name=md_str(m,md_node(m,id).a) in
+    loop (i=0, duplicate=false) while !duplicate && i<len(fns) && tx_at(fns,i)!=id
+      next (i+1,tx_equal(md_str(m,md_node(m,tx_at(fns,i)).a),name)) yield duplicate
+
+fn tc_cleanup_check(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, destructor:i64, borrow value:TcValue) -> TcResult
+  = if destructor<0 then tc_error(at,"using requires a resource type") else
+    let f=md_node(m,destructor) in let gate=tc_need_effect(env,at,md_str(m,f.a),tx_at(env.required,destructor)) in
+    if gate.value.ty<=0 then gate else
+    let p=md_node(m,ast_list_at(m.ast,f.b,0)) in
+    let inner=tc_env(tx_at(m.owners,destructor)) with { facts=env.facts, allow_unproven=env.allow_unproven } in
+    tc_contracts(m,fns,tc_bind(inner,p.a,value),p.c,1,at,"precondition").result
+
+fn tc_body(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, module:i64, id:i64, allow_unproven:bool) -> TcResult
+  = let f=md_node(m,id) in let path=md_path(m,module) in
+    if ast_flag(f,fl_external()) then tc_type(n_t_unit()) else
+    let base=tc_parameters(m,f,module).env with { effectful=ast_flag(f,fl_effect()), allowed=te_declared(m,f), required=required,
+      allow_unproven=allow_unproven, trusted=pt_within(path,m.stdlib) || pt_within(path,m.runtime) } in
+    let ret=tc_return_type(m,base,id) in
+    let pre=tc_parameter_contracts(m,fns,base,f,0,-1) in if pre.result.value.ty<=0 then pre.result else let env=pre.env in
+    let body=tc_infer(m,fns,env,f.d) in if body.value.ty<=0 then body else
+    let cleanup=loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
+      next (i+1,let param=ast_list_at(m.ast,f.b,i) in let p=md_node(m,param) in
+        let record_id=if p.f==1 then md_resource_type(m,p.b) else -1 in
+        if record_id<0 then result else
+        tc_cleanup_check(m,fns,tc_assume(env,body.value.known),param,md_resource_drop(m,fns,record_id),tc_lookup(m,env,p.a))) yield result in
+    if cleanup.value.ty<=0 then cleanup else
+    let message=concat("body has type ",tc_show(body.value),", declared ",tc_show(ret.value)) in
+    if !tc_shape_equal(body.value,ret.value) then tc_error(f.d,message) else
+    let env=tc_assume(env,body.value.known) in
+    let size=tc_value_fits(env.facts,body.value,ret.value) in
+    if size==0 then tc_error(f.d,message) else if size<0 then tc_unsupported(f.d,"return length proof exceeds the current checker") else
+    tc_contracts(m,fns,tc_bind(env,m.result,body.value),f.e,1,-1,"postcondition").result
+
+; Resolve the record graph before checking functions. A visiting declaration
+; on the dependency path would require an infinitely sized value layout.
+type TcRecords = { flags:Arr i64 _, result:TcResult }
+fn tc_record_field_type(borrow m:Mods, move records:TcRecords, id:i64, owner:i64) -> TcRecords
+  = let t=md_node(m,id) in if tc_scalar(t.kind) || ((t.kind==n_t_fn() || t.kind==n_t_ref()) && tc_decl_supported(m,id,false)) then records
+    else if t.kind==n_t_arr() then
+      if t.c!=0 || !tx_equal(md_str(m,t.b),"_") then records with { result=tc_error(owner,"record array fields use existential size _") }
+      else tc_record_field_type(m,records,t.a,owner)
+    else if t.kind==n_t_rec() && ast_list_len(m.ast,t.b)==0 then
+      let decl=tc_find_record(m,t.a) in
+      if decl<0 then records with { result=tc_error(owner,concat("unknown type ",md_str(m,t.a))) }
+      else tc_record_visit(m,records,decl,owner)
+    else records with { result=tc_unsupported(owner,"record field type outside the current checker") }
+
+fn tc_record_visit(borrow m:Mods, move records:TcRecords, id:i64, owner:i64) -> TcRecords
+  = let decl=md_node(m,id) in let flag=tx_at(records.flags,id) in let name=md_str(m,decl.a) in
+    if flag==2 then records
+    else if flag==1 then records with { result=tc_error(owner,concat("recursive value type ",name," is not finite")) }
+    else if decl.d>=0 || ast_list_len(m.ast,decl.c)>0 then
+      records with { result=tc_unsupported(id,"record declaration outside the current checker") }
+    else
+    let checked=loop (i=0, state=records with { flags=set_at(records.flags,id,1) })
+      while state.result.value.ty>0 && i<ast_list_len(m.ast,decl.b)
+      next (i+1, let field=ast_list_at(m.ast,decl.b,i) in let n=md_node(m,field) in
+            if tc_named_node(m,decl.b,n.a)!=field then state with { result=tc_error(id,concat("duplicate fields in ",name)) }
+            else tc_record_field_type(m,state,n.b,id)) yield state in
+    if checked.result.value.ty<=0 then checked else checked with { flags=set_at(checked.flags,id,2) }
+
+fn tc_records(borrow m:Mods) -> TcReport
+  = loop (k=0, state=TcRecords { flags=arr(i in 0..len(m.ast.nodes)/11) 0, result=tc_type(n_t_unit()) })
+      while state.result.value.ty>0 && k<len(m.paths)
+      next (k+1, let types=md_list(m.types,k) in
+            loop (i=0, r=state) while r.result.value.ty>0 && i<len(types)
+              next (i+1, let id=tx_at(types,i) in tc_record_visit(m,r,id,id)) yield r)
+      yield TcReport { result=state.result, module=k-1 }
+
+fn tc_module(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, module:i64, signatures:bool, allow_unproven:bool) -> TcResult
+  = let ids=md_list(m.fns,module) in
+    loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<len(ids)
+      next (i+1, if signatures then tc_signature(m,fns,tx_at(ids,i)) else tc_body(m,fns,required,module,tx_at(ids,i),allow_unproven)) yield result
+
+fn tc_pass(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, signatures:bool, allow_unproven:bool) -> TcReport
+  = loop (k=0, report=TcReport { result=tc_type(n_t_unit()), module=-1 }) while report.result.value.ty>0 && k<len(m.paths)
+      next (k+1, TcReport { result=tc_module(m,fns,required,k,signatures,allow_unproven), module=k }) yield report
+
+fn tc_functions(borrow m:Mods) -> Arr i64 _
+  = loop (k=0, ids=tx_ints()) while k<len(m.paths) next (k+1, md_with_all(ids,md_list(m.fns,k))) yield ids
+
+fn tc_program_proofs(borrow m:Mods, require_main:bool, allow_unproven:bool) -> TcReport
+  = let records=tc_records(m) in if records.result.value.ty<=0 then records else
+    let fns=tc_functions(m) in
+    let signatures=tc_pass(m,fns,tx_ints(),true,false) in if signatures.result.value.ty<=0 then signatures else
+    let entry=bk_get(m.local,md_entry_module(m),"main") in
+    if require_main && md_find_decl(m,fns,entry)<0 then TcReport { result=tc_error(-1,"no `main` function"), module=-1 }
+    else tc_pass(m,fns,te_program(m,fns),false,allow_unproven)
+
+fn tc_program_mode(borrow m:Mods, require_main:bool) -> TcReport = tc_program_proofs(m,require_main,false)
+
+fn tc_program(borrow m:Mods) -> TcReport = tc_program_mode(m,true)
+
+fn tc_dump(borrow m:Mods, borrow report:TcReport) -> Arr u8 _
+  = let ty=report.result.value.ty in if ty>0 then "(ok)\n" else let n=md_node(m,report.result.at) in
+    let path=if report.module<0 then m.entry else md_path(m,report.module) in
+    concat(if ty==-1 then "(unsupported " else if ty==-2 then "(unproven " else "(error ",
+      path," ",int_text(n.line),":",int_text(n.col)," ",report.result.message,")\n")

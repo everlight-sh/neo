@@ -1,0 +1,17 @@
+import "std:io"
+resource type ShutdownSignal = {token:i64,previous:i64} drop shutdown_signal_close
+; One process-owned monitor blocks SIGINT/SIGTERM and consumes them through a
+; pollable descriptor. Drop restores the original signal mask. No async handler.
+effect(process) fn shutdown_signal()->ShutdownSignal
+  = let old=stack_alloc(8) in let cleared=store_i64(old,0,0) in let fd=rt_signal_monitor_open(old) in
+    ShutdownSignal {token=if fd<0 then 0-i64(load_i32(rt_errno(),0)) else rt_handle_new(fd,21),previous=load_i64(old,0)}
+effect(process) fn shutdown_signal_status(signal:ShutdownSignal)->IntResult
+  = if signal.token<0 then int_error(0-signal.token,"Cannot monitor shutdown signals",0) else
+    if rt_handle_fd(signal.token,21)<0 then int_error(9,"Shutdown monitor closed",0) else int_ok(0)
+fn shutdown_signal_identity(signal:ShutdownSignal)->i64=signal.token
+effect(process) fn shutdown_signal_poll(signal:ShutdownSignal)->IntResult
+  = let fd=rt_handle_fd(signal.token,21) in if fd<0 then int_error(9,"Shutdown monitor closed",0) else int_ok(rt_signal_take(fd))
+private effect(process) fn shutdown_signal_close(signal:ShutdownSignal)->unit
+  = let fd=rt_handle_fd(signal.token,21) in if fd<0 then noop() else
+    let dropped=rt_handle_drop(signal.token,21) in let cleared=store_i64(runtime_state(),1728,0) in
+    let mask=stack_alloc(8) in let saved=store_i64(mask,0,signal.previous) in let restored=rt_signal_mask(rt_signal_restore_mode(),mask,null()) in noop()

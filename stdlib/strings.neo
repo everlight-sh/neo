@@ -3,6 +3,11 @@ import "std:errors"
 fn str_byte (text: Arr u8 n, index: i64) -> i64
   = if index >= 0 && index < n then i64(text[index]) else -1
 fn str_equal (a:Arr u8 n,b:Arr u8 m) -> bool = byte_equal(a,b)
+; Flatten a dynamic list of byte strings with one output allocation.
+fn str_concat_parts(borrow parts:Arr Arr u8 _ n)->Arr u8 _
+  = let size=sum(i in 0..n) check i>=0 && i<n in len(parts[i]) in check size>=0 in
+    loop(i=0,at=0,out=arr(j in 0..size) u8(0)) while i<n next(i+1,
+      check i>=0 && i<n in at+len(parts[i]),check i>=0 && i<n in byte_copy(out,at,parts[i])) yield out
 fn str_slice (borrow text: Arr u8 n, start: i64, end: i64) -> Arr u8 _
   = if start < 0 || end < start || end > n then ""
     else byte_slice(text,start,end)

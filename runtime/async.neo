@@ -1,0 +1,294 @@
+; Cooperative byte-result tasks. Each owns a guarded 1 MiB stack. Ordinary
+; socket/DNS/TLS/PostgreSQL call stacks suspend at rt_wait_ready; resources
+; remain on that stack and execute their normal cleanup when it resumes.
+; State: slots@1744, scheduler registers@1752, current task@1760,
+; backend descriptor+1@1768 (kind@1776), live count@1784, wait serial@1792.
+; Slot (384 bytes): ABI registers@0..191, stack@192, callback@208,
+; capture@216/224, result@232/240, status@248, wait fd/events@256/264,
+; wake@272, deadline@280, cancelled@288, handle@304, detached@312,
+; HTTP group@320, wait token@336, ready@344. Status: 1 ready,2 waiting,3 done.
+effect fn rt_fiber_slots()->ptr
+  = let existing=load_ptr(runtime_state(),1744) in if existing!=null() then existing else
+    let slots=ax_alloc(256*384) in let cleared=memset(slots,i32(0),256*384) in
+    let registers=ax_alloc(192) in let zero=memset(registers,i32(0),192) in
+    let saved=store_ptr(runtime_state(),1752,registers) in let saved=store_ptr(runtime_state(),1744,slots) in slots
+effect fn rt_fiber_current()->ptr = load_ptr(runtime_state(),1760)
+effect fn rt_fiber_cancelled()->bool
+  = let job=rt_fiber_current() in if job==null() then false else
+    if load_i64(job,288)!=0 then true else if rt_clock_ns()/1000000<load_i64(job,280) then false else
+      let expired=store_i64(job,288,110) in true
+; Explicit yielding and a cheap opt-in time slice keep ready-data loops fair.
+; This is cooperative scheduling: CPU-only code must reach a yield/checkpoint.
+effect fn rt_fiber_yield()->unit
+  = let job=rt_fiber_current() in if job==null() then noop() else
+    let ready=store_i64(job,248,1) in fiber_swap(job,load_ptr(runtime_state(),1752))
+effect fn rt_fiber_checkpoint()->unit
+  = let job=rt_fiber_current() in if job==null() then noop() else
+    if rt_clock_ns()/1000000-load_i64(job,200)<4 then noop() else rt_fiber_yield()
+effect fn rt_fiber_lookup(token:i64)->ptr
+  = let address=rt_handle_fd(token,22) in if address<0 then null() else ptr_from_i64(address)
+effect fn rt_fiber_unwatch(job:ptr)->unit
+  = let fd=load_i64(job,256) in let backend=load_i64(runtime_state(),1768)-1 in
+    let removed=if fd<0 || backend<0 || load_i64(job,336)==0 then 0 else rt_fiber_watch_kernel(backend,fd,load_i64(job,264),load_i64(job,336),false) in
+    store_i64(job,336,0)
+effect fn rt_fiber_notify(token:i64)->unit
+  = let slot=bit_and(token,4095)-2048 in let slots=load_ptr(runtime_state(),1744) in
+    if slots==null() || slot<0 || slot>=256 then noop() else let job=ptr_add(slots,slot*384) in
+    if load_i64(job,248)!=2 || load_i64(job,336)!=token then noop() else store_i64(job,344,1)
+effect fn rt_fiber_wait(fd:i64,events:i64,milliseconds:i64)->i64
+  = let job=rt_fiber_current() in if job==null() || milliseconds==0 then rt_wait_ready_kernel(fd,events,milliseconds) else
+    if rt_fiber_cancelled() then rt_result(-125) else
+    let now=rt_clock_ns()/1000000 in let end=if milliseconds<0 || milliseconds>load_i64(job,280)-now then load_i64(job,280) else now+milliseconds in
+    let a=store_i64(job,256,fd) in let b=store_i64(job,264,events) in let c=store_i64(job,272,end) in let d=store_i64(job,344,0) in
+    let slots=load_ptr(runtime_state(),1744) in let index=(ptr_to_i64(job)-ptr_to_i64(slots))/384 in
+    let serial=load_i64(runtime_state(),1792)+1 in let bounded=if serial>=2251799813685247 then ax_trap(data("async wait serial exhausted\0")) else noop() in
+    let advanced=store_i64(runtime_state(),1792,serial) in let token=serial*4096+2048+index in let saved=store_i64(job,336,token) in
+    let backend=load_i64(runtime_state(),1768)-1 in
+    let watched=if fd<0 || backend<0 || load_i64(job,336)==0 then 0 else rt_fiber_watch_kernel(backend,fd,events,token,true) in
+    if watched<0 then let removed=rt_fiber_unwatch(job) in rt_result(-5) else
+    let waiting=store_i64(job,248,2) in let paused=fiber_swap(job,load_ptr(runtime_state(),1752)) in
+    if rt_fiber_cancelled() then rt_result(-125) else if load_i64(job,344)!=0 then 1 else 0
+; This branch is the only cost for a synchronous caller. Its kernel wait is
+; unchanged; tasks suspend instead of monopolizing their HTTP worker.
+effect fn rt_wait_ready(fd:i64,events:i64,milliseconds:i64)->i64
+  = if load_ptr(runtime_state(),1760)==null() then rt_wait_ready_kernel(fd,events,milliseconds) else rt_fiber_wait(fd,events,milliseconds)
+effect fn rt_fiber_copy_result(job:ptr,result:Arr u8 n)->unit
+  = if load_i64(job,288)!=0 then noop() else if n>4194304 || n>67108864-load_i64(runtime_state(),1832) then store_i64(job,288,27) else
+    let bytes=ax_alloc(if n==0 then 1 else n) in let copied=memcpy(bytes,data(result),n) in
+    let saved=store_ptr(job,232,bytes) in let counted=store_i64(runtime_state(),1832,load_i64(runtime_state(),1832)+n) in store_i64(job,240,n)
+effect fn rt_fiber_execute(job:ptr)->unit
+  = if rt_fiber_cancelled() then noop() else
+    let result=handler_call(load_ptr(job,208),load_ptr(job,216),load_i64(job,224)) in rt_fiber_copy_result(job,result)
+effect fn rt_fiber_entry(job:ptr)->unit
+  = let ran=rt_fiber_execute(job) in
+    let completed=rt_http_fiber_complete(job) in
+    let finished=store_i64(job,248,3) in
+    let returned=fiber_swap(job,load_ptr(runtime_state(),1752)) in ax_trap(data("completed async task resumed\0"))
+effect fn rt_fiber_spawn(callback:ptr,capture:Arr u8 n,deadline:i64)->i64
+  = let now=rt_clock_ns()/1000000 in
+    if callback==null() || n>16793600 || n>67108864-load_i64(runtime_state(),1824) || deadline<=now || deadline-now>120000 || load_i64(runtime_state(),1784)>=256 then -11 else
+    let slots=rt_fiber_slots() in let slot=loop(i=0) while i<256 && load_i64(slots,i*384+248)!=0 next(i+1) yield i in
+    if slot>=256 then -11 else
+    let mapping=rt_private_map(1179648) in if mapping<0 then -12 else let stack=ptr_from_i64(mapping) in
+    let guard=rt_protect(stack,65536,0) in let guard2=rt_protect(ptr_add(stack,1114112),65536,0) in
+    if guard<0 || guard2<0 then let closed=rt_munmap(stack,1179648) in -12 else
+    let job=ptr_add(slots,slot*384) in let clear=memset(job,i32(0),384) in
+    let bytes=ax_alloc(if n<1 then 1 else n) in let copied=memcpy(bytes,data(capture),n) in
+    let a=store_ptr(job,192,stack) in let b=store_ptr(job,208,callback) in let c=store_ptr(job,216,bytes) in let d=store_i64(job,224,n) in
+    let e=store_i64(job,280,deadline) in let f=store_i64(job,256,-1) in
+    let token=rt_handle_new(ptr_to_i64(job),22) in let g=store_i64(job,304,token) in let h=store_i64(job,248,1) in
+    let init=fiber_init(job,ptr_add(stack,1114112),addr(rt_fiber_entry),job) in
+    let captured=store_i64(runtime_state(),1824,load_i64(runtime_state(),1824)+n) in
+    let counted=store_i64(runtime_state(),1784,load_i64(runtime_state(),1784)+1) in token
+effect fn rt_fiber_dispose(job:ptr)->unit
+  = let unwatched=rt_fiber_unwatch(job) in let capture=ax_release(load_ptr(job,216)) in let result=ax_release(load_ptr(job,232)) in
+    let envelope=ax_release(load_ptr(job,352)) in
+    let captured=store_i64(runtime_state(),1824,load_i64(runtime_state(),1824)-load_i64(job,224)) in
+    let results=store_i64(runtime_state(),1832,load_i64(runtime_state(),1832)-load_i64(job,240)) in
+    let stack=rt_munmap(load_ptr(job,192),1179648) in let dropped=rt_handle_drop(load_i64(job,304),22) in
+    let clear=memset(job,i32(0),384) in store_i64(runtime_state(),1784,load_i64(runtime_state(),1784)-1)
+effect fn rt_fiber_cancel(token:i64)->unit
+  = let job=rt_fiber_lookup(token) in if job==null() then noop() else if load_i64(job,288)!=0 then noop() else store_i64(job,288,125)
+effect fn rt_fiber_release(token:i64)->unit
+  = let job=rt_fiber_lookup(token) in if job==null() then noop() else
+    if load_i64(job,248)==3 then rt_fiber_dispose(job) else
+    let cancel=if load_i64(job,288)!=0 then noop() else store_i64(job,288,125) in store_i64(job,312,1)
+; Poll is used by a standalone executor. HTTP workers register these exact
+; interests in their existing kqueue/epoll, without a polling timer or thread.
+effect fn rt_fiber_poll(milliseconds:i64)->unit
+  = if load_i64(runtime_state(),1784)==0 then noop() else
+    let slots=load_ptr(runtime_state(),1744) in let fds=stack_alloc(2048) in
+    let filled=loop(i=0) while i<256 next(let job=ptr_add(slots,i*384) in
+      let waiting=load_i64(job,248)==2 && load_i64(job,256)>=0 in
+      let fd=store_i32(fds,i*8,i32(if waiting then load_i64(job,256) else -1)) in
+      let events=store_i32(fds,i*8+4,i32(if waiting then load_i64(job,264) else 0)) in i+1) yield i in
+    let ready=rt_poll_timeout(fds,256,milliseconds) in
+    let collected=if ready<=0 then 0 else loop(i=0) while i<256 next(let flags=bit_and(shift_right(i64(load_i32(fds,i*8+4)),16),65535) in
+      let marked=if flags==0 then noop() else store_i64(slots,i*384+344,1) in i+1) yield i in noop()
+effect fn rt_fiber_queued_cancel(job:ptr)->bool
+  = let group=load_ptr(job,320) in load_i64(job,288)==125 || group==null() || load_i64(group,32)!=0
+effect fn rt_fiber_step(job:ptr,now:i64)->i64
+  = let status=load_i64(job,248) in
+    let expired=if status!=0 && status!=3 && now>=load_i64(job,280) && load_i64(job,288)==0 then store_i64(job,288,110) else noop() in
+    let ready=status==1 || status==4 && rt_fiber_queued_cancel(job) || status==2 && (load_i64(job,344)!=0 || load_i64(job,272)<=now || load_i64(job,280)<=now || load_i64(job,288)!=0 || rt_http_fiber_writable(job)) in
+    let ran=if !ready then noop() else
+      let removed=rt_fiber_unwatch(job) in let state=store_i64(job,248,1) in
+      let resumed=store_i64(job,200,now) in
+      let previous=load_ptr(runtime_state(),1616) in let generation=load_i64(runtime_state(),1624) in let group=load_ptr(job,320) in
+      let context=if group==null() || load_i64(group,32)!=0 then null() else rt_async_state(load_ptr(runtime_state(),1800),load_i64(runtime_state(),1808),load_i64(group,0)) in
+      let bound=store_ptr(runtime_state(),1616,context) in let named=if group==null() then noop() else store_i64(runtime_state(),1624,load_i64(group,104)) in
+      let active=store_ptr(runtime_state(),1760,job) in let switched=fiber_swap(load_ptr(runtime_state(),1752),job) in
+      let clear=store_ptr(runtime_state(),1760,null()) in let restored=store_ptr(runtime_state(),1616,previous) in store_i64(runtime_state(),1624,generation) in
+    let disposed=if load_i64(job,248)==3 && load_i64(job,312)!=0 then rt_fiber_dispose(job) else noop() in
+    if ready then 1 else 0
+type RuntimeFiberTurn={visited:i64,ran:i64}
+effect fn rt_fiber_tick()->unit
+  = if load_i64(runtime_state(),1784)==0 then noop() else
+    let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in
+    let polled=if load_i64(runtime_state(),1768)==0 then rt_fiber_poll(0) else noop() in
+    let start=load_i64(runtime_state(),1840) in
+    let turn=loop(i=0,ran=0) while i<256 && ran<32 next(i+1,ran+rt_fiber_step(ptr_add(slots,((start+i)%256)*384),now)) yield RuntimeFiberTurn {visited=i,ran=ran} in
+    store_i64(runtime_state(),1840,(start+turn.visited)%256)
+effect fn rt_fiber_timeout(maximum:i64)->i64
+  = if load_i64(runtime_state(),1784)==0 then maximum else
+    let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in
+    let nearest=loop(i=0,wake=if maximum<0 then now+120000 else now+maximum) while i<256 next(i+1,
+      let job=ptr_add(slots,i*384) in let status=load_i64(job,248) in
+      if status==1 || status==4 && rt_fiber_queued_cancel(job) || status==2 && (load_i64(job,288)!=0 || load_i64(job,344)!=0 || rt_http_fiber_writable(job)) then now else
+      if status!=2 then wake else let deadline=if load_i64(job,272)<load_i64(job,280) then load_i64(job,272) else load_i64(job,280) in if deadline<wake then deadline else wake) yield wake-now in
+    if nearest<0 then 0 else nearest
+effect fn rt_fiber_await(token:i64,deadline:i64)->i64
+  = let job=rt_fiber_lookup(token) in
+    if job==null() || job==rt_fiber_current() then -22 else
+    loop(done=false,code=0) while !done && code==0 next(
+      load_i64(job,248)==3,
+      if load_i64(job,248)==3 then 0 else
+      if rt_fiber_cancelled() then let cancelled=rt_fiber_cancel(token) in 125 else
+      if rt_clock_ns()/1000000>=deadline then let cancelled=store_i64(job,288,110) in 110 else
+      if rt_fiber_current()!=null() then let waited=rt_fiber_wait(-2,token,deadline-rt_clock_ns()/1000000) in 0 else
+      let tick=rt_fiber_tick() in let delay=rt_fiber_timeout(10) in let wait=if load_i64(job,248)==3 then noop() else rt_fiber_poll(delay) in 0) yield
+    if code!=0 then 0-code else if load_i64(job,288)!=0 then 0-load_i64(job,288) else 0
+effect fn rt_fiber_result(token:i64)->Arr u8 _
+  = let job=rt_fiber_lookup(token) in if job==null() || load_i64(job,248)!=3 || load_i64(job,288)!=0 then "" else
+    let size=load_i64(job,240) in check size>=0 in view(load_ptr(job,232),size)
+effect fn rt_http_fiber_writable(job:ptr)->bool
+  = if load_i64(job,256)== -2 then let child=rt_fiber_lookup(load_i64(job,264)) in child==null() || load_i64(child,248)==3 else
+    if load_i64(job,256)!= -3 && load_i64(job,256)!= -4 then false else let group=load_ptr(job,320) in
+    if load_i64(job,256)== -4 then group==null() || load_i64(group,32)!=0 || load_i64(group,72)==0 || load_i64(group,72)==load_i64(job,304) else
+    let state=rt_http_render_state(group) in state==null() || load_i64(state,32)==0
+; Reusable HTTP response groups. A group admits its whole fan-out before the
+; shell commits. Its last task ends the stream; disconnect cancels every task.
+; group: fd@0,deadline@8,pending@16,refs@24,cancelled@32,committed@40,
+; expected@48,admitted@56,mode@64 (0 chunk stream,1 buffered response).
+effect fn rt_http_render_state(group:ptr)->ptr
+  = if group==null() || load_i64(group,32)!=0 || load_i64(group,40)==0 then null() else
+    rt_async_state(load_ptr(runtime_state(),1800),load_i64(runtime_state(),1808),load_i64(group,0))
+effect fn rt_http_render_open(count:i64,deadline:i64,buffered:bool)->ptr
+  = let state=load_ptr(runtime_state(),1616) in let now=rt_clock_ns()/1000000 in let job=rt_fiber_current() in
+    let existing=if job==null() then null() else load_ptr(job,320) in
+    let upgrade=existing!=null() && load_i64(existing,64)==1 && load_i64(existing,32)==0 && !buffered in
+    if state==null() || load_i64(state,48)==2 && !upgrade || load_i64(runtime_state(),1680)%2!=1 || count<1 || count>32 || load_i64(runtime_state(),1784)>256-count || deadline<=now || deadline-now>120000 then null() else
+    if upgrade then
+      let mode=store_i64(existing,64,2) in let stage=store_i64(existing,40,0) in let root=store_i64(existing,96,load_i64(job,304)) in
+      let expected=store_i64(existing,48,count) in let admitted=store_i64(existing,56,0) in
+      let end=if deadline<load_i64(existing,8) then store_i64(existing,8,deadline) else noop() in existing else
+    let group=ax_alloc(112) in let clear=memset(group,i32(0),112) in
+    let fd=store_i64(group,0,load_i64(state,0)) in let end=store_i64(group,8,deadline) in
+    let generation=store_i64(group,104,load_i64(runtime_state(),1624)) in
+    let size=store_i64(group,48,count) in let mode=store_i64(group,64,if buffered then 1 else 0) in group
+effect fn rt_http_render_add(group:ptr,callback:ptr,capture:Arr u8 n)->i64
+  = if group==null() || load_i64(group,32)!=0 || load_i64(group,40)!=0 || load_i64(group,56)>=load_i64(group,48) then -22 else
+    let token=rt_fiber_spawn(callback,capture,load_i64(group,8)) in let job=rt_fiber_lookup(token) in
+    if job==null() then token else
+    let attached=store_ptr(job,320,group) in let queued=if load_i64(group,64)==2 then store_i64(job,248,4) else noop() in let detached=store_i64(job,312,1) in
+    let pending=store_i64(group,16,load_i64(group,16)+1) in let refs=store_i64(group,24,load_i64(group,24)+1) in
+    let admitted=store_i64(group,56,load_i64(group,56)+1) in token
+effect fn rt_http_render_rollback(group:ptr)->unit
+  = let root=load_i64(group,96) in let slots=load_ptr(runtime_state(),1744) in
+    let cancelled=loop(i=0) while i<256 next(
+      let child=ptr_add(slots,i*384) in let released=if load_i64(child,248)==0 || load_ptr(child,320)!=group || load_i64(child,304)==root then noop() else
+        let unlinked=store_ptr(child,320,null()) in let stopped=store_i64(child,288,125) in let pending=store_i64(group,16,load_i64(group,16)-1) in store_i64(group,24,load_i64(group,24)-1) in i+1) yield i in
+    let tail=ax_release(load_ptr(group,80)) in let clear=store_ptr(group,80,null()) in let size=store_i64(group,88,0) in
+    let expected=store_i64(group,48,1) in let admitted=store_i64(group,56,1) in let mode=store_i64(group,64,1) in
+    let root=store_i64(group,96,0) in store_i64(group,40,1)
+effect fn rt_http_render_abort(group:ptr)->unit
+  = if group==null() then noop() else
+    let job=rt_fiber_current() in
+    if job!=null() && load_ptr(job,320)==group && load_i64(group,64)==2 then rt_http_render_rollback(group) else
+    let cancelled=store_i64(group,32,1) in
+    let slots=load_ptr(runtime_state(),1744) in
+    let marked=if slots==null() then 0 else loop(i=0) while i<256 next(
+      let job=ptr_add(slots,i*384) in let stopped=if load_i64(job,248)==0 || load_ptr(job,320)!=group then noop() else store_i64(job,288,125) in i+1) yield i in
+    if load_i64(group,24)==0 then let tail=ax_release(load_ptr(group,80)) in ax_release(group) else noop()
+effect fn rt_http_render_commit(group:ptr)->i64
+  = let state=load_ptr(runtime_state(),1616) in
+    if group==null() || state==null() || load_i64(group,32)!=0 || load_i64(group,40)!=0 || load_i64(group,56)!=load_i64(group,48) || load_i64(state,0)!=load_i64(group,0) then -22 else
+    let committed=store_i64(group,40,if load_i64(group,64)==2 then 2 else 1) in let waiting=store_i64(state,48,2) in 0
+effect fn rt_http_render_cancel(fd:i64)->unit
+  = if load_i64(runtime_state(),1784)==0 then noop() else
+    let slots=load_ptr(runtime_state(),1744) in let marked=loop(i=0) while i<256 next(
+      let job=ptr_add(slots,i*384) in let group=load_ptr(job,320) in
+      let stopped=if load_i64(job,248)==0 || group==null() || (load_i64(group,0)!=fd && load_i64(group,32)==0) then noop() else
+        let invalid=store_i64(group,32,1) in let fd=store_i64(group,0,-1) in store_i64(job,288,125) in i+1) yield i in noop()
+effect fn rt_http_render_queue(group:ptr,bytes:ptr,size:i64)->bool
+  = let state=rt_http_render_state(group) in if state==null() then false else
+    if load_i64(state,32)+size<=65536 then let queued=rt_async_queue(state,bytes,size) in true else
+    if rt_fiber_cancelled() then false else
+    let waited=rt_fiber_wait(-3,0,load_i64(group,8)-rt_clock_ns()/1000000) in
+    if waited<0 || rt_http_render_state(group)==null() then false else rt_http_render_queue(group,bytes,size)
+effect fn rt_http_render_emit(group:ptr,bytes:ptr,size:i64,framed:bool)->bool
+  = let chunk=stack_alloc(16416) in loop(offset=0,ok=true) while ok && offset<size next(
+      offset+(if size-offset>16384 then 16384 else size-offset),
+      let take=if size-offset>16384 then 16384 else size-offset in
+      let header=if !framed then 0 else let digits=loop(i=0) while i<16 next(
+        let nibble=bit_and(shift_right(take,(15-i)*4),15) in let stored=store_u8(chunk,i,u8(if nibble<10 then nibble+48 else nibble+87)) in i+1) yield i in
+        let cr=store_u8(chunk,16,u8(13)) in let lf=store_u8(chunk,17,u8(10)) in 18 in
+      let payload=memcpy(ptr_add(chunk,header),ptr_add(bytes,offset),take) in
+      let tail=if !framed then 0 else let cr=store_u8(chunk,header+take,u8(13)) in let lf=store_u8(chunk,header+take+1,u8(10)) in 2 in
+      rt_http_render_queue(group,chunk,header+take+tail)) yield ok
+effect fn rt_http_render_lock(group:ptr)->bool
+  = let job=rt_fiber_current() in let token=load_i64(job,304) in
+    if rt_http_render_state(group)==null() then false else
+    if load_i64(group,72)==0 || load_i64(group,72)==token then let locked=store_i64(group,72,token) in true else
+    if rt_fiber_cancelled() then false else let waited=rt_fiber_wait(-4,0,load_i64(group,8)-rt_clock_ns()/1000000) in
+      if waited<0 then false else rt_http_render_lock(group)
+effect fn rt_http_render_frame(job:ptr,group:ptr)->bool
+  = if !rt_http_render_lock(group) then false else
+    let envelope=load_ptr(job,352) in let prefix=load_i64(job,360) in let suffix=load_i64(job,368) in let failure=load_i64(job,376) in
+    let framed=load_i64(group,64)==0 in
+    let sent=if load_i64(job,288)!=0 then
+      if load_i64(group,64)==1 && load_i64(job,288)==110 then
+        let timeout="HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 20\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nAsync render expired" in
+        rt_http_render_emit(group,data(timeout),len(timeout),false) else
+      if failure==0 then let state=rt_http_render_state(group) in let dropped=if state==null() then noop() else rt_drop(state) in false else
+      rt_http_render_emit(group,ptr_add(envelope,prefix+suffix),failure,framed) else
+      let before=if prefix==0 then true else rt_http_render_emit(group,envelope,prefix,framed) in
+      let body=before && rt_http_render_emit(group,load_ptr(job,232),load_i64(job,240),framed) in
+      body && (suffix==0 || rt_http_render_emit(group,ptr_add(envelope,prefix),suffix,framed)) in
+    let unlocked=store_i64(group,72,0) in sent
+effect fn rt_http_fiber_complete(job:ptr)->unit
+  = let group=load_ptr(job,320) in if group==null() then noop() else
+    let upgrading=load_i64(group,64)==2 && load_i64(group,96)==load_i64(job,304) in
+    let invalid=if upgrading && (load_i64(job,288)!=0 || load_i64(job,240)==0 || load_i64(group,40)!=2) then
+      let code=if load_i64(job,288)!=0 then noop() else store_i64(job,288,5) in rt_http_render_rollback(group) else noop() in
+    let emitted=if rt_http_render_state(group)==null() then false else rt_http_render_frame(job,group) in
+    let broken=if emitted || rt_http_render_state(group)==null() then noop() else rt_drop(rt_http_render_state(group)) in
+    let handed=if !emitted || load_i64(group,64)!=2 then noop() else
+      let mode=store_i64(group,64,0) in let committed=store_i64(group,40,1) in let root=store_i64(group,96,0) in
+      let slots=load_ptr(runtime_state(),1744) in let ready=loop(i=0) while i<256 next(let child=ptr_add(slots,i*384) in
+        let started=if load_ptr(child,320)==group && load_i64(child,248)==4 then store_i64(child,248,1) else noop() in i+1) yield i in noop() in
+    let pending=store_i64(group,16,load_i64(group,16)-1) in
+    let ended=if load_i64(group,16)>0 || rt_http_render_state(group)==null() then noop() else
+      let tail=load_i64(group,88) in let ending=if tail==0 then true else rt_http_render_emit(group,load_ptr(group,80),tail,true) in
+      let last=if load_i64(group,64)!=0 then true else let terminal="0\r\n\r\n" in rt_http_render_queue(group,data(terminal),5) in
+      let state=rt_http_render_state(group) in
+      let flushed=if state==null() || load_i64(state,32)==0 then noop() else rt_flush(state) in
+      let drained=loop(done=false) while !done next(
+        let current=rt_http_render_state(group) in
+        if current==null() || load_i64(current,32)==0 || rt_fiber_cancelled() then true else
+        let waited=rt_fiber_wait(-3,0,load_i64(group,8)-rt_clock_ns()/1000000) in false) yield done in
+      let current=rt_http_render_state(group) in if current==null() then noop() else rt_drop(current) in
+    let released=store_ptr(job,320,null()) in let count=store_i64(group,24,load_i64(group,24)-1) in
+    if load_i64(group,24)==0 then let tail=ax_release(load_ptr(group,80)) in ax_release(group) else noop()
+effect fn rt_http_render_envelope(token:i64,prefix:Arr u8 n,suffix:Arr u8 m,failure:Arr u8 k,deadline:i64)->bool
+  = let job=rt_fiber_lookup(token) in if job==null() || n+m+k>16384 then false else
+    let buffer=ax_alloc(if n+m+k==0 then 1 else n+m+k) in
+    let a=memcpy(buffer,data(prefix),n) in let b=memcpy(ptr_add(buffer,n),data(suffix),m) in let c=memcpy(ptr_add(buffer,n+m),data(failure),k) in
+    let saved=store_ptr(job,352,buffer) in let a=store_i64(job,360,n) in let b=store_i64(job,368,m) in let c=store_i64(job,376,k) in
+    let limited=if deadline>0 && deadline<load_i64(job,280) then store_i64(job,280,deadline) else noop() in true
+effect fn rt_http_render_tail(group:ptr,tail:Arr u8 n)->bool
+  = if group==null() || n>16384 then false else
+    let bytes=ax_alloc(if n==0 then 1 else n) in let copied=memcpy(bytes,data(tail),n) in
+    let saved=store_ptr(group,80,bytes) in let size=store_i64(group,88,n) in true
+
+; Regular file transfers remain synchronous. Contended advisory locks use
+; nonblocking attempts inside a task, so document-store writers do not park
+; the HTTP worker while another process owns the lock.
+effect fn rt_flock(fd:i64,mode:i64)->i64
+  = if rt_fiber_current()==null() || mode!=1 && mode!=2 then rt_flock_kernel(fd,mode) else
+    loop(result= -4) while result== -4 || result==0-rt_again() next(
+      if rt_fiber_cancelled() then -125 else
+      let value=rt_flock_kernel(fd,bit_or(mode,4)) in if value>=0 then 0 else
+      let code=i64(load_i32(rt_errno(),0)) in if code!=4 && code!=rt_again() then 0-code else
+      let paused=rt_fiber_wait(-1,0,2) in if paused<0 then -125 else 0-code) yield
+      if result<0 then rt_result(result) else result

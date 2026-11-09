@@ -1,0 +1,14 @@
+import "std:events"
+import "std:sse"
+import "std:http_async"
+
+; Framework-independent event-channel -> prepared HTTP/SSE frame adapter.
+; Cache keys include identity and exact event/data bytes: forged or reused keys
+; cannot return a different payload. Validation/encoding occurs only on a miss.
+effect(process) fn event_stream_frame(channel:EventChannel,epoch:i64,message:EventMessage)->HttpAsyncFrameResult
+  = let key=HttpAsyncFrameKey {namespace=event_channel_id(channel),version=message.sequence,epoch=epoch,key=message.event,variant=message.json} in
+    let cached=http_async_frame_find(key) in if cached.ok then cached else
+    let encoded=sse_encode(message.event,message.json,concat(int_text(epoch),".",int_text(message.sequence))) in
+    let prepared=http_async_prepare(if encoded.ok then encoded.value else "") in
+    if !encoded.ok || !prepared.ok then prepared with {ok=false,error=if encoded.ok then prepared.error else encoded.error} else
+    prepared with {frame=http_async_frame_remember(key,prepared.frame)}

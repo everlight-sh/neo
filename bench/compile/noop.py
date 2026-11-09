@@ -4,7 +4,7 @@
 usage: noop.py OUT.json ROUNDS
 
 Every (program, build) pair is built once untimed, then rebuilt unchanged
-ROUNDS times in shuffled order (fixed seed). Neo rows run `./neo build P -o
+ROUNDS times in shuffled order (fixed seed). Neo rows run `./neoc.sh build P -o
 OUT --report`, the command run.py times, and also without --report. Wall
 seconds come from the parent's clock around the whole command, launcher
 included.
@@ -29,8 +29,8 @@ def pairs():
         if only and program not in only: continue
         for label, tree in TREES:
             binary = str(WORK / 'noop' / f'{label}-{program}')
-            out.append((program, f'Neo {label}', tree, ['./neo', 'build', path, '-o', binary, '--report']))
-            out.append((program, f'Neo {label} (no --report)', tree, ['./neo', 'build', path, '-o', binary]))
+            out.append((program, f'Neo {label}', tree, ['./neoc.sh', 'build', path, '-o', binary, '--report']))
+            out.append((program, f'Neo {label} (no --report)', tree, ['./neoc.sh', 'build', path, '-o', binary]))
         if E('OTHERS', '1') == '0': continue
         for impl, (cwd, argv, _) in OTHER.get(program, {}).items():
             if impl == 'Zig': continue

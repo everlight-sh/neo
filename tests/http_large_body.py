@@ -9,7 +9,7 @@ from functools import cache
 from pathlib import Path
 from agent_codecs import RUNNER, build
 from http_keepalive import read_request
-from tls_language import certificates
+from tls_language import certificates,default_suite
 
 SIZES = [1, 100, 16383, 16384, 16385, 49152, 100000, 1048576]
 PATHS = [f'/n/{n}' for n in SIZES] + ['/split/300000', '/n/16384', '/short/50000', '/n/70000', '/excess/70000']
@@ -99,7 +99,7 @@ def main():
                   f'{len(PATHS)} requests, 1 B to 1 MiB, small writes, early close, excess bytes', flush=True)
         # With the CPU's AES instructions the client offers AES-128-GCM first, so
         # both TLS 1.3 paths ran: opened in place, and opened then copied.
-        if ' aes' in Path('/proc/cpuinfo').read_text():
+        if default_suite()==4865:
             assert {'TLS_AES_128_GCM_SHA256', 'TLS_CHACHA20_POLY1305_SHA256'} <= negotiated, negotiated
 
 

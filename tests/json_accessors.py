@@ -22,6 +22,10 @@ def main():
         corpus.append((' \n\t'+text+' \r\n').encode())
     corpus += [b'{"target":"old","ta\\u0072get":"last"}',b'{"target":1,"ta\\u0072get":2,"target":3}',
         b'{"target":{"inner":1,"inner":2}}',b'{"target":[{"inner":1},[2,3],null]}']
+    # Exercise long plain runs separated by escapes, dense escapes, surrogate
+    # pairs and control bytes with both literal UTF-8 and ASCII JSON encodings.
+    for text in ['plain'*4000+'"tail', '\\"\n\t\x00'*2000, 'café 🚀'*2000, 'prefix'+''.join(chr(i) for i in range(32))+'\U0010ffff']:
+        for ascii_only in (True,False):corpus.append(json.dumps({'target':text},ensure_ascii=ascii_only).encode())
     for data in (b'\xc0\x80',b'\xc1\xbf',b'\xe0\x80\x80',b'\xed\xa0\x80',b'\xf0\x80\x80\x80',b'\xf4\x90\x80\x80',b'\xf5\x80\x80\x80',b'\x80',b'\xc2',b'\xe1\x80',b'\xf1\x80\x80'):
         corpus.extend([b'{"target":"'+data+b'"}',b'{"'+data+b'":0}',b'["'+data+b'"]'])
     # Batch stdin/output keeps the probe bounded and avoids quadratic test-harness copying.

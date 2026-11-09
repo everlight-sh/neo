@@ -1,0 +1,28 @@
+import "std:io"
+import "std:json"
+import "ast.neo"
+import "check.neo"
+import "modules.neo"
+import "text.neo"
+
+fn td_pos(value:i64) -> i64 = if value<1 then 1 else value
+effect(fs) fn td_error(borrow format:Arr u8 _, borrow fallback:Arr u8 _, borrow kind:Arr u8 _,
+                       borrow file:Arr u8 _, line:i64, column:i64, borrow message:Arr u8 _) -> IntResult
+  = if tx_equal(format,"json") then print_out(concat("{\"ok\":false,\"errors\":[{\"kind\":",json_quote(kind),
+      ",\"file\":",json_quote(file),",\"pos\":[",int_text(td_pos(line)),",",int_text(td_pos(column)),
+      "],\"msg\":",json_quote(message),"}]}\n"))
+    else if tx_equal(format,"human") then print_out(concat(file,":",int_text(td_pos(line)),":",int_text(td_pos(column)),
+      ": error[",kind,"]: ",message,"\n"))
+    else print_out(fallback)
+
+effect(fs) fn td_modules(borrow m:Mods, borrow format:Arr u8 _) -> IntResult
+  = td_error(format,md_dump(m),"source",m.efile,m.eline,m.ecol,m.err)
+
+effect(fs) fn td_check(borrow m:Mods, borrow report:TcReport, borrow format:Arr u8 _) -> IntResult
+  = let ty=report.result.value.ty in
+    if ty>0 then print_out(if tx_equal(format,"json") then "{\"ok\":true,\"errors\":[]}\n"
+      else if tx_equal(format,"human") then "neo: check passed\n" else "(ok)\n")
+    else let n=md_node(m,report.result.at) in
+    let path=if report.module<0 then m.entry else md_path(m,report.module) in
+    td_error(format,tc_dump(m,report),if ty== -1 then "unsupported" else if ty== -2 then "unproven" else "type",
+      path,n.line,n.col,report.result.message)

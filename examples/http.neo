@@ -156,7 +156,7 @@ fn escape (s : Arr u8 n) -> Arr u8 _
                 while i < n
                 next (esc_char(o, j, s[i]), i + 1, j + esc_width(s[i]))
                 yield o in
-    arr(k in 0..total) buf[k]
+    check total >= 0 && total <= len(buf) in arr(k in 0..total) buf[k]
 
 ; ---- the catalog page (see bench/react/page.tsx for the React original)
 fn word (k : i64) -> Arr u8 _

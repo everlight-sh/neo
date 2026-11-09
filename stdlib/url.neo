@@ -1,4 +1,4 @@
-import "std:strings"
+import "std:http"
 fn url_unreserved(c:i64) -> bool = c>=65 && c<=90 || c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==46 || c==95 || c==126
 private fn url_digit(c:i64) -> i64 = if c>=48 && c<=57 then c-48 else if c>=65 && c<=70 then c-55 else if c>=97 && c<=102 then c-87 else -1
 fn url_encode(bytes:Arr u8 n,form:bool) -> Arr u8 _
@@ -14,3 +14,18 @@ fn url_decode(bytes:Arr u8 n,form:bool) -> BytesResult
         concat(out,arr(k in 0..1) u8(if form && c==43 then 32 else c)),
       str_byte(bytes,i)!=37 || url_digit(str_byte(bytes,i+1))>=0 && url_digit(str_byte(bytes,i+2))>=0)
     yield if valid then bytes_ok(out) else bytes_error(22,"malformed percent escape",i)
+
+; Strict HTTP URL decomposition for protocol clients. ASCII DNS/IPv4 hosts;
+; credentials and IPv6 literals are rejected. Fragments are never transmitted.
+sealed type HTTPURL = {ok:bool,secure:bool,host:Arr u8 _,port:i64,target:Arr u8 _,origin:Arr u8 _}
+fn url_parse_http(value:Arr u8 n)->HTTPURL
+  = let mark=str_find(value,"://") in let scheme=http_lower(if mark.present then str_slice(value,0,mark.value) else "") in
+    let secure=str_equal(scheme,"https") in let start=if mark.present then mark.value+3 else n in
+    let end=loop(i=start) while i<n && str_byte(value,i)!=47 && str_byte(value,i)!=63 && str_byte(value,i)!=35 next(i+1) yield i in
+    let authority=str_slice(value,start,end) in let colon=str_find(authority,":") in let host=http_lower(if colon.present then str_slice(authority,0,colon.value) else authority) in
+    let port=if colon.present then int_parse(str_slice(authority,colon.value+1,len(authority))) else int_ok(if secure then 443 else 80) in
+    let fragment=str_find(str_slice(value,end,n),"#") in let target=str_slice(value,end,if fragment.present then end+fragment.value else n) in let target=if len(target)==0 then "/" else if str_starts(target,"?") then concat("/",target) else target in
+    let valid=n>0 && n<=8192 && (secure || str_equal(scheme,"http")) && len(host)>0 && len(host)<=253 && port.ok && port.value>0 && port.value<65536 &&
+      loop(i=0,ok=true) while ok && i<len(host) next(i+1,let c=str_byte(host,i) in c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==46) yield ok in
+    let valid=valid && loop(i=0,ok=true) while ok && i<len(target) next(i+1,let c=str_byte(target,i) in c>=33 && c<=126 && c!=34 && c!=60 && c!=62 && c!=92) yield ok in
+    HTTPURL {ok=valid,secure=secure,host=host,port=port.value,target=target,origin=concat(scheme,"://",host,if port.value==(if secure then 443 else 80) then "" else concat(":",int_text(port.value)))}

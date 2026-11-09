@@ -1,0 +1,94 @@
+; Direct effects and the transitive capability requirements of unannotated
+; functions. Capability bits follow diagnostic sort order.
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "modules.neo"
+
+fn te_name(i:i64) -> Arr u8 _
+  = if i==0 then "env" else if i==1 then "fs" else if i==2 then "net"
+    else if i==3 then "process" else if i==4 then "time" else "unsafe"
+fn te_flag(borrow name:Arr u8 _) -> i64
+  = loop (i=0, flag=0) while flag==0 && i<6
+      next (i+1,if tx_equal(name,te_name(i)) then shift_left(1,i) else 0) yield flag
+fn te_names(flags:i64) -> Arr u8 _
+  = loop (i=0, names=tx_empty()) while i<6
+      next (i+1,if bit_and(flags,shift_left(1,i))==0 then names
+        else if len(names)==0 then te_name(i) else concat(names,", ",te_name(i))) yield names
+fn te_declared(borrow m:Mods, f:Node) -> i64
+  = if f.g<0 then -1 else loop (i=0, flags=0) while i<ast_list_len(m.ast,f.g)
+      next (i+1,bit_or(flags,te_flag(md_str(m,ast_list_at(m.ast,f.g,i))))) yield flags
+fn te_unknown(borrow m:Mods, f:Node) -> Arr u8 _
+  = let sorted=md_sort(m,md_ids(m,f.g)) in
+    loop (i=0, names=tx_empty()) while i<len(sorted)
+      next (i+1,let name=md_str(m,tx_at(sorted,i)) in
+        if te_flag(name)!=0 || (i>0 && tx_equal(name,md_str(m,tx_at(sorted,i-1)))) then names
+        else if len(names)==0 then name else concat(names,", ",name)) yield names
+
+fn te_builtin(borrow name:Arr u8 _) -> i64
+  = let unsafe=" addr aes_final_round_high aes_final_round_low aes_round_high aes_round_low atomic_compare_exchange_i64 atomic_load_i32 atomic_load_i64 atomic_store_i32 atomic_store_i64 block_xor_high block_xor_low byte_uninit callback_address carryless_mul_high carryless_mul_low counter_frequency counter_ticks data fiber_init fiber_swap fork_syscall handler_call invoke_clock_gettime invoke_finalizer invoke_region load_i32 load_i64 load_ptr load_u8 ptr_add ptr_from_i64 ptr_to_i64 runtime_state spawn_thread stack_alloc store_i32 store_i64 store_ptr store_u8 syscall6 view volatile_load_i64 volatile_load_u8 volatile_store_i64 volatile_store_u8 " in
+    if str_find(unsafe,concat(" ",name," ")).present then 32
+    else if tx_equal(name,"adopt") || tx_equal(name,"borrow_ref") || tx_equal(name,"ref_live") then 8
+    else if tx_equal(name,"ref_release") then 14
+    else if tx_equal(name,"serve") || tx_equal(name,"serve_effect") then 4 else 0
+
+type TeCalls = { flags:i64, functions:Arr i64 _ }
+type TeFunction = { id:i64, declared:i64, calls:TeCalls }
+
+fn te_list(borrow m:Mods, borrow fns:Arr i64 _, move calls:TeCalls, list:i64, field:i64) -> TeCalls
+  = loop (i=0, found=calls) while i<ast_list_len(m.ast,list)
+      next (i+1,let id=ast_list_at(m.ast,list,i) in let n=md_node(m,id) in
+        te_scan(m,fns,found,if field==0 then id else if field==2 then n.b else n.c)) yield found
+
+fn te_scan(borrow m:Mods, borrow fns:Arr i64 _, move calls:TeCalls, id:i64) -> TeCalls
+  = let n=md_node(m,id) in let kind=n.kind in
+    if kind==n_call() then
+      let name=md_str(m,n.a) in let target=md_find_decl(m,fns,n.a) in
+      let signature=md_node(m,n.g) in
+      let indirect=if signature.kind==n_t_fn() && signature.c>=0 then te_declared(m,signature with { g=signature.c }) else 0 in
+      let flags=bit_or(bit_or(calls.flags,te_builtin(name)),indirect) in
+      let direct=if target>=0 then push(calls.functions,target) else calls.functions in
+      let callback=md_node(m,ast_list_at(m.ast,n.b,1)) in
+      let handler=if tx_equal(name,"serve_effect") && ast_list_len(m.ast,n.b)==2 && callback.kind==n_var() then md_find_decl(m,fns,callback.a) else -1 in
+      te_list(m,fns,TeCalls { flags=flags, functions=if handler>=0 then push(direct,handler) else direct },n.b,0)
+    else if kind==n_bin() || kind==n_let() || kind==n_using() then
+      let calls=if kind==n_using() && n.e>=0 then calls with { functions=push(calls.functions,n.e) } else calls in
+      te_scan(m,fns,te_scan(m,fns,calls,n.b),n.c)
+    else if kind==n_un() || kind==n_cast() then te_scan(m,fns,calls,n.b)
+    else if kind==n_index() || kind==n_check() then te_scan(m,fns,te_scan(m,fns,calls,n.a),n.b)
+    else if kind==n_if() then te_scan(m,fns,te_scan(m,fns,te_scan(m,fns,calls,n.a),n.b),n.c)
+    else if kind==n_sum() || kind==n_arrc() then te_scan(m,fns,te_scan(m,fns,te_scan(m,fns,calls,n.b),n.c),n.d)
+    else if kind==n_loop() then
+      let init=te_list(m,fns,calls,n.a,3) in
+      te_scan(m,fns,te_list(m,fns,te_scan(m,fns,init,n.b),n.c,0),n.d)
+    else if kind==n_reclit() then te_list(m,fns,calls,n.b,2)
+    else if kind==n_len() || kind==n_field() || kind==n_try() then te_scan(m,fns,calls,n.a)
+    else if kind==n_with() then te_list(m,fns,te_scan(m,fns,calls,n.a),n.b,2)
+    else if kind==n_match() then te_list(m,fns,te_scan(m,fns,calls,n.a),n.b,3)
+    else calls
+
+fn te_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> TeFunction
+  = let f=md_node(m,id) in
+    let declared=if ast_flag(f,fl_external()) then 32 else te_declared(m,f) in
+    let drops=loop (i=0, out=tx_ints()) while i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        let destructor=if p.f==1 then md_resource_drop(m,fns,md_resource_type(m,p.b)) else -1 in
+        if destructor<0 then out else push(out,destructor)) yield out in
+    TeFunction { id=id, declared=declared, calls=te_scan(m,fns,TeCalls { flags=0, functions=drops },f.d) }
+
+type TePass = { required:Arr i64 _, changed:bool }
+fn te_function_at(borrow functions:Arr TeFunction _, i:i64) -> TeFunction
+  = if i>=0 && i<len(functions) then functions[i]
+    else TeFunction { id=-1, declared=0, calls=TeCalls { flags=0, functions=tx_ints() } }
+fn te_update(move pass:TePass, borrow function:TeFunction) -> TePass
+  = let flags=if function.declared>=0 then function.declared else
+      loop (i=0, flags=function.calls.flags) while i<len(function.calls.functions)
+        next (i+1,bit_or(flags,tx_at(pass.required,tx_at(function.calls.functions,i)))) yield flags in
+    if flags==tx_at(pass.required,function.id) then pass else
+      TePass { required=set_at(pass.required,function.id,flags), changed=true }
+fn te_program(borrow m:Mods, borrow fns:Arr i64 _) -> Arr i64 _
+  = let functions=arr(i in 0..len(fns)) te_function(m,fns,tx_at(fns,i)) in
+    loop (round=0, pass=TePass { required=arr(i in 0..len(m.ast.nodes)/11) 0, changed=true })
+      while pass.changed && round<=len(fns)
+      next (round+1,loop (i=0, current=pass with { changed=false }) while i<len(functions)
+        next (i+1,te_update(current,te_function_at(functions,i))) yield current) yield pass.required

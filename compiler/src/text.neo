@@ -23,6 +23,15 @@ fn tx_less(borrow a:Arr u8 _, borrow b:Arr u8 _) -> bool
   = let i=loop (i:i64{i>=0}=0) while i<len(a) && i<len(b) && a[i]==b[i] next (i+1) yield i in
     if i<len(a) && i<len(b) then tx_byte(a,i)<tx_byte(b,i) else len(a)<len(b)
 
+fn tx_words() -> Arr Arr u8 _ _ = arr(i in 0..0) tx_empty()
+fn tx_word(borrow words:Arr Arr u8 _ _, i:i64) -> Arr u8 _
+  = if i>=0 && i<len(words) then words[i] else tx_empty()
+
+fn tx_insert_word(borrow sorted:Arr Arr u8 _ _, borrow path:Arr u8 _) -> Arr Arr u8 _ _
+  = let position=loop (i=0) while i<len(sorted) && tx_less(tx_word(sorted,i),path) next (i+1) yield i in
+    if tx_equal(tx_word(sorted,position),path) then sorted else
+    arr(i in 0..len(sorted)+1) if i<position then tx_word(sorted,i) else if i==position then path else tx_word(sorted,i-1)
+
 fn tx_hex_digit(d:i64) -> u8 = u8(if d<10 then 48+d else 87+d)
 fn tx_hex_byte(move out:Arr u8 _, b:i64) -> Arr u8 _
   = push(push(out,tx_hex_digit(bit_and(shift_right(b,4),15))),tx_hex_digit(bit_and(b,15)))

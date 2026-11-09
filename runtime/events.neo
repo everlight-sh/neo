@@ -1,0 +1,25 @@
+; Optional bounded broadcast mapping. Created before fork, inherited by HTTP
+; workers, never stores process-private pointers. State pointer@1856 is preserved
+; by rt_fork. Anonymous shared pages and the mapping die with the server family.
+effect fn rt_events_init(channels:i64,capacity:i64,payload:i64)->i64
+  = if load_ptr(runtime_state(),1856)!=null() then -16 else
+    if channels<1 || channels>64 || capacity<1 || capacity>1024 || payload<64 || payload>8192 then -22 else
+    let size=64+channels*(128+capacity*(80+payload)) in
+    if size>67108864 then -27 else let address=rt_mmap(size) in if address<0 then -12 else
+    let root=ptr_from_i64(address) in
+    let a=store_i64(root,0,size) in let b=store_i64(root,8,channels) in let c=store_i64(root,16,capacity) in let d=store_i64(root,24,payload) in
+    let e=store_i64(root,32,rt_clock_ns()) in let saved=store_ptr(runtime_state(),1856,root) in 0
+effect fn rt_events_root()->ptr = load_ptr(runtime_state(),1856)
+
+; HTTP optionally binds its pre-fork shared control mapping. Publications wake
+; the inherited worker socketpairs, which are already watched by kqueue/epoll.
+; Standalone event users need no HTTP machinery and retain a null binding.
+effect fn rt_events_bind(control:ptr)->unit
+  = let root=rt_events_root() in if root==null() then noop() else store_ptr(root,48,control)
+effect fn rt_events_notify()->unit
+  = let root=rt_events_root() in let control=if root==null() then null() else load_ptr(root,48) in
+    if control==null() || atomic_load_i64(control,8)>0 then noop() else
+    let byte=stack_alloc(8) in let set=store_u8(byte,0,u8(1)) in
+    let sent=loop(i=0) while i<load_i64(control,40) next(
+      let writer=load_i64(control,264+i*16) in
+      let written=loop(result=rt_send_now(writer,byte,1)) while result<0 && load_i32(rt_errno(),0)==i32(4) next(rt_send_now(writer,byte,1)) yield result in i+1) yield i in noop()

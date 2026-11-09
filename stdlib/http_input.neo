@@ -1,0 +1,24 @@
+import "std:http_server"
+import "std:json"
+
+type WebInput = {ok:bool,form:bool,document:Json,request:WebRequest}
+type WebIntField = {ok:bool,value:i64}
+type WebBoolField = {ok:bool,value:bool}
+fn web_input(request:WebRequest) -> WebInput
+  = let content_type=http_lower(web_request_header(request,"content-type")) in
+    let form=str_starts(content_type,"application/x-www-form-urlencoded") in let document=if form then json_parse("{}") else json_parse(request.body) in
+    WebInput {ok=(form || str_starts(content_type,"application/json")) && document.ok && document.value.kind==6,form=form,document=document.value,request=request}
+fn web_input_text(input:WebInput,name:Arr u8 n,minimum:i64,maximum:i64,required:bool) -> WebField
+  = let field=json_get(input.document,name) in let decoded=json_text(field.value) in
+    let value=if input.form then web_form(input.request,name) else if field.present && decoded.ok then some_bytes(decoded.value) else none_bytes() in
+    if !required && !value.present then WebField {ok=true,value="",error=""} else web_required(value,minimum,maximum)
+fn web_input_int(input:WebInput,name:Arr u8 n,minimum:i64,maximum:i64,required:bool) -> WebIntField
+  = let field=json_get(input.document,name) in let form=web_form(input.request,name) in
+    let value=if input.form then int_parse(form.value) else json_int(field.value) in
+    let present=if input.form then form.present else field.present in
+    WebIntField {ok=if !present && !required then minimum<=0 && maximum>=0 else value.ok && value.value>=minimum && value.value<=maximum,value=if present then value.value else 0}
+fn web_input_bool(input:WebInput,name:Arr u8 n,required:bool) -> WebBoolField
+  = let field=json_get(input.document,name) in let form=web_form(input.request,name) in let value=json_bool(field.value) in
+    let present=if input.form then form.present else field.present in
+    WebBoolField {ok=if !present then !required else if input.form then str_equal(form.value,"true") || str_equal(form.value,"false") || str_equal(form.value,"on") || str_equal(form.value,"off") else value.ok,
+      value=if input.form then str_equal(form.value,"true") || str_equal(form.value,"on") else value.value}

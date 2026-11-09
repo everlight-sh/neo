@@ -1,0 +1,161 @@
+; Link native-emitted IR. A bootstrap object is available for seed tests.
+import "std:fs"
+import "std:process"
+import "std:random"
+import "std:sha256"
+import "std:strings"
+import "std:time"
+import "text.neo"
+import "paths.neo"
+import "modules.neo"
+import "startup.neo"
+
+fn bd_path_end(borrow path:Arr u8 _, i:i64) -> i64
+  = loop (j=i) while j<len(path) && tx_byte(path,j)!=58 next (j+1) yield j
+
+effect(fs,env) fn bd_clang() -> Arr u8 _
+  = let configured=env_get("NEO_CLANG") in
+    if configured.present then
+      let path=pt_abspath(configured.value) in if fs_executable(path) then path else tx_empty()
+    else bd_find_tool("clang")
+
+effect(fs,env) fn bd_find_tool(borrow name:Arr u8 _) -> Arr u8 _
+  = if len(name)==0 then tx_empty() else
+    if tx_has(name,47) then let path=pt_abspath(name) in if fs_executable(path) then path else tx_empty() else
+    let search=env_get("PATH") in let path=if search.present then search.value else "/usr/bin:/bin" in
+      loop (i=0, found=tx_empty()) while i<=len(path) && len(found)==0
+        next (bd_path_end(path,i)+1,
+              let candidate=pt_abspath(pt_join(pt_slice(path,i,bd_path_end(path,i)),name)) in
+              if fs_executable(candidate) then candidate else tx_empty()) yield found
+
+effect(env,unsafe) fn bd_environment() -> Arr Arr u8 _ _
+  = let base=load_ptr(runtime_state(),0) in if base==null() then md_words() else
+    loop (i=0, out=md_words()) while load_ptr(base,i*8)!=null()
+      next (i+1,let p=load_ptr(base,i*8) in let count=rt_cstrlen(p) in
+            check count>=0 in push(out,view(p,count))) yield out
+
+type BdPoll = { status:ProcessStatus, pending:bool, output:Arr u8 _ }
+effect(process,fs,time) fn bd_poll(process:Process, borrow previous:Arr u8 _, capture:bool) -> BdPoll
+  = let status=process_status(process) in
+    let output=process_try_read(process,1,4096) in let errors=process_try_read(process,2,4096) in
+    let wrote_output=if output.ok && !capture then print_out(output.value) else int_ok(0) in
+    let wrote_errors=if errors.ok then print_error(errors.value) else int_ok(0) in
+    let data_ready=(output.ok && len(output.value)>0) || (errors.ok && len(errors.value)>0) in
+    let paused=if status.running && !data_ready then sleep_ms(5) else int_ok(0) in
+    let collected=if capture && output.ok && len(previous)<128 then concat(previous,output.value) else previous in
+    BdPoll { status=status, pending=status.ok && (status.running || data_ready), output=collected }
+
+effect(process,fs,env,time,unsafe) fn bd_execute(borrow clang:Arr u8 _, borrow arguments:Arr Arr u8 _ _, capture:bool) -> BdPoll
+  = using child=process_start(clang,arguments,bd_environment()) in
+    let closed=process_close_input(child) in
+    loop (poll=bd_poll(child,tx_empty(),capture)) while poll.pending
+      next (bd_poll(child,poll.output,capture)) yield poll
+
+fn bd_exit_code(status:ProcessStatus) -> i64
+  = if !status.ok then 127 else if status.signal!=0 then 128+status.signal else status.exit_code
+
+effect(env,fs) fn bd_runtime() -> Arr u8 _
+  = let configured=env_get("NEO_RUNTIME") in if configured.present then pt_abspath(configured.value) else
+    let invoked=cli_arg(0) in pt_join(pt_head(pt_realpath(invoked.value)),"neo-runtime.o")
+
+fn bd_target_valid(borrow target:Arr u8 _) -> bool
+  = let arm=str_starts(target,"arm64-") || str_starts(target,"aarch64-") in
+    let linux=str_find(target,"-linux").present in let darwin=str_find(target,"-apple-").present in
+    ((linux && (arm || str_starts(target,"x86_64-"))) || (darwin && arm)) && len(target)<128 &&
+    loop (i=0, ok=true) while ok && i<len(target)
+      next (i+1,let c=tx_byte(target,i) in (c>=48 && c<=57) || (c>=97 && c<=122) || c==45 || c==46 || c==95) yield ok
+
+effect(fs,process) fn bd_error(borrow message:Arr u8 _) -> unit
+  = let wrote=print_error(concat("neoc: ",message,"\n")) in process_exit(1)
+
+fn bd_compile_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow object:Arr u8 _, borrow remarks:Arr u8 _) -> Arr Arr u8 _ _
+  = let target=config.target in
+    let args=push(push(push(push(push(md_words(),concat("--target=",target)),concat("-O",config.level)),
+      "-Wno-override-module"),"-ffunction-sections"),"-fdata-sections") in
+    let args=if str_starts(target,"arm64-") || str_starts(target,"aarch64-") then push(args,"-mno-outline-atomics") else args in
+    let args=if len(remarks)==0 then args else push(push(args,"-fsave-optimization-record"),concat("-foptimization-record-file=",remarks)) in
+    push(push(push(push(args,"-c"),ir),"-o"),object)
+
+fn bd_link_arguments(borrow config:BdConfig, borrow object:Arr u8 _, borrow libraries:Arr Arr u8 _ _, borrow output:Arr u8 _) -> Arr Arr u8 _ _
+  = let target=config.target in let args=push(push(push(md_words(),concat("--target=",target)),"-nostdlib"),object) in
+    let args=md_words_append(args,libraries) in
+    let args=if len(config.runtime)>0 then push(args,config.runtime) else args in
+    let args=push(push(args,"-o"),output) in
+    if str_find(target,"-apple-").present then push(push(args,"-lSystem"),"-Wl,-dead_strip")
+    else push(push(args,"-static"),"-Wl,-e,_start,--no-undefined,--gc-sections")
+
+fn md_words_append(move args:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = loop (i=0, all=args) while i<len(extra) next (i+1,push(all,md_word(extra,i))) yield all
+
+type BdLink = { compile_ns:i64, link_ns:i64, remarks:Arr u8 _, digest:Arr u8 _ }
+
+effect(time) fn bd_clock() -> i64 = monotonic_ns().value
+fn bd_elapsed(start:i64, finish:i64) -> i64 = if finish<start then 0 else finish-start
+
+effect(fs) fn bd_file_digest(borrow path:Arr u8 _) -> BytesResult
+  = let opened=file_open(path,0) in
+    if !opened.ok then bytes_error(opened.error.code,opened.error.message,0) else
+    let result=loop (part=file_read_chunk(opened.value,65536),hash=sha256_stream_start())
+      while part.ok && len(part.value)>0 next (file_read_chunk(opened.value,65536),sha256_stream_add(hash,part.value))
+      yield if part.ok then bytes_ok(tx_hex_bytes("",sha256_stream_finish(hash))) else part in
+    let closed=file_close(opened.value) in
+    if !closed.ok && result.ok then bytes_error(closed.error.code,closed.error.message,0) else result
+
+effect(process,fs,env,time,unsafe) fn bd_link_profile(borrow config:BdConfig, borrow ir:Arr u8 _, borrow library:Arr u8 _, borrow output:Arr u8 _, profile:bool) -> BdLink
+  = let empty=BdLink { compile_ns=0,link_ns=0,remarks="",digest="" } in
+    let entropy=random_bytes(16) in if !entropy.ok then let failed=bd_error(entropy.error.message) in empty else
+    let parent=pt_head(output) in let stage=pt_join(parent,concat(".neo-link-",tx_hex_bytes(tx_empty(),entropy.value))) in
+    let created=fs_mkdir(stage) in if !created.ok then let failed=bd_error(concat("cannot create build directory: ",created.error.message)) in empty else
+    let name=pt_tail(output) in
+    let source=pt_join(stage,if tx_equal(name,"module.ll") then "input.ll" else "module.ll") in
+    let object=pt_join(stage,if tx_equal(name,"module.o") then "input.o" else "module.o") in
+    let dependency=pt_join(stage,if tx_equal(name,"dependency.o") then "library.o" else "dependency.o") in
+    let remark_file=pt_join(stage,if tx_equal(name,"optimization.yaml") then "remarks.yaml" else "optimization.yaml") in
+    let binary=pt_join(stage,name) in
+    let saved=fs_write(source,ir) in
+    let prepared=if len(library)==0 then int_ok(0) else fs_write(dependency,library) in
+    let libraries=if len(library)==0 then md_words() else push(md_words(),dependency) in
+    let started=bd_clock() in
+    let compiled=if saved.ok && prepared.ok then bd_exit_code(bd_execute(config.clang,bd_compile_arguments(config,source,object,if profile then remark_file else ""),false).status) else 1 in
+    let after_compile=bd_clock() in
+    let linked=if compiled==0 then bd_exit_code(bd_execute(config.clang,bd_link_arguments(config,object,libraries,binary),false).status) else 1 in
+    let finished=bd_clock() in
+    let remarks=if profile && compiled==0 then fs_read(remark_file).value else "" in
+    let digest=if profile && linked==0 then bd_file_digest(binary).value else "" in
+    let published=if linked==0 then fs_rename(binary,output) else int_error(5,if compiled!=0 then "Clang could not compile the LLVM IR" else "Clang could not link the executable",0) in
+    let removed_ir=fs_remove(source) in let removed_object=fs_remove(object) in
+    let removed_library=if len(library)>0 then fs_remove(dependency) else int_ok(0) in
+    let removed_remarks=if profile then fs_remove(remark_file) else int_ok(0) in
+    let removed_binary=if published.ok then int_ok(0) else fs_remove(binary) in
+    let removed_stage=fs_rmdir(stage) in
+    let checked=if !saved.ok then bd_error(concat("cannot write LLVM IR: ",saved.error.message))
+    else if !prepared.ok then bd_error(concat("cannot stage the dependency object: ",prepared.error.message))
+    else if !published.ok then bd_error(published.error.message)
+    else if !removed_stage.ok then bd_error(concat("could not remove build directory: ",removed_stage.error.message)) else noop() in
+    BdLink { compile_ns=bd_elapsed(started,after_compile),link_ns=bd_elapsed(after_compile,finished),remarks=remarks,digest=digest }
+
+effect(process,fs,env,time,unsafe) fn bd_link(borrow config:BdConfig, borrow ir:Arr u8 _, borrow output:Arr u8 _) -> unit
+  = let linked=bd_link_profile(config,ir,"",output,false) in noop()
+
+type BdConfig = { clang:Arr u8 _, runtime:Arr u8 _, target:Arr u8 _, level:Arr u8 _, error:Arr u8 _ }
+effect(process,fs,env,time,unsafe) fn bd_configuration(borrow requested:Arr u8 _, seed:bool, borrow level:Arr u8 _) -> BdConfig
+  = let clang=bd_clang() in
+    let config=BdConfig { clang=clang, runtime=tx_empty(), target=tx_empty(), level=level, error=tx_empty() } in
+    if len(clang)==0 then config with { error="Clang executable not found" } else
+    let env_target=env_get("NEO_TARGET") in let target=if len(requested)>0 then requested else env_target.value in
+    if seed then
+      let runtime=bd_runtime() in let metadata=fs_read(concat(runtime,".target")) in
+      if !metadata.ok then config with { error=concat("cannot read bootstrap runtime target beside ",runtime) } else
+      let triple=str_trim(metadata.value) in
+      if !bd_target_valid(triple) then config with { error=concat("unsupported bootstrap runtime target ",triple) }
+      else if len(target)>0 && !tx_equal(target,triple) then config with { error="bootstrap runtime does not match the requested target" }
+      else config with { runtime=runtime, target=triple }
+    else
+      let probe=if len(target)>0 then target else bd_detect_target(clang) in
+      if len(probe)==0 then config with { error="could not detect the Clang target" }
+      else if !bd_target_valid(probe) then config with { error=concat("unsupported target ",probe) }
+      else config with { target=probe }
+
+effect(process,fs,env,time,unsafe) fn bd_detect_target(borrow clang:Arr u8 _) -> Arr u8 _
+  = let probe=bd_execute(clang,push(md_words(),"-print-target-triple"),true) in
+    if bd_exit_code(probe.status)==0 then str_trim(probe.output) else tx_empty()

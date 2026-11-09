@@ -1,0 +1,6 @@
+import "std:http_server"
+import "std:debug"
+effect fn echo(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in let delayed=sleep_ms(2) in
+    web_encode(web_reply(200,request.body,"application/octet-stream"),false)
+effect fn main(port:i64{port>0,port<65536})->i64=serve_effect(port,echo)

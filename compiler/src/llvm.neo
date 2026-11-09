@@ -1,0 +1,1049 @@
+; LLVM lowering for Neo functions. The source entry point is exposed
+; as neo_entry, ready for a platform startup wrapper to call.
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "lex.neo"
+import "dump.neo"
+import "modules.neo"
+import "check.neo"
+import "intrinsics.neo"
+import "native_asm.neo"
+import "native_crypto.neo"
+
+type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
+type CgBinding = { name:i64, value:CgValue, live:Arr u8 _ }
+type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
+                 function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool }
+type CgProgram = { text:Arr u8 _, report:TcReport }
+
+fn cg_type(ty:i64) -> Arr u8 _
+  = if ty==n_t_i64() then "i64" else if ty==n_t_f64() then "double" else if ty==n_t_bool() then "i1"
+    else if ty==n_t_u8() || ty==n_t_unit() then "i8" else if ty==n_t_u16() then "i16"
+    else if ty==n_t_i32() then "i32" else if ty==n_t_arr() then "%ax_arr"
+    else if ty==n_t_ref() then "{ i64, i64 }" else "ptr"
+fn cg_record_name(id:i64) -> Arr u8 _ = concat("%neo_record_",int_text(id))
+fn cg_type_of(borrow value:CgValue) -> Arr u8 _ = if value.ty==n_t_rec() then cg_record_name(value.record) else cg_type(value.ty)
+fn cg_return(borrow value:CgValue) -> Arr u8 _ = if value.ty==n_t_unit() then "void" else cg_type_of(value)
+fn cg_value(ty:i64, borrow operand:Arr u8 _) -> CgValue = CgValue { ty=ty, elem=0, depth=0, record=-1, operand=operand }
+fn cg_unit() -> CgValue = cg_value(n_t_unit(),"0")
+fn cg_array_value(borrow element:CgValue, borrow operand:Arr u8 _) -> CgValue
+  = cg_value(n_t_arr(),operand) with { elem=if element.ty==n_t_arr() then element.elem else element.ty,
+    depth=element.depth+1, record=element.record }
+fn cg_element(borrow array:CgValue) -> CgValue
+  = if array.depth>1 then array with { depth=array.depth-1, operand=tx_empty() }
+    else cg_value(array.elem,"") with { record=array.record }
+fn cg_declaration(borrow m:Mods, id:i64) -> CgValue
+  = let t=md_node(m,id) in if t.kind==n_t_arr() then cg_array_value(cg_declaration(m,t.a),"")
+    else cg_value(t.kind,"") with { record=if t.kind==n_t_rec() then tc_find_record(m,t.a) else if t.kind==n_t_fn() then id
+      else if t.kind==n_t_ref() then md_resource_type(m,t.a) else -1 }
+fn cg_supported(borrow value:CgValue) -> bool
+  = let kind=if value.ty==n_t_arr() then value.elem else value.ty in
+    tc_scalar(kind) || ((kind==n_t_fn() || kind==n_t_ref()) && value.record>=0) || (kind==n_t_rec() && value.record>=0)
+fn cg_typed(borrow value:CgValue) -> Arr u8 _ = concat(cg_type_of(value)," ",value.operand)
+fn cg_write(move s:CgState, borrow text:Arr u8 _) -> CgState = s with { text=concat(s.text,text) }
+fn cg_reg(id:i64) -> Arr u8 _ = concat("%v",int_text(id))
+fn cg_label(id:i64) -> Arr u8 _ = if id<0 then "entry" else concat("b",int_text(id))
+fn cg_jump(move s:CgState, id:i64) -> CgState = cg_write(s,concat("  br label %",cg_label(id),"\n"))
+fn cg_block(move s:CgState, id:i64) -> CgState = cg_write(s with { block=id },concat(cg_label(id),":\n"))
+fn cg_branch(move s:CgState, borrow cond:Arr u8 _, yes:i64, no:i64) -> CgState
+  = cg_write(s,concat("  br i1 ",cond,", label %",cg_label(yes),", label %",cg_label(no),"\n"))
+fn cg_ins(move s:CgState, ty:i64, borrow instruction:Arr u8 _) -> CgState
+  = let register=cg_reg(s.serial) in
+    cg_write(s with { serial=s.serial+1, value=cg_value(ty,register) },concat("  ",register," = ",instruction,"\n"))
+fn cg_ins_value(move s:CgState, borrow value:CgValue, borrow instruction:Arr u8 _) -> CgState
+  = let emitted=cg_ins(s,value.ty,instruction) in emitted with { value=value with { operand=emitted.value.operand } }
+fn cg_bytes(borrow symbol:Arr u8 _, borrow bytes:Arr u8 _, terminated:bool) -> Arr u8 _
+  = let encoded=loop (i=0, out=tx_empty()) while i<len(bytes)
+      next (i+1,tx_hex_byte(push(out,'\\'),tx_byte(bytes,i))) yield out in
+    concat(symbol," = private unnamed_addr constant [",int_text(len(bytes)+(if terminated then 1 else 0)),
+      " x i8] c\"",encoded,if terminated then "\\00" else "","\"\n")
+
+fn cg_guard(move s:CgState, borrow bad:Arr u8 _, borrow message:Arr u8 _, precondition:bool) -> CgState
+  = let fail=s.serial in let good=fail+1 in
+    let symbol=concat("@neo_failure_",int_text(s.function),"_",int_text(fail)) in
+    let handler=if precondition then "@neo_precondition_trap" else "@neo_runtime_trap" in
+    let s=s with { serial=good+1, globals=concat(s.globals,cg_bytes(symbol,message,true)) } in
+    let s=cg_block(cg_branch(s,bad,fail,good),fail) in
+    cg_block(cg_write(s,concat("  call void ",handler,"(ptr ",symbol,")\n  unreachable\n")),good)
+
+fn cg_arithmetic_guard(move s:CgState, borrow message:Arr u8 _) -> CgState
+  = let diagnostic=concat(message," at ",s.name,":",int_text(s.line)) in cg_guard(s,s.value.operand,diagnostic,false)
+
+fn cg_string(move s:CgState, id:i64, borrow bytes:Arr u8 _) -> CgState
+  = let symbol=concat("@neo_bytes_",int_text(id)) in
+    let operand=concat("{ ptr ",symbol,", i64 ",int_text(len(bytes)),", i64 1, ptr inttoptr (i64 1 to ptr) }") in
+    s with { globals=concat(s.globals,cg_bytes(symbol,bytes,false)), value=cg_array_value(cg_value(n_t_u8(),""),operand) }
+
+fn cg_extract(move s:CgState, borrow array:CgValue, field:i64, ty:i64) -> CgState
+  = cg_ins(s,ty,concat("extractvalue ",cg_typed(array),", ",int_text(field)))
+fn cg_storage(borrow element:CgValue) -> Arr u8 _ = if element.ty==n_t_bool() then "i8" else cg_type_of(element)
+fn cg_offset(move s:CgState, borrow storage:Arr u8 _, borrow data:Arr u8 _, borrow index:Arr u8 _) -> CgState
+  = cg_ins(s,n_t_ptr(),concat("getelementptr ",storage,", ptr ",data,", i64 ",index))
+fn cg_load_element(move s:CgState, borrow array:CgValue, borrow index:CgValue) -> CgState
+  = let element=cg_element(array) in let storage=cg_storage(element) in
+    let s=cg_extract(s,array,0,n_t_ptr()) in let s=cg_offset(s,storage,s.value.operand,index.operand) in
+    let loaded=cg_ins_value(s,element,concat("load ",storage,", ptr ",s.value.operand,", align 1")) in
+    if element.ty!=n_t_bool() then loaded else cg_ins(loaded,n_t_bool(),concat("trunc i8 ",loaded.value.operand," to i1"))
+
+; Each array or record expression owns its managed references. Bindings and
+; parameters keep theirs until scope exit. String literals are immortal.
+fn cg_managed(borrow value:CgValue) -> bool = value.ty==n_t_rec() || value.ty==n_t_arr()
+fn cg_ref_name(borrow value:CgValue, retain:bool) -> Arr u8 _
+  = let action=if retain then "@neo_retain" else "@neo_release" in
+    if value.ty==n_t_rec() then concat(action,"_record_",int_text(value.record)) else action
+fn cg_ref_call(borrow value:CgValue, retain:bool) -> Arr u8 _
+  = concat("  call void ",cg_ref_name(value,retain),"(",cg_typed(value),")\n")
+fn cg_retain(move s:CgState, borrow value:CgValue) -> CgState
+  = if cg_managed(value) then cg_write(s,cg_ref_call(value,true)) else s
+fn cg_release(move s:CgState, borrow value:CgValue) -> CgState
+  = if cg_managed(value) then cg_write(s,cg_ref_call(value,false)) else s
+
+; Only a raw byte view has no owner. Detach it before storing it in an
+; owning aggregate or before releasing storage that its data may alias.
+fn cg_own_view(move s:CgState) -> CgState
+  = let value=s.value in
+    if s.views && value.ty==n_t_arr() && value.depth==1 && value.elem==n_t_u8() then
+      cg_ins_value(s,value,concat("call %ax_arr @neo_own_view(",cg_typed(value),")")) else s
+
+fn cg_width(elem:i64) -> i64
+  = if elem==n_t_i64() || elem==n_t_f64() || elem==n_t_ptr() || elem==n_t_fn() then 8
+    else if elem==n_t_ref() then 16 else if elem==n_t_i32() then 4 else if elem==n_t_u16() then 2 else 1
+fn cg_stride(borrow element:CgValue) -> Arr u8 _
+  = if cg_managed(element) then concat("ptrtoint (ptr getelementptr (",cg_storage(element),", ptr null, i64 1) to i64)")
+    else int_text(cg_width(element.ty))
+fn cg_byte_count(move s:CgState, borrow element:CgValue, borrow length:Arr u8 _) -> CgState
+  = if !cg_managed(element) && cg_width(element.ty)==1 then s with { value=cg_value(n_t_i64(),length) }
+    else cg_checked_arithmetic(s,"mul",length,cg_stride(element))
+fn cg_slot_symbol(borrow element:CgValue, retain:bool) -> Arr u8 _
+  = concat("@neo.slot.",if retain then "retain." else "release.",
+    if element.ty==n_t_rec() then concat("record.",int_text(element.record)) else "array")
+fn cg_array_allocate(move s:CgState, borrow element:CgValue, borrow length:Arr u8 _) -> CgState
+  = let managed=cg_managed(element) in let s=cg_byte_count(s,element,length) in
+    let s=if managed then cg_checked_arithmetic(s,"add",s.value.operand,"32") else s in
+    let s=cg_ins(s,n_t_ptr(),concat("call ptr @ax_heap_alloc(i64 ",s.value.operand,")")) in let payload=s.value.operand in
+    ; The allocator aligns the reference header. Bit 1 records that the
+    ; payload begins with a destructor, stride, and element count.
+    let s=cg_offset(s,"i8",payload,if managed then "-14" else "-16") in let control=s.value.operand in
+    let s=if !managed then s with { value=cg_value(n_t_ptr(),payload) } else
+      let s=cg_write(s,concat("  call void @neo.init.elements(ptr ",payload,", ptr ",cg_slot_symbol(element,false),
+        ", i64 ",cg_stride(element),", i64 ",length,")\n")) in cg_offset(s,"i8",payload,"32") in
+    let data=s.value.operand in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr poison, ptr ",data,", 0")) in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue ",cg_typed(s.value),", i64 ",length,", 1")) in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue ",cg_typed(s.value),", i64 1, 2")) in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue ",cg_typed(s.value),", ptr ",control,", 3")) in
+    s with { value=cg_array_value(element,s.value.operand) }
+
+fn cg_store_element(move s:CgState, borrow array:CgValue, borrow index:Arr u8 _, borrow value:CgValue) -> CgState
+  = let element=cg_element(array) in let s=cg_extract(s,array,0,n_t_ptr()) in
+    let s=cg_offset(s,cg_storage(element),s.value.operand,index) in
+    let location=s.value.operand in
+    let s=if element.ty==n_t_bool() then cg_ins(s,n_t_u8(),concat("zext ",cg_typed(value)," to i8"))
+      else s with { value=value } in
+    cg_write(s,concat("  store ",cg_typed(s.value),", ptr ",location,", align 1\n"))
+
+fn cg_copy_array(move s:CgState, borrow array:CgValue, borrow target:CgValue, borrow offset:Arr u8 _, borrow length:Arr u8 _) -> CgState
+  = let s=cg_extract(s,array,0,n_t_ptr()) in let source=s.value.operand in
+    let element=cg_element(target) in let s=cg_extract(s,target,0,n_t_ptr()) in
+    let s=cg_offset(s,cg_storage(element),s.value.operand,offset) in let destination=s.value.operand in
+    let s=cg_byte_count(s,element,length) in
+    let s=cg_write(s,concat("  call void @llvm.memcpy.p0.p0.i64(ptr ",destination,", ptr ",source,", i64 ",s.value.operand,", i1 false)\n")) in
+    if !cg_managed(element) then s else cg_write(s,concat("  call void @neo.visit.elements(ptr ",destination,", ptr ",
+      cg_slot_symbol(element,true),", i64 ",cg_stride(element),", i64 ",length,")\n"))
+
+fn cg_bind(name:i64, borrow value:CgValue) -> CgBinding = CgBinding { name=name, value=value, live=tx_empty() }
+fn cg_binding(borrow env:Arr CgBinding _, i:i64) -> CgBinding
+  = if i>=0 && i<len(env) then env[i] else cg_bind(-1,cg_unit())
+fn cg_binding_index(borrow m:Mods, borrow env:Arr CgBinding _, name:i64) -> i64
+  = let text=md_str(m,name) in
+    loop (i=len(env)-1) while i>=0 && !tx_equal(text,md_str(m,cg_binding(env,i).name)) next (i-1) yield i
+fn cg_lookup(borrow m:Mods, borrow env:Arr CgBinding _, name:i64) -> CgValue
+  = cg_binding(env,cg_binding_index(m,env,name)).value
+
+fn cg_move_owner(borrow m:Mods, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
+  = let n=md_node(m,id) in
+    let flag=if n.kind!=n_var() then tx_empty() else cg_binding(env,cg_binding_index(m,env,n.a)).live in
+    if len(flag)==0 then s else cg_write(s,concat("  store i1 false, ptr ",flag,", align 1\n"))
+fn cg_new_owner(move s:CgState) -> CgState
+  = let flag=cg_reg(s.serial) in
+    let s=s with { serial=s.serial+1, allocas=concat(s.allocas,"  ",flag," = alloca i1, align 1\n"), value=cg_value(n_t_ptr(),flag) } in
+    cg_write(s,concat("  store i1 true, ptr ",flag,", align 1\n"))
+fn cg_cleanup(borrow m:Mods, move s:CgState, borrow binding:CgBinding, destructor:i64) -> CgState
+  = if len(binding.live)==0 then cg_release(s,binding.value) else
+    let result=s.value in let run=s.serial in let done=run+1 in
+    let s=cg_ins(s with { serial=done+1 },n_t_bool(),concat("load i1, ptr ",binding.live,", align 1")) in
+    let s=cg_block(cg_branch(s,s.value.operand,run,done),run) in
+    let s=cg_retain(s,binding.value) in
+    let s=cg_write(s,concat("  call void ",cg_symbol(m,destructor),"(",cg_typed(binding.value),")\n")) in
+    cg_release(cg_block(cg_jump(s,done),done),binding.value) with { value=result }
+fn cg_symbol(borrow m:Mods, id:i64) -> Arr u8 _
+  = let f=md_node(m,id) in let abi=tc_abi_boundary(f) in
+    if !abi && !m.stable_symbols then concat("@neo_fn_",int_text(id)) else
+    let name=if abi then md_str(m,f.a) else concat("neo.fn.",md_str(m,f.a)) in
+    let escaped=loop (i=0, out=tx_empty()) while i<len(name)
+      next (i+1,let b=tx_byte(name,i) in if b>=128 then tx_hex_byte(push(out,'\\'),b) else push(out,u8(b))) yield out in
+    concat("@\"",escaped,"\"")
+
+fn cg_abi_types(borrow m:Mods, f:Node) -> Arr u8 _
+  = let count=ast_list_len(m.ast,f.b) in
+    let fixed=loop (i=0, out=tx_empty()) while i<count
+      next (i+1,let param=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        concat(out,if i==0 then "" else ", ",cg_type(md_node(m,param.b).kind))) yield out in
+    if !ast_flag(f,fl_variadic()) then fixed else concat(fixed,if count==0 then "..." else ", ...")
+
+fn cg_runtime_signature(borrow name:Arr u8 _) -> Arr u8 _
+  = if tx_equal(name,"ax_heap_alloc") then "ptr(i64)"
+    else if tx_equal(name,"ax_free") || tx_equal(name,"ax_print_bytes") then "void(ptr, i64)"
+    else if tx_equal(name,"ax_parse_i64") then "i64(ptr, ptr)"
+    else if tx_equal(name,"ax_usage") then "void(ptr, ptr)"
+    else if tx_equal(name,"ax_print_i64") || tx_equal(name,"ax_exit") then "void(i64)"
+    else if tx_equal(name,"ax_print_f64") then "void(double)"
+    else if tx_equal(name,"ax_runtime_init") || tx_equal(name,"ax_trap") || tx_equal(name,"ax_precondition_failed") then "void(ptr)"
+    else tx_empty()
+
+fn cg_runtime_owner(borrow m:Mods, id:i64) -> bool = pt_within(md_path(m,tx_at(m.owners,id)),m.runtime)
+fn cg_runtime_check(borrow m:Mods, borrow fns:Arr i64 _) -> TcReport
+  = let names="ax_runtime_init ax_exit ax_trap ax_precondition_failed ax_usage ax_parse_i64 ax_print_i64 ax_print_f64 ax_print_bytes ax_heap_alloc ax_free" in
+    loop (i=0, out=TcReport { result=tc_type(n_t_unit()), module=-1 }) while out.result.value.ty>0 && i<len(names)
+      next (md_word_end(names,i)+1,let name=pt_slice(names,i,md_word_end(names,i)) in
+        let id=md_find_decl(m,fns,bk_get(m.base,0,name)) in let f=md_node(m,id) in
+        let signature=concat(cg_return(cg_declaration(m,f.c)),"(",cg_abi_types(m,f),")") in
+        if id>=0 && cg_runtime_owner(m,id) && ast_flag(f,fl_exported()) && !ast_flag(f,fl_external()) &&
+          tx_equal(signature,cg_runtime_signature(name)) then out else
+        TcReport { result=tc_error(id,concat("runtime must export ",name," with signature ",cg_runtime_signature(name))),
+          module=if id<0 then -1 else tx_at(m.owners,id) }) yield out
+
+; Runtime source definitions may supply the ABI used by generated code.
+; The wrapper's own symbols always remain reserved.
+fn cg_abi_reserved(borrow name:Arr u8 _, executable:bool, runtime_export:bool) -> bool
+  = str_starts(name,"neo_fn_") || str_starts(name,"neo_bytes_") || str_starts(name,"neo_failure_") ||
+    str_find(" neo_entry neo_retain neo_release neo_own_view neo_runtime_trap neo_precondition_trap ax_runtime_state ax_native_alloc_stats ",concat(" ",name," ")).present ||
+    str_find(" neo_spawn_thread neo_fiber_swap neo_fiber_init ",concat(" ",name," ")).present ||
+    (executable && (str_starts(name,"neo_arg_") || tx_equal(name,"_start") || tx_equal(name,"neo_process_start"))) ||
+    (!runtime_export && (if executable then len(cg_runtime_signature(name))>0 else tx_equal(name,"ax_heap_alloc") || tx_equal(name,"ax_free")))
+
+fn cg_checked_arithmetic(move s:CgState, borrow op:Arr u8 _, borrow a:Arr u8 _, borrow b:Arr u8 _) -> CgState
+  = let s=cg_ins(s,0,concat("call { i64, i1 } @llvm.s",op,".with.overflow.i64(i64 ",a,", i64 ",b,")")) in
+    let pair=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("extractvalue { i64, i1 } ",pair,", 1")) in
+    let s=cg_arithmetic_guard(s,"integer overflow") in cg_ins(s,n_t_i64(),concat("extractvalue { i64, i1 } ",pair,", 0"))
+
+; Runtime sources use machine arithmetic for system words and byte patterns,
+; just as they do in the bootstrap compiler.
+fn cg_integer_arithmetic(move s:CgState, borrow op:Arr u8 _, borrow a:Arr u8 _, borrow b:Arr u8 _) -> CgState
+  = if s.runtime then cg_ins(s,n_t_i64(),concat(op," i64 ",a,", ",b)) else cg_checked_arithmetic(s,op,a,b)
+
+fn cg_binary(move s:CgState, op:i64, borrow a:CgValue, borrow b:CgValue) -> CgState
+  = let float=a.ty==n_t_f64() in
+    if op>=24 && op<=28 then
+      let word=if op==24 then "add" else if op==25 then "sub" else if op==26 then "mul" else if op==27 then "div" else "rem" in
+      if float then cg_ins(s,a.ty,concat("f",word," ",cg_typed(a),", ",b.operand))
+      else if op<=26 then cg_integer_arithmetic(s,word,a.operand,b.operand)
+      else if s.runtime then cg_ins(s,a.ty,concat("s",word," ",cg_typed(a),", ",b.operand))
+      else let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",a.operand,", -9223372036854775808")) in let minimum=s.value.operand in
+        let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",b.operand,", -1")) in
+        let s=cg_ins(s,n_t_bool(),concat("and i1 ",minimum,", ",s.value.operand)) in
+        let s=cg_arithmetic_guard(s,"integer division overflow") in cg_ins(s,a.ty,concat("s",word," ",cg_typed(a),", ",b.operand))
+    else
+      let prefix=if float then "o" else if a.ty==n_t_u8() || a.ty==n_t_u16() then "u" else "s" in
+      let predicate=if op==6 then (if float then "oeq" else "eq") else if op==7 then (if float then "une" else "ne")
+        else concat(prefix,if op==8 then "le" else if op==9 then "ge" else if op==22 then "lt" else "gt") in
+      cg_ins(s,n_t_bool(),concat(if float then "fcmp " else "icmp ",predicate," ",cg_typed(a),", ",b.operand))
+
+fn cg_cast(move s:CgState, to:i64, borrow value:CgValue) -> CgState
+  = if value.ty==n_t_f64() then
+      let s=cg_ins(s,n_t_bool(),concat("fcmp oge double ",value.operand,", 0xC3E0000000000000")) in let low=s.value.operand in
+      let s=cg_ins(s,n_t_bool(),concat("fcmp olt double ",value.operand,", 0x43E0000000000000")) in
+      let s=cg_ins(s,n_t_bool(),concat("and i1 ",low,", ",s.value.operand)) in
+      let s=cg_ins(s,n_t_bool(),concat("xor i1 ",s.value.operand,", true")) in
+      cg_ins(cg_arithmetic_guard(s,"float to integer out of range"),to,concat("fptosi ",cg_typed(value)," to i64"))
+    else let op=if to==n_t_f64() then "sitofp" else if to!=n_t_i64() then "trunc" else if value.ty==n_t_i32() then "sext" else "zext" in
+    cg_ins(s,to,concat(op," ",cg_typed(value)," to ",cg_type(to)))
+
+fn cg_phi(move s:CgState, borrow yes:CgValue, yes_block:i64, borrow no:CgValue, no_block:i64) -> CgState
+  = if yes.ty==n_t_unit() then s with { value=cg_unit() }
+    else cg_ins_value(s,yes,concat("phi ",cg_type_of(yes)," [ ",yes.operand,", %",cg_label(yes_block),
+      " ], [ ",no.operand,", %",cg_label(no_block)," ]"))
+
+fn cg_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let s=cg_expr(m,fns,env,s,n.a) in if s.error>=0 then s else
+    let yes=s.serial in let no=yes+1 in let join=no+1 in let cond=s.value.operand in
+    let s=cg_branch(s with { serial=join+1 },cond,yes,no) in
+    let s=cg_expr(m,fns,env,cg_block(s,yes),n.b) in if s.error>=0 then s else
+    let left=s.value in let left_block=s.block in
+    let s=cg_expr(m,fns,env,cg_block(cg_jump(s,join),no),n.c) in if s.error>=0 then s else
+    let right=s.value in let right_block=s.block in
+    cg_phi(cg_block(cg_jump(s,join),join),left,left_block,right,right_block)
+
+fn cg_short_circuit(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let left=s.value in let left_block=s.block in let rhs=s.serial in let join=rhs+1 in
+    let s=if n.a==10 then cg_branch(s with { serial=join+1 },left.operand,rhs,join)
+      else cg_branch(s with { serial=join+1 },left.operand,join,rhs) in
+    let s=cg_expr(m,fns,env,cg_block(s,rhs),n.c) in if s.error>=0 then s else
+    let right=s.value in let right_block=s.block in
+    cg_phi(cg_block(cg_jump(s,join),join),left,left_block,right,right_block)
+
+type CgArgs = { state:CgState, values:Arr CgValue _ }
+fn cg_arg(borrow values:Arr CgValue _, i:i64) -> CgValue
+  = if i>=0 && i<len(values) then values[i] else cg_unit()
+fn cg_arguments(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64, keep:bool) -> CgArgs
+  = loop (i=0, a=CgArgs { state=s, values=arr(j in 0..0) cg_unit() }) while a.state.error<0 && i<ast_list_len(m.ast,list)
+      next (i+1, let lowered=cg_expr(m,fns,env,a.state,ast_list_at(m.ast,list,i)) in
+        let lowered=if keep && lowered.error<0 then cg_own_view(lowered) else lowered in
+        CgArgs { state=lowered, values=push(a.values,lowered.value) }) yield a
+fn cg_arg_text(borrow values:Arr CgValue _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(values)
+      next (i+1,concat(out,if i==0 then "" else ", ",cg_typed(cg_arg(values,i)))) yield out
+
+type CgCopy = { state:CgState, offset:Arr u8 _ }
+fn cg_concat(move s:CgState, borrow values:Arr CgValue _) -> CgState
+  = let lengths=loop (i=0, copy=CgCopy { state=s, offset="0" }) while i<len(values)
+      next (i+1, let part=cg_extract(copy.state,cg_arg(values,i),1,n_t_i64()) in
+        let total=cg_checked_arithmetic(part,"add",copy.offset,part.value.operand) in
+        CgCopy { state=total, offset=total.value.operand }) yield copy in
+    let s=cg_array_allocate(lengths.state,cg_element(cg_arg(values,0)),lengths.offset) in let result=s.value in
+    let copies=loop (i=0, copy=CgCopy { state=s, offset="0" }) while i<len(values)
+      next (i+1, let part=cg_arg(values,i) in let measured=cg_extract(copy.state,part,1,n_t_i64()) in
+        let length=measured.value.operand in let copied=cg_copy_array(measured,part,result,copy.offset,length) in
+        let advanced=cg_ins(cg_release(copied,part),n_t_i64(),concat("add i64 ",copy.offset,", ",length)) in
+        CgCopy { state=advanced, offset=advanced.value.operand }) yield copy.state in
+    copies with { value=result }
+
+fn cg_array_edit(move s:CgState, borrow values:Arr CgValue _, append:bool) -> CgState
+  = let original=cg_arg(values,0) in let s=cg_extract(s,original,1,n_t_i64()) in let length=s.value.operand in
+    let s=if append then cg_checked_arithmetic(s,"add",length,"1") else s in
+    let s=cg_array_allocate(s,cg_element(original),s.value.operand) in let result=s.value in
+    let copied=cg_copy_array(s,original,result,"0",length) in
+    let prepared=cg_own_view(copied with { value=cg_arg(values,if append then 1 else 2) }) in let value=prepared.value in
+    let index=if append then cg_value(n_t_i64(),length) else cg_arg(values,1) in
+    let ready=if append || !cg_managed(value) then prepared else
+      let old=cg_load_element(prepared,result,index) in cg_release(old,old.value) in
+    let changed=cg_store_element(ready,result,index.operand,value) in
+    cg_release(changed,original) with { value=result }
+
+fn cg_byte_bounds(move s:CgState, borrow offset:Arr u8 _, borrow limit:Arr u8 _, borrow message:Arr u8 _) -> CgState
+  = let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",offset,", 0")) in let low=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",offset,", ",limit)) in
+    let s=cg_ins(s,n_t_bool(),concat("or i1 ",low,", ",s.value.operand)) in cg_arithmetic_guard(s,message)
+
+fn cg_byte_read(move s:CgState, borrow bytes:CgValue, borrow offset:Arr u8 _, borrow width:Arr u8 _) -> CgState
+  = let s=cg_ins(s,n_t_i64(),concat("sub i64 ",width,", 1")) in let before=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),concat("and i64 ",width,", ",before)) in
+    let s=cg_ins(s,n_t_bool(),concat("icmp ne i64 ",s.value.operand,", 0")) in let uneven=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp ugt i64 ",before,", 7")) in
+    let s=cg_ins(s,n_t_bool(),concat("or i1 ",uneven,", ",s.value.operand)) in
+    let s=cg_arithmetic_guard(s,"byte read width") in
+    let s=cg_extract(s,bytes,1,n_t_i64()) in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",s.value.operand,", ",width)) in
+    let s=cg_byte_bounds(s,offset,s.value.operand,"byte read bounds") in
+    let s=cg_extract(s,bytes,0,n_t_ptr()) in let s=cg_offset(s,"i8",s.value.operand,offset) in
+    cg_release(cg_ins(s,n_t_i64(),concat("call i64 @neo.bytes.read(ptr ",s.value.operand,", i64 ",width,")")),bytes)
+
+fn cg_byte_copy(move s:CgState, borrow original:CgValue, borrow offset:Arr u8 _, borrow source:CgValue) -> CgState
+  = let s=cg_extract(s,original,1,n_t_i64()) in let length=s.value.operand in
+    let s=cg_extract(s,source,1,n_t_i64()) in let count=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",length,", ",count)) in
+    let s=cg_byte_bounds(s,offset,s.value.operand,"byte write bounds") in
+    let s=cg_array_allocate(s,cg_element(original),length) in let result=s.value in
+    let s=cg_copy_array(s,original,result,"0",length) in
+    let s=cg_copy_array(s,source,result,offset,count) in
+    cg_release(cg_release(s,source),original) with { value=result }
+
+fn cg_byte_write(move s:CgState, borrow original:CgValue, borrow offset:Arr u8 _, borrow number:Arr u8 _, borrow width:Arr u8 _) -> CgState
+  = let s=cg_ins(s,n_t_bool(),concat("icmp ugt i64 ",width,", 8")) in
+    let s=cg_arithmetic_guard(s,"byte write width") in
+    let s=cg_extract(s,original,1,n_t_i64()) in let length=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",length,", ",width)) in
+    let s=cg_byte_bounds(s,offset,s.value.operand,"byte write bounds") in
+    let s=cg_array_allocate(s,cg_element(original),length) in let result=s.value in
+    let s=cg_copy_array(s,original,result,"0",length) in
+    let s=cg_extract(s,result,0,n_t_ptr()) in let s=cg_offset(s,"i8",s.value.operand,offset) in
+    let s=cg_write(s,concat("  call void @neo.bytes.write(ptr ",s.value.operand,", i64 ",number,", i64 ",width,")\n")) in
+    cg_release(s,original) with { value=result }
+
+fn cg_byte_slice(move s:CgState, borrow bytes:CgValue, borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgState
+  = let s=cg_extract(s,bytes,1,n_t_i64()) in let length=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",length)) in
+    let s=cg_arithmetic_guard(s,"byte slice bounds") in let s=cg_byte_bounds(s,lo,hi,"byte slice bounds") in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",hi,", ",lo)) in let size=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",size,", 0")) in
+    let empty=s.serial in let nonempty=empty+1 in let done=nonempty+1 in
+    let s=cg_branch(s with { serial=done+1 },s.value.operand,empty,nonempty) in
+    let s=cg_jump(cg_release(cg_block(s,empty),bytes),done) in
+    let s=cg_extract(cg_block(s,nonempty),bytes,0,n_t_ptr()) in
+    let s=cg_offset(s,"i8",s.value.operand,lo) in
+    let s=cg_ins_value(s,bytes,concat("insertvalue ",cg_typed(bytes),", ",cg_typed(s.value),", 0")) in
+    let s=cg_ins_value(s,bytes,concat("insertvalue ",cg_typed(s.value),", i64 ",size,", 1")) in
+    cg_phi(cg_block(cg_jump(s,done),done),bytes with { operand="zeroinitializer" },empty,s.value,nonempty)
+
+fn cg_byte_builtin(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue _) -> CgState
+  = let first=cg_arg(values,0) in let second=cg_arg(values,1) in let third=cg_arg(values,2) in
+    if tx_equal(name,"byte_equal") then
+      let s=cg_ins(s,n_t_bool(),concat("call i1 @neo.bytes.equal(",cg_arg_text(values),")")) in
+      cg_release(cg_release(s,second),first)
+    else if tx_equal(name,"byte_read_le") then cg_byte_read(s,first,second.operand,third.operand)
+    else if tx_equal(name,"byte_copy") then cg_byte_copy(s,first,second.operand,third)
+    else if tx_equal(name,"byte_write_le") then cg_byte_write(s,first,second.operand,third.operand,cg_arg(values,3).operand)
+    else cg_byte_slice(s,first,second.operand,third.operand)
+
+fn cg_syscall(move s:CgState, borrow values:Arr CgValue _, fork:bool, id:i64) -> CgState
+  = if len(s.target)==0 then s with { error=id } else
+    let arm=str_starts(s.target,"arm64-") || str_starts(s.target,"aarch64-") in
+    let darwin=str_find(s.target,"-apple-").present in
+    ; Darwin returns the child indicator in x1. Linux ARM64 implements
+    ; fork with clone(SIGCHLD) and a null child stack.
+    let code=if darwin && fork then "svc #0x80\\0Ab.cs 1f\\0Acbz x1, 2f\\0Amov x0, #0\\0Ab 2f\\0A1: neg x0, x0\\0A2:"
+      else if darwin then "svc #0x80\\0Acneg x0, x0, cs" else if arm then "svc #0" else "syscall" in
+    let args=if !fork then values else
+      let number=if darwin then "2" else if arm then "220" else "57" in
+      arr(i in 0..7) cg_value(n_t_i64(),if i==0 then number else if i==1 && arm && !darwin then "17" else "0") in
+    let constraints=if darwin then "={x0},={x1},0,1,{x2},{x3},{x4},{x5},{x16},~{memory},~{cc}"
+      else if arm then "={x0},0,{x1},{x2},{x3},{x4},{x5},{x8},~{memory},~{cc}"
+      else "={rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},{rax},~{rcx},~{r11},~{memory},~{cc}" in
+    let operands=loop (i=1, out=tx_empty()) while i<7
+      next (i+1,concat(out,cg_typed(cg_arg(args,i)),", ")) yield out in
+    let result=cg_ins(s,n_t_i64(),concat("call ",if darwin then "{ i64, i64 }" else "i64", " asm sideeffect \"",code,
+      "\", \"",constraints,"\"(",operands,cg_typed(cg_arg(args,0)),")")) in
+    if darwin then cg_ins(result,n_t_i64(),concat("extractvalue { i64, i64 } ",result.value.operand,", 0")) else result
+
+fn cg_byte_view(move s:CgState, borrow data:CgValue, borrow size:CgValue) -> CgState
+  = let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr zeroinitializer, ",cg_typed(data),", 0")) in
+    cg_ins_value(s,cg_array_value(cg_value(n_t_u8(),""),""),concat("insertvalue ",cg_typed(s.value),", ",cg_typed(size),", 1"))
+
+fn cg_intrinsic(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue _, result:i64, id:i64) -> CgState
+  = let a=cg_arg(values,0) in let b=cg_arg(values,1) in
+    if str_starts(name,"wrapping_") || str_starts(name,"bit_") then
+      let start=if str_starts(name,"bit_") then 4 else 9 in
+      cg_ins(s,result,concat(pt_slice(name,start,len(name))," ",cg_typed(a),", ",b.operand))
+    else if tx_equal(name,"mul_high") then
+      let s=cg_ins(s,0,concat("zext ",cg_typed(a)," to i128")) in let left=s.value.operand in
+      let s=cg_ins(s,0,concat("zext ",cg_typed(b)," to i128")) in
+      let s=cg_ins(s,0,concat("mul i128 ",left,", ",s.value.operand)) in
+      let s=cg_ins(s,0,concat("lshr i128 ",s.value.operand,", 64")) in cg_ins(s,result,concat("trunc i128 ",s.value.operand," to i64"))
+    else if tx_equal(name,"shift_left") || tx_equal(name,"shift_right") || tx_equal(name,"arithmetic_shift_right") then
+      let op=if tx_equal(name,"shift_left") then "shl" else if tx_equal(name,"shift_right") then "lshr" else "ashr" in
+      let s=cg_ins(s,n_t_i64(),concat("and ",cg_typed(b),", 63")) in cg_ins(s,result,concat(op," ",cg_typed(a),", ",s.value.operand))
+    else if tx_equal(name,"byte_swap64") then cg_ins(s,result,concat("call i64 @llvm.bswap.i64(",cg_typed(a),")"))
+    else if tx_equal(name,"count_trailing_zeros") then cg_ins(s,result,concat("call i64 @llvm.cttz.i64(",cg_typed(a),", i1 false)"))
+    else if tx_equal(name,"sqrt") then cg_ins(s,result,concat("call double @llvm.sqrt.f64(",cg_typed(a),")"))
+    else if tx_equal(name,"float_bits") || tx_equal(name,"bits_float") then cg_ins(s,result,concat("bitcast ",cg_typed(a)," to ",cg_type(result)))
+    else if tx_equal(name,"ptr_to_i64") || tx_equal(name,"ptr_from_i64") then
+      cg_ins(s,result,concat(if result==n_t_i64() then "ptrtoint " else "inttoptr ",cg_typed(a)," to ",cg_type(result)))
+    else if tx_equal(name,"stack_alloc") then cg_ins(s,result,concat("alloca i8, ",cg_typed(a),", align 16"))
+    else if tx_equal(name,"runtime_state") then s with { value=cg_value(n_t_ptr(),"@ax_runtime_state") }
+    else if tx_equal(name,"aes_hardware") then cg_ins(s,result,"call i1 @neo_crypto_hardware()")
+    else if bi_crypto(name) then cg_ins(s,result,concat("call i64 @neo_crypto_",name,"(",cg_arg_text(values),")"))
+    else if tx_equal(name,"allocation_stats_enabled") then cg_ins(s,result,"load i1, ptr @ax_native_alloc_stats, align 1")
+    else if tx_equal(name,"counter_ticks") || tx_equal(name,"counter_frequency") then
+      if !str_starts(s.target,"arm64-") && !str_starts(s.target,"aarch64-") then s with { error=id } else
+      let instruction=if tx_equal(name,"counter_ticks") then "isb\\0Amrs $0, cntvct_el0" else "mrs $0, cntfrq_el0" in
+      cg_ins(s,result,concat("call i64 asm sideeffect \"",instruction,"\", \"=r,~{memory}\"()"))
+    else if str_starts(name,"invoke_") then
+      let params=if len(values)==2 then cg_typed(b) else concat(cg_typed(b),", ",cg_typed(cg_arg(values,2))) in
+      if result==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  call void ",a.operand,"(",params,")\n")) else
+      cg_ins(s,result,concat("call ",cg_type(result)," ",a.operand,"(",params,")"))
+    else if tx_equal(name,"syscall6") || tx_equal(name,"fork_syscall") then cg_syscall(s,values,tx_equal(name,"fork_syscall"),id)
+    else if tx_equal(name,"spawn_thread") then
+      if !str_find(s.target,"-linux").present then s with { error=id } else
+      cg_ins(s,result,concat("call i64 @neo_spawn_thread(",cg_arg_text(values),")"))
+    else if tx_equal(name,"fiber_swap") || tx_equal(name,"fiber_init") then
+      if len(s.target)==0 then s with { error=id } else
+      cg_write(s with { value=cg_unit() },concat("  call void @neo_",name,"(",cg_arg_text(values),")\n"))
+    else if tx_equal(name,"handler_call") then
+      let view=cg_byte_view(s,b,cg_arg(values,2)) in
+      cg_ins_value(view,view.value,concat("call %ax_arr ",a.operand,"(",cg_typed(view.value),")"))
+    else let s=cg_offset(s,"i8",a.operand,b.operand) in let address=s.value.operand in
+      let volatile=if str_starts(name,"volatile_") then "volatile " else "" in
+      if tx_equal(name,"ptr_add") then s
+      else if str_starts(name,"atomic_") then cg_atomic(s,name,values,result,address)
+      else if bi_load(name) then cg_ins(s,result,concat("load ",volatile,cg_type(result),", ptr ",address,", align 1"))
+      else if bi_store(name) then cg_write(s with { value=cg_unit() },concat("  store ",volatile,cg_typed(cg_arg(values,2)),", ptr ",address,", align 1\n"))
+      else s with { error=id }
+
+fn cg_atomic(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue _, result:i64, borrow address:Arr u8 _) -> CgState
+  = let width=if bi_memory_type(name)==n_t_i32() then "4" else "8" in
+    let value=cg_arg(values,2) in
+    if str_starts(name,"atomic_load_") then cg_ins(s,result,concat("load atomic ",cg_type(result),", ptr ",address," acquire, align ",width))
+    else if str_starts(name,"atomic_store_") then
+      cg_write(s with { value=cg_unit() },concat("  store atomic ",cg_typed(value),", ptr ",address," release, align ",width,"\n"))
+    else let pair=cg_ins(s,0,concat("cmpxchg ptr ",address,", ",cg_typed(value),", ",cg_typed(cg_arg(values,3))," acq_rel acquire, align 8")) in
+      cg_ins(pair,result,concat("extractvalue { i64, i1 } ",pair.value.operand,", 0"))
+
+fn cg_indirect(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node,
+               borrow callback:CgValue) -> CgState
+  = let signature=md_node(m,callback.record) in let result=cg_declaration(m,signature.b) in
+    let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+    let s=cg_ins(args.state,n_t_bool(),concat("icmp eq ptr ",callback.operand,", null")) in
+    let s=cg_arithmetic_guard(s,"inactive callback") in
+    let call=concat("call ",cg_return(result)," ",callback.operand,"(",cg_arg_text(args.values),")") in
+    if result.ty==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  ",call,"\n")) else cg_ins_value(s,result,call)
+
+fn cg_adopt(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
+            borrow owner:CgValue, borrow arena:CgValue) -> CgState
+  = let finalize=concat("@neo_arena_finalizer_",int_text(id)) in let ty=cg_type_of(owner) in
+    let destructor=md_resource_drop(m,fns,owner.record) in
+    let wrapper=concat("define internal void ",finalize,"(ptr %box) {\nentry:\n  %value = load ",ty,
+      ", ptr %box, align 8\n  call void ",cg_symbol(m,destructor),"(",ty," %value)\n  ret void\n}\n") in
+    let s=cg_extract(s with { globals=concat(s.globals,wrapper) },arena,0,n_t_i64()) in let token=s.value.operand in
+    let s=cg_release(s,arena) in
+    let s=cg_ins(s,n_t_ptr(),concat("call ptr @ax_alloc(i64 ptrtoint (ptr getelementptr (",ty,", ptr null, i64 1) to i64))")) in
+    let box=s.value.operand in
+    let s=cg_write(s,concat("  store ",cg_typed(owner),", ptr ",box,", align 8\n")) in
+    let register=cg_symbol(m,tc_named_fn(m,fns,"rt_arena_register")) in
+    let s=cg_ins(s,n_t_i64(),concat("call i64 ",register,"(i64 ",token,", ptr ",box,", ptr ",finalize,")")) in
+    let slot=s.value.operand in let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",slot,", 0")) in
+    let s=cg_arithmetic_guard(s,"resource arena is closed or full") in
+    let s=cg_move_owner(m,env,s,ast_list_at(m.ast,n.b,0)) in
+    let ref=cg_declaration(m,n.e) in
+    let s=cg_ins_value(s,ref,concat("insertvalue ",cg_type_of(ref)," zeroinitializer, i64 ",token,", 0")) in
+    cg_ins_value(s,ref,concat("insertvalue ",cg_typed(s.value),", i64 ",slot,", 1"))
+
+fn cg_reference(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
+                borrow name:Arr u8 _) -> CgState
+  = if tx_equal(name,"ref_null") then s with { value=cg_declaration(m,n.e) with { operand="zeroinitializer" } }
+    else let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+    let first=cg_arg(args.values,0) in
+    if tx_equal(name,"adopt") then cg_adopt(m,fns,env,args.state,id,n,first,cg_arg(args.values,1))
+    else let s=cg_extract(args.state,first,0,n_t_i64()) in let token=s.value.operand in
+    let s=cg_extract(s,first,1,n_t_i64()) in let slot=s.value.operand in
+    if tx_equal(name,"ref_release") then
+      let fn_name=cg_symbol(m,tc_named_fn(m,fns,"rt_arena_release")) in
+      cg_write(s with { value=cg_unit() },concat("  call void ",fn_name,"(i64 ",token,", i64 ",slot,")\n"))
+    else let fn_name=cg_symbol(m,tc_named_fn(m,fns,"rt_arena_lookup")) in
+    let s=cg_ins(s,n_t_ptr(),concat("call ptr ",fn_name,"(i64 ",token,", i64 ",slot,")")) in let box=s.value.operand in
+    if tx_equal(name,"ref_live") then cg_ins(s,n_t_bool(),concat("icmp ne ptr ",box,", null"))
+    else let s=cg_ins(s,n_t_bool(),concat("icmp eq ptr ",box,", null")) in
+    let s=cg_arithmetic_guard(s,"borrow of a closed resource reference") in
+    let result=cg_declaration(m,n.e) in
+    let s=cg_ins_value(s,result,concat("load ",cg_type_of(result),", ptr ",box,", align 8")) in cg_retain(s,s.value)
+
+fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
+  = let name=md_str(m,n.a) in
+    if tx_equal(name,"noop") then s with { value=cg_unit() }
+    else if tx_equal(name,"null") then s with { value=cg_value(n_t_ptr(),"null") }
+    else if tx_equal(name,"addr") || tx_equal(name,"function") then
+      let arg=md_node(m,ast_list_at(m.ast,n.b,0)) in let decl=md_find_decl(m,fns,arg.a) in
+      s with { value=if tx_equal(name,"addr") then cg_value(n_t_ptr(),cg_symbol(m,decl))
+        else cg_declaration(m,n.e) with { operand=cg_symbol(m,decl) } }
+    else if tx_equal(name,"function_null") then s with { value=cg_declaration(m,n.e) with { operand="null" } }
+    else if tx_equal(name,"callback_address") then
+      let lowered=cg_expr(m,fns,env,s,ast_list_at(m.ast,n.b,0)) in lowered with { value=cg_value(n_t_ptr(),lowered.value.operand) }
+    else if tx_equal(name,"serve") || tx_equal(name,"serve_effect") then
+      let port=cg_expr(m,fns,env,s,ast_list_at(m.ast,n.b,0)) in if port.error>=0 then port else
+      let arg=md_node(m,ast_list_at(m.ast,n.b,1)) in let handler=md_find_decl(m,fns,arg.a) in
+      cg_ins(port,n_t_i64(),concat("call i64 @ax_serve(",cg_typed(port.value),", ptr ",cg_symbol(m,handler),")"))
+    else if tx_equal(name,"adopt") || tx_equal(name,"borrow_ref") || tx_equal(name,"ref_live") ||
+      tx_equal(name,"ref_release") || tx_equal(name,"ref_null") then cg_reference(m,fns,env,s,id,n,name)
+    else if tx_equal(name,"data") then
+      let id=ast_list_at(m.ast,n.b,0) in let arg=md_node(m,id) in
+      let bytes=if arg.kind==n_var() then s with { value=cg_lookup(m,env,arg.a) } else cg_string(s,id,md_str(m,arg.a)) in
+      cg_extract(bytes,bytes.value,0,n_t_ptr())
+    else if tx_equal(name,"byte_uninit") then
+      let size=cg_expr(m,fns,env,s,ast_list_at(m.ast,n.b,0)) in
+      if size.error>=0 then size else cg_array_allocate(size,cg_value(n_t_u8(),""),size.value.operand)
+    else if tx_equal(name,"view") then
+      let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+      cg_byte_view(args.state,cg_arg(args.values,0),cg_arg(args.values,1))
+    else if tx_equal(name,"concat") || tx_equal(name,"push") || tx_equal(name,"set") then
+      let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+      let state=args.state with { line=n.line } in
+      if tx_equal(name,"concat") then cg_concat(state,args.values) else cg_array_edit(state,args.values,tx_equal(name,"push"))
+    else if bi_bytes(name) then
+      let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+      cg_byte_builtin(args.state with { line=n.line },name,args.values)
+    else if md_is_builtin(m,name) then
+      let signature=bi_signature(name) in if signature.result<=0 then s with { error=id } else
+      let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+      cg_intrinsic(args.state,name,args.values,signature.result,id)
+    else let callback=cg_lookup(m,env,n.a) in
+    if callback.ty==n_t_fn() then cg_indirect(m,fns,env,s,n,callback) else
+    let callee=md_find_decl(m,fns,n.a) in let result=cg_declaration(m,md_node(m,callee).c) in
+    if callee<0 || !cg_supported(result) then s with { error=id } else
+    let args=cg_arguments(m,fns,env,s,n.b,false) in
+    if args.state.error>=0 then args.state else
+    let f=md_node(m,callee) in let signature=if ast_flag(f,fl_variadic()) then concat(" (",cg_abi_types(m,f),")") else "" in
+    let s=loop (i=0, out=args.state) while i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        if md_resource_consumed(m,f,p) then cg_move_owner(m,env,out,ast_list_at(m.ast,n.b,i)) else out) yield out in
+    let call=concat("call ",cg_return(result),signature," ",cg_symbol(m,callee),"(",cg_arg_text(args.values),")") in
+    if result.ty==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  ",call,"\n")) else
+    cg_ins_value(s,result,call)
+
+type CgRange = { header:i64, work:i64, latch:i64, done:i64, iterator:Arr u8 _, successor:Arr u8 _, lo:Arr u8 _, hi:Arr u8 _ }
+fn cg_counted_head(move s:CgState, borrow r:CgRange, borrow other_phi:Arr u8 _) -> CgState
+  = let initial=s.block in let s=cg_block(cg_jump(s,r.header),r.header) in
+    let s=cg_write(s,concat("  ",r.iterator," = phi i64 [ ",r.lo,", %",cg_label(initial)," ], [ ",r.successor,", %",cg_label(r.latch)," ]\n",other_phi)) in
+    let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",r.iterator,", ",r.hi)) in
+    cg_block(cg_branch(s,s.value.operand,r.work,r.done),r.work)
+fn cg_counted_tail(move s:CgState, borrow r:CgRange) -> CgState
+  = let s=cg_block(cg_jump(s,r.latch),r.latch) in
+    let s=cg_write(s,concat("  ",r.successor," = add i64 ",r.iterator,", 1\n")) in
+    cg_block(cg_jump(s,r.header),r.done)
+fn cg_sum_add(move s:CgState, ty:i64, borrow left:Arr u8 _, borrow right:Arr u8 _) -> CgState
+  = if ty==n_t_i64() then cg_integer_arithmetic(s,"add",left,right)
+    else cg_ins(s,n_t_f64(),concat("fadd double ",left,", ",right))
+
+fn cg_sum_record(borrow m:Mods, move body:CgState, borrow previous:CgValue) -> CgState
+  = let value=body.value in let fields=md_node(m,value.record).b in
+    let zero=value with { operand="zeroinitializer" } in
+    loop (i=0, s=body with { value=zero }) while i<ast_list_len(m.ast,fields)
+      next (i+1,let record=s.value in let field=cg_field_type(m,fields,i) in
+        let s=cg_field_get(s,previous,field,i) in let left=s.value.operand in
+        let s=cg_field_get(s,value,field,i) in
+        let updated=cg_sum_add(s,field.ty,left,s.value.operand) in
+        cg_ins_value(updated,record,concat("insertvalue ",cg_typed(record),", ",cg_typed(updated.value),", ",int_text(i)))) yield s
+
+fn cg_sum_range(borrow m:Mods, move s:CgState, move body:CgState, borrow r:CgRange, borrow accumulator:Arr u8 _) -> CgState
+  = let ty=body.value.ty in let result=body.value with { operand=accumulator } in
+    let body=body with { line=s.line } in
+    let updated=if ty==n_t_rec() then cg_sum_record(m,body,result)
+      else cg_sum_add(body,ty,accumulator,body.value.operand) in
+    let initial=if ty==n_t_i64() then "0" else if ty==n_t_f64() then "0.0" else "zeroinitializer" in
+    let phi=concat("  ",accumulator," = phi ",cg_type_of(result)," [ ",initial,
+      ", %",cg_label(s.block)," ], [ ",updated.value.operand,", %",cg_label(r.latch)," ]\n") in
+    let head=cg_counted_head(s with { serial=updated.serial,allocas=updated.allocas,globals=concat(s.globals,updated.globals) },r,phi) in
+    cg_counted_tail(cg_write(head with { block=updated.block },updated.text),r) with { value=result }
+
+fn cg_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
+  = let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
+    let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else let hi=s.value.operand in
+    let header=s.serial in let work=header+1 in let latch=work+1 in let done=latch+1 in
+    let iterator=cg_reg(done+1) in let successor=cg_reg(done+2) in let accumulator=cg_reg(done+3) in
+    let range=CgRange { header=header, work=work, latch=latch, done=done, iterator=iterator, successor=successor, lo=lo, hi=hi } in
+    let inner=push(env,cg_bind(n.a,cg_value(n_t_i64(),iterator))) in
+    ; Lower the body first to learn its element type. All registers and
+    ; blocks it reserves stay distinct from the surrounding allocation code.
+    let body=cg_expr(m,fns,inner,s with { text=tx_empty(), globals=tx_empty(), serial=done+4, block=work },n.d) in
+    if body.error>=0 then body else if n.kind==n_sum() then
+      cg_sum_range(m,s with { line=n.line },body,range,accumulator)
+    else if !cg_supported(body.value) then s with { error=id } else
+    let body=cg_own_view(body) in
+    let s=s with { serial=body.serial, globals=concat(s.globals,body.globals), allocas=body.allocas, line=n.line } in
+    let s=cg_integer_arithmetic(s,"sub",hi,lo) in
+    let s=cg_array_allocate(s,body.value,s.value.operand) in let array=s.value in
+    let s=cg_counted_head(s,range,"") in
+    let s=cg_write(s with { block=body.block },body.text) in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",iterator,", ",lo)) in
+    let s=cg_store_element(s,array,s.value.operand,body.value) in
+    cg_counted_tail(s,range) with { value=array }
+
+fn cg_loop_initial(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64) -> CgArgs
+  = loop (i=0, a=CgArgs { state=s, values=arr(j in 0..0) cg_unit() }) while a.state.error<0 && i<ast_list_len(m.ast,list)
+      next (i+1, let state=md_node(m,ast_list_at(m.ast,list,i)) in let lowered=cg_expr(m,fns,env,a.state,state.c) in
+        let lowered=if lowered.error<0 then cg_own_view(lowered) else lowered in
+        CgArgs { state=lowered, values=push(a.values,lowered.value) }) yield a
+
+fn cg_loop_phi(move s:CgState, borrow value:CgValue, borrow initial:CgValue, initial_block:i64, borrow updated:CgValue, back:i64) -> CgState
+  = cg_write(s,concat("  ",value.operand," = phi ",cg_type_of(value)," [ ",initial.operand,", %",cg_label(initial_block),
+      " ], [ ",updated.operand,", %",cg_label(back)," ]\n"))
+
+fn cg_loop(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let initial=cg_loop_initial(m,fns,env,s,n.a) in if initial.state.error>=0 then initial.state else
+    let s=initial.state in let count=len(initial.values) in
+    let header=s.serial in let step=header+1 in let done=step+1 in let first=done+1 in
+    let values=arr(i in 0..count) cg_arg(initial.values,i) with { operand=cg_reg(first+i) } in
+    let inner=loop (i=0, bindings=env) while i<count
+      next (i+1,let state=md_node(m,ast_list_at(m.ast,n.a,i)) in push(bindings,cg_bind(state.a,cg_arg(values,i)))) yield bindings in
+    ; Reserve phi names before lowering the condition and successors. Their
+    ; final block is the back-edge predecessor, even if a successor branches.
+    let cond=cg_expr(m,fns,inner,s with { text=tx_empty(), globals=tx_empty(), serial=first+count, block=header },n.b) in
+    if cond.error>=0 then cond else
+    let updated=cg_arguments(m,fns,inner,cond with { text=tx_empty(), globals=tx_empty(), block=step },n.c,true) in
+    if updated.state.error>=0 then updated.state else
+    let back=updated.state.block in let origin=s.block in
+    let s=cg_block(cg_jump(s with { serial=updated.state.serial, allocas=updated.state.allocas,
+      globals=concat(s.globals,cond.globals,updated.state.globals) },header),header) in
+    let s=loop (i=0, code=s) while i<count
+      next (i+1,cg_loop_phi(code,cg_arg(values,i),cg_arg(initial.values,i),origin,cg_arg(updated.values,i),back)) yield code in
+    let s=cg_write(s with { block=cond.block },cond.text) in
+    let s=cg_write(cg_block(cg_branch(s,cond.value.operand,step,done),step) with { block=back },updated.state.text) in
+    let s=loop (i=0, code=s) while i<count next (i+1,cg_release(code,cg_arg(values,i))) yield code in
+    let result=cg_expr(m,fns,inner,cg_block(cg_jump(s,header),done),n.d) in
+    if result.error>=0 then result else
+    loop (i=0, code=cg_own_view(result)) while i<count next (i+1,cg_release(code,cg_arg(values,i))) yield code
+
+fn cg_show(borrow m:Mods, id:i64) -> Arr u8 _
+  = let n=md_node(m,id) in
+    if n.kind==n_num() then int_text(n.a)
+    else if n.kind==n_bool() then if n.a==0 then "false" else "true"
+    else if n.kind==n_var() then md_str(m,n.a)
+    else if n.kind==n_str() then tx_repr(md_str(m,n.a),true)
+    else if n.kind==n_byte() then tx_repr(push(tx_empty(),u8(n.a)),true)
+    else if n.kind==n_bin() then concat("(",cg_show(m,n.b)," ",lx_sym_text(n.a)," ",cg_show(m,n.c),")")
+    else if n.kind==n_un() then concat(lx_sym_text(n.a),cg_show(m,n.b))
+    else if n.kind==n_index() then concat(cg_show(m,n.a),"[",cg_show(m,n.b),"]")
+    else if n.kind==n_len() then concat("len(",cg_show(m,n.a),")")
+    else if n.kind==n_cast() then concat(dp_scalar(md_node(m,n.a).kind),"(",cg_show(m,n.b),")")
+    else if n.kind==n_call() then
+      let args=loop (i=0, out=tx_empty()) while i<ast_list_len(m.ast,n.b)
+        next (i+1,concat(out,if i==0 then "" else ", ",cg_show(m,ast_list_at(m.ast,n.b,i)))) yield out in
+      concat(md_str(m,n.a),"(",args,")")
+    else dp_expr(tx_empty(),m.ast,id)
+
+fn cg_assertion(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState,
+    predicate:i64, borrow message:Arr u8 _, precondition:bool) -> CgState
+  = let s=cg_expr(m,fns,env,s,predicate) in if s.error>=0 then s else
+    let s=cg_ins(s,n_t_bool(),concat("xor i1 ",s.value.operand,", true")) in
+    cg_guard(s,s.value.operand,message,precondition)
+
+fn cg_field_index(borrow m:Mods, list:i64, name:i64) -> i64
+  = let text=md_str(m,name) in
+    loop (i=0, index=-1) while index<0 && i<ast_list_len(m.ast,list)
+      next (i+1,let field=md_node(m,ast_list_at(m.ast,list,i)) in if tx_equal(md_str(m,field.a),text) then i else -1) yield index
+fn cg_field_type(borrow m:Mods, fields:i64, index:i64) -> CgValue
+  = cg_declaration(m,md_node(m,ast_list_at(m.ast,fields,index)).b)
+fn cg_field_get(move s:CgState, borrow base:CgValue, borrow field:CgValue, index:i64) -> CgState
+  = cg_ins_value(s,field,concat("extractvalue ",cg_typed(base),", ",int_text(index)))
+
+fn cg_record_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64, literal:bool) -> CgState
+  = let fields=md_node(m,s.value.record).b in
+    let count=if literal then ast_list_len(m.ast,fields) else ast_list_len(m.ast,list) in
+    loop (i=0, code=s) while code.error<0 && i<count
+      next (i+1,let initial=code.value in
+        let field=md_node(m,ast_list_at(m.ast,fields,i)) in
+        let init=md_node(m,if literal then tc_named_node(m,list,field.a) else ast_list_at(m.ast,list,i)) in
+        let index=if literal then i else cg_field_index(m,fields,init.a) in
+        let lowered=cg_expr(m,fns,env,code,init.b) in if lowered.error>=0 then lowered else
+        let lowered=cg_own_view(lowered) in
+        let value=lowered.value in let previous=cg_field_type(m,fields,index) in
+        let lowered=if !literal && cg_managed(previous) then
+          let extracted=cg_field_get(lowered,initial,previous,index) in cg_release(extracted,extracted.value) else lowered in
+        cg_ins_value(lowered,initial,concat("insertvalue ",cg_typed(initial),", ",cg_typed(value),", ",int_text(index)))) yield code
+
+fn cg_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = if n.kind==n_reclit() then
+      let value=cg_value(n_t_rec(),"zeroinitializer") with { record=tc_find_record(m,n.a) } in
+      cg_record_fill(m,fns,env,s with { value=value },n.b,true)
+    else let base=cg_expr(m,fns,env,s,n.a) in if base.error>=0 then base else
+    if n.kind==n_with() then cg_record_fill(m,fns,env,base,n.b,false) else
+    let value=base.value in let fields=md_node(m,value.record).b in let index=cg_field_index(m,fields,n.b) in
+    let extracted=cg_field_get(base,value,cg_field_type(m,fields,index),index) in
+    cg_release(cg_retain(extracted,extracted.value),value)
+
+fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
+  = let n=md_node(m,id) in let kind=n.kind in let s=s with { line=n.line } in
+    if kind==n_num() then s with { value=cg_value(n_t_i64(),int_text(n.a)) }
+    else if kind==n_flt() then s with { value=cg_value(n_t_f64(),tx_hex("0x",n.a,16)) }
+    else if kind==n_bool() then s with { value=cg_value(n_t_bool(),if n.a==0 then "false" else "true") }
+    else if kind==n_byte() then s with { value=cg_value(n_t_u8(),int_text(n.a)) }
+    else if kind==n_str() then cg_string(s,id,md_str(m,n.a))
+    else if kind==n_var() then let value=cg_lookup(m,env,n.a) in cg_retain(s with { value=value },value)
+    else if kind==n_if() then cg_if(m,fns,env,s,n)
+    else if kind==n_call() then cg_call(m,fns,env,s,id,n)
+    else if kind==n_arrc() || kind==n_sum() then cg_range(m,fns,env,s,id,n)
+    else if kind==n_loop() then cg_loop(m,fns,env,s,n)
+    else if kind==n_reclit() || kind==n_field() || kind==n_with() then cg_record_expr(m,fns,env,s,n)
+    else if kind==n_check() then
+      let message=concat("check failed: ",cg_show(m,n.a)," at ",int_text(n.line),":",int_text(n.col)) in
+      let s=cg_assertion(m,fns,env,s,n.a,message,false) in if s.error>=0 then s else cg_expr(m,fns,env,s,n.b)
+    else if kind==n_len() || kind==n_index() then
+      let s=cg_expr(m,fns,env,s,n.a) in if s.error>=0 then s else let array=s.value in
+      if kind==n_len() then cg_release(cg_extract(s,array,1,n_t_i64()),array) else
+      let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else
+      let loaded=cg_load_element(s,array,s.value) in cg_release(cg_retain(loaded,loaded.value),array)
+    else if kind==n_bin() || kind==n_un() || kind==n_cast() || kind==n_let() || kind==n_using() then
+      let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let value=s.value in
+      if kind==n_using() then
+        let owner=cg_new_owner(cg_move_owner(m,env,s,n.b)) in
+        let binding=cg_bind(n.a,value) with { live=owner.value.operand } in
+        let body=cg_expr(m,fns,push(env,binding),owner,n.c) in
+        if body.error>=0 then body else cg_cleanup(m,cg_own_view(body),binding,n.e)
+      else if kind==n_let() then
+        let body=cg_expr(m,fns,push(env,cg_bind(n.a,value)),s,n.c) in
+        if body.error>=0 || !cg_managed(value) then body else cg_release(cg_own_view(body),value)
+      else if kind==n_cast() then cg_cast(s with { line=n.line },md_node(m,n.a).kind,value)
+      else if kind==n_un() then
+        if n.a==29 then cg_ins(s,n_t_bool(),concat("xor i1 ",value.operand,", true"))
+        else if value.ty==n_t_f64() then cg_ins(s,n_t_f64(),concat("fneg ",cg_typed(value)))
+        else cg_integer_arithmetic(s with { line=n.line },"sub","0",value.operand)
+      else if n.a==10 || n.a==11 then cg_short_circuit(m,fns,env,s,n)
+      else let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else cg_binary(s with { line=n.line },n.a,value,s.value)
+    else s with { error=id }
+
+type CgParams = { env:Arr CgBinding _, text:Arr u8 _, ok:bool }
+type CgSizes = { state:CgState, env:Arr CgBinding _ }
+fn cg_sizes(borrow m:Mods, move state:CgState, borrow params:Arr CgBinding _, list:i64) -> CgSizes
+  = loop (i=0, sizes=CgSizes { state=state, env=params }) while i<ast_list_len(m.ast,list)
+      next (i+1, let p=md_node(m,ast_list_at(m.ast,list,i)) in let t=md_node(m,p.b) in
+        if t.kind!=n_t_arr() || tx_equal(md_str(m,t.b),"_") || cg_binding_index(m,sizes.env,t.b)>=0 then sizes else
+        let measured=cg_extract(sizes.state,cg_binding(params,i).value,1,n_t_i64()) in
+        CgSizes { state=measured, env=push(sizes.env,cg_bind(t.b,measured.value)) }) yield sizes
+fn cg_owned_parameters(borrow m:Mods, move s:CgState, borrow params:Arr CgBinding _, list:i64) -> CgSizes
+  = loop (i=0, out=CgSizes { state=s, env=params }) while i<len(params)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,list,i)) in
+        if p.f!=1 || md_resource_type(m,p.b)<0 || i<0 || i>=len(out.env) then out else
+        let owner=cg_new_owner(out.state) in
+        let bound=cg_binding(params,i) with { live=owner.value.operand } in
+        CgSizes { state=owner, env=set(out.env,i,bound) }) yield out
+fn cg_preconditions(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64) -> CgState
+  = loop (i=0, code=s) while code.error<0 && i<ast_list_len(m.ast,list)
+      next (i+1,let param=md_node(m,ast_list_at(m.ast,list,i)) in
+        loop (j=0, checked=code) while checked.error<0 && j<ast_list_len(m.ast,param.c)
+          next (j+1,let predicate=ast_list_at(m.ast,param.c,j) in
+            cg_assertion(m,fns,env,checked,predicate,cg_show(m,predicate),true)) yield checked) yield code
+fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool, shared:bool) -> CgState
+  = let f=md_node(m,id) in let result=cg_declaration(m,f.c) in
+    let name=md_str(m,f.a) in let symbol=if entry then "@neo_entry" else cg_symbol(m,id) in
+    let diagnostic_id=if entry then len(m.ast.nodes)/11+id else id in
+    let start=CgState { text=tx_empty(), globals=tx_empty(), allocas=tx_empty(), serial=0, block=-1, value=cg_unit(), error=-1,
+      function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id) } in
+    let runtime_export=source_runtime && ast_flag(f,fl_exported()) && start.runtime in
+    if tc_abi_boundary(f) && cg_abi_reserved(name,len(target)>0,runtime_export) then start with { error=id } else
+    if ast_flag(f,fl_external()) then cg_write(start,concat("declare ",cg_return(result)," ",symbol,"(",cg_abi_types(m,f),")\n")) else
+    let p=loop (i=0, params=CgParams { env=arr(j in 0..0) cg_bind(-1,cg_unit()), text=tx_empty(), ok=true })
+      while params.ok && i<ast_list_len(m.ast,f.b)
+      next (i+1, let param=md_node(m,ast_list_at(m.ast,f.b,i)) in
+            let value=cg_declaration(m,param.b) with { operand=concat("%p",int_text(i)) } in
+            CgParams { env=push(params.env,cg_bind(param.a,value)),
+              text=concat(params.text,if i==0 then "" else ", ",cg_typed(value)), ok=cg_supported(value) }) yield params in
+    if !p.ok || !cg_supported(result) then start with { error=id } else
+    let exported=ast_flag(f,fl_exported()) in
+    ; Prevent loop idiom recognition from turning memcpy or memset into a
+    ; recursive call to the very runtime function being defined.
+    let libc=runtime_export && str_find(" memcpy memmove memset memcmp bcmp bzero calloc memset_pattern16 ",concat(" ",name," ")).present in
+    let header=concat("define ",if entry || exported then "" else if shared then "hidden " else "internal ",cg_return(result)," ",symbol,"(",p.text,")",
+      if libc then " \"no-builtins\"" else ""," {\nentry:\n") in
+    let owners=cg_owned_parameters(m,start,p.env,f.b) in
+    let sizes=cg_sizes(m,owners.state,owners.env,f.b) in
+    let ready=if entry || exported then cg_preconditions(m,fns,sizes.env,sizes.state,f.b) else sizes.state in
+    if ready.error>=0 then ready else
+    let body=if entry then
+      let call=concat("call ",cg_return(result)," ",cg_symbol(m,id),"(",p.text,")") in
+      if result.ty==n_t_unit() then cg_write(ready with { value=cg_unit() },concat("  ",call,"\n")) else cg_ins_value(ready,result,call)
+      else let lowered=cg_expr(m,fns,sizes.env,ready,f.d) in if lowered.error>=0 then lowered else
+        loop (i=len(p.env)-1, s=cg_own_view(lowered)) while i>=0
+          next (i-1,let binding=cg_binding(owners.env,i) in
+            cg_cleanup(m,s,binding,md_resource_drop(m,fns,binding.value.record))) yield s in
+    if body.error>=0 then body else
+    let finish=cg_write(body,concat("  ret ",if result.ty==n_t_unit() then "void" else cg_typed(body.value),"\n")) in
+    finish with { text=concat(header,finish.allocas,finish.text,"}\n\n") }
+
+fn cg_slot_refs(borrow element:CgValue, retain:bool) -> Arr u8 _
+  = let loaded=element with { operand="%value" } in
+    concat("define internal void ",cg_slot_symbol(element,retain),"(ptr %slot) {\nentry:\n",
+      "  %value = load ",cg_type_of(element),", ptr %slot, align 1\n",cg_ref_call(loaded,retain),"  ret void\n}\n")
+
+fn cg_array_runtime(source_runtime:bool) -> Arr u8 _
+  = concat(if source_runtime then "" else "declare ptr @ax_heap_alloc(i64)\ndeclare void @ax_free(ptr, i64)\n",
+      "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n",
+      "define internal void @neo.init.elements(ptr %payload, ptr %drop, i64 %stride, i64 %length) {\nentry:\n",
+      "  store ptr %drop, ptr %payload, align 8\n",
+      "  %stride_slot = getelementptr i8, ptr %payload, i64 8\n  store i64 %stride, ptr %stride_slot, align 8\n",
+      "  %length_slot = getelementptr i8, ptr %payload, i64 16\n  store i64 %length, ptr %length_slot, align 8\n",
+      "  ret void\n}\n",
+      "define internal void @neo.visit.elements(ptr %data, ptr %action, i64 %stride, i64 %length) {\nentry:\n  br label %test\n",
+      "test:\n  %i = phi i64 [ 0, %entry ], [ %next, %visit ]\n  %more = icmp ult i64 %i, %length\n",
+      "  br i1 %more, label %visit, label %done\nvisit:\n  %offset = mul i64 %i, %stride\n",
+      "  %slot = getelementptr i8, ptr %data, i64 %offset\n  call void %action(ptr %slot)\n",
+      "  %next = add nuw i64 %i, 1\n  br label %test\ndone:\n  ret void\n}\n",
+      "define internal void @neo_retain(%ax_arr %value) {\nentry:\n",
+      "  %control = extractvalue %ax_arr %value, 3\n  %bits = ptrtoint ptr %control to i64\n",
+      "  %counted = icmp ugt i64 %bits, 1\n  br i1 %counted, label %retain, label %done\n",
+      "retain:\n  %raw = and i64 %bits, -4\n  %address = inttoptr i64 %raw to ptr\n",
+      "  %old = atomicrmw add ptr %address, i64 1 monotonic\n  br label %done\ndone:\n  ret void\n}\n",
+      "define internal void @neo_release(%ax_arr %value) {\nentry:\n",
+      "  %control = extractvalue %ax_arr %value, 3\n  %bits = ptrtoint ptr %control to i64\n",
+      "  %counted = icmp ugt i64 %bits, 1\n  br i1 %counted, label %release, label %done\n",
+      "release:\n  %raw = and i64 %bits, -4\n  %address = inttoptr i64 %raw to ptr\n",
+      "  %old = atomicrmw sub ptr %address, i64 1 acq_rel\n  %last = icmp eq i64 %old, 1\n",
+      "  br i1 %last, label %destroy, label %done\ndestroy:\n",
+      "  %payload = getelementptr i8, ptr %address, i64 16\n",
+      "  %tag = and i64 %bits, 2\n  %aggregate = icmp ne i64 %tag, 0\n",
+      "  br i1 %aggregate, label %children, label %free\nchildren:\n",
+      "  %drop = load ptr, ptr %payload, align 8\n  %stride_slot = getelementptr i8, ptr %payload, i64 8\n",
+      "  %stride = load i64, ptr %stride_slot, align 8\n  %length_slot = getelementptr i8, ptr %payload, i64 16\n",
+      "  %length = load i64, ptr %length_slot, align 8\n  %data = getelementptr i8, ptr %payload, i64 32\n",
+      "  call void @neo.visit.elements(ptr %data, ptr %drop, i64 %stride, i64 %length)\n  br label %free\n",
+      "free:\n  call void @ax_free(ptr %payload, i64 0)\n  br label %done\ndone:\n  ret void\n}\n",
+      cg_slot_refs(cg_value(n_t_arr(),""),true),cg_slot_refs(cg_value(n_t_arr(),""),false))
+
+fn cg_view_runtime() -> Arr u8 _
+  = concat("define internal %ax_arr @neo_own_view(%ax_arr %value) {\nentry:\n",
+      "  %control = extractvalue %ax_arr %value, 3\n  %borrowed = icmp eq ptr %control, null\n",
+      "  br i1 %borrowed, label %copy, label %keep\nkeep:\n  ret %ax_arr %value\ncopy:\n",
+      "  %data = extractvalue %ax_arr %value, 0\n  %length = extractvalue %ax_arr %value, 1\n",
+      "  %owned = call ptr @ax_heap_alloc(i64 %length)\n",
+      "  call void @llvm.memcpy.p0.p0.i64(ptr %owned, ptr %data, i64 %length, i1 false)\n",
+      "  %header = getelementptr i8, ptr %owned, i64 -16\n",
+      "  %buffer = insertvalue %ax_arr %value, ptr %owned, 0\n  %flag = insertvalue %ax_arr %buffer, i64 1, 2\n",
+      "  %result = insertvalue %ax_arr %flag, ptr %header, 3\n  ret %ax_arr %result\n}\n")
+
+fn cg_failure_runtime(executable:bool, source_runtime:bool) -> Arr u8 _
+  = if executable then concat(if source_runtime then "" else "declare void @ax_trap(ptr)\ndeclare void @ax_precondition_failed(ptr)\ndeclare void @ax_exit(i64)\n",
+      "define internal void @neo_runtime_trap(ptr %message) noreturn {\n  call void @ax_trap(ptr %message)\n  unreachable\n}\n",
+      "define internal void @neo_precondition_trap(ptr %message) noreturn {\n  call void @ax_precondition_failed(ptr %message)\n",
+      "  call void @ax_exit(i64 3)\n  unreachable\n}\n") else concat("declare void @llvm.trap()\n",
+      "define internal void @neo_runtime_trap(ptr %message) noreturn {\n  call void @llvm.trap()\n  unreachable\n}\n",
+      "define internal void @neo_precondition_trap(ptr %message) noreturn {\n  call void @llvm.trap()\n  unreachable\n}\n")
+
+fn cg_byte_runtime() -> Arr u8 _
+  = "define internal i1 @neo.bytes.equal(%ax_arr %a, %ax_arr %b) {
+entry:
+  %n = extractvalue %ax_arr %a, 1
+  %m = extractvalue %ax_arr %b, 1
+  %pa = extractvalue %ax_arr %a, 0
+  %pb = extractvalue %ax_arr %b, 0
+  %same = icmp eq i64 %n, %m
+  br i1 %same, label %loop, label %no
+loop:
+  %i = phi i64 [ 0, %entry ], [ %next, %byte ]
+  %done = icmp eq i64 %i, %n
+  br i1 %done, label %yes, label %byte
+byte:
+  %ap = getelementptr i8, ptr %pa, i64 %i
+  %bp = getelementptr i8, ptr %pb, i64 %i
+  %x = load i8, ptr %ap, align 1
+  %y = load i8, ptr %bp, align 1
+  %equal = icmp eq i8 %x, %y
+  %next = add i64 %i, 1
+  br i1 %equal, label %loop, label %no
+yes:
+  ret i1 true
+no:
+  ret i1 false
+}
+
+define internal void @neo.bytes.write(ptr %data, i64 %number, i64 %width) {
+entry:
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %next, %byte ]
+  %done = icmp eq i64 %i, %width
+  br i1 %done, label %exit, label %byte
+byte:
+  %offset = mul i64 %i, 8
+  %word = lshr i64 %number, %offset
+  %value = trunc i64 %word to i8
+  %dest = getelementptr i8, ptr %data, i64 %i
+  store i8 %value, ptr %dest, align 1
+  %next = add i64 %i, 1
+  br label %loop
+exit:
+  ret void
+}
+
+define internal i64 @neo.bytes.read(ptr %data, i64 %width) {
+entry:
+  switch i64 %width, label %invalid [
+    i64 1, label %one
+    i64 2, label %two
+    i64 4, label %four
+    i64 8, label %eight
+  ]
+one:
+  %a = load i8, ptr %data, align 1
+  %a64 = zext i8 %a to i64
+  ret i64 %a64
+two:
+  %b = load i16, ptr %data, align 1
+  %b64 = zext i16 %b to i64
+  ret i64 %b64
+four:
+  %c = load i32, ptr %data, align 1
+  %c64 = zext i32 %c to i64
+  ret i64 %c64
+eight:
+  %d = load i64, ptr %data, align 1
+  ret i64 %d
+invalid:
+  unreachable
+}
+"
+
+fn cg_record_refs(borrow m:Mods, id:i64, retain:bool) -> Arr u8 _
+  = let fields=md_node(m,id).b in let record=cg_value(n_t_rec(),"%value") with { record=id } in
+    let body=loop (i=0, out=tx_empty()) while i<ast_list_len(m.ast,fields)
+      next (i+1,let field=cg_field_type(m,fields,i) with { operand=concat("%field",int_text(i)) } in
+        if !cg_managed(field) then out else
+        concat(out,"  ",field.operand," = extractvalue ",cg_typed(record),", ",int_text(i),"\n",cg_ref_call(field,retain))) yield out in
+    concat("define internal void ",cg_ref_name(record,retain),"(",cg_typed(record),") {\nentry:\n",body,"  ret void\n}\n",
+      cg_slot_refs(record,retain))
+
+type CgLayout = { fields:Arr u8 _, ok:bool }
+fn cg_record_layout(borrow m:Mods, move p:CgProgram, module:i64, id:i64) -> CgProgram
+  = let fields=md_node(m,id).b in
+    let layout=loop (i=0, layout=CgLayout { fields=tx_empty(), ok=true }) while layout.ok && i<ast_list_len(m.ast,fields)
+      next (i+1,let field=cg_field_type(m,fields,i) in
+        CgLayout { fields=concat(layout.fields,if i==0 then "" else ", ",cg_type_of(field)), ok=cg_supported(field) }) yield layout in
+    if !layout.ok then CgProgram { text=tx_empty(), report=TcReport { result=tc_unsupported(id,"record layout outside the supported subset"), module=module } } else
+    p with { text=concat(p.text,cg_record_name(id)," = type { ",layout.fields," }\n") }
+
+fn cg_partition_module(borrow selected:Arr i64 _, module:i64, partition:i64) -> bool
+  = partition!=2 || tx_at(selected,module)==1
+
+fn cg_records(borrow m:Mods, move p:CgProgram) -> CgProgram
+  = let layouts=loop (k=0, code=p) while code.report.result.value.ty>0 && k<len(m.paths)
+      next (k+1,let ids=md_list(m.types,k) in
+        loop (i=0, out=code) while out.report.result.value.ty>0 && i<len(ids)
+          next (i+1,cg_record_layout(m,out,k,tx_at(ids,i))) yield out) yield code in
+    if layouts.report.result.value.ty<=0 then layouts else
+    ; LLVM permits forward references in named layouts, but a by-value call
+    ; in an ownership helper requires the argument layout to be defined first.
+    let text=loop (k=0, out=layouts.text) while k<len(m.paths)
+      next (k+1,let ids=md_list(m.types,k) in loop (i=0, code=out) while i<len(ids)
+        next (i+1,let id=tx_at(ids,i) in concat(code,cg_record_refs(m,id,true),cg_record_refs(m,id,false))) yield code) yield out in
+    layouts with { text=text }
+
+fn cg_import_function(borrow m:Mods, id:i64) -> Arr u8 _
+  = let f=md_node(m,id) in
+    let parameters=loop (i=0, text="") while i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        concat(text,if i==0 then "" else ", ",cg_type_of(cg_declaration(m,p.b)))) yield text in
+    let rest=if !ast_flag(f,fl_variadic()) then "" else if len(parameters)==0 then "..." else ", ..." in
+    concat("declare ",if tc_abi_boundary(f) then "" else "hidden ",cg_return(cg_declaration(m,f.c)),
+      " ",cg_symbol(m,id),"(",parameters,rest,")\n")
+
+type CgPieces = { pieces:Arr Arr u8 _ _, report:TcReport }
+
+fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool,
+                   borrow selected:Arr i64 _, partition:i64) -> CgProgram
+  = let fns=tc_functions(m) in
+    let runtime=if source_runtime then cg_runtime_check(m,fns) else TcReport { result=tc_type(n_t_unit()), module=-1 } in
+    if runtime.result.value.ty<=0 then CgProgram { text=tx_empty(), report=runtime } else
+    let views=loop (i=0, found=partition!=0) while !found && i<len(m.ast.nodes)/11
+      next (i+1,let n=md_node(m,i) in n.kind==n_call() &&
+        (tx_equal(md_str(m,n.a),"view") || tx_equal(md_str(m,n.a),"handler_call"))) yield found in
+    let header=concat("source_filename = \"neo\"\n",if len(target)==0 then "" else concat("target triple = \"",target,"\"\n"),
+      "\n%ax_arr = type { ptr, i64, i64, ptr }\n\n",
+      if partition==2 || (len(target)>0 && !source_runtime) then "@ax_runtime_state = external hidden global [256 x i64]\n"
+      else concat("@ax_runtime_state = ",if partition==1 then "hidden" else "internal"," global [256 x i64] zeroinitializer, align ",
+        if str_starts(target,"x86_64-") && str_find(target,"-linux").present then "4096\n" else "16\n"),
+      if partition==2 then "@ax_native_alloc_stats = external hidden constant i1\n" else
+      concat("@ax_native_alloc_stats = ",if len(target)>0 then "hidden" else "internal",
+        " constant i1 ",if allocation_stats then "true\n" else "false\n"),
+      cg_failure_runtime(len(target)>0,source_runtime),
+      "declare i64 @llvm.bswap.i64(i64)\ndeclare i64 @llvm.cttz.i64(i64, i1)\ndeclare double @llvm.sqrt.f64(double)\n",
+      "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)\n",
+      "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)\n",
+      "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n\n",cg_byte_runtime()) in
+    ; A library generic can be instantiated with an application record. Keep
+    ; those layouts available to both LLVM modules for the shared ABI.
+    let start=cg_records(m,CgProgram { text=header, report=TcReport { result=tc_type(n_t_unit()), module=-1 } }) in
+    let p=loop (k=0, p=CgPieces { pieces=push(md_words(),start.text),report=start.report })
+      while p.report.result.value.ty>0 && k<len(m.paths)
+      next (k+1,if !cg_partition_module(selected,k,partition) then p else let ids=md_list(m.fns,k) in
+        loop (i=0, out=p) while out.report.result.value.ty>0 && i<len(ids)
+          next (i+1,let id=tx_at(ids,i) in
+            if partition==1 && tx_at(selected,k)==1 then out with { pieces=push(out.pieces,cg_import_function(m,id)) } else
+            let function=cg_function(m,fns,id,false,target,views,source_runtime,partition==2) in
+            if function.error>=0 then out with { report=TcReport { result=tc_unsupported(function.error,"LLVM lowering outside the supported subset"), module=k } }
+            else out with { pieces=push(push(out.pieces,function.globals),function.text) }) yield out) yield p in
+    if p.report.result.value.ty<=0 then CgProgram { text="",report=p.report } else
+    let module=md_entry_module(m) in let id=md_find_decl(m,fns,bk_get(m.local,module,"main")) in
+    let entry=if partition==2 then p else let code=cg_function(m,fns,id,true,target,views,source_runtime,false) in
+      if code.error>=0 then p with { report=TcReport { result=tc_unsupported(code.error,"LLVM lowering outside the supported subset"), module=module } }
+      else p with { pieces=push(push(p.pieces,code.globals),code.text) } in
+    if entry.report.result.value.ty<=0 then CgProgram { text="",report=entry.report } else
+    let text=str_concat_parts(entry.pieces) in
+    let text=concat(text,na_runtime(target,text,partition),na_crypto(target,text),
+      if !source_runtime && str_find(text,"call ptr @ax_alloc(").present then "declare ptr @ax_alloc(i64)\n" else "",
+      if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "") in
+    let p=CgProgram { text=text,report=entry.report } in
+    if str_find(text,"@neo_own_view(").present then p with { text=concat(text,cg_array_runtime(source_runtime),cg_view_runtime()) }
+    else if str_find(text,"@neo_retain(").present || str_find(text,"@neo_release(").present ||
+      str_find(text,"@ax_heap_alloc(").present || str_find(text,"define %ax_arr @neo_entry(").present then
+      p with { text=concat(text,cg_array_runtime(source_runtime)) } else p with { text=text }
+
+fn cg_program(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool) -> CgProgram
+  = cg_program_part(m,target,allocation_stats,source_runtime,tx_ints(),0)

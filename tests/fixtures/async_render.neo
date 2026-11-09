@@ -1,0 +1,14 @@
+import "std:http_async"
+import "std:http_client"
+private effect(fs,net,env,time,process) fn deferred(capture:Arr u8 n)->Arr u8 _
+  = let early=http_render_write(web_html("<p>Upstream request starting</p>")) in let request=web_request(capture,0) in let port=int_parse(web_query_get(request.query,"port").value) in let deadline=deadline_after(3000) in
+    let response=http_request("127.0.0.1",port.value,"GET",web_query_get(request.query,"target").value,"",3000,1048576) in
+    concat("<p>",if response.ok then html_escape(response.body) else concat("failed read ",int_text(response.error.code)," ",response.error.message),"</p>")
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/wait") then let deadline=deadline_after(4000) in let begin=http_render_start(web_html("<!doctype html><html><body><p>Shell ready</p>"),
+      arr(i in 0..1) http_deferred(raw,function(deferred)),deadline.value) in
+      if begin.ok then begin.value else web_encode(web_reply(503,"Busy","text/plain"),false) else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main(port:i64)->i64
+  = let configured=http_server_options(1000,true) in check configured.ok in serve_effect(port,handler)

@@ -1,0 +1,43 @@
+; Reference models for native word and byte intrinsics and JSON scalar decoding.
+import "std:io"
+import "std:json"
+import "std:strings"
+
+fn rp_trailing_zeros(n:i64) -> i64
+  = loop (word=n, bits=0) while bits<64 && bit_and(word,1)==0
+      next (shift_right(word,1),bits+1) yield bits
+
+fn rp_read(borrow bytes:Arr u8 _, at:i64, width:i64) -> i64
+  = loop (i=0, result=0) while i<width next (i+1,
+      bit_or(result,shift_left(str_byte(bytes,at+i),i*8))) yield result
+
+fn rp_equal(borrow left:Arr u8 _, borrow right:Arr u8 _) -> bool
+  = len(left)==len(right) && loop (i=0, ok=true) while ok && i<len(left)
+      next (i+1,str_byte(left,i)==str_byte(right,i)) yield ok
+
+fn rp_binary(seed:i64{seed>=0}) -> bool
+  = let width=if seed%4==0 then 1 else if seed%4==1 then 2 else if seed%4==2 then 4 else 8 in
+    let at=seed%25 in
+    let original=arr(i in 0..32) u8(i*37+seed*11) in
+    let word=wrapping_mul(seed,6364136223846793005) in
+    let changed=byte_write_le(original,at,word,width) in
+    let expected=arr(i in 0..32) if at<=i && i<at+width then u8(shift_right(word,8*(i-at))) else u8(i*37+seed*11) in
+    let different=arr(i in 0..32) u8(i*37+seed*11+1) in
+    rp_equal(changed,expected) && byte_equal(changed,expected) && !byte_equal(original,different) &&
+      byte_read_le(changed,at,width)==rp_read(changed,at,width) &&
+      byte_read_le(original,at,width)==rp_read(original,at,width)
+
+fn rp_json(value:i64) -> bool
+  = let source=concat("{\"value\":",int_text(value),",\"flag\":true}") in
+    let parsed=json_parse(source) in
+    let result=json_int(json_get(parsed.value,"value").value) in
+    parsed.ok && result.ok && result.value==value && !json_parse(concat(source,"?")).ok
+
+effect(fs) fn main() -> unit
+  = let bits=loop (i=0, ok=true) while i<64 && ok next (i+1,
+      let one=shift_left(1,i) in count_trailing_zeros(one)==rp_trailing_zeros(one) &&
+      count_trailing_zeros(wrapping_sub(0,one))==rp_trailing_zeros(wrapping_sub(0,one))) yield ok in
+    let samples=loop (i:i64{i>=0}=0, ok=true) while i<257 && ok
+      next (i+1,rp_binary(i) && rp_json(wrapping_mul(i,-147673950761))) yield ok in
+    check bits && count_trailing_zeros(0)==64 && samples in
+    let result=print_out("Runtime properties OK\n") in check result.ok in noop()

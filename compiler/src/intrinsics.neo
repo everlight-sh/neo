@@ -1,0 +1,63 @@
+; Scalar primitive signatures shared by type checking and LLVM lowering.
+import "std:strings"
+import "ast.neo"
+import "text.neo"
+
+type BiSignature = { result:i64, params:Arr i64 _, unsafe_call:bool, message:Arr u8 _ }
+fn bi_fixed(result:i64, move params:Arr i64 _, unsafe_call:bool, borrow message:Arr u8 _) -> BiSignature
+  = BiSignature { result=result, params=params, unsafe_call=unsafe_call, message=message }
+fn bi_system(result:i64, move params:Arr i64 _, borrow name:Arr u8 _) -> BiSignature
+  = let text=loop (i=0, out=tx_empty()) while i<len(params)
+      next (i+1, let ty=tx_at(params,i) in concat(out,if i==0 then "" else ", ",
+        if ty==n_t_ptr() then "ptr" else if ty==n_t_f64() then "f64" else if ty==n_t_u8() then "u8"
+        else if ty==n_t_i32() then "i32" else "i64")) yield out in
+    let pure=tx_equal(name,"float_bits") || tx_equal(name,"bits_float") in
+    bi_fixed(result,params,!pure,concat(name," expects (",text,")"))
+fn bi_ends(borrow name:Arr u8 _, borrow suffix:Arr u8 _) -> bool
+  = len(name)>=len(suffix) && bytes_match_at(name,len(name)-len(suffix),suffix)
+fn bi_memory_type(borrow name:Arr u8 _) -> i64
+  = if bi_ends(name,"_i32") then n_t_i32() else if bi_ends(name,"_i64") then n_t_i64()
+    else if bi_ends(name,"_ptr") then n_t_ptr() else n_t_u8()
+fn bi_load(borrow name:Arr u8 _) -> bool = str_starts(name,"load_") || str_starts(name,"volatile_load_")
+fn bi_store(borrow name:Arr u8 _) -> bool = str_starts(name,"store_") || str_starts(name,"volatile_store_")
+fn bi_bytes(borrow name:Arr u8 _) -> bool
+  = tx_equal(name,"byte_equal") || tx_equal(name,"byte_copy") || tx_equal(name,"byte_read_le") ||
+    tx_equal(name,"byte_write_le") || tx_equal(name,"byte_slice")
+
+fn bi_crypto(borrow name:Arr u8 _) -> bool
+  = str_find(" aes_round_low aes_round_high aes_final_round_low aes_final_round_high carryless_mul_low carryless_mul_high block_xor_low block_xor_high ",
+    concat(" ",name," ")).present
+
+fn bi_signature(borrow name:Arr u8 _) -> BiSignature
+  = let i=n_t_i64() in let p=n_t_ptr() in let f=n_t_f64() in let u=n_t_unit() in
+    let two=push(push(tx_ints(),i),i) in let pointer_offset=push(push(tx_ints(),p),i) in
+    if str_find(" wrapping_add wrapping_sub wrapping_mul mul_high bit_and bit_or bit_xor shift_left shift_right arithmetic_shift_right ",
+      concat(" ",name," ")).present then bi_fixed(i,two,false,concat(name," requires two i64 arguments"))
+    else if tx_equal(name,"byte_swap64") || tx_equal(name,"count_trailing_zeros") then
+      bi_fixed(i,push(tx_ints(),i),false,concat(name," requires one i64 argument"))
+    else if tx_equal(name,"sqrt") then bi_fixed(f,push(tx_ints(),f),false,"sqrt takes one f64")
+    else if tx_equal(name,"aes_hardware") then bi_fixed(n_t_bool(),tx_ints(),false,"aes_hardware takes no arguments")
+    else if bi_crypto(name) then bi_system(i,if str_starts(name,"carryless") then two else arr(j in 0..4) i,name)
+    else if tx_equal(name,"allocation_stats_enabled") then bi_fixed(n_t_bool(),tx_ints(),false,"allocation_stats_enabled takes no arguments")
+    else if tx_equal(name,"float_bits") then bi_system(i,push(tx_ints(),f),name)
+    else if tx_equal(name,"bits_float") then bi_system(f,push(tx_ints(),i),name)
+    else if tx_equal(name,"ptr_to_i64") then bi_system(i,push(tx_ints(),p),name)
+    else if tx_equal(name,"ptr_from_i64") || tx_equal(name,"stack_alloc") then bi_system(p,push(tx_ints(),i),name)
+    else if tx_equal(name,"ptr_add") then bi_system(p,pointer_offset,name)
+    else if tx_equal(name,"runtime_state") then bi_system(p,tx_ints(),name)
+    else if tx_equal(name,"fork_syscall") then bi_system(i,tx_ints(),name)
+    else if tx_equal(name,"spawn_thread") then bi_system(i,arr(j in 0..2) p,name)
+    else if tx_equal(name,"fiber_swap") then bi_system(u,arr(j in 0..2) p,name)
+    else if tx_equal(name,"fiber_init") then bi_system(u,arr(j in 0..4) p,name)
+    else if tx_equal(name,"handler_call") then bi_system(n_t_arr(),push(push(push(tx_ints(),p),p),i),name)
+    else if tx_equal(name,"counter_ticks") || tx_equal(name,"counter_frequency") then bi_system(i,tx_ints(),name)
+    else if tx_equal(name,"invoke_finalizer") then bi_system(u,push(push(tx_ints(),p),p),name)
+    else if tx_equal(name,"invoke_region") then bi_system(u,push(push(push(tx_ints(),p),p),i),name)
+    else if tx_equal(name,"invoke_clock_gettime") then bi_system(n_t_i32(),push(push(push(tx_ints(),p),n_t_i32()),p),name)
+    else if tx_equal(name,"atomic_load_i32") || tx_equal(name,"atomic_load_i64") then bi_system(bi_memory_type(name),pointer_offset,name)
+    else if tx_equal(name,"atomic_store_i32") || tx_equal(name,"atomic_store_i64") then bi_system(u,push(pointer_offset,bi_memory_type(name)),name)
+    else if tx_equal(name,"atomic_compare_exchange_i64") then bi_system(i,push(push(pointer_offset,i),i),name)
+    else if bi_load(name) then bi_system(bi_memory_type(name),pointer_offset,name)
+    else if bi_store(name) then bi_system(u,push(pointer_offset,bi_memory_type(name)),name)
+    else if tx_equal(name,"syscall6") then bi_system(i,arr(j in 0..7) i,name)
+    else bi_fixed(0,tx_ints(),false,"")

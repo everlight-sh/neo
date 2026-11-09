@@ -1,0 +1,135 @@
+; Format raw source spans so literal spelling and comment text survive.
+; Re-lex the result to guard against spacing that changes language tokens.
+import "std:strings"
+import "std:unicode"
+import "lex.neo"
+import "text.neo"
+
+type FfResult = { output:Arr u8 _, error:Arr u8 _ }
+type FfLine = { spans:Arr i64 _, at:i64, multiline:bool }
+type FfSpan = { start:i64, end:i64 }
+
+fn ff_span(borrow spans:Arr i64 _, i:i64) -> FfSpan
+  = FfSpan { start=tx_at(spans,i*2), end=tx_at(spans,i*2+1) }
+fn ff_slice(borrow src:Arr u8 _, start:i64, end:i64) -> Arr u8 _
+  = if start>=0 && start<=end && end<=len(src) then byte_slice(src,start,end) else tx_empty()
+fn ff_token(borrow src:Arr u8 _, span:FfSpan) -> Arr u8 _ = ff_slice(src,span.start,span.end)
+
+fn ff_code(borrow src:Arr u8 _, at:i64) -> i64
+  = let b=tx_byte(src,at) in if b<128 then b else unicode_next(src,at).code
+fn ff_space(code:i64) -> bool = unicode_space(code) || (code>=28 && code<=31)
+fn ff_line_break(code:i64) -> bool
+  = (code>=10 && code<=13) || (code>=28 && code<=30) || code==133 || code==8232 || code==8233
+fn ff_line_end(borrow src:Arr u8 _, at:i64) -> i64
+  = loop (i=at) while i<len(src) && !ff_line_break(ff_code(src,i)) next (i+lx_width(src,i)) yield i
+
+fn ff_previous_rune(borrow src:Arr u8 _, end:i64) -> i64
+  = loop (i=end-1) while i>0 && tx_byte(src,i)>=128 && tx_byte(src,i)<192 next (i-1) yield i
+fn ff_rtrim(borrow src:Arr u8 _) -> Arr u8 _
+  = let end=loop (i=len(src)) while i>0 && ff_space(ff_code(src,ff_previous_rune(src,i)))
+      next (ff_previous_rune(src,i)) yield i in ff_slice(src,0,end)
+fn ff_alnum_end(borrow word:Arr u8 _) -> bool
+  = if len(word)==0 then false else let c=ff_code(word,ff_previous_rune(word,len(word))) in
+    lx_digit(c) || (c>=65 && c<=90) || (c>=97 && c<=122) || (c>=128 && unicode_word(c))
+
+; The formatting scanner keeps exponent spelling together even where the
+; language lexer treats it as multiple tokens, matching the reference.
+fn ff_number_end(borrow src:Arr u8 _, i:i64) -> i64
+  = let j=lx_digits(src,i) in
+    let j=if tx_byte(src,j)==46 && lx_digit(tx_byte(src,j+1)) then lx_digits(src,j+1) else j in
+    let e=tx_byte(src,j) in let sign=tx_byte(src,j+1) in
+    let k=if sign==43 || sign==45 then j+2 else j+1 in
+    if (e==101 || e==69) && lx_digit(tx_byte(src,k)) then lx_digits(src,k) else j
+
+fn ff_quote_end(borrow src:Arr u8 _, start:i64, stop:i64) -> i64
+  = let quote=tx_byte(src,start) in
+    loop (i=start+1) while i<stop && tx_byte(src,i)!=quote
+      next (if tx_byte(src,i)==92 then i+1+lx_width(src,i+1) else i+lx_width(src,i)) yield i
+
+fn ff_scan_step(borrow src:Arr u8 _, stop:i64, move line:FfLine) -> FfLine
+  = let i=line.at in let c=tx_byte(src,i) in
+    if ff_space(ff_code(src,i)) then line with { at=i+lx_width(src,i) } else
+    let quoted=c==34 || c==39 in
+    let end=if c==59 || c==35 then stop else if quoted then ff_quote_end(src,i,stop)+1
+      else if lx_digit(c) then ff_number_end(src,i)
+      else if lx_word_at(src,i)>0 then loop (j=i) while j<stop && lx_word_at(src,j)>0
+        next (j+lx_word_at(src,j)) yield j
+      else let symbol=lx_symbol_at(src,i) in
+        i+(if symbol>0 then len(lx_sym_text(symbol)) else lx_width(src,i)) in
+    if end>stop && quoted then line with { multiline=true } else
+    FfLine { spans=push(push(line.spans,i),end), at=end, multiline=false }
+
+fn ff_scan(borrow src:Arr u8 _, start:i64, stop:i64) -> FfLine
+  = loop (line=FfLine { spans=tx_ints(), at=start, multiline=false }) while !line.multiline && line.at<stop
+      next (ff_scan_step(src,stop,line)) yield line
+
+type FfGeneric = { opens:Arr i64 _, matched:Arr i64 _ }
+fn ff_generics(borrow src:Arr u8 _, borrow spans:Arr i64 _) -> Arr i64 _
+  = let found=loop (i=1, marks=FfGeneric { opens=tx_ints(), matched=tx_ints() }) while i<len(spans)/2
+      next (i+1,let current=ff_span(spans,i) in let previous=ff_span(spans,i-1) in
+        let word=ff_token(src,current) in let prev=ff_token(src,previous) in
+        if tx_equal(word,"<") && previous.end==current.start && (tx_equal(prev,"::") || ff_alnum_end(prev)) then
+          marks with { opens=push(marks.opens,i) }
+        else if tx_equal(word,">") && len(marks.opens)>0 then
+          let last=len(marks.opens)-1 in
+          FfGeneric { opens=tx_take(marks.opens,last), matched=push(push(marks.matched,tx_at(marks.opens,last)),i) }
+        else marks) yield marks in found.matched
+
+fn ff_marked(borrow marks:Arr i64 _, index:i64) -> bool
+  = loop (i=0, found=false) while i<len(marks) && !found next (i+1,tx_at(marks,i)==index) yield found
+
+fn ff_one_of(borrow word:Arr u8 _, borrow options:Arr u8 _) -> bool
+  = len(word)>0 && !tx_has(word,32) && str_find(options,concat(" ",word," ")).present
+
+fn ff_gap(borrow word:Arr u8 _, borrow prev:Arr u8 _, borrow marks:Arr i64 _, i:i64, unary:bool) -> bool
+  = i>0 && !unary &&
+    !ff_one_of(word," ) ] , . : :: ? [ ") && !ff_one_of(prev," ( [ . :: ") &&
+    !(tx_equal(word,"(") && (ff_alnum_end(prev) || ff_one_of(prev," ) ] > ")) &&
+      !ff_one_of(prev," loop sum arr effect ")) &&
+    !(ff_marked(marks,i) && ff_one_of(word," < > ")) &&
+    !(tx_equal(prev,"<") && ff_marked(marks,i-1))
+
+fn ff_indent(borrow src:Arr u8 _, start:i64) -> Arr u8 _
+  = let width=loop (i=start, w=0) while tx_byte(src,i)==32 || tx_byte(src,i)==9
+      next (i+1,if tx_byte(src,i)==9 then w+2-w%2 else w+1) yield w in
+    check width>=0 in arr(i in 0..(width+width%2)) ' '
+
+fn ff_line(borrow src:Arr u8 _, start:i64, borrow spans:Arr i64 _) -> Arr u8 _
+  = let marks=ff_generics(src,spans) in
+    loop (i=0, text=ff_indent(src,start), prev=tx_empty(), unary=false) while i<len(spans)/2
+      next (i+1,let word=ff_token(src,ff_span(spans,i)) in
+        if tx_byte(word,0)==59 || tx_byte(word,0)==35 then concat(text,if i>0 then "  " else "",ff_rtrim(word))
+        else concat(text,if ff_gap(word,prev,marks,i,unary) then " " else "",word),
+        ff_token(src,ff_span(spans,i)),
+        let word=ff_token(src,ff_span(spans,i)) in tx_equal(word,"!") ||
+          (tx_equal(word,"-") && (i==0 || ff_one_of(prev," ( , = => then else in + - * / % && || ")))) yield text
+
+type FfText = { output:Arr u8 _, at:i64, blanks:i64, multiline:bool }
+fn ff_text_step(borrow src:Arr u8 _, move text:FfText) -> FfText
+  = let end=ff_line_end(src,text.at) in let line=ff_scan(src,text.at,end) in
+    let next_line=end+lx_width(src,end) in
+    if line.multiline then text with { multiline=true }
+    else if len(line.spans)==0 then text with { at=next_line, blanks=text.blanks+1,
+      output=if text.blanks<2 then push(text.output,'\n') else text.output }
+    else FfText { output=concat(text.output,ff_line(src,text.at,line.spans),"\n"), at=next_line, blanks=0, multiline=false }
+
+fn ff_same_tokens(borrow before:Lx, borrow after:Lx) -> bool
+  = len(before.toks)==len(after.toks) && tx_equal(before.text,after.text) &&
+    loop (i=0, same=true) while same && i<lx_tok_count(before.toks)
+      next (i+1,let a=lx_tok(before.toks,i) in let b=lx_tok(after.toks,i) in
+        a.kind==b.kind && a.code==b.code && a.size==b.size) yield same
+
+fn ff_error(borrow lexed:Lx) -> Arr u8 _
+  = concat(int_text(lexed.eline),":",int_text(lexed.ecol),": ",lexed.err)
+
+fn ff_format(borrow source:Arr u8 _) -> FfResult
+  = let before=lx_lex(source) in
+    if !before.ok then FfResult { output=source, error=ff_error(before) } else
+    let text=loop (s=FfText { output=tx_empty(),at=0,blanks=0,multiline=false })
+      while !s.multiline && s.at<len(source) next (ff_text_step(source,s)) yield s in
+    if text.multiline then FfResult { output=source, error=tx_empty() } else
+    let output=push(ff_rtrim(text.output),'\n') in
+    if tx_equal(source,output) then FfResult { output=source, error=tx_empty() } else
+    let after=lx_lex(output) in
+    FfResult { output=if after.ok && ff_same_tokens(before,after) then output else source,
+      error=if after.ok then tx_empty() else ff_error(after) }

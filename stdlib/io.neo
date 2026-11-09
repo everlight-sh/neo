@@ -16,6 +16,11 @@ effect(fs) fn file_lock (fd: i64, exclusive: bool) -> IntResult
 effect(fs) fn file_sync (fd: i64) -> IntResult
   = let result = rt_fsync(fd) in if result < 0 then int_error(i64(load_i32(rt_errno(), 0)), "sync failed", 0) else int_ok(0)
 
+; Full file/directory metadata sync, including the drive cache on macOS.
+; Unlike file_sync_data this also uses fsync, rather than fdatasync, on Linux.
+effect(fs) fn file_sync_full(fd:i64) -> IntResult
+  = let result=rt_sync_full(fd) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"full sync failed",0) else int_ok(0)
+
 ; File contents and retrieval metadata are durable before success. This does
 ; not publish directory-entry changes; sync the containing directory as well.
 effect(fs) fn file_sync_data(fd:i64) -> IntResult

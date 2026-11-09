@@ -1,0 +1,61 @@
+import "std:io"
+import "std:json"
+import "std:strings"
+import "paths.neo"
+import "text.neo"
+
+type LsInput = { bytes:Arr u8 _, eof:bool }
+type LsLine = { input:LsInput, bytes:Arr u8 _, error:Arr u8 _, done:bool }
+type LsFrame = { input:LsInput, bytes:Arr u8 _, error:Arr u8 _, eof:bool }
+effect(fs) fn ls_fill(borrow input:LsInput) -> LsInput
+  = let read=file_read_chunk(0,65536) in
+    if !read.ok || len(read.value)==0 then input with { eof=true }
+    else input with { bytes=concat(input.bytes,read.value) }
+
+fn ls_lf(borrow bytes:Arr u8 _) -> i64
+  = loop (i=0) while i<len(bytes) && tx_byte(bytes,i)!=10 next (i+1) yield i
+effect(fs) fn ls_line(borrow input:LsInput) -> LsLine
+  = let state=loop (current=input) while !current.eof && len(current.bytes)<=1024 && ls_lf(current.bytes)==len(current.bytes)
+      next (ls_fill(current)) yield current in
+    let end=ls_lf(state.bytes) in
+    if end>=1024 then LsLine { input=state,bytes="",error="oversized header",done=true }
+    else if end==len(state.bytes) then LsLine { input=state,bytes="",error="",done=true }
+    else let trimmed=if end>0 && tx_byte(state.bytes,end-1)==13 then end-1 else end in
+      LsLine { input=state with { bytes=pt_slice(state.bytes,end+1,len(state.bytes)) },
+        bytes=pt_slice(state.bytes,0,trimmed),error="",done=false }
+
+fn ls_lower(borrow value:Arr u8 _) -> Arr u8 _
+  = arr(i in 0..len(value)) let c=tx_byte(value,i) in u8(if c>=65 && c<=90 then c+32 else c)
+
+type LsHeaders = { input:LsInput, length:i64, error:Arr u8 _, done:bool, eof:bool }
+effect(fs) fn ls_header(move state:LsHeaders) -> LsHeaders
+  = let line=ls_line(state.input) in
+    if line.done then state with { input=line.input,error=line.error,done=true,eof=len(line.error)==0 }
+    else if len(line.bytes)==0 then state with { input=line.input,done=true }
+    else let colon=str_find(line.bytes,":") in
+    if !colon.present || !tx_equal(ls_lower(pt_slice(line.bytes,0,colon.value)),"content-length") then
+      state with { input=line.input } else
+    let length=int_parse(str_trim(pt_slice(line.bytes,colon.value+1,len(line.bytes)))) in
+    if state.length>=0 || !length.ok || length.value<0 || length.value>8388608 then
+      state with { input=line.input,error="invalid Content-Length",done=true }
+    else state with { input=line.input,length=length.value }
+
+effect(fs) fn ls_frame(borrow input:LsInput) -> LsFrame
+  = let head=loop (state=LsHeaders { input=input,length= -1,error="",done=false,eof=false })
+      while !state.done next (ls_header(state)) yield state in
+    if head.eof || len(head.error)>0 then LsFrame { input=head.input,bytes="",error=head.error,eof=head.eof }
+    else if head.length<0 then LsFrame { input=head.input,bytes="",error="invalid Content-Length",eof=false }
+    else let body=loop (state=head.input) while !state.eof && len(state.bytes)<head.length next (ls_fill(state)) yield state in
+      if len(body.bytes)<head.length then LsFrame { input=body,bytes="",error="",eof=true }
+      else LsFrame { input=body with { bytes=pt_slice(body.bytes,head.length,len(body.bytes)) },
+        bytes=pt_slice(body.bytes,0,head.length),error="",eof=false }
+
+effect(fs) fn ls_send(borrow text:Arr u8 _) -> IntResult
+  = print_out(concat("Content-Length: ",int_text(len(text)),"\r\n\r\n",text))
+effect(fs) fn ls_reply(borrow id:Arr u8 _, borrow body:Arr u8 _) -> IntResult
+  = ls_send(concat("{\"jsonrpc\":\"2.0\",\"id\":",id,",\"result\":",body,"}"))
+effect(fs) fn ls_error(borrow id:Arr u8 _, code:i64, borrow message:Arr u8 _) -> IntResult
+  = ls_send(concat("{\"jsonrpc\":\"2.0\",\"id\":",id,",\"error\":{\"code\":",int_text(code),
+    ",\"message\":",json_quote(message),"}}"))
+effect(fs) fn ls_notify(borrow method:Arr u8 _, borrow params:Arr u8 _) -> IntResult
+  = ls_send(concat("{\"jsonrpc\":\"2.0\",\"method\":",json_quote(method),",\"params\":",params,"}"))

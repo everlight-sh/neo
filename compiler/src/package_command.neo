@@ -1,0 +1,20 @@
+import "std:fs"
+import "std:io"
+import "build.neo"
+import "packages.neo"
+import "text.neo"
+
+fn pk_action(borrow action:Arr u8 _) -> bool
+  = tx_equal(action,"lock") || tx_equal(action,"verify") || tx_equal(action,"vendor")
+
+effect fn pk_command(borrow action:Arr u8 _, borrow input:Arr u8 _) -> unit
+  = let project=pk_root(input) in if !project.ok then bd_error(project.error.message) else
+    let root=project.value in let creating=tx_equal(action,"lock") in let vendoring=tx_equal(action,"vendor") in
+    let lock=if creating then pk_create(root) else pk_verify(root) in
+    let result=if len(lock.error)==0 && vendoring then pk_vendor(root,lock.value) else lock in
+    if len(result.error)>0 then bd_error(result.error) else
+    let saved=if creating || vendoring then
+      fs_atomic_replace_mode(pk_lock_path(root),concat(pk_pretty(result.value,0),"\n"),438) else int_ok(0) in
+    if !saved.ok then bd_error(concat("cannot write package lock: ",saved.error.message)) else
+    let shown=print_out(concat("{\"action\": ",pk_quote(action),", \"ok\": true, \"packages\": ",
+      int_text(pk_get(result.value,"packages").count),", \"root\": ",pk_quote(pk_text(result.value,"root")),"}\n")) in noop()

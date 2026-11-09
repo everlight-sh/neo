@@ -1,0 +1,58 @@
+; One verified lock for the source graph. Aliases belong to the importing
+; module's nearest package, even when the module lives in the vendor tree.
+import "std:hashmap"
+import "std:json"
+import "std:option"
+import "packages.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+import "toml.neo"
+
+type PkImports = { root:Arr u8 _, items:Json, owners:HashMap<Arr u8 _,Arr u8 _>, error:Arr u8 _ }
+fn pk_imports_empty() -> PkImports
+  = PkImports { root="",items=json_value_null(),owners=hashmap_empty::<Arr u8 _,Arr u8 _>(31,37),error="" }
+
+effect(fs,unsafe) fn pk_imports_load(borrow input:Arr u8 _) -> PkImports
+  = let empty=pk_imports_empty() in let root=pk_root(input) in
+    if !root.ok then empty with { error=root.error.message } else
+    let lock=pk_verify(root.value) in
+    if len(lock.error)>0 then empty with { error=lock.error } else
+    let items=pk_get(lock.value,"packages") in let ids=json_object_keys(items) in
+    let owners=loop (i=0, owners=empty.owners) while i<len(ids)
+      next (i+1,let id=tx_word(ids,i) in
+        let path=pt_realpath(pt_join(root.value,pk_text(pk_get(items,id),"path"))) in
+        hashmap_put(owners,path,id)) yield owners in
+    PkImports { root=root.value,items=items,owners=owners,error="" }
+
+fn pk_import_valid(borrow relative:Arr u8 _) -> bool
+  = loop (i=0, ok=true) while ok && i<=len(relative)
+      next (pt_part_end(relative,i)+1,let end=pt_part_end(relative,i) in
+        end>i && !pt_is_dots(relative,i,end,1) && !pt_is_dots(relative,i,end,2) &&
+        loop (j=i, valid=true) while valid && j<end
+          next (j+1,let c=tx_byte(relative,j) in tm_bare(c) || c==46) yield valid) yield ok
+
+effect(fs,unsafe) fn pk_import_target(borrow base:Arr u8 _, borrow subpath:Arr u8 _) -> BytesResult
+  = let manifest=if len(subpath)==0 then pk_metadata(base,false) else pk_meta_empty() in
+    if len(manifest.error)>0 then bytes_error(1,manifest.error,0) else
+    if manifest.has_entry && tx_has(manifest.entry,0) then bytes_error(1,"embedded null byte",0) else
+    let path=if manifest.has_entry then pt_join(base,manifest.entry) else
+      let stem=pt_join(pt_join(base,"src"),if len(subpath)==0 then "lib" else subpath) in
+      pk_pick("",concat(stem,".neo"),concat(stem,".ax")) in
+    let resolved=pt_realpath(path) in
+    if pt_within(resolved,base) then bytes_ok(resolved) else bytes_error(1,"package import escapes source root",0)
+
+effect(fs,unsafe) fn pk_resolve_import(borrow imports:PkImports, borrow name:Arr u8 _, borrow from:Arr u8 _) -> BytesResult
+  = if len(imports.error)>0 then bytes_error(1,imports.error,0) else
+    let owner=pk_root(from) in if !owner.ok then owner else
+    let id=hashmap_get(imports.owners,owner.value) in
+    if !option_is_some(id) then bytes_error(1,concat("source package is absent from neo.lock: ",owner.value),0) else
+    let relative=pt_slice(name,4,len(name)) in
+    if !pk_import_valid(relative) then bytes_error(1,concat("invalid package import ",name),0) else
+    let slash=pt_part_end(relative,0) in let alias=pt_slice(relative,0,slash) in
+    let edges=pk_get(pk_get(imports.items,option_or(id,"")),"dependencies") in
+    let target=json_get(edges,alias) in
+    if !target.present then bytes_error(1,concat("undeclared package dependency ",alias),0) else
+    let item=pk_get(imports.items,json_text(target.value).value) in
+    let base=pt_realpath(pt_join(imports.root,pk_text(item,"path"))) in
+    pk_import_target(base,pt_slice(relative,slash+1,len(relative)))

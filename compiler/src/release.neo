@@ -1,0 +1,199 @@
+; Deterministic USTAR payload, compressed with the system gzip.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:random"
+import "std:sha256"
+import "std:strings"
+import "build.neo"
+import "intrinsics.neo"
+import "packages.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+import "tool_version.neo"
+
+fn rl_zeros(count:i64) -> Arr u8 _ = check count>=0 in arr(i in 0..count) u8(0)
+fn rl_octal(number:i64, digits:i64) -> Arr u8 _
+  = check digits>=0 && digits<=11 in
+    arr(i in 0..digits) u8(48+bit_and(shift_right(number,3*(digits-i-1)),7))
+fn rl_header(borrow name:Arr u8 _, mode:i64, size:i64, epoch:i64) -> Arr u8 _
+  = let header=byte_copy(rl_zeros(512),0,name) in
+    let header=byte_copy(header,100,rl_octal(mode,7)) in
+    let header=byte_copy(header,108,rl_octal(0,7)) in
+    let header=byte_copy(header,116,rl_octal(0,7)) in
+    let header=byte_copy(header,124,rl_octal(size,11)) in
+    let header=byte_copy(header,136,rl_octal(epoch,11)) in
+    let header=byte_copy(header,148,"        0") in
+    let header=byte_copy(header,257,"ustar\000") in
+    let checksum=sum(i in 0..512) tx_byte(header,i) in
+    byte_copy(header,148,concat(rl_octal(checksum,6),"\0 "))
+
+type RlPayload = { names:Arr Arr u8 _ _, virtual:Json, hashes:Json, size:i64, status:IntResult }
+fn rl_empty() -> RlPayload
+  = RlPayload { names=tx_words(),virtual=pk_object(),hashes=pk_object(),size=0,status=int_ok(0) }
+
+effect(fs,unsafe) fn rl_names(borrow root:Arr u8 _, borrow dir:Arr u8 _, borrow suffix:Arr u8 _,
+                            move names:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let entries=pf_directory(pt_join(root,dir)) in
+    loop (i=0, out=names) while i<len(entries)
+      next (i+1,let name=pf_dirent(entries,i).name in let path=pt_join(dir,name) in
+        if (if len(dir)==0 then str_starts(name,"LICENSE") else bi_ends(name,suffix)) &&
+            pf_kind(pt_join(root,path),true)==8 then tx_insert_word(out,path) else out) yield out
+
+fn rl_readme(borrow version:Arr u8 _, borrow platform:Arr u8 _) -> Arr u8 _
+  = concat("# Neo ",version,"\n\nNative compiler for ",platform,". Builds require Clang/LLVM and a linker.\n\n",
+    "Put `neo` on your PATH (a symlink works; install.sh does this), run `neo doctor` to check the tools,\n",
+    "then `neo build file.neo -o app`. Give coding agents `skills.md` before they write code.\n",
+    "The language contract and complete core examples are in `docs/language-v01.md`.\n",
+    "Application examples and benchmark data are distributed separately.\n\n",
+    "Linux ARM64/x86-64 executables use the kernel directly without runtime libraries.\n",
+    "ARM64 macOS still requires the system libSystem load command.\n",
+    "TLS is experimental and has not had an independent cryptographic audit.\n",
+    "MANIFEST.json lists SHA-256 hashes for every payload file.\n")
+
+fn rl_platform(borrow header:Arr u8 _) -> Arr u8 _
+  = if len(header)>=64 && bytes_match_at(header,0,"\x7fELF\x02\x01") then
+      let machine=byte_read_le(header,18,2) in
+      if machine==62 then "linux-x86_64" else if machine==183 then "linux-arm64" else ""
+    else if len(header)>=32 && bytes_match_at(header,0,"\xcf\xfa\xed\xfe\x0c\x00\x00\x01") then "darwin-arm64" else ""
+
+effect(fs) fn rl_probe(borrow binary:Arr u8 _) -> BytesResult
+  = let opened=file_open(binary,0) in
+    if !opened.ok then bytes_error(2,concat("native neoc executable missing at ",binary,"; pass --native"),0) else
+    let read=file_read_chunk(opened.value,64) in let closed=file_close(opened.value) in
+    let platform=rl_platform(read.value) in
+    if len(platform)>0 then bytes_ok(platform)
+    else bytes_error(22,"expected a native neoc executable for x86-64/ARM64 Linux or ARM64 macOS",0)
+
+type RlStream = { hash:Sha256Stream, count:i64, status:IntResult, eof:bool }
+effect(fs) fn rl_stream(input:i64, output:i64) -> RlStream
+  = loop (s=RlStream { hash=sha256_stream_start(),count=0,status=int_ok(0),eof=false })
+    while s.status.ok && !s.eof next (
+      let part=file_read_chunk(input,65536) in
+      if !part.ok then s with { status=int_error(part.error.code,part.error.message,0) }
+      else if len(part.value)==0 then s with { eof=true }
+      else RlStream { hash=sha256_stream_add(s.hash,part.value),count=s.count+len(part.value),
+        status=if output<0 then int_ok(0) else file_write(output,part.value),eof=false }) yield s
+
+fn rl_digest(borrow hash:Sha256Stream) -> Arr u8 _
+  = tx_hex_bytes(tx_empty(),sha256_stream_finish(hash))
+effect(fs) fn rl_tail(output:i64, move payload:RlPayload, borrow name:Arr u8 _, size:i64, borrow digest:Arr u8 _) -> RlPayload
+  = let padding=(512-size%512)%512 in let wrote=file_write(output,rl_zeros(padding)) in
+    payload with { size=payload.size+512+size+padding,status=wrote,
+      hashes=if tx_equal(name,"MANIFEST.json") then payload.hashes else pk_set_text(payload.hashes,name,digest) }
+
+effect(fs,unsafe) fn rl_add(output:i64, move payload:RlPayload, borrow root:Arr u8 _, borrow binary:Arr u8 _,
+                           borrow prefix:Arr u8 _, borrow name:Arr u8 _, epoch:i64) -> RlPayload
+  = let full=concat(prefix,name) in let generated=json_get(payload.virtual,name) in
+    let mode=if tx_equal(name,"neo") || tx_equal(name,"bin/neoc") then 493 else 420 in
+    if len(full)>100 then payload with { status=int_error(36,concat("archive member name too long: ",full),0) }
+    else if generated.present then
+      let bytes=json_text(generated.value).value in let header=rl_header(full,mode,len(bytes),epoch) in
+      let wrote=file_write(output,concat(header,bytes)) in
+      if !wrote.ok then payload with { status=wrote } else
+      rl_tail(output,payload,name,len(bytes),tx_hex_bytes(tx_empty(),sha256(bytes)))
+    else let path=if tx_equal(name,"bin/neoc") then binary else pt_join(root,name) in
+    let input=file_open(path,0) in
+    if !input.ok then payload with { status=int_error(input.error.code,concat("cannot read ",path),0) } else
+    let size=rt_file_size(input.value) in let rewind=file_seek(input.value,0) in
+    let wrote=if size<0 || size>8589934591 || !rewind.ok then int_error(5,concat("cannot size ",path),0)
+      else file_write(output,rl_header(full,mode,size,epoch)) in
+    if !wrote.ok then let closed=file_close(input.value) in payload with { status=wrote } else
+    let streamed=rl_stream(input.value,output) in let closed=file_close(input.value) in
+    if !streamed.status.ok then payload with { status=streamed.status }
+    else if !closed.ok then payload with { status=closed }
+    else if streamed.count!=size then payload with { status=int_error(5,concat("file changed while archiving: ",path),0) }
+    else rl_tail(output,payload,name,size,rl_digest(streamed.hash))
+
+fn rl_manifest(borrow payload:RlPayload, borrow version:Arr u8 _, borrow platform:Arr u8 _) -> Arr u8 _
+  = let value=pk_set_text(pk_set_text(pk_object(),"version",version),"platform",platform) in
+    let dependencies=json_value_array(arr(i in 0..1) json_value_string("LLVM clang and linker").value).value in
+    let value=pk_put(pk_put(pk_put(value,"build_dependencies",dependencies),"format",json_value_int(2)),"files",payload.hashes) in
+    concat(pk_pretty(value,0),"\n")
+
+effect(fs,unsafe) fn rl_tar(output:i64, borrow root:Arr u8 _, borrow binary:Arr u8 _, borrow version:Arr u8 _,
+                            borrow platform:Arr u8 _, epoch:i64) -> IntResult
+  = let data=pk_set_text(pk_set_text(pk_set_text(pk_object(),"PLATFORM",concat(platform,"\n")),
+      "VERSION",concat(version,"\n")),"README.md",rl_readme(version,platform)) in
+    let names=rl_names(root,"","",rl_names(root,"docs",".md",rl_names(root,"stdlib",".neo",
+      rl_names(root,"runtime",".neo",rl_names(root,"compiler/src",".neo",tx_words()))))) in
+    let base=loop (i=0, names=names) while i<6 next (i+1,tx_insert_word(names,
+      if i==0 then "PLATFORM" else if i==1 then "README.md" else if i==2 then "VERSION"
+      else if i==3 then "bin/neoc" else if i==4 then "neo" else "skills.md")) yield names in
+    let prefix=concat("neo-",version,"/") in
+    ; The manifest is computed from the payload, then written first in the tar.
+    let measured=loop (i=0, p=rl_empty() with { names=base,virtual=data }) while p.status.ok && i<len(base)
+      next (i+1,rl_measure(p,root,binary,tx_word(base,i))) yield p in
+    if !measured.status.ok then measured.status else
+    let names=tx_insert_word(base,"MANIFEST.json") in
+    let data=pk_set_text(data,"MANIFEST.json",rl_manifest(measured,version,platform)) in
+    let result=loop (i=0, p=rl_empty() with { virtual=data }) while p.status.ok && i<len(names)
+      next (i+1,rl_add(output,p,root,binary,prefix,tx_word(names,i),epoch)) yield p in
+    if !result.status.ok then result.status
+    else if !tx_equal(pk_pretty(measured.hashes,0),pk_pretty(result.hashes,0)) then int_error(5,"release payload changed while archiving",0)
+    else let end=result.size+1024 in let wrote=file_write(output,rl_zeros(1024+(10240-end%10240)%10240)) in
+      if !wrote.ok then wrote else int_ok(len(names))
+
+effect(fs) fn rl_measure(move payload:RlPayload, borrow root:Arr u8 _, borrow binary:Arr u8 _, borrow name:Arr u8 _) -> RlPayload
+  = let generated=json_get(payload.virtual,name) in
+    if generated.present then payload with { hashes=pk_set_text(payload.hashes,name,
+      tx_hex_bytes(tx_empty(),sha256(json_text(generated.value).value))) } else
+    let path=if tx_equal(name,"bin/neoc") then binary else pt_join(root,name) in let opened=file_open(path,0) in
+    if !opened.ok then payload with { status=int_error(opened.error.code,concat("cannot read ",path),0) } else
+    let hashed=rl_stream(opened.value,-1) in let closed=file_close(opened.value) in
+    if !hashed.status.ok then payload with { status=hashed.status }
+    else if !closed.ok then payload with { status=closed }
+    else payload with { hashes=pk_set_text(payload.hashes,name,rl_digest(hashed.hash)) }
+
+effect(fs) fn rl_fix_header(borrow path:Arr u8 _, epoch:i64) -> IntResult
+  = let opened=file_open(path,3) in if !opened.ok then opened else
+    let seek=file_seek(opened.value,4) in
+    let wrote=if seek.ok then file_write(opened.value,byte_write_le(rl_zeros(4),0,epoch,4)) else seek in
+    let seek=if wrote.ok then file_seek(opened.value,9) else wrote in
+    let os=if seek.ok then file_write(opened.value,"\xff") else seek in
+    let sync=if os.ok then file_sync(opened.value) else os in let closed=file_close(opened.value) in
+    if !sync.ok then sync else closed
+
+effect fn rl_archive(borrow root:Arr u8 _, borrow binary:Arr u8 _, borrow output:Arr u8 _, borrow stage:Arr u8 _,
+                      borrow version:Arr u8 _, borrow platform:Arr u8 _, epoch:i64, borrow gzip:Arr u8 _) -> BytesResult
+  = let tar=pt_join(stage,"release.tar") in let compressed=concat(tar,".gz") in let opened=file_open(tar,1) in
+    if !opened.ok then bytes_error(opened.error.code,opened.error.message,0) else
+    let archived=rl_tar(opened.value,root,binary,version,platform,epoch) in let closed=file_close(opened.value) in
+    if !archived.ok then bytes_error(archived.error.code,archived.error.message,0)
+    else if !closed.ok then bytes_error(closed.error.code,closed.error.message,0)
+    else let args=push(push(push(tx_words(),"-n"),"-9"),tar) in
+    let result=bd_execute(gzip,args,false) in
+    if bd_exit_code(result.status)!=0 then bytes_error(5,"gzip could not compress the release",0) else
+    let fixed=rl_fix_header(compressed,epoch) in
+    if !fixed.ok then bytes_error(fixed.error.code,fixed.error.message,0) else
+    let input=file_open(compressed,0) in
+    if !input.ok then bytes_error(input.error.code,input.error.message,0) else
+    let hashed=rl_stream(input.value,-1) in let closed=file_close(input.value) in
+    if !hashed.status.ok then bytes_error(hashed.status.error.code,hashed.status.error.message,0)
+    else if !closed.ok then bytes_error(closed.error.code,closed.error.message,0)
+    else let published=fs_rename(compressed,output) in
+    if !published.ok then bytes_error(published.error.code,published.error.message,0)
+    else let report=pk_set_text(pk_set_text(pk_set_text(pk_set_text(pk_object(),"version",version),"platform",platform),
+      "archive",pt_realpath(output)),"sha256",rl_digest(hashed.hash)) in
+    let report=pk_put(pk_put(pk_put(report,"ok",json_value_bool(true)),"files",json_value_int(archived.value)),"epoch",json_value_int(epoch)) in
+    bytes_ok(concat(pk_pretty(report,0),"\n"))
+
+effect fn rl_command(borrow root:Arr u8 _, borrow output:Arr u8 _, borrow native:Arr u8 _) -> unit
+  = let date=env_get("SOURCE_DATE_EPOCH") in let epoch=if date.present then int_parse(str_trim(date.value)) else int_ok(0) in
+    if !epoch.ok || epoch.value<0 || epoch.value>4294967295 then bd_error("SOURCE_DATE_EPOCH must be between 0 and 4294967295") else
+    let gzip=bd_find_tool("gzip") in if len(gzip)==0 then bd_error("gzip executable not found") else
+    let binary=if len(native)>0 then pt_abspath(native) else pt_realpath(cli_arg(0).value) in
+    let platform=rl_probe(binary) in if !platform.ok then bd_error(platform.error.message) else
+    let version=tool_version(root) in if !pk_version(version) then bd_error("invalid release version") else
+    let output=pt_abspath(output) in
+    if tx_equal(pt_realpath(output),pt_realpath(binary)) then bd_error("release output would replace the native compiler") else
+    let parent=pt_head(output) in let dirs=pf_mkdirs(parent) in if !dirs.ok then bd_error(dirs.error.message) else
+    let token=random_bytes(16) in if !token.ok then bd_error(token.error.message) else
+    let stage=pt_join(parent,concat(".neo-release-",tx_hex_bytes(tx_empty(),token.value))) in
+    let ready=fs_mkdir(stage) in if !ready.ok then bd_error(ready.error.message) else
+    let result=rl_archive(root,binary,output,stage,version,platform.value,epoch.value,gzip) in
+    let removed=fs_remove(pt_join(stage,"release.tar")) in let removed=fs_remove(pt_join(stage,"release.tar.gz")) in
+    let removed=fs_rmdir(stage) in
+    if !result.ok then bd_error(result.error.message) else
+    let shown=print_out(result.value) in noop()

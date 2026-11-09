@@ -1,0 +1,117 @@
+; Python's package file selection and hash framing, with streaming file reads.
+import "std:fs"
+import "std:io"
+import "std:random"
+import "std:sha256"
+import "std:strings"
+import "intrinsics.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+import "toml.neo"
+
+type PkFiles = { paths:Arr Arr u8 _ _, error:Arr u8 _ }
+fn pk_ignored(borrow name:Arr u8 _) -> bool
+  = str_find(" .git .neo-build .kernel-build .neo node_modules target __pycache__ .axon-build .axon ",concat(" ",name," ")).present
+    && !tx_has(name,32)
+fn pk_source_file(borrow name:Arr u8 _) -> bool
+  = (len(name)>4 && bi_ends(name,".neo")) || (len(name)>3 && bi_ends(name,".ax"))
+fn pk_sorted_entries(borrow entries:Arr PfDirent _) -> Arr Arr u8 _ _
+  = loop (i=0, names=tm_words()) while i<len(entries)
+      next (i+1,tx_insert_word(names,pf_dirent(entries,i).name)) yield names
+
+effect(fs,unsafe) fn pk_walk(borrow root:Arr u8 _, borrow relative:Arr u8 _, move files:PkFiles) -> PkFiles
+  = let directory=pt_join(root,relative) in let listing=pf_directory_result(directory) in
+    if !listing.ok then files with { error=concat("cannot read package directory: ",directory) } else
+    ; Path ordering is by component, so a/x.neo precedes its sibling a.neo.
+    let names=pk_sorted_entries(listing.entries) in
+    loop (i=0, found=files) while i<len(names) && len(found.error)==0 next (i+1,
+      let name=tx_word(names,i) in let rel=pt_join(relative,name) in let path=pt_join(root,rel) in
+      let kind=pf_kind(path,false) in
+      if kind==10 && !(pk_ignored(name) && pf_kind(path,true)==4) then
+        found with { error=concat("package symlinks are not supported: ",path) }
+      else if kind==4 && !pk_ignored(name) then pk_walk(root,rel,found)
+      else if kind==8 && (pk_source_file(name) || tx_equal(rel,"neo.toml") || tx_equal(rel,"axon.toml")) then
+        if !utf8_valid(rel) then found with { error=concat("invalid UTF-8 package path: ",path) }
+        else found with { paths=push(found.paths,rel) }
+      else if kind<0 then found with { error=concat("cannot read package file type: ",path) } else found) yield found
+
+type PkStream = { hash:Sha256Stream, count:i64, status:IntResult, done:bool }
+effect(fs) fn pk_stream(input:i64, output:i64, move hash:Sha256Stream) -> PkStream
+  = loop (s=PkStream { hash=hash, count=0, status=int_ok(0), done=false })
+      while !s.done && s.status.ok next (
+        let part=file_read_chunk(input,65536) in
+        if !part.ok then s with { status=int_error(part.error.code,part.error.message,0) }
+        else if len(part.value)==0 then s with { done=true }
+        else PkStream { hash=if output<0 then sha256_stream_add(s.hash,part.value) else s.hash,
+          count=s.count+len(part.value),status=if output<0 then int_ok(0) else file_write(output,part.value),done=false }) yield s
+
+type PkDigest = { hash:Sha256Stream, error:Arr u8 _ }
+effect(fs,unsafe) fn pk_hash_file(borrow path:Arr u8 _, borrow relative:Arr u8 _, move hash:Sha256Stream) -> PkDigest
+  = let input=file_open(path,0) in
+    if !input.ok then PkDigest { hash=hash, error=concat("cannot open package file: ",path) } else
+    let size=rt_file_size(input.value) in let reset=file_seek(input.value,0) in
+    if size<0 || !reset.ok then let closed=file_close(input.value) in
+      PkDigest { hash=hash, error=concat("cannot size package file: ",path) }
+    else let header=concat(relative,"\0",int_text(size),"\0") in
+    let read=pk_stream(input.value,-1,sha256_stream_add(hash,header)) in let closed=file_close(input.value) in
+    PkDigest { hash=read.hash,
+      error=if !read.status.ok || !closed.ok then concat("cannot read package file: ",path)
+        else if read.count!=size then concat("package file changed while hashing: ",path) else "" }
+
+effect(fs,unsafe) fn pk_digest(borrow root:Arr u8 _) -> BytesResult
+  = let files=pk_walk(root,"",PkFiles { paths=tm_words(),error="" }) in
+    if len(files.error)>0 then bytes_error(5,files.error,0) else
+    let hashed=loop (i=0, state=PkDigest { hash=sha256_stream_start(),error="" })
+      while i<len(files.paths) && len(state.error)==0
+      next (i+1,let relative=tx_word(files.paths,i) in pk_hash_file(pt_join(root,relative),relative,state.hash)) yield state in
+    if len(hashed.error)>0 then bytes_error(5,hashed.error,0) else bytes_ok(tx_hex_bytes(tx_empty(),sha256_stream_finish(hashed.hash)))
+
+effect(fs,unsafe) fn pk_copy_file(borrow source:Arr u8 _, borrow target:Arr u8 _) -> IntResult
+  = let dirs=pf_mkdirs(pt_head(target)) in if !dirs.ok then dirs else
+    let input=file_open(source,0) in if !input.ok then input else
+    let terminated=concat(target,"\0") in let output=rt_open_mode(data(terminated),rt_open_exclusive(),438) in
+    if output<0 then let code=i64(load_i32(rt_errno(),0)) in let closed=file_close(input.value) in
+      int_error(code,concat("cannot create vendored file: ",target),0)
+    else let copied=pk_stream(input.value,output,sha256_stream_start()) in
+    let closed_in=file_close(input.value) in let closed_out=file_close(output) in
+    if !copied.status.ok then copied.status else if !closed_in.ok then closed_in else closed_out
+
+effect(fs,unsafe) fn pk_copy_sources(borrow source:Arr u8 _, borrow stage:Arr u8 _) -> IntResult
+  = let files=pk_walk(source,"",PkFiles { paths=tm_words(),error="" }) in
+    if len(files.error)>0 then int_error(5,files.error,0) else
+    loop (i=0, status=int_ok(0)) while status.ok && i<len(files.paths) next (
+      i+1,let relative=tx_word(files.paths,i) in pk_copy_file(pt_join(source,relative),pt_join(stage,relative))) yield status
+
+effect(fs,unsafe) fn pk_remove_stage(borrow dir:Arr u8 _) -> unit
+  = let entries=pf_directory(dir) in
+    let cleaned=loop (i=0) while i<len(entries)
+      next (let path=pt_join(dir,pf_dirent(entries,i).name) in
+        let removed=if pf_kind(path,false)==4 then pk_remove_stage(path)
+          else let deleted=fs_remove(path) in noop() in i+1) yield i in
+    let removed=fs_rmdir(dir) in noop()
+
+effect(fs,unsafe) fn pk_check_vendor(borrow target:Arr u8 _, borrow sha:Arr u8 _) -> IntResult
+  = let digest=pk_digest(target) in
+    if !digest.ok then int_error(digest.error.code,digest.error.message,0)
+    else if tx_equal(digest.value,sha) then int_ok(0)
+    else int_error(5,concat("existing vendor source changed: ",target),0)
+
+effect(fs,process,unsafe) fn pk_stage_vendor(borrow source:Arr u8 _, borrow target:Arr u8 _, borrow sha:Arr u8 _) -> IntResult
+  = let parent=pt_head(target) in let ready=pf_mkdirs(parent) in if !ready.ok then ready else
+    let random=random_bytes(16) in if !random.ok then int_error(random.error.code,random.error.message,0) else
+    let stage=pt_join(parent,concat(".stage-",tx_hex_bytes(tx_empty(),random.value))) in
+    let made=pf_mkdir(stage) in if !made.ok then made else
+    let copied=pk_copy_sources(source,stage) in
+    let checked=if !copied.ok then copied else let hash=pk_digest(stage) in
+      if hash.ok && tx_equal(hash.value,sha) then int_ok(0)
+      else int_error(5,concat("package source changed while vendoring: ",source),0) in
+    if checked.ok && pf_kind(target,false)<0 then
+      let moved=fs_rename(stage,target) in
+      if moved.ok then moved else let cleared=pk_remove_stage(stage) in
+        if pf_kind(target,true)==4 then pk_check_vendor(target,sha) else moved
+    else let cleared=pk_remove_stage(stage) in
+      if !checked.ok then checked else pk_check_vendor(target,sha)
+
+effect(fs,process,unsafe) fn pk_vendor_source(borrow source:Arr u8 _, borrow target:Arr u8 _, borrow sha:Arr u8 _) -> IntResult
+  = if pf_kind(target,false)>=0 then pk_check_vendor(target,sha) else pk_stage_vendor(source,target,sha)

@@ -1,0 +1,159 @@
+; JSON-RPC over stdio. The editor's open documents are in-memory overlays.
+import "std:fs"
+import "std:hashmap"
+import "std:io"
+import "std:json"
+import "std:option"
+import "std:strings"
+import "build.neo"
+import "formatter.neo"
+import "lex.neo"
+import "lsp_editor.neo"
+import "lsp_wire.neo"
+import "modules.neo"
+import "packages.neo"
+import "paths.neo"
+import "text.neo"
+import "tool_version.neo"
+
+type LsServer = { root:Arr u8 _, target:Arr u8 _, docs:Arr LsDoc _, stopped:bool }
+type LsReply = { server:LsServer, body:Arr u8 _, error:Arr u8 _, code:i64 }
+fn ls_ok(borrow server:LsServer, borrow body:Arr u8 _) -> LsReply
+  = LsReply { server=server,body=body,error="",code=0 }
+fn ls_fail(borrow server:LsServer, code:i64, borrow error:Arr u8 _) -> LsReply
+  = LsReply { server=server,body="null",error=error,code=code }
+
+fn ls_number(borrow value:Json, borrow key:Arr u8 _) -> i64 = json_int(pk_get(value,key)).value
+fn ls_ident_start(c:i64) -> bool = c>=65 && c<=90 || c>=97 && c<=122 || c==95
+fn ls_ident_byte(c:i64) -> bool = ls_ident_start(c) || c>=48 && c<=57 || c==58
+fn ls_word_start(borrow text:Arr u8 _, offset:i64) -> i64
+  = let start=loop (i=offset) while i>0 && ls_ident_byte(tx_byte(text,i-1)) next (i-1) yield i in
+    loop (i=start) while i<offset && !ls_ident_start(tx_byte(text,i)) next (i+1) yield i
+fn ls_keyword_names(borrow initial:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let words="fn type enum match let in check if then else loop while next yield effect move import private pub i64 f64 u8 u16 i32 bool Arr" in
+    loop (i=0, names=initial) while i<len(words)
+      next (md_word_end(words,i)+1,tx_insert_word(names,pt_slice(words,i,md_word_end(words,i)))) yield names
+fn ls_completion(borrow doc:LsDoc, borrow prefix:Arr u8 _) -> Arr u8 _
+  = let lx=lx_lex(tx_newlines(doc.text)) in let base=ls_keyword_names(doc.names) in
+    let words=if !lx.ok then base else loop (i=0, out=base) while i<lx_tok_count(lx.toks)
+      next (i+1,let t=lx_tok(lx.toks,i) in
+        if t.kind==tk_ident() then tx_insert_word(out,md_text(lx.text,t)) else out) yield out in
+    let entries=loop (i=0, out="[") while i<len(words)
+      next (i+1,let word=tx_word(words,i) in if !str_starts(word,prefix) then out else
+        let item=option_or(hashmap_get(doc.index,word),ls_empty_symbol()) in
+        concat(out,if len(out)>1 then "," else "","{\"label\":",json_quote(word),",\"kind\":",
+          int_text(if item.kind==0 then 14 else item.kind),",\"detail\":",json_quote(if item.kind==0 then "Neo" else item.label),"}")) yield out in
+    concat(entries,"]")
+
+fn ls_symbols(borrow doc:LsDoc) -> Arr u8 _
+  = let entries=loop (i=0, out="[") while i<len(doc.symbols)
+      next (i+1,check i>=0 && i<len(doc.symbols) in let item=doc.symbols[i] in
+        let pos=ls_position(doc.text,item.line-1,item.col-1) in let range=ls_range(pos,pos) in
+        concat(out,if i>0 then "," else "","{\"name\":",json_quote(item.name),",\"kind\":",
+          int_text(if item.kind==3 then 12 else 23),",\"range\":",range,",\"selectionRange\":",range,"}")) yield out in
+    concat(entries,"]")
+
+effect(fs) fn ls_location(borrow server:LsServer, borrow item:LsSymbol) -> Arr u8 _
+  = let index=ls_find(server.docs,item.path) in
+    let text=if index>=0 then ls_at(server.docs,index).text else fs_read(item.path).value in
+    let pos=ls_position(text,item.line-1,item.col-1) in
+    concat("{\"uri\":",json_quote(ls_uri(item.path)),",\"range\":",ls_range(pos,pos),"}")
+
+effect(fs) fn ls_request(borrow server:LsServer, borrow doc:LsDoc, borrow method:Arr u8 _, borrow params:Json) -> LsReply
+  = if tx_equal(method,"textDocument/documentSymbol") then ls_ok(server,ls_symbols(doc))
+    else if tx_equal(method,"textDocument/formatting") then
+      let formatted=ff_format(doc.text) in
+      if len(formatted.error)>0 || tx_equal(formatted.output,doc.text) then ls_ok(server,"[]")
+      else ls_ok(server,concat("[{\"range\":",ls_range(ls_position(doc.text,0,0),ls_end(doc.text)),
+        ",\"newText\":",json_quote(formatted.output),"}]"))
+    else let pos=pk_get(params,"position") in
+    let offset=ls_offset(doc.text,ls_number(pos,"line"),ls_number(pos,"character")) in
+    let start=ls_word_start(doc.text,offset) in
+    if tx_equal(method,"textDocument/completion") then ls_ok(server,ls_completion(doc,pt_slice(doc.text,start,offset)))
+    else if tx_equal(method,"textDocument/hover") || tx_equal(method,"textDocument/definition") then
+      let end=loop (i=offset) while i<len(doc.text) && ls_ident_byte(tx_byte(doc.text,i)) next (i+1) yield i in
+      let name=pt_slice(doc.text,start,end) in let item=hashmap_get(doc.index,name) in
+      if !option_is_some(item) then ls_ok(server,"null") else
+      let symbol=option_or(item,ls_empty_symbol()) in
+      if tx_equal(method,"textDocument/definition") then ls_ok(server,ls_location(server,symbol))
+      else ls_ok(server,concat("{\"contents\":{\"kind\":\"markdown\",\"value\":",
+        json_quote(concat("```neo\n",symbol.label,"\n```")),"}}"))
+    else ls_fail(server,-32601,concat("method not supported: ",method))
+
+effect fn ls_refresh(borrow server:LsServer) -> LsServer
+  = let overlay=ls_overlay(server.docs) in
+    let docs=loop (i=0, out=server.docs) while i<len(server.docs)
+      next (i+1,check i>=0 && i<len(out) in
+        set(out,i,ls_analyze(ls_at(server.docs,i),server.root,server.target,overlay))) yield out in
+    server with { docs=docs }
+
+effect fn ls_open(borrow server:LsServer, borrow data:Json, borrow path:Arr u8 _, index:i64) -> LsReply
+  = let text=pk_get(data,"text") in
+    if text.kind!=4 then ls_fail(server,-32602,"textDocument.text must be a string") else
+    let doc=ls_doc(path,json_text(text).value,ls_number(data,"version")) in
+    let docs=if index<0 then push(server.docs,doc) else check index<len(server.docs) in set(server.docs,index,doc) in
+    ls_ok(ls_refresh(server with { docs=docs }),"null")
+
+effect fn ls_change(borrow server:LsServer, borrow data:Json, index:i64, borrow changes:Json) -> LsReply
+  = let doc=ls_at(server.docs,index) in let version=ls_number(data,"version") in
+    if index<0 || version<=doc.version then ls_ok(server,"null")
+    else if changes.kind!=5 then ls_fail(server,-32602,"contentChanges must be an array")
+    else let bad=loop (i=0, error="") while i<changes.count && len(error)==0
+      next (i+1,let change=json_array_get(changes,i).value in
+        if json_get(change,"range").present then "full-document synchronization required"
+        else if pk_get(change,"text").kind!=4 then "change text must be a string" else "") yield error in
+    if len(bad)>0 then ls_fail(server,-32602,bad) else
+    if changes.count==0 then ls_ok(server,"null") else
+    let text=pk_text(json_array_get(changes,changes.count-1).value,"text") in
+    let docs=check index>=0 && index<len(server.docs) in set(server.docs,index,doc with { text=text,version=version }) in
+    ls_ok(ls_refresh(server with { docs=docs }),"null")
+
+effect fn ls_close(borrow server:LsServer, borrow uri:Arr u8 _, index:i64) -> LsReply
+  = let sent=ls_notify("textDocument/publishDiagnostics",concat("{\"uri\":",json_quote(uri),",\"diagnostics\":[]}")) in
+    let docs=loop (i=0, out=arr(j in 0..0) ls_doc("","",0)) while i<len(server.docs)
+      next (i+1,if i==index then out else push(out,ls_at(server.docs,i))) yield out in
+    ls_ok(ls_refresh(server with { docs=docs }),"null")
+
+effect fn ls_handle(borrow server:LsServer, borrow method:Arr u8 _, borrow params:Json) -> LsReply
+  = if tx_equal(method,"initialize") then ls_ok(server,concat(
+    "{\"capabilities\":{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":1,\"completionProvider\":{\"triggerCharacters\":[\":\"]},",
+    "\"hoverProvider\":true,\"definitionProvider\":true,\"documentSymbolProvider\":true,\"documentFormattingProvider\":true},",
+    "\"serverInfo\":{\"name\":\"neo\",\"version\":",json_quote(tool_version(server.root)),"}}"))
+    else if tx_equal(method,"shutdown") then ls_ok(server with { stopped=true },"null")
+    else if tx_equal(method,"exit") then let done=process_exit(if server.stopped then 0 else 1) in ls_ok(server,"null")
+    else if tx_equal(method,"initialized") || tx_equal(method,"$/cancelRequest") || tx_equal(method,"workspace/didChangeConfiguration") then ls_ok(server,"null")
+    else if !str_starts(method,"textDocument/") then ls_fail(server,-32601,concat("method not supported: ",method))
+    else let data=pk_get(params,"textDocument") in let uri=pk_text(data,"uri") in let local=ls_path(uri) in
+    if !local.ok then ls_fail(server,-32602,local.error.message) else
+    let path=pt_realpath(local.value) in let index=ls_find(server.docs,path) in
+    if tx_equal(method,"textDocument/didOpen") then ls_open(server,data,path,index)
+    else if tx_equal(method,"textDocument/didChange") then ls_change(server,data,index,pk_get(params,"contentChanges"))
+    else if tx_equal(method,"textDocument/didClose") then ls_close(server,uri,index)
+    else ls_request(server,ls_at(server.docs,index),method,params)
+
+effect fn ls_dispatch(borrow server:LsServer, borrow bytes:Arr u8 _) -> LsServer
+  = let parsed=json_parse(bytes) in
+    if !parsed.ok then let sent=ls_error("null",-32700,"invalid JSON") in server else
+    let value=parsed.value in let method=pk_get(value,"method") in
+    if value.kind!=6 || !tx_equal(pk_text(value,"jsonrpc"),"2.0") || method.kind!=4 then
+      let sent=ls_error("null",-32600,"invalid request") in server else
+    let id=json_get(value,"id") in let reply=ls_handle(server,json_text(method).value,pk_get(value,"params")) in
+    let sent=if reply.code==0 then
+        if id.present then ls_reply(json_encode(id.value),reply.body) else int_ok(0)
+      else if id.present then ls_error(json_encode(id.value),reply.code,reply.error)
+      else if reply.code== -32601 then int_ok(0)
+      else ls_notify("window/logMessage",concat("{\"type\":1,\"message\":",json_quote(reply.error),"}")) in
+    reply.server
+
+type LsSession = { input:LsInput, server:LsServer, done:bool }
+effect fn ls_step(move session:LsSession) -> LsSession
+  = let frame=ls_frame(session.input) in
+    if len(frame.error)>0 then let shown=print_error(concat("neo lsp: ",frame.error,"\n")) in session with { done=true }
+    else if frame.eof then session with { done=true } else
+    LsSession { input=frame.input,server=ls_dispatch(session.server,frame.bytes),done=false }
+
+effect fn ls_command(borrow root:Arr u8 _) -> unit
+  = let clang=bd_clang() in let target=if len(clang)>0 then bd_detect_target(clang) else "" in
+    let initial=LsSession { input=LsInput { bytes="",eof=false },
+      server=LsServer { root=root,target=target,docs=arr(i in 0..0) ls_doc("","",0),stopped=false },done=false } in
+    let done=loop (session=initial) while !session.done next (ls_step(session)) yield session in noop()

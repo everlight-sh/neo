@@ -182,6 +182,23 @@ fn sha256_finish(running:Sha256Running,text:Arr u8 n) -> Arr u8 _
     if running.blocks<0 || running.blocks>n/64 then sha256(text) else
     let result=loop(i=running.blocks,state=running.state) while i<padded/64 next(i+1,sha_block(state,text,i,padded)) yield state in
     arr(i in 0..32) u8(shift_right(sha_word(result,i/4),(3-i%4)*8))
+; Incremental hashing of disjoint chunks. Only the last partial block
+; stays buffered between calls.
+type Sha256Stream = { state:Sha256State, tail:Arr u8 _, size:i64 }
+fn sha256_stream_start() -> Sha256Stream
+  = Sha256Stream { state=sha256_start().state, tail="", size=0 }
+fn sha256_stream_add(borrow stream:Sha256Stream, borrow bytes:Arr u8 n) -> Sha256Stream
+  = let text=concat(stream.tail,bytes) in
+    let step=sha256_absorb(Sha256Running { state=stream.state, blocks=0 },text) in
+    Sha256Stream { state=step.state, tail=str_slice(text,step.blocks*64,len(text)), size=wrapping_add(stream.size,n) }
+fn sha256_stream_finish(borrow stream:Sha256Stream) -> Arr u8 _
+  = let size=if len(stream.tail)<56 then 64 else 128 in
+    let padding=arr(i in 0..size) if i<len(stream.tail) then u8(str_byte(stream.tail,i))
+      else if i==len(stream.tail) then u8(128) else if i<size-8 then u8(0)
+      else u8(shift_right(wrapping_mul(stream.size,8),(size-1-i)*8)) in
+    let block=sha_block(stream.state,padding,0,size) in
+    let final=if size==64 then block else sha_block(block,padding,1,size) in
+    arr(i in 0..32) u8(shift_right(sha_word(final,i/4),(3-i%4)*8))
 fn hmac_sha256(key:Arr u8 n,message:Arr u8 m) -> Arr u8 _
   = let bounded=if n>64 then sha256(key) else key in
     let inner=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,54)) in
@@ -199,3 +216,14 @@ fn hkdf_label(key:Arr u8 n,label:Arr u8 m,context:Arr u8 k,count:i64{count>=0 &&
     let header=arr(i in 0..3) u8(if i==0 then count/256 else if i==1 then count%256 else m+6) in
     hkdf_expand(key,concat(header,"tls13 ",label,arr(i in 0..1) u8(k),context),count)
 
+
+; Reusable HMAC key schedule for KDFs and protocols with repeated MACs.
+; Prehash the ipad/opad blocks once; every message keeps its own hash state.
+sealed type HMACSHA256 = { inner:Sha256Running,outer:Sha256Running,ipad:Arr u8 _,opad:Arr u8 _ }
+fn hmac_sha256_prepare(key:Arr u8 n) -> HMACSHA256
+  = let bounded=if n>64 then sha256(key) else key in
+    let ipad=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,54)) in
+    let opad=arr(i in 0..64) u8(bit_xor(if i<len(bounded) then i64(bounded[i]) else 0,92)) in
+    HMACSHA256 {inner=sha256_absorb(sha256_start(),ipad),outer=sha256_absorb(sha256_start(),opad),ipad=ipad,opad=opad}
+fn hmac_sha256_prepared(key:HMACSHA256,message:Arr u8 n) -> Arr u8 _
+  = sha256_finish(key.outer,concat(key.opad,sha256_finish(key.inner,concat(key.ipad,message))))

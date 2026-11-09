@@ -40,6 +40,15 @@ fn pt_parts(borrow p:Arr u8 _) -> Arr i64 _
       next (let j=pt_part_end(p,i) in if j==i || pt_is_dots(p,i,j,1) then out else push(push(out,i),j), pt_part_end(p,i)+1)
       yield out
 
+; pathlib's display spelling collapses slashes and "." components, while
+; leaving ".." intact so symlinks still resolve in the original order.
+fn pt_pathname(borrow path:Arr u8 _) -> Arr u8 _
+  = let parts=pt_parts(path) in
+    let prefix=if !pt_abs(path) then "" else if tx_byte(path,1)==47 && tx_byte(path,2)!=47 then "//" else "/" in
+    let name=loop (i=0, out=prefix) while i<len(parts)
+      next (i+2,pt_join(out,pt_slice(path,tx_at(parts,i),tx_at(parts,i+1)))) yield out in
+    if len(name)==0 then "." else name
+
 ; posixpath.normpath(p)
 fn pt_norm_step(borrow p:Arr u8 _, rooted:bool, move kept:Arr i64 _, start:i64, end:i64) -> Arr i64 _
   = let n=len(kept) in

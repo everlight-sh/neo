@@ -1,0 +1,22 @@
+import "ast.neo"
+import "dump.neo"
+import "modules.neo"
+import "text.neo"
+
+fn tool_types(borrow m:Mods, list:i64) -> Arr u8 _
+  = loop (i=0, out="") while i<ast_list_len(m.ast,list)
+      next (i+1,concat(out,if i==0 then "" else ", ",tool_type(m,ast_list_at(m.ast,list,i)))) yield out
+fn tool_caps(borrow m:Mods, list:i64) -> Arr Arr u8 _ _
+  = loop (i=0, caps=tx_words()) while i<ast_list_len(m.ast,list)
+      next (i+1,tx_insert_word(caps,md_str(m,ast_list_at(m.ast,list,i)))) yield caps
+fn tool_type(borrow m:Mods, id:i64) -> Arr u8 _
+  = let n=md_node(m,id) in
+    if n.kind==n_t_arr() then concat("Arr ",tool_type(m,n.a)," ",if n.c==0 then md_str(m,n.b) else "(…)")
+    else if n.kind==n_t_rec() then concat(md_str(m,n.a),
+      if ast_list_len(m.ast,n.b)==0 then "" else concat("<",tool_types(m,n.b),">"))
+    else if n.kind==n_t_ref() then concat("Ref<",tool_type(m,n.a),">")
+    else if n.kind==n_t_fn() then
+      let caps=tool_caps(m,n.c) in
+      let joined=loop (i=0, out="") while i<len(caps) next (i+1,concat(out,if i==0 then "" else ",",tx_word(caps,i))) yield out in
+      concat(if n.c<0 then "Fn" else concat("Effect<",joined,">"),"(",tool_types(m,n.a),")->",tool_type(m,n.b))
+    else dp_scalar(n.kind)

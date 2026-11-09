@@ -96,8 +96,9 @@ def test(args):
             print('PASS',case['name'],flush=True)
         except (Exception,SystemExit) as exc:
             failed+=1;print('FAIL',case['name'],str(exc),file=sys.stderr,flush=True)
-    if config.get('integration') and not args.unit_only:
-        failed+=bool(subprocess.call([sys.executable,str(root/config['integration'])],cwd=root))
+    integration=config.get('reference-integration') or config.get('integration')
+    if integration and Path(integration).suffix == '.py' and not args.unit_only:
+        failed+=bool(subprocess.call([sys.executable,str(root/integration)],cwd=root))
     print(f'neo test: {count} native cases, {failed} failed',flush=True)
     if failed:raise SystemExit(1)
 

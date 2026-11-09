@@ -1,0 +1,111 @@
+[tool.neo]
+test-globs = []
+
+[[test]]
+name = "compute-hello"
+file = "../examples/hello.neo"
+stdout = "Hello, World!\n"
+
+[[test]]
+name = "compute-mandelbrot"
+file = "../examples/mandel.neo"
+args = ["200", "200", "100"]
+stdout = "842053\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "compute-stencil"
+file = "../examples/stencil.neo"
+args = ["1000", "3"]
+stdout = "499223042\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "compute-sieve"
+file = "../examples/sieve.neo"
+args = ["10000"]
+stdout = "1229\n"
+
+[[test]]
+name = "compute-nbody"
+file = "../examples/nbody.neo"
+args = ["100", "10"]
+stdout = "-0.88644769431012838\n"
+stdout-tolerance = 1e-9
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "argv-missing"
+file = "../examples/stencil.neo"
+exit = 2
+
+[[test]]
+name = "argv-nonnumeric"
+file = "../examples/stencil.neo"
+args = ["bad", "3"]
+exit = 2
+
+[[test]]
+name = "argv-refinement"
+file = "../examples/stencil.neo"
+args = ["0", "3"]
+exit = 3
+
+[[test]]
+name = "argv-overflow"
+file = "../examples/stencil.neo"
+args = ["99999999999999999999999", "3"]
+exit = 2
+
+[[test]]
+name = "unproven-bounds-rejected"
+file = "../examples/unproven.neo"
+reject = true
+diagnostic = "bounds"
+
+[[test]]
+name = "heap-class-boundaries"
+file = "fixtures/heap_headers.neo"
+stdout = "0\n"
+timeout = 60
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "observer-lifetimes"
+file = "fixtures/observer_lifetimes.neo"
+stdout = "observer lifetimes OK\n"
+timeout = 60
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "indexed-parent-lifetime"
+file = "fixtures/index_lifetimes.neo"
+args = ["1024", "7"]
+stdout = "256\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "shared-arrays"
+file = "fixtures/shared_arrays.neo"
+args = ["1000"]
+stdout = "shared arrays OK\n"
+timeout = 60
+build-env.NEO_ALLOC_STATS = "1"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "http-loopback-framing-and-pipeline"
+file = "fixtures/http_integration.neo"
+stdout = "HTTP integration OK\n"
+timeout = 30
+
+[[test]]
+name = "sha256-binary-stream"
+file = "fixtures/sha256_stdin.neo"
+stdin-hex = "616263"
+stdout-hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+[[test]]
+name = "runtime-word-byte-and-json-properties"
+file = "fixtures/runtime_properties.neo"
+stdout = "Runtime properties OK\n"

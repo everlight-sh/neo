@@ -1,0 +1,48 @@
+; Report frontend and LLVM work separately. LLVM records describe the passes
+; that actually ran at the selected optimization level.
+import "std:io"
+import "std:json"
+import "std:numbers"
+import "std:sha256"
+import "std:strings"
+import "build.neo"
+import "lex.neo"
+import "modules.neo"
+import "packages.neo"
+import "paths.neo"
+import "text.neo"
+
+type BrStages = { started:i64, parsed:i64, elaborated:i64, checked:i64, lowered:i64 }
+
+fn br_seconds(ns:i64) -> Arr u8 _ = float_text(f64(ns)/1000000000.0).value
+fn br_phase(start:i64, finish:i64) -> Arr u8 _ = br_seconds(bd_elapsed(start,finish))
+
+type BrRemarks = { offset:i64, passed:bool, counts:Json }
+fn br_remarks(borrow text:Arr u8 _) -> Json
+  = let result=loop (out=BrRemarks { offset=0,passed=false,counts=pk_object() }) while out.offset<len(text)
+      next (let end=lx_line_end(text,out.offset) in let line=pt_slice(text,out.offset,end) in
+        let state=if str_starts(line,"--- ") then tx_equal(line,"--- !Passed") else out.passed in
+        let name=if state && str_starts(line,"Pass:") then str_trim(pt_slice(line,5,len(line))) else "" in
+        let counts=if len(name)==0 then out.counts
+          else pk_put(out.counts,name,json_value_int(json_int(pk_get(out.counts,name)).value+1)) in
+        BrRemarks { offset=end+1,passed=state && len(name)==0,counts=counts }) yield out in result.counts
+
+fn br_sources(borrow m:Mods) -> Arr u8 _
+  = let parts=arr(i in 0..len(m.paths)) concat(if i==0 then "" else ",",json_quote(md_path(m,i)),":",
+      json_quote(tx_hex_bytes(tx_empty(),sha256(md_word(m.sources,i))))) in
+    concat("{",str_concat_parts(parts),"}")
+
+effect(fs,time) fn br_print(borrow m:Mods, borrow stages:BrStages, borrow linked:BdLink,
+                          borrow config:BdConfig, borrow output:Arr u8 _, dev:bool, allow_unproven:bool,
+                          borrow library:Arr u8 _) -> IntResult
+  = let now=bd_clock() in
+    print_out(concat("{\"ok\":true,\"backend\":\"llvm-ir\",\"binary\":",json_quote(output),
+      ",\"target\":",json_quote(config.target),",\"binary_sha256\":",if len(linked.digest)>0 then json_quote(linked.digest) else "null",
+      ",\"optimization\":{\"profile\":",if dev then "\"dev\"" else "\"release\"",",\"level\":",config.level,
+      ",\"llvm_passes\":",json_encode(br_remarks(linked.remarks)),"},\"allow_unproven\":",if allow_unproven then "true" else "false",
+      ",\"sources\":",br_sources(m),",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),
+      ",\"elaborate_seconds\":",br_phase(stages.parsed,stages.elaborated),",\"check_seconds\":",br_phase(stages.elaborated,stages.checked),
+      ",\"lower_seconds\":",br_phase(stages.checked,stages.lowered),"},\"build\":{\"cache\":\"disabled\",\"compile_seconds\":",
+      br_seconds(linked.compile_ns),",\"link_seconds\":",br_seconds(linked.link_ns),",\"llvm_seconds\":",
+      br_seconds(linked.compile_ns+linked.link_ns),",\"total_seconds\":",br_phase(stages.started,now),"}",
+      if len(library)==0 then "" else concat(",\"native_libraries\":",library),"}\n"))

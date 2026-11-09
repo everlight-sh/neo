@@ -1,0 +1,175 @@
+; Optional HTTP continuations and coordinated process shutdown. The ordinary
+; request path allocates no task table. Every byte capture has one owner.
+; State: jobs@1632, count@1640, features@1680, grace@1688, signal fd+1@1696,
+; worker listener closed@1704, signal monitor fd+1@1728.
+; 160-byte callback slots: eight persistent scalar words@80, dense index@144,
+; direct-send disposition@152. Active vector@1960, free-slot head@1968.
+effect fn rt_signal_monitor_open(old:ptr)->i64
+  = if load_i64(runtime_state(),1728)!=0 then rt_result(-16) else
+    let mask=stack_alloc(8) in let set=store_i64(mask,0,16386) in let blocked=rt_signal_mask(rt_signal_block_mode(),mask,old) in
+    if blocked<0 then -1 else let fd=rt_signal_open(mask) in
+    if fd<0 then let restored=rt_signal_mask(rt_signal_restore_mode(),old,null()) in -1 else
+    let saved=store_i64(runtime_state(),1728,fd+1) in let previous=store_i64(runtime_state(),1736,load_i64(old,0)) in fd
+effect fn rt_signal_monitor_close(fd:i64,old:i64)->unit
+  = let closed=rt_close(fd) in let clear=store_i64(runtime_state(),1728,0) in
+    let mask=stack_alloc(8) in let saved=store_i64(mask,0,old) in let restored=rt_signal_mask(rt_signal_restore_mode(),mask,null()) in noop()
+effect fn rt_http_config(grace:i64,asynchronous:bool)->i64
+  = if grace<1 || grace>120000 || load_ptr(runtime_state(),1616)!=null() then -22 else
+    let flags=store_i64(runtime_state(),1680,if asynchronous then 3 else 2) in let saved=store_i64(runtime_state(),1688,grace) in 0
+effect fn rt_async_jobs()->ptr
+  = let existing=load_ptr(runtime_state(),1632) in if existing!=null() then existing else
+    let jobs=ax_alloc(2048*168) in let cleared=memset(jobs,i32(0),2048*168) in
+    let empty=loop(i=0) while i<2048 next(let saved=store_i64(jobs,i*160,-1) in let free=store_i64(jobs,i*160+8,i+1) in i+1) yield i in
+    let active=store_ptr(runtime_state(),1960,ptr_add(jobs,2048*160)) in
+    let free=store_i64(runtime_state(),1968,0) in let saved=store_ptr(runtime_state(),1632,jobs) in jobs
+effect fn rt_async_remove(job:ptr)->unit
+  = if load_i64(job,0)<0 then noop() else
+    let released=ax_release(load_ptr(job,16)) in let empty=store_i64(job,0,-1) in
+    let unwatched=store_ptr(job,56,null()) in let ready=store_i64(job,72,0) in
+    let count=load_i64(runtime_state(),1640)-1 in let active=load_ptr(runtime_state(),1960) in
+    let index=load_i64(job,144) in let last=load_ptr(active,count*8) in
+    let moved=if last==job then noop() else let swapped=store_ptr(active,index*8,last) in store_i64(last,144,index) in
+    let clear=store_ptr(active,count*8,null()) in let counted=store_i64(runtime_state(),1640,count) in
+    let linked=store_i64(job,8,load_i64(runtime_state(),1968)) in
+    store_i64(runtime_state(),1968,(ptr_to_i64(job)-ptr_to_i64(load_ptr(runtime_state(),1632)))/160)
+effect fn rt_async_cancel(fd:i64)->unit
+  = if load_i64(runtime_state(),1640)<=0 then noop() else
+    let active=load_ptr(runtime_state(),1960) in let count=load_i64(runtime_state(),1640) in
+    let index=loop(i=0) while i<count && load_i64(load_ptr(active,i*8),0)!=fd next(i+1) yield i in
+    if index==count then noop() else rt_async_remove(load_ptr(active,index*8))
+effect fn rt_async_register(callback:ptr,capture:Arr u8 n,wake:i64,deadline:i64)->i64
+  = let state=load_ptr(runtime_state(),1616) in let now=rt_clock_ns()/1000000 in
+    if state==null() || load_i64(runtime_state(),1680)%2!=1 || n>16384 || wake<now || deadline<wake || deadline-now>120000 || load_i64(runtime_state(),1640)>=2048 then -22 else
+    if load_i64(state,48)==2 then -16 else
+    let jobs=rt_async_jobs() in let slot=load_i64(runtime_state(),1968) in
+    if slot>=2048 then -11 else let job=ptr_add(jobs,slot*160) in
+    let popped=store_i64(runtime_state(),1968,load_i64(job,8)) in
+    let bytes=ax_alloc(if n<1 then 1 else n) in let copied=memcpy(bytes,data(capture),n) in
+    let a=store_i64(job,0,load_i64(state,0)) in let b=store_ptr(job,8,callback) in let c=store_ptr(job,16,bytes) in let d=store_i64(job,24,n) in
+    let e=store_i64(job,32,wake) in let f=store_i64(job,40,deadline) in let owner=store_ptr(job,48,state) in
+    let watch=store_ptr(job,56,null()) in let expected=store_i64(job,64,0) in let ready=store_i64(job,72,0) in
+    let cleared=memset(ptr_add(job,80),i32(0),80) in let index=load_i64(runtime_state(),1640) in
+    let placed=store_ptr(load_ptr(runtime_state(),1960),index*8,job) in let position=store_i64(job,144,index) in
+    let marked=store_i64(state,48,2) in let counted=store_i64(runtime_state(),1640,load_i64(runtime_state(),1640)+1) in 0
+effect fn rt_async_queue(state:ptr,bytes:ptr,n:i64)->unit
+  = let length=load_i64(state,32) in let old=load_ptr(state,24) in
+    let grown=if length+n>ax_allocation_capacity(old) then let bigger=ax_alloc(length+n) in
+      let copied=memcpy(bigger,old,length) in let freed=ax_release(old) in store_ptr(state,24,bigger) else noop() in
+    let copied=memcpy(ptr_add(load_ptr(state,24),length),bytes,n) in store_i64(state,32,length+n)
+effect fn rt_async_state(states:ptr,n:i64,fd:i64)->ptr
+  = let index=loop(i=0) while i<n && load_i64(states,i*64)!=fd next(i+1) yield i in if index==n then null() else ptr_add(states,index*64)
+effect fn rt_async_notified()->unit = store_i64(runtime_state(),1872,1)
+effect fn rt_async_current_job()->ptr
+  = let current=load_ptr(runtime_state(),1864) in if current!=null() then current else
+    let state=load_ptr(runtime_state(),1616) in
+    if state==null() || load_i64(runtime_state(),1640)==0 then null() else
+    let active=load_ptr(runtime_state(),1960) in let count=load_i64(runtime_state(),1640) in let fd=load_i64(state,0) in
+    let slot=loop(i=0) while i<count && load_i64(load_ptr(active,i*8),0)!=fd next(i+1) yield i in
+    if slot==count then null() else load_ptr(active,slot*8)
+effect fn rt_async_watch(word:ptr,observed:i64,immediate:bool)->bool
+  = let job=rt_async_current_job() in if job==null() || word==null() then false else
+    let a=store_ptr(job,56,word) in let b=store_i64(job,64,observed) in
+    let c=if immediate && atomic_load_i64(word,0)!=observed then store_i64(job,72,bit_or(load_i64(job,72),2)) else noop() in true
+effect fn rt_async_direct(bytes:ptr,size:i64,wake:i64)->i64
+  = let job=load_ptr(runtime_state(),1864) in let now=load_i64(runtime_state(),1984) in
+    if job==null() || size<0 || size>49184 || wake<=now || wake>load_i64(job,40) || load_i64(job,152)!=0 then -22 else
+    let state=load_ptr(job,48) in
+    if state==null() || load_i64(state,0)!=load_i64(job,0) || load_i64(state,32)!=0 then -22 else
+    let ready=store_i64(job,152,1) in let deadline=store_i64(job,32,wake) in
+    let written=if size==0 then 0 else loop(result=rt_send_now(load_i64(job,0),bytes,size)) while result<0 && load_i32(rt_errno(),0)==i32(4) next(rt_send_now(load_i64(job,0),bytes,size)) yield result in
+    if written<0 && !rt_retry() then let failed=store_i64(job,152,3) in 0 else
+    let sent=if written<0 then 0 else written in
+    if sent==size then 0 else let reset=store_i64(state,40,0) in let queued=rt_async_queue(state,ptr_add(bytes,sent),size-sent) in 0
+effect fn rt_async_process(job:ptr,states:ptr,n:i64,now:i64,notified:bool)->unit
+  = let fd=load_i64(job,0) in
+      let word=load_ptr(job,56) in
+      let dirty=fd>=0 && notified && word!=null() && atomic_load_i64(word,0)!=load_i64(job,64) in
+      if fd<0 || (load_i64(job,32)>now && load_i64(job,40)>now && load_i64(job,72)==0 && !dirty) then noop() else
+        let cached=load_ptr(job,48) in
+        let offset=ptr_to_i64(cached)-ptr_to_i64(states) in
+        let state=if cached!=null() && offset>=0 && offset<n*64 && offset%64==0 && load_i64(cached,0)==fd then cached else rt_async_state(states,n,fd) in
+        if state==null() then rt_async_remove(job) else
+        let owner=store_ptr(job,48,state) in
+        if now>=load_i64(job,40) then rt_drop(state) else
+        let reason=bit_or(load_i64(job,72),bit_or(if dirty then 2 else 0,if load_i64(job,32)<=now then 1 else 0)) in
+        if load_i64(state,32)>0 then store_i64(job,72,reason) else
+        let marked=store_i64(job,72,0) in let current=store_ptr(runtime_state(),1864,job) in
+        let reset_direct=store_i64(job,152,0) in
+        let awakened=store_i64(runtime_state(),1912,reason) in
+        let dispatched=store_i64(runtime_state(),1984,now) in
+        let counted=store_i64(runtime_state(),1896,load_i64(runtime_state(),1896)+1) in
+        let result=handler_call(load_ptr(job,8),load_ptr(job,16),load_i64(job,24)) in
+        let cleared=store_ptr(runtime_state(),1864,null()) in let reset_reason=store_i64(runtime_state(),1912,0) in
+        let reset_dispatch=store_i64(runtime_state(),1984,0) in
+        let direct=load_i64(job,152) in
+        if direct!=0 then
+          (if direct!=1 || len(result)!=0 then rt_drop(state) else if load_i64(state,32)>0 then rt_flush(state) else noop()) else
+        let bytes=data(result) in let size=len(result) in
+        let capture=if size>=32 then load_i64(bytes,16) else -1 in let done=if size>=32 then load_i64(bytes,24) else -1 in let wake=if size>=32 then load_i64(bytes,8) else -1 in
+        if size<32 || size>1064992 || !rt_match(result,0,"NEOASY01") || capture<0 || capture>16384 || capture>size-32 || done<0 || done>1 || done==0 && (wake<=now || wake>load_i64(job,40)) then rt_drop(state) else
+        let queued=rt_async_queue(state,ptr_add(bytes,32+capture),size-32-capture) in
+        let changed=if done==1 then let removed=rt_async_remove(job) in store_i64(state,48,1) else
+          let replacement=if capture==0 && load_i64(job,24)==0 then noop() else
+            let old=ax_release(load_ptr(job,16)) in let following=ax_alloc(if capture<1 then 1 else capture) in let copied=memcpy(following,ptr_add(bytes,32),capture) in
+            let saved=store_ptr(job,16,following) in store_i64(job,24,capture) in store_i64(job,32,wake) in
+        if load_i64(state,32)>0 then rt_flush(state) else if done==1 then rt_drop(state) else noop()
+effect fn rt_async_tick_active(states:ptr,n:i64)->unit
+  = let saved=store_ptr(runtime_state(),1800,states) in let count=store_i64(runtime_state(),1808,n) in
+    let timers=rt_timer_tick() in let fibers=rt_fiber_tick() in
+    let notified=load_i64(runtime_state(),1872)!=0 in let reset=store_i64(runtime_state(),1872,0) in
+    if load_i64(runtime_state(),1640)<=0 then noop() else
+    let now=rt_clock_ns()/1000000 in let active=load_ptr(runtime_state(),1960) in
+    let stepped=loop(i=0) while i<load_i64(runtime_state(),1640) next(
+      let job=load_ptr(active,i*8) in let processed=rt_async_process(job,states,n,now,notified) in
+      if i<load_i64(runtime_state(),1640) && load_ptr(active,i*8)==job then i+1 else i) yield i in noop()
+; Ordinary buffered requests must not pay the active executor's stack setup or
+; timer/fiber dispatch. Keep ownership context current for work admitted later
+; in this HTTP iteration. These are the same live-count guards as each driver.
+inline effect fn rt_async_tick(states:ptr,n:i64)->unit
+  = if load_i64(runtime_state(),1640)!=0 || load_i64(runtime_state(),1784)!=0 || load_i64(runtime_state(),1904)!=0 then rt_async_tick_active(states,n) else
+    let saved=store_ptr(runtime_state(),1800,states) in let count=store_i64(runtime_state(),1808,n) in store_i64(runtime_state(),1872,0)
+effect fn rt_async_timeout_legacy(maximum:i64)->i64
+  = if load_i64(runtime_state(),1640)<=0 then maximum else
+    let active=load_ptr(runtime_state(),1960) in let count=load_i64(runtime_state(),1640) in let now=rt_clock_ns()/1000000 in
+    let wake=loop(i=0,nearest=if maximum<0 then now+120000 else now+maximum) while i<count next(i+1,
+      let job=load_ptr(active,i*8) in
+      let state=load_ptr(job,48) in let states=load_ptr(runtime_state(),1800) in let n=load_i64(runtime_state(),1808) in
+      let offset=ptr_to_i64(state)-ptr_to_i64(states) in
+      let blocked=state!=null() && offset>=0 && offset<n*64 && load_i64(state,0)==load_i64(job,0) && load_i64(state,32)>0 in
+      let due=if load_i64(job,72)!=0 then now else load_i64(job,32) in
+      let following=if blocked then load_i64(job,40) else if due<load_i64(job,40) then due else load_i64(job,40) in
+      if following<nearest then following else nearest) yield nearest-now in
+    let delay=if wake<0 then 0 else wake in if maximum<0 || delay<maximum then delay else maximum
+effect fn rt_http_shutdown_signal(control:ptr,fd:i64)->unit
+  = let signal=rt_signal_take(fd) in
+    if signal!=2 && signal!=15 then noop() else
+    let deadline=rt_clock_ns()/1000000+load_i64(control,24) in let previous=atomic_compare_exchange_i64(control,8,0,deadline) in
+    let woken=if previous!=0 then noop() else
+      let byte=stack_alloc(8) in let set=store_u8(byte,0,u8(1)) in
+      let sent=loop(i=0) while i<load_i64(control,40) next(let wrote=rt_write(load_i64(control,264+i*16),byte,1) in i+1) yield i in noop() in noop()
+effect fn rt_http_draining(control:ptr,states:ptr,n:i64,listener:i64)->bool
+  = let deadline=atomic_load_i64(control,8) in if deadline<=0 then false else
+    let timers=rt_timer_stop_all() in
+    let closed=if load_i64(runtime_state(),1704)==0 then let closed=rt_close(listener) in store_i64(runtime_state(),1704,1) else noop() in
+    let expired=rt_clock_ns()/1000000>=deadline in
+    let active=loop(i=0,active=0) while i<n next(i+1,
+      let state=ptr_add(states,i*64) in if load_i64(state,0)<0 then active else
+      if expired || load_i64(state,32)==0 && load_i64(state,48)!=2 then let dropped=rt_drop(state) in active else
+      let close=if load_i64(state,48)==2 then noop() else store_i64(state,48,1) in active+1) yield active in active==0 && load_i64(runtime_state(),1784)==0
+effect fn rt_http_worker_signals(control:ptr)->i64
+  = let flags=store_i64(runtime_state(),1680,load_i64(control,16)) in let grace=store_i64(runtime_state(),1688,load_i64(control,24)) in
+    if load_i64(control,16)==0 then -1 else
+    let old=stack_alloc(8) in let cleared=store_i64(old,0,0) in let fd=rt_signal_monitor_open(old) in
+    if fd<0 then let failed=ax_trap(data("HTTP signal monitor failed\0")) in -1 else
+    let saved=store_i64(runtime_state(),1696,fd+1) in fd
+effect fn rt_http_reap(control:ptr,workers:i64)->unit
+  = let reaped=loop(i=1) while i<workers next(
+      let pid=load_i64(control,8192+i*8) in let status=stack_alloc(8) in
+      let waited=if pid<=0 then 0 else loop(done=false) while !done next(
+        let result=rt_wait_status(pid,status,1) in if result!=0 then true else
+        if rt_clock_ns()/1000000>=atomic_load_i64(control,8) then let killed=rt_kill(pid,9) in let waited=rt_wait(pid) in true else
+        let pause=rt_wait_ready(-1,0,10) in false) yield 0 in i+1) yield i in noop()
+
+inline effect fn rt_async_timeout(maximum:i64)->i64
+  = if load_i64(runtime_state(),1640)==0 && load_i64(runtime_state(),1784)==0 && load_i64(runtime_state(),1904)==0 then maximum else
+    rt_timer_timeout(rt_fiber_timeout(rt_async_timeout_legacy(maximum)))

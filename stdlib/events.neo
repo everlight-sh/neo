@@ -1,0 +1,90 @@
+import "std:json"
+import "std:time"
+import "std:vec"
+
+; Bounded ephemeral broadcast channels, independent of HTTP. Configure once
+; before fork. Registry and ring slots live in anonymous shared memory; no heap
+; pointers cross workers. Try-locks never block the scheduler. A busy writer or
+; reader returns EAGAIN and can be retried. Retention is by event count.
+sealed type EventChannel = {token:i64}
+type EventMessage = {sequence:i64,stamp:i64,event:Arr u8 _,json:Arr u8 _}
+type EventBatch = {ok:bool,epoch:i64,latest:i64,oldest:i64,reset:bool,events:Arr EventMessage _,error:Error}
+fn event_name_valid(name:Arr u8 n)->bool
+  = n>=1 && n<=48 && loop(i=0,ok=true) while ok && i<n next(i+1,let c=str_byte(name,i) in c>=65 && c<=90 || c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==95 || c==46 || c==58) yield ok
+effect(process) fn events_configure(channels:i64,capacity:i64,payload:i64)->IntResult
+  = let code=rt_events_init(channels,capacity,payload) in if code<0 then int_error(0-code,"Invalid or already configured event bus",0) else int_ok(0)
+private effect(process) fn event_address(channel:EventChannel)->ptr
+  = let root=rt_events_root() in if root==null() || channel.token<1 || channel.token>load_i64(root,8) then null() else
+    let p=ptr_add(root,64+(channel.token-1)*(128+load_i64(root,16)*(80+load_i64(root,24)))) in
+    if atomic_load_i64(p,0)==0 then null() else p
+private effect(process) fn event_find(root:ptr,name:Arr u8 n)->i64
+  = let stride=128+load_i64(root,16)*(80+load_i64(root,24)) in
+    loop(i=0,found= -1) while found<0 && i<load_i64(root,8) next(i+1,
+      let p=ptr_add(root,64+i*stride) in if atomic_load_i64(p,0)==n && byte_equal(view(ptr_add(p,64),n),name) then i else found) yield found
+effect(process) fn event_channel(name:Arr u8 n)->EventChannel
+  = let root=rt_events_root() in
+    if root==null() || !event_name_valid(name) then EventChannel {token= -22} else
+    let existing=event_find(root,name) in if existing>=0 then EventChannel {token=existing+1} else
+    if atomic_compare_exchange_i64(root,40,0,1)!=0 then EventChannel {token= -11} else
+    let stride=128+load_i64(root,16)*(80+load_i64(root,24)) in
+    let found=loop(i=0,slot= -1,empty= -1) while slot<0 && i<load_i64(root,8) next(i+1,
+      let p=ptr_add(root,64+i*stride) in if atomic_load_i64(p,0)==n && byte_equal(view(ptr_add(p,64),n),name) then i else slot,
+      let p=ptr_add(root,64+i*stride) in if empty<0 && atomic_load_i64(p,0)==0 then i else empty) yield if slot>=0 then slot else empty in
+    let saved=if found<0 then noop() else let p=ptr_add(root,64+found*stride) in
+      if atomic_load_i64(p,0)>0 then noop() else let bytes=memcpy(ptr_add(p,64),data(name),n) in atomic_store_i64(p,0,n) in
+    let unlocked=atomic_store_i64(root,40,0) in EventChannel {token=if found<0 then -28 else found+1}
+effect(process) fn event_channel_ok(channel:EventChannel)->bool = event_address(channel)!=null()
+effect(process) fn event_channel_id(channel:EventChannel)->i64 = if event_address(channel)==null() then 0 else channel.token
+effect(process) fn event_channel_from_id(id:i64)->EventChannel
+  = let channel=EventChannel {token=id} in if event_address(channel)==null() then EventChannel {token= -22} else channel
+effect(process) fn event_channel_name(channel:EventChannel)->Arr u8 _
+  = let p=event_address(channel) in if p==null() then "" else let size=atomic_load_i64(p,0) in check size>=0 && size<=48 in view(ptr_add(p,64),size)
+effect(process) fn event_epoch()->i64 = let root=rt_events_root() in if root==null() then 0 else load_i64(root,32)
+effect(process) fn event_last_key(channel:EventChannel)->i64
+  = let p=event_address(channel) in if p==null() then 0 else atomic_load_i64(p,24)
+private effect(process) fn event_unlock(p:ptr,published:bool)->unit
+  = let unlocked=atomic_store_i64(p,8,0) in let waiter=atomic_compare_exchange_i64(p,32,1,0) in
+    if published || waiter==1 then rt_events_notify() else noop()
+private effect(process) fn event_read_lock(p:ptr)->bool
+  = if atomic_compare_exchange_i64(p,8,0,1)==0 then true else
+    let waiter=atomic_store_i64(p,32,1) in atomic_compare_exchange_i64(p,8,0,1)==0
+; Arm after copying the channel. A publication between the copy and arming
+; either marks this continuation ready immediately or leaves its socket wake
+; pending. Contention retries wait for an unlock notification, never a timer.
+effect(process) fn event_watch(channel:EventChannel,observed:i64)->bool
+  = let p=event_address(channel) in if p==null() then false else rt_async_watch(ptr_add(p,16),observed,true)
+effect(process) fn event_watch_unlock(channel:EventChannel)->bool
+  = let p=event_address(channel) in if p==null() then false else rt_async_watch(ptr_add(p,16),-1,false)
+effect(process) fn event_publish_once(channel:EventChannel,event:Arr u8 n,json:Arr u8 m,stamp:i64,key:i64)->IntResult
+  = let root=rt_events_root() in let p=event_address(channel) in
+    if p==null() || !event_name_valid(event) || str_starts(event,"neokit-") || m>load_i64(root,24) || !json_parse(json).ok || stamp<0 || key<0 then int_error(22,"Invalid event/channel or payload",0) else
+    if atomic_compare_exchange_i64(p,8,0,1)!=0 then int_error(11,"Event channel is busy",0) else
+    let latest=load_i64(p,16) in
+    let published=if key>0 && key<=load_i64(p,24) then int_ok(latest) else
+      if latest>=9007199254740991 then int_error(75,"Event sequence exhausted",0) else
+      let capacity=load_i64(root,16) in check capacity>0 in let slot=ptr_add(p,128+(latest%capacity)*(80+load_i64(root,24))) in
+      let a=store_i64(slot,0,latest+1) in let b=store_i64(slot,8,stamp) in let c=store_i64(slot,16,n) in let d=store_i64(slot,24,m) in
+      let e=memcpy(ptr_add(slot,32),data(event),n) in let f=memcpy(ptr_add(slot,80),data(json),m) in
+      let key_saved=if key>0 then atomic_store_i64(p,24,key) else noop() in let advanced=atomic_store_i64(p,16,latest+1) in int_ok(latest+1) in
+    let unlocked=event_unlock(p,published.ok && published.value>latest) in published
+effect(process) fn event_publish(channel:EventChannel,event:Arr u8 n,json:Arr u8 m,stamp:i64)->IntResult
+  = event_publish_once(channel,event,json,stamp,0)
+private fn event_batch_error(code:i64)->EventBatch
+  = EventBatch {ok=false,epoch=0,latest=0,oldest=0,reset=false,events=arr(i in 0..0) EventMessage {sequence=0,stamp=0,event="",json=""},error=Error {code=code,message="Event channel unavailable",position=0}}
+effect(process) fn event_read(channel:EventChannel,after:i64,limit:i64)->EventBatch
+  = let counted=store_i64(runtime_state(),1920,load_i64(runtime_state(),1920)+1) in
+    let root=rt_events_root() in let p=event_address(channel) in
+    if p==null() then event_batch_error(if channel.token<0 then 0-channel.token else 22) else
+    if after<0 || limit<1 || limit>4 then event_batch_error(22) else
+    if !event_read_lock(p) then event_batch_error(11) else
+    let latest=load_i64(p,16) in let capacity=load_i64(root,16) in check capacity>0 in let oldest=if latest>=capacity then latest-capacity+1 else 1 in
+    let reset=after<oldest-1 || after>latest in let start=if reset then (if latest==0 then 1 else latest) else after+1 in
+    let count=if latest<start then 0 else if latest-start+1>limit then limit else latest-start+1 in check count>=0 in
+    let list=loop(i=0,out=vec_empty::<EventMessage>()) while i<count next(i+1,
+      let sequence=start+i in let slot=ptr_add(p,128+((sequence-1)%capacity)*(80+load_i64(root,24))) in
+      let n=load_i64(slot,16) in let m=load_i64(slot,24) in check n>=0 && n<=48 && m>=0 && m<=8192 in
+      vec_push(out,EventMessage {sequence=sequence,stamp=load_i64(slot,8),event=view(ptr_add(slot,32),n),json=view(ptr_add(slot,80),m)})) yield out in
+    let messages=arr(i in 0..count) match vec_get(list,i) {None=>EventMessage {sequence=0,stamp=0,event="",json=""},Some(message)=>message} in
+    let unlocked=event_unlock(p,false) in EventBatch {ok=true,epoch=load_i64(root,32),latest=latest,oldest=oldest,reset=reset,events=messages,error=no_error()}
+effect(process) fn event_latest(channel:EventChannel)->EventBatch = event_read(channel,9007199254740991,1)
+effect(process) fn event_read_count()->i64 = load_i64(runtime_state(),1920)

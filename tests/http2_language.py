@@ -110,6 +110,8 @@ def go_cases(binary, server, root):
     ca = root / 'ca.der'
     proc, port = start_go(server, root)
     try:
+        authenticated=run(binary,port,ca,'POST:/request-headers:4')[0]
+        expect(authenticated,200,'h2',b'Bearer fixture-token|application/x-www-form-urlencoded')
         steps = ['GET:/hello', 'GET:/1m', 'GET:/headers', 'GET:/headers', 'GET:/big-headers', 'GET:/headers', 'GET:/stream',
                  'POST:/echo:3000000', 'HEAD:/1m', 'GET:/missing', 'PUT:/echo:0', 'GET:/hello']
         results = run(binary, port, ca, *steps)
@@ -136,6 +138,8 @@ def go_cases(binary, server, root):
         proc.terminate(); proc.wait()
     proc, port = start_go(server, root, '-h1')
     try:
+        authenticated=run(binary,port,ca,'POST:/request-headers:4')[0]
+        expect(authenticated,200,'http/1.1',b'Bearer fixture-token|application/x-www-form-urlencoded')
         steps = ['GET:/hello', 'GET:/1m', 'GET:/headers', 'GET:/stream', 'POST:/echo:1000', 'HEAD:/1m', 'GET:/hello']
         results = run(binary, port, ca, *steps)
         for step, result in zip(steps, results):

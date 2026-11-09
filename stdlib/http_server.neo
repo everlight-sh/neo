@@ -1,0 +1,173 @@
+import "std:http"
+import "std:chunked"
+import "std:io"
+
+; Templates produce HTML; text props always pass through html_escape.
+type WebHtml = { bytes: Arr u8 _ }
+type WebRequest = { method: Arr u8 _, path: Arr u8 _, query: Arr u8 _, body: Arr u8 _, param: Arr u8 _, raw: Arr u8 _, route: Arr u8 _, server: bool, stamp: i64 }
+type WebResponse = { status: i64, body: Arr u8 _, content_type: Arr u8 _, immutable: bool, headers: Arr u8 _ }
+
+fn web_html(body: Arr u8 n) -> WebHtml = WebHtml { bytes=body }
+fn web_reply(status: i64, body: Arr u8 n, content_type: Arr u8 m) -> WebResponse
+  = WebResponse { status=status,body=body,content_type=content_type,immutable=false,headers="" }
+fn web_document(move body: WebHtml) -> WebResponse
+  = WebResponse { status=200,body=body.bytes,content_type="text/html; charset=utf-8",immutable=false,headers="" }
+fn web_json(body: Arr u8 n) -> WebResponse
+  = WebResponse { status=200,body=body,content_type="application/json; charset=utf-8",immutable=false,headers="" }
+
+fn web_reason(status:i64) -> Arr u8 _
+  = if status==200 then "OK" else if status==201 then "Created" else if status==202 then "Accepted" else if status==204 then "No Content"
+    else if status==301 then "Moved Permanently" else if status==302 then "Found" else if status==303 then "See Other" else if status==304 then "Not Modified"
+    else if status==307 then "Temporary Redirect" else if status==308 then "Permanent Redirect" else if status==400 then "Bad Request" else if status==401 then "Unauthorized"
+    else if status==403 then "Forbidden" else if status==404 then "Not Found" else if status==405 then "Method Not Allowed" else if status==409 then "Conflict"
+    else if status==413 then "Content Too Large" else if status==415 then "Unsupported Media Type" else if status==422 then "Unprocessable Content" else if status==429 then "Too Many Requests" else if status==503 then "Service Unavailable" else "Internal Server Error"
+fn web_header_safe(value:Arr u8 n) -> bool
+  = !str_find(value,"\r").present && !str_find(value,"\n").present && !str_find(value,"\0").present && http_field_value(value)
+fn web_with_header(response:WebResponse,name:Arr u8 n,value:Arr u8 m) -> WebResponse
+  = if !http_token(name) || !web_header_safe(value) || str_equal(http_lower(name),"content-length") || str_equal(http_lower(name),"transfer-encoding") || str_equal(http_lower(name),"connection") || str_equal(http_lower(name),"content-type")
+    then web_reply(500,"Invalid response header","text/plain; charset=utf-8") else response with { headers=concat(response.headers,name,": ",value,"\r\n") }
+fn web_status(response:WebResponse,status:i64) -> WebResponse
+  = response with { status=if status>=200 && status<=599 then status else 500 }
+fn web_redirect(location:Arr u8 n,status:i64) -> WebResponse
+  = if !web_header_safe(location) || !str_starts(location,"/") || str_starts(location,"//") || str_find(location,"\\").present then web_reply(400,"Invalid redirect","text/plain") else
+    web_with_header(web_status(web_reply(200,"","text/plain"),if status==301 || status==302 || status==303 || status==307 || status==308 then status else 303),"Location",location)
+fn web_encode_connection(response:WebResponse,head:bool,close:bool) -> Arr u8 _
+  = let empty=response.status==204 || response.status==304 in
+    concat("HTTP/1.1 ",int_text(response.status)," ",web_reason(response.status),"\r\n",if empty then "" else concat("Content-Length: ",int_text(len(response.body)),"\r\n"),
+      "Content-Type: ",if web_header_safe(response.content_type) then response.content_type else "application/octet-stream","\r\n",
+      if str_find(http_lower(response.headers),"cache-control:").present then "" else concat("Cache-Control: ",if response.immutable then "public, max-age=31536000, immutable" else "no-store","\r\n"),
+      "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
+      response.headers,if close then "Connection: close\r\n\r\n" else "Connection: keep-alive\r\n\r\n",if head || empty then "" else response.body)
+
+fn web_query(request: Arr u8 n) -> Arr u8 _
+  = let first=str_find(request," ") in if !first.present then "" else
+    let rest=str_slice(request,first.value+1,n) in let end=str_find(rest," ") in
+    if !end.present then "" else let target=str_slice(rest,0,end.value) in let query=str_find(target,"?") in
+    if query.present then str_slice(target,query.value+1,len(target)) else ""
+fn web_normal_path(path: Arr u8 n) -> Arr u8 _
+  = if n>1 && str_byte(path,n-1)==47 then str_slice(path,0,n-1) else path
+fn web_request(raw: Arr u8 n, stamp: i64) -> WebRequest
+  = WebRequest { method=http_method(raw),path=web_normal_path(http_path(raw)),query=web_query(raw),body=(if str_equal(http_lower(web_header(raw,"transfer-encoding")),"chunked") then http_decode_chunked(http_body(raw),16777216).value else http_body(raw)),param="",raw=raw,route="",server=true,stamp=stamp }
+fn web_static_request(path: Arr u8 n) -> WebRequest
+  = WebRequest { method="GET",path=path,query="",body="",param="",raw="",route="",server=false,stamp=0 }
+
+fn web_header(raw: Arr u8 n, name: Arr u8 m) -> Arr u8 _
+  = let first=http_line_end(raw,0) in
+    loop(at=if first<0 then n else first+2,value="",done=false) while !done && at<n
+      next(let end=http_line_end(raw,at) in if end<0 then n else end+2,
+        let end=http_line_end(raw,at) in let line=str_slice(raw,at,end) in let colon=str_find(line,":") in
+        if colon.present && str_equal(http_lower(str_slice(line,0,colon.value)),name) then str_trim(str_slice(line,colon.value+1,len(line))) else value,
+        let end=http_line_end(raw,at) in end<=at) yield value
+
+; Text without % or + decodes to itself; only the validity checks remain.
+fn web_decode(text: Arr u8 n) -> OptionBytes
+  = let plain=loop(i=0) while i<n && str_byte(text,i)!=37 && str_byte(text,i)!=43 next(i+1) yield i in
+    if plain==n then (if utf8_valid(text) && !str_find(text,"\0").present then some_bytes(text) else none_bytes()) else
+    loop(i=0,out="",valid=true) while valid && i<n
+      next(i+(if str_byte(text,i)==37 then 3 else 1),
+        let byte=str_byte(text,i) in if byte==37 then
+          let hi=http_hex(str_byte(text,i+1)) in let lo=http_hex(str_byte(text,i+2)) in
+          if i+2<n && hi>=0 && lo>=0 then let value=hi*16+lo in check value>=0 && value<=255 in concat(out,arr(k in 0..1) u8(value)) else out
+        else concat(out,if byte==43 then " " else str_slice(text,i,i+1)),
+        if str_byte(text,i)==37 then i+2<n && http_hex(str_byte(text,i+1))>=0 && http_hex(str_byte(text,i+2))>=0 else true)
+      yield if valid && utf8_valid(out) && !str_find(out,"\0").present then some_bytes(out) else none_bytes()
+type WebQueryScan = { at: i64, value: OptionBytes, done: bool }
+; A key without % or + is its own decoding, so it is compared raw; the decoder's
+; validity checks then only matter for a key that matches.
+fn web_query_key(raw: Arr u8 n, name: Arr u8 m) -> bool
+  = if !str_find(raw,"%").present && !str_find(raw,"+").present then str_equal(raw,name) && utf8_valid(raw) && !str_find(raw,"\0").present
+    else let key=web_decode(raw) in key.present && str_equal(key.value,name)
+fn web_query_step(query: Arr u8 n, name: Arr u8 m, at: i64) -> WebQueryScan
+  = let found=str_find(str_slice(query,at,n),"&") in let end=if found.present then at+found.value else n in
+    let part=str_slice(query,at,end) in let equal=str_find(part,"=") in
+    if web_query_key(if equal.present then str_slice(part,0,equal.value) else part,name)
+    then WebQueryScan { at=n,value=web_decode(if equal.present then str_slice(part,equal.value+1,len(part)) else ""),done=true }
+    else WebQueryScan { at=if found.present then end+1 else n,value=none_bytes(),done=false }
+fn web_query_get(query: Arr u8 n, name: Arr u8 m) -> OptionBytes
+  = loop(scan=WebQueryScan { at=0,value=none_bytes(),done=false }) while !scan.done && scan.at<n
+      next(web_query_step(query,name,scan.at)) yield scan.value
+fn web_segment(path: Arr u8 n, prefix: Arr u8 m) -> OptionBytes
+  = if !str_starts(path,prefix) || n<=m then none_bytes() else
+    let rest=str_slice(path,m,n) in let value=web_decode(rest) in
+    if str_find(rest,"/").present || !value.present || str_find(value.value,"/").present || str_find(value.value,"\\").present || str_equal(value.value,".") || str_equal(value.value,"..") then none_bytes() else value
+
+; Named route parameters, including terminal catch-all and optional catch-all.
+fn web_route_end(text:Arr u8 n,start:i64) -> i64
+  = let found=str_find(str_slice(text,start,n),"/") in if found.present then start+found.value else n
+fn web_route_name(segment:Arr u8 n) -> Arr u8 _
+  = if str_starts(segment,"[[...") && n>7 then str_slice(segment,5,n-2) else if str_starts(segment,"[...") && n>5 then str_slice(segment,4,n-1) else if str_starts(segment,"[") && n>2 then str_slice(segment,1,n-1) else ""
+private fn web_route_at(pattern:Arr u8 n,path:Arr u8 m,p:i64,q:i64) -> bool
+  = if p>n then q>m else
+    let pe=web_route_end(pattern,p) in let qe=web_route_end(path,q) in let segment=str_slice(pattern,p,pe) in let name=web_route_name(segment) in
+    if str_starts(segment,"[...") || str_starts(segment,"[[...") then
+      pe==n && (q<m || str_starts(segment,"[[...")) &&
+      loop(at=q,ok=true) while ok && at<m next(web_route_end(path,at)+1,let end=web_route_end(path,at) in web_segment(concat("/",str_slice(path,at,end)),"/").present) yield ok
+    else q<=m && (if len(name)>0 then web_segment(concat("/",str_slice(path,q,qe)),"/").present else str_equal(segment,str_slice(path,q,qe))) &&
+      web_route_at(pattern,path,pe+1,qe+1)
+fn web_route_match(pattern:Arr u8 n,path:Arr u8 m) -> bool
+  = n<=4096 && m<=4096 && str_starts(pattern,"/") && str_starts(path,"/") && web_route_at(pattern,path,1,1)
+fn web_param(request:WebRequest,name:Arr u8 n) -> OptionBytes
+  = if !web_route_match(request.route,request.path) then none_bytes() else
+    loop(p=1,q=1,value=none_bytes(),done=false) while !done && p<=len(request.route)
+      next(web_route_end(request.route,p)+1,web_route_end(request.path,q)+1,
+        let segment=str_slice(request.route,p,web_route_end(request.route,p)) in
+        if str_equal(web_route_name(segment),name) then web_decode(str_slice(request.path,q,if str_starts(segment,"[...") || str_starts(segment,"[[...") then len(request.path) else web_route_end(request.path,q))) else value,
+        let segment=str_slice(request.route,p,web_route_end(request.route,p)) in str_equal(web_route_name(segment),name) || str_starts(segment,"[...") || str_starts(segment,"[[...")) yield value
+fn web_routed(request:WebRequest,pattern:Arr u8 n) -> WebRequest
+  = let routed=request with { route=pattern } in let first=loop(p=1,name="") while len(name)==0 && p<=n
+      next(web_route_end(pattern,p)+1,web_route_name(str_slice(pattern,p,web_route_end(pattern,p)))) yield name in
+    routed with { param=if len(first)==0 then "" else web_param(routed,first).value }
+fn web_request_header(request:WebRequest,name:Arr u8 n) -> Arr u8 _ = web_header(request.raw,http_lower(name))
+fn web_form(request:WebRequest,name:Arr u8 n) -> OptionBytes
+  = if str_starts(http_lower(web_request_header(request,"content-type")),"application/x-www-form-urlencoded") then web_query_get(request.body,name) else none_bytes()
+fn web_cookie(request:WebRequest,name:Arr u8 n) -> OptionBytes
+  = let raw=web_request_header(request,"cookie") in
+    loop(at=0,value=none_bytes(),matches=0) while at<len(raw)
+      next(let found=str_find(str_slice(raw,at,len(raw)),";") in if found.present then at+found.value+1 else len(raw),
+        let found=str_find(str_slice(raw,at,len(raw)),";") in let piece=str_trim(str_slice(raw,at,if found.present then at+found.value else len(raw))) in let equal=str_find(piece,"=") in
+        if equal.present && str_equal(str_slice(piece,0,equal.value),name) then some_bytes(str_slice(piece,equal.value+1,len(piece))) else value,
+        let found=str_find(str_slice(raw,at,len(raw)),";") in let piece=str_trim(str_slice(raw,at,if found.present then at+found.value else len(raw))) in let equal=str_find(piece,"=") in
+        matches+(if equal.present && str_equal(str_slice(piece,0,equal.value),name) then 1 else 0)) yield if matches==1 then value else none_bytes()
+fn web_cookie_value(value:Arr u8 n) -> bool
+  = loop(i=0,valid=true) while valid && i<n next(i+1,let c=str_byte(value,i) in c>=33 && c<=126 && c!=34 && c!=44 && c!=59 && c!=92) yield valid
+fn web_set_cookie(response:WebResponse,name:Arr u8 n,value:Arr u8 m,age:i64,secure:bool) -> WebResponse
+  = if !http_token(name) || !web_cookie_value(value) || age<0 || (str_starts(name,"__Host-") || str_starts(name,"__Secure-")) && !secure then web_reply(500,"Invalid cookie","text/plain") else
+    web_with_header(response,"Set-Cookie",concat(name,"=",value,"; Path=/; HttpOnly; SameSite=Lax; Max-Age=",int_text(age),if secure then "; Secure" else ""))
+fn web_mutation(request:WebRequest) -> bool = !str_equal(request.method,"GET") && !str_equal(request.method,"HEAD") && !str_equal(request.method,"OPTIONS")
+fn web_same_origin(request:WebRequest,origin:Arr u8 n) -> bool
+  = let supplied=web_request_header(request,"origin") in n>0 && str_equal(supplied,origin) && !str_equal(web_request_header(request,"sec-fetch-site"),"cross-site")
+type WebField = { ok:bool,value:Arr u8 _,error:Arr u8 _ }
+fn web_required(value:OptionBytes,minimum:i64,maximum:i64) -> WebField
+  = let text=str_trim(value.value) in let valid=value.present && minimum>=0 && maximum>=minimum && len(text)>=minimum && len(text)<=maximum && utf8_valid(text) && !str_find(text,"\0").present in
+    WebField { ok=valid,value=text,error=if valid then "" else "Invalid or missing field" }
+fn web_form_int(request:WebRequest,name:Arr u8 n,minimum:i64,maximum:i64) -> IntResult
+  = let value=web_form(request,name) in let parsed=int_parse(value.value) in
+    if !value.present || !parsed.ok || parsed.value<minimum || parsed.value>maximum then int_error(22,"Invalid integer field",0) else parsed
+fn web_method_not_allowed(allowed:Arr u8 n) -> WebResponse
+  = web_with_header(web_reply(405,"Method Not Allowed","text/plain; charset=utf-8"),"Allow",allowed)
+
+sealed type WebURL = { value:Arr u8 _ }
+fn web_url(value:Arr u8 n) -> WebURL
+  = WebURL { value=if n>0 && n<=4096 && str_starts(value,"/") && !str_starts(value,"//") && !str_find(value,"\\").present && web_header_safe(value) then value else "#" }
+
+; Middleware uses status zero to continue dispatch without a response.
+fn web_continue() -> WebResponse = web_reply(200,"","text/plain") with { status=0 }
+
+private fn web_gzip_quality(field:Arr u8 n) -> bool
+  = let mark=str_find(field,"q=") in if !mark.present then !str_find(field,";").present else
+    let value=str_trim(str_slice(field,mark.value+2,n)) in
+    str_equal(value,"1") || str_equal(value,"1.0") || str_equal(value,"1.00") || str_equal(value,"1.000") ||
+    len(value)>=3 && len(value)<=5 && str_starts(value,"0.") &&
+      loop(i=2,valid=true,nonzero=false) while valid && i<len(value) next(i+1,let c=str_byte(value,i) in c>=48 && c<=57,nonzero || str_byte(value,i)>48) yield valid && nonzero
+fn web_accepts_gzip(value:Arr u8 n) -> bool
+  = loop(at=0,seen=false,accepted=false,wildcard=false) while at<n
+      next(let comma=str_find(str_slice(value,at,n),",") in if comma.present then at+comma.value+1 else n,
+        let comma=str_find(str_slice(value,at,n),",") in let field=http_lower(str_trim(str_slice(value,at,if comma.present then at+comma.value else n))) in let semi=str_find(field,";") in
+        seen || str_equal(str_trim(if semi.present then str_slice(field,0,semi.value) else field),"gzip"),
+        let comma=str_find(str_slice(value,at,n),",") in let field=http_lower(str_trim(str_slice(value,at,if comma.present then at+comma.value else n))) in let semi=str_find(field,";") in
+        if str_equal(str_trim(if semi.present then str_slice(field,0,semi.value) else field),"gzip") then web_gzip_quality(field) else accepted,
+        let comma=str_find(str_slice(value,at,n),",") in let field=http_lower(str_trim(str_slice(value,at,if comma.present then at+comma.value else n))) in let semi=str_find(field,";") in
+        if str_equal(str_trim(if semi.present then str_slice(field,0,semi.value) else field),"*") then web_gzip_quality(field) else wildcard) yield if seen then accepted else wildcard
+
+fn web_encode(response:WebResponse,head:bool)->Arr u8 _ = web_encode_connection(response,head,false)
+fn web_encode_close(response:WebResponse,head:bool)->Arr u8 _ = web_encode_connection(response,head,true)

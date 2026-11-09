@@ -23,7 +23,8 @@ fn shown_headers(headers:Arr HttpHeader n) -> Arr u8 _
       if str_starts(headers[i].name,"x-neo") then concat(out,"  ",headers[i].name,": ",headers[i].value,"\n") else out) yield out
 
 effect(fs,net,time,process) fn request(arena:Arena, move run:Run, method:Arr u8 m, path:Arr u8 k, size:i64) -> Run
-  = let sent=http_send(arena,run.client,method,path,upload(size),20000,8388608) in
+  = let headers=arr(i in 0..2) if i==0 then HttpHeader {name="Authorization",value="Bearer fixture-token"} else HttpHeader {name="Content-Type",value="application/x-www-form-urlencoded"} in
+    let sent=if str_equal(path,"/request-headers") then http_send_headers(arena,run.client,method,path,upload(size),20000,8388608,headers) else http_send(arena,run.client,method,path,upload(size),20000,8388608) in
     let client=sent.client in let response=sent.response in
     let line=if !response.ok then concat(method," ",path," -> error ",int_text(response.error.code)," ",response.error.message,"\n") else
       concat(method," ",path," -> ",int_text(response.status)," ",sent.protocol," connections=",int_text(client.connections),

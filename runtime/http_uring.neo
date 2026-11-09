@@ -92,9 +92,9 @@ effect fn rt_uring_push (d : ptr, opcode : i64, fd : i64, address : i64, length 
 ; (RESULTS-zig-x86-linux-2026-11-02.md). (With POLL_FIRST an earlier
 ; measurement on a client-bound setup saw 0.25 us less CPU per request.)
 effect fn rt_uring_recv (d : ptr, state : ptr, index : i64) -> unit
-  = let have = load_i64(state, 16) in
+  = let room = rt_http_input_room(state) in let have = load_i64(state, 16) in
     rt_uring_push(d, 27, load_i64(state, 0),
-      ptr_to_i64(ptr_add(load_ptr(state, 8), have)), 65536 - have, 0, 2 + index * 2)
+      ptr_to_i64(ptr_add(load_ptr(state, 8), have)), room, 0, 2 + index * 2)
 
 ; IORING_OP_SEND of the unsent output, MSG_NOSIGNAL.
 effect fn rt_uring_send (d : ptr, state : ptr, index : i64) -> unit

@@ -1,0 +1,134 @@
+; Native project test driver. Keep generated files in a private per-run
+; directory beneath the project, so imports resolve as they do for sources.
+import "std:random"
+import "std:strings"
+import "build.neo"
+import "lex.neo"
+import "modules.neo"
+import "paths.neo"
+import "test_glob.neo"
+import "test_manifest.neo"
+import "test_process.neo"
+import "text.neo"
+
+fn nt_quoted_import(borrow path:Arr u8 _) -> Arr u8 _
+  = let quoted=loop (i=0, out="import \"") while i<len(path)
+      next (i+1,tx_hex_byte(concat(out,"\\x"),tx_byte(path,i))) yield out in concat(quoted,"\"\n")
+
+fn nt_unit_code(borrow lexed:Lx, borrow path:Arr u8 _) -> Arr u8 _
+  = let checks=loop (i=0, out=tx_empty()) while i+1<lx_tok_count(lexed.toks)
+      next (i+1,let tok=lx_tok(lexed.toks,i) in let name=lx_tok(lexed.toks,i+1) in
+        if tok.kind!=tk_kw() || tok.code!=1 || name.kind!=tk_ident() then out else
+        let word=pt_slice(lexed.text,name.start,name.start+name.size) in
+        if !str_starts(word,"test_") then out else concat(out,"check ",word,"() in ")) yield out in
+    if len(checks)==0 then checks else concat(nt_quoted_import(path),"effect fn main() -> unit = ",checks,"noop()\n")
+
+effect(fs) fn nt_unit(borrow root:Arr u8 _, borrow path:Arr u8 _, move cases:Arr NtCase _) -> Arr NtCase _
+  = let text=fs_read(path) in let name=pt_relative_to(path,root) in
+    let c=nt_empty_case() with { name=name, generated=true, has_stdout=true } in
+    if !text.ok || !utf8_valid(text.value) then push(cases,c with { valid=false }) else
+    let lexed=lx_lex(tx_newlines(text.value)) in
+    if !lexed.ok then push(cases,c with { valid=false }) else
+    let code=nt_unit_code(lexed,path) in if len(code)==0 then cases else push(cases,c with { code=code })
+
+fn nt_fence(borrow src:Arr u8 _, i:i64) -> Arr u8 _
+  = str_trim(pt_slice(src,i,lx_line_end(src,i)))
+fn nt_code_fence(borrow src:Arr u8 _, i:i64) -> bool
+  = let word=nt_fence(src,i) in tx_equal(word,"```neo") || tx_equal(word,"```axon")
+fn nt_end_fence(borrow src:Arr u8 _, i:i64) -> i64
+  = loop (at=i) while at<len(src) && !tx_equal(nt_fence(src,at),"```")
+      next (lx_line_end(src,at)+1) yield at
+fn nt_skip_space(borrow src:Arr u8 _, i:i64) -> i64
+  = loop (at=i) while tx_byte(src,at)==32 || tx_byte(src,at)==9 || tx_byte(src,at)==10
+      next (at+1) yield at
+
+type NtDoc = { at:i64, index:i64, cases:Arr NtCase _ }
+fn nt_doc_step(borrow src:Arr u8 _, borrow name:Arr u8 _, move d:NtDoc) -> NtDoc
+  = let after=lx_line_end(src,d.at)+1 in
+    if !nt_code_fence(src,d.at) then d with { at=after } else
+    let end=nt_end_fence(src,after) in let next_line=lx_line_end(src,end)+1 in
+    let output=nt_skip_space(src,next_line) in
+    if !tx_equal(nt_fence(src,output),"```text") then d with { at=next_line } else
+    let begin=lx_line_end(src,output)+1 in let close=nt_end_fence(src,begin) in
+    if close>=len(src) then d with { at=close } else
+    let c=nt_empty_case() with { name=concat("doc-",name,"-",int_text(d.index)), generated=true,
+      code=pt_slice(src,after,end), has_stdout=true, expected=pt_slice(src,begin,close) } in
+    NtDoc { at=lx_line_end(src,close)+1, index=d.index+1, cases=push(d.cases,c) }
+
+fn nt_stem(borrow path:Arr u8 _) -> Arr u8 _
+  = let name=pt_tail(path) in
+    let i=loop (k=len(name)-1) while k>0 && tx_byte(name,k)!=46 next (k-1) yield k in
+    if i>0 then pt_slice(name,0,i) else name
+
+effect(fs) fn nt_doc(borrow path:Arr u8 _, move cases:Arr NtCase _) -> Arr NtCase _
+  = let read=fs_read(path) in let name=nt_stem(path) in
+    if !read.ok || !utf8_valid(read.value) then
+      push(cases,nt_empty_case() with { name=concat("doc-",name),valid=false }) else
+    let src=tx_newlines(read.value) in
+    let result=loop (d=NtDoc { at=0,index=0,cases=cases }) while d.at<len(src)
+      next (nt_doc_step(src,name,d)) yield d in result.cases
+
+effect fn nt_discover(borrow root:Arr u8 _, borrow patterns:Arr Arr u8 _ _, move cases:Arr NtCase _, docs:bool) -> Arr NtCase _
+  = loop (i=0, out=cases) while i<len(patterns)
+      next (i+1, let paths=nt_glob(root,md_word(patterns,i)) in
+        loop (k=0, result=out) while k<len(paths)
+          next (k+1, let path=md_word(paths,k) in
+            if docs then nt_doc(path,result) else nt_unit(root,path,result)) yield result) yield out
+
+effect fn nt_case_result(borrow run:NtRun, borrow c:NtCase, i:i64) -> i64
+  = let error=nt_execute_case(run,c) in let name=if len(c.name)>0 then c.name else concat("test-",int_text(i+1)) in
+    if len(error)==0 then let shown=print_out(concat("PASS ",name,"\n")) in 0
+    else let shown=print_error(concat("FAIL ",name," ",error,"\n")) in 1
+
+effect fn nt_summary(count:i64, failed:i64) -> unit
+  = let shown=print_out(concat("neo test: ",int_text(count)," native cases, ",int_text(failed)," failed\n")) in
+    if failed>0 then process_exit(1) else noop()
+
+effect fn nt_run_suite(borrow root:Arr u8 _, borrow project:Arr u8 _, borrow requested:Arr u8 _, borrow cases:Arr NtCase _) -> unit
+  = if len(cases)==0 then nt_summary(0,0) else
+    let config=bd_configuration(requested,false,"2") in
+    if len(config.error)>0 then bd_error(config.error) else
+    let executable=bd_find_tool(cli_arg(0).value) in
+    let prefix=nt_words(env_get("NEO_RUNNER").value) in
+    let runner=if len(prefix.words)>0 then bd_find_tool(md_word(prefix.words,0)) else tx_empty() in
+    if len(executable)==0 then bd_error("cannot locate the running native compiler") else
+    if prefix.quote!=0 || prefix.escape || (len(prefix.words)>0 && len(runner)==0) then bd_error("invalid NEO_RUNNER") else
+    let random=random_bytes(16) in if !random.ok then bd_error(random.error.message) else
+    let stage=pt_join(project,concat(".neo-test-",tx_hex_bytes(tx_empty(),random.value))) in
+    let created=fs_mkdir(stage) in if !created.ok then bd_error(created.error.message) else
+    let run=NtRun { root=pt_abspath(root), project=project, compiler=executable, target=config.target,
+      source=pt_join(stage,"case.neo"), binary=pt_join(stage,"case"),
+      runner=runner, runner_args=nt_extend(md_words(),prefix.words,1), environment=bd_environment() } in
+    let failed=loop (i=0, failures=0) while i<len(cases)
+      next (i+1,failures+nt_case_result(run,nt_case_at(cases,i),i)) yield failures in
+    let removed_source=fs_remove(run.source) in let removed_binary=fs_remove(run.binary) in
+    let removed_stage=fs_rmdir(stage) in
+    if !removed_stage.ok then bd_error(removed_stage.error.message) else nt_summary(len(cases),failed)
+
+fn nt_integration_manifest(borrow path:Arr u8 _) -> bool
+  = len(path)>=5 && tx_equal(pt_slice(path,len(path)-5,len(path)),".toml")
+
+effect(fs) fn nt_integration(borrow project:Arr u8 _, borrow name:Arr u8 _, move cases:Arr NtCase _) -> Arr NtCase _
+  = let file=pt_realpath(pt_join(project,name)) in let contents=fs_read(file) in
+    if !contents.ok then push(cases,nt_empty_case() with { name=name,valid=false }) else
+    let plan=nt_plan(contents.value) in
+    if !plan.valid then push(cases,nt_empty_case() with { name=name,valid=false }) else
+    let parent=pt_head(file) in
+    loop (i=0, out=cases) while i<len(plan.cases) next (i+1,
+      let c=nt_case_at(plan.cases,i) in push(out,c with { file=pt_join(parent,c.file) })) yield out
+
+effect fn nt_test(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow target:Arr u8 _, unit_only:bool) -> unit
+  = let absolute=pt_realpath(path) in let name=pt_tail(absolute) in
+    let file=nt_integration_manifest(name) in
+    let project=if file then pt_head(absolute) else absolute in
+    let manifest=if file then fs_read(absolute) else md_manifest(project) in
+    if !manifest.ok then bd_error(concat("no neo.toml at ",absolute)) else
+    let plan=nt_plan(manifest.value) in
+    if !plan.valid then bd_error(concat("invalid test manifest at ",absolute)) else
+    let native=nt_integration_manifest(plan.integration) in
+    let skipped=if plan.python || (len(plan.integration)>0 && !native && !unit_only) then
+      print_error("neo test: skipped Python reference hooks; use ./neoc.sh test to run them\n") else int_ok(0) in
+    let docs=nt_discover(project,plan.docs,plan.cases,true) in
+    let cases=nt_discover(project,plan.units,docs,false) in
+    let cases=if native && !unit_only then nt_integration(project,plan.integration,cases) else cases in
+    nt_run_suite(root,project,target,cases)

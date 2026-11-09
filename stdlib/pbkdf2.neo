@@ -1,0 +1,17 @@
+import "std:sha256"
+
+; RFC 8018 PBKDF2-HMAC-SHA256. Password storage should use >=600000 rounds.
+private type PBKDF2State = { round:i64,previous:Arr u8 _,out:Arr u8 _ }
+private fn pbkdf2_step(key:HMACSHA256,state:PBKDF2State) -> PBKDF2State
+  = let digest=hmac_sha256_prepared(key,state.previous) in let count=len(state.out) in
+    let combined=arr(i in 0..count) check i>=0 && i<len(digest) in u8(bit_xor(i64(state.out[i]),i64(digest[i]))) in
+    PBKDF2State {round=state.round+1,previous=digest,out=combined}
+private fn pbkdf2_block(key:HMACSHA256,salt:Arr u8 n,iterations:i64,index:i64) -> Arr u8 _
+  = let counter=arr(i in 0..4) u8(bit_and(shift_right(index,(3-i)*8),255)) in
+    let first=hmac_sha256_prepared(key,concat(salt,counter)) in
+    loop(state=PBKDF2State {round=1,previous=first,out=first}) while state.round<iterations next(pbkdf2_step(key,state)) yield state.out
+fn pbkdf2_sha256(password:Arr u8 n,salt:Arr u8 m,iterations:i64,length:i64) -> BytesResult
+  = if iterations<1 || iterations>10000000 || length<1 || length>1024 || n>4096 || m>4096 then bytes_error(22,"invalid PBKDF2 bounds",0) else
+    let key=hmac_sha256_prepare(password) in
+    let bytes=loop(block=1,out="") while len(out)<length
+      next(block+1,concat(out,pbkdf2_block(key,salt,iterations,block))) yield out in bytes_ok(str_slice(bytes,0,length))

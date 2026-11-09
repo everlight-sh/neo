@@ -1,0 +1,63 @@
+; Loopback client shared by the live HTTP integration and benchmarks.
+import "std:io"
+import "std:net"
+import "std:socket"
+import "std:strings"
+import "std:time"
+
+effect(net,unsafe) fn hp_port() -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,1) in
+    let status=listener_status(listener) in check status.ok in
+    let fd=rt_handle_fd(listener_identity(listener),3) in
+    let address=stack_alloc(32) in let size=stack_alloc(8) in let ready=store_i64(size,0,32) in
+    let named=rt_socket_name(fd,address,size) in check named==0 in
+    i64(load_u8(address,2))*256+i64(load_u8(address,3))
+
+effect(net,time) fn hp_ready(port:i64) -> bool
+  = let deadline=deadline_after(100) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in socket_status(socket).ok
+
+effect(net,time) fn hp_receive(socket:Socket,deadline:i64) -> BytesResult
+  = loop (part=socket_read(socket,deadline), out="") while part.ok && len(part.value)>0 && len(out)<1048576
+      next (socket_read(socket,deadline),concat(out,part.value))
+      yield if !part.ok then part else if len(part.value)>0 then bytes_error(27,"HTTP response too large",0) else bytes_ok(out)
+
+type HpFrame = { status:i64, body:Arr u8 _, rest:Arr u8 _ }
+fn hp_invalid() -> HpFrame = HpFrame { status=0,body="",rest="" }
+fn hp_frame(borrow bytes:Arr u8 _) -> HpFrame
+  = let end=str_find(bytes,"\r\n\r\n") in if !end.present then hp_invalid() else
+    let header=str_slice(bytes,0,end.value+2) in let status=net_status(header) in if !status.ok then hp_invalid() else
+    let length=str_find(header,"\r\nContent-Length: ") in if !length.present then hp_invalid() else
+    let start=length.value+18 in let remaining=str_slice(header,start,len(header)) in
+    let next_line=str_find(remaining,"\r\n") in if !next_line.present then hp_invalid() else
+    let size=int_parse(str_slice(remaining,0,next_line.value)) in let body_at=end.value+4 in
+    if !size.ok || size.value<0 || size.value>len(bytes)-body_at then hp_invalid() else
+    let boundary=body_at+size.value in
+    HpFrame { status=status.value,body=str_slice(bytes,body_at,boundary),rest=str_slice(bytes,boundary,len(bytes)) }
+
+effect(net,time) fn hp_get(port:i64,borrow route:Arr u8 _) -> HpFrame
+  = let deadline=deadline_after(5000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,concat("GET ",route," HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),deadline.value) in
+    if !sent.ok then hp_invalid() else let reply=hp_receive(socket,deadline.value) in
+    if !reply.ok then hp_invalid() else hp_frame(reply.value)
+
+effect(net,time) fn hp_wait(port:i64) -> bool
+  = loop (i=0, ready=false) while i<100 && !ready
+      next (i+1,let connected=hp_ready(port) in let pause=if connected then int_ok(0) else sleep_ms(20) in connected) yield ready
+
+type HpProgress = { remaining:Arr u8 _, ok:bool }
+
+effect(net,time) fn hp_batch(port:i64,depth:i64,borrow expected:Arr u8 _) -> bool
+  = if depth<1 || depth>128 then false else
+    let deadline=deadline_after(5000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let request=str_concat_parts(arr(i in 0..depth) if i+1==depth then
+      "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+      else "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n") in
+    let sent=socket_write(socket,request,deadline.value) in if !sent.ok then false else
+    let response=hp_receive(socket,deadline.value) in if !response.ok then false else
+    let read=loop (i=0, progress=HpProgress { remaining=response.value,ok=true }) while i<depth && progress.ok
+      next (i+1,let parsed=hp_frame(progress.remaining) in
+        HpProgress { remaining=parsed.rest,ok=parsed.status==200 && str_equal(parsed.body,expected) }) yield progress in
+    read.ok && len(read.remaining)==0

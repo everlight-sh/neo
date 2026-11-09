@@ -1,0 +1,23 @@
+import "std:http"
+import "std:vec"
+
+; Bounded HTTP chunked decoding. Balanced assembly avoids quadratic copying.
+private type HTTPChunked = {ok:bool,done:bool,at:i64,size:i64,parts:Vec<Arr u8 _>}
+private fn chunked_step(raw:Arr u8 n,state:HTTPChunked,limit:i64)->HTTPChunked
+  = let end=http_line_end(raw,state.at) in
+    if end<state.at || end-state.at>1024 || vec_len(state.parts)>=4096 then state with {ok=false,done=true} else
+    let size=http_chunk_length(str_slice(raw,state.at,end)) in let from=end+2 in
+    if !size.ok || state.size+size.value>limit then state with {ok=false,done=true} else
+    if size.value==0 then
+      let rest=str_slice(raw,from,n) in let trailers=str_find(rest,"\r\n\r\n") in
+      state with {done=true,ok=str_equal(rest,"\r\n") || len(rest)<=16384 && trailers.present && trailers.value+4==len(rest),at=n} else
+    if from+size.value+2>n || !str_equal(str_slice(raw,from+size.value,from+size.value+2),"\r\n") then state with {ok=false,done=true} else
+      state with {at=from+size.value+2,size=state.size+size.value,parts=vec_push(state.parts,str_slice(raw,from,from+size.value))}
+private fn chunked_join(parts:Arr Arr u8 _ n,from:i64,count:i64)->Arr u8 _
+  = if count<=0 then "" else if count==1 then check from>=0 && from<n in parts[from] else
+    let half=count/2 in concat(chunked_join(parts,from,half),chunked_join(parts,from+half,count-half))
+fn http_decode_chunked(raw:Arr u8 n,limit:i64)->BytesResult
+  = if limit<0 || limit>16777216 || n>16793600 then bytes_error(27,"chunked body exceeds configured limit",0) else
+    let scanned=loop(state=HTTPChunked {ok=true,done=false,at=0,size=0,parts=vec_empty::<Arr u8 _>()}) while state.ok && !state.done next(chunked_step(raw,state,limit)) yield state in
+    if !scanned.ok || !scanned.done then bytes_error(71,"invalid chunked body",scanned.at) else
+    let count=vec_len(scanned.parts) in check count>=0 in let parts=arr(i in 0..count) match vec_get(scanned.parts,i) {None=>"",Some(part)=>part} in bytes_ok(chunked_join(parts,0,count))

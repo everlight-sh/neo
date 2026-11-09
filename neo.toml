@@ -1,12 +1,13 @@
 [package]
 name = "neo"
-version = "0.1.4"
+version = "0.2.0"
 entry = "examples/hello.neo"
 
 [tool.neo]
 python-tests = "tests"
 doc-tests = ["docs/getting-started.md", "docs/language-v01.md"]
-integration = "tests/integration.py"
+integration = "tests/integration.neo.toml"
+reference-integration = "tests/integration.py"
 
 [[test]]
 name = "language-generics-results"
@@ -193,3 +194,15 @@ name="utf16-code-unit-arrays"
 file="tests/fixtures/u16_units.neo"
 args=[]
 stdout="u16 OK 991961738 184979539 517441387\n"
+
+[[test]]
+name="http-server-primitives"
+file="tests/fixtures/http_server.neo"
+args=[]
+stdout="HTTP server primitives OK\n"
+
+[[test]]
+name="pbkdf2-and-hmac"
+file="tests/fixtures/pbkdf2.neo"
+args=[]
+stdout="PBKDF2 and reusable HMAC OK\n"

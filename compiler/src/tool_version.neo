@@ -1,0 +1,11 @@
+import "std:io"
+import "std:strings"
+import "modules.neo"
+import "paths.neo"
+import "toml.neo"
+import "text.neo"
+
+effect(fs) fn tool_version(borrow root:Arr u8 _) -> Arr u8 _
+  = let shipped=fs_read(pt_join(root,"VERSION")) in
+    if shipped.ok then str_trim(shipped.value) else
+    let source=md_manifest(root) in tm_parse(tx_newlines(source.value)).version

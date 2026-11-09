@@ -1,0 +1,615 @@
+; Specialize source declarations before the ordinary checker and LLVM emitter.
+; Template nodes stay in the AST, so each instance starts from the same source.
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "modules.neo"
+import "dump.neo"
+import "intrinsics.neo"
+
+type ElBindings = { names:Arr i64 _, types:Arr i64 _ }
+type ElContext = { module:i64, subst:ElBindings, ret:i64 }
+type ElInstance = { template:i64, key:Arr u8 _, args:Arr i64 _, decl:i64, ty:i64, active:bool }
+type ElState = { m:Mods, type_index:Arr i64 _, fn_index:Arr i64 _, variant_index:Arr i64 _,
+                 instances:Arr ElInstance _, scalar:Arr i64 _, wildcard:i64, bytes:i64, fn_count:i64, type_depth:i64 }
+type ElNode = { state:ElState, id:i64 }
+type ElExpr = { state:ElState, id:i64, ty:i64 }
+type ElItems = { state:ElState, ids:Arr i64 _ }
+type ElArgs = { state:ElState, ids:Arr i64 _, types:Arr i64 _ }
+
+fn el_bindings() -> ElBindings = ElBindings { names=tx_ints(), types=tx_ints() }
+fn el_context(module:i64) -> ElContext = ElContext { module=module, subst=el_bindings(), ret=-1 }
+fn el_at(borrow a:Arr i64 _, i:i64) -> i64 = if i>=0 && i<len(a) then a[i] else -1
+fn el_local(borrow m:Mods, borrow names:Arr i64 _, name:i64) -> i64
+  = let word=md_str(m,name) in
+    loop (i=len(names)-1) while i>=0 && !tx_equal(md_str(m,el_at(names,i)),word) next (i-1) yield i
+fn el_bind(move env:ElBindings, name:i64, ty:i64) -> ElBindings
+  = ElBindings { names=push(env.names,name), types=push(env.types,ty) }
+fn el_kind(kind:i64, at:Node) -> Node = ast_none() with { kind=kind, line=at.line, col=at.col }
+fn el_num(value:i64, at:Node) -> Node = el_kind(n_num(),at) with { a=value, b=0 }
+fn el_scalar(borrow s:ElState, kind:i64) -> i64 = el_at(s.scalar,kind-n_t_i64())
+fn el_emit(move s:ElState, n:Node) -> ElNode
+  = let id=len(s.m.ast.nodes)/11 in
+    ElNode { state=s with { m=s.m with { ast=s.m.ast with { nodes=ast_push_node(s.m.ast.nodes,n) } } }, id=id }
+fn el_list(move s:ElState, borrow ids:Arr i64 _) -> ElNode
+  = if len(ids)==0 then ElNode { state=s, id=-1 } else
+    let id=len(s.m.ast.lists) in
+    let lists=loop (i=0, out=push(s.m.ast.lists,len(ids))) while i<len(ids)
+      next (i+1,push(out,el_at(ids,i))) yield out in
+    ElNode { state=s with { m=s.m with { ast=s.m.ast with { lists=lists } } }, id=id }
+fn el_list_changed(move s:ElState, old:i64, borrow ids:Arr i64 _) -> ElNode
+  = let same=len(ids)==ast_list_len(s.m.ast,old) &&
+      loop (i=0, same=true) while same && i<len(ids)
+        next (i+1,el_at(ids,i)==ast_list_at(s.m.ast,old,i)) yield same in
+    if same then ElNode { state=s, id=old } else el_list(s,ids)
+fn el_rewrite(move s:ElState, id:i64, n:Node) -> ElNode
+  = let old=md_node(s.m,id) in
+    if old.kind==n.kind && old.a==n.a && old.b==n.b && old.c==n.c && old.d==n.d &&
+      old.e==n.e && old.f==n.f && old.g==n.g && old.h==n.h then
+      ElNode { state=s, id=id } else el_emit(s,n)
+fn el_fail(move s:ElState, module:i64, at:Node, borrow message:Arr u8 _) -> ElState
+  = let path=if module<0 then s.m.entry else md_path(s.m,module) in
+    s with { m=md_fail(s.m,message,path,at.line,at.col) }
+fn el_expr_node(move s:ElState, id:i64, n:Node, ty:i64) -> ElExpr
+  = let changed=el_rewrite(s,id,n) in ElExpr { state=changed.state, id=changed.id, ty=ty }
+fn el_expr_error(move s:ElState, module:i64, at:Node, borrow message:Arr u8 _) -> ElExpr
+  = ElExpr { state=el_fail(s,module,at,message), id=-1, ty=-1 }
+fn el_declare(move s:ElState, original:i64, n:Node) -> ElNode
+  = let module=el_at(s.m.owners,original) in let display=el_at(s.m.display,original) in
+    let made=el_emit(s,n) in let m=made.state.m in
+    let extra=made.id-len(m.owners) in let padding=arr(i in 0..(if extra>0 then extra else 0)) -1 in
+    let owners=push(md_with_all(m.owners,padding),module) in let names=push(md_with_all(m.display,padding),display) in
+    let canon=push(md_with_all(m.canon,padding),n.a) in
+    let m=if n.kind==n_fn() then m with { fns=el_add_to_module(m.fns,module,made.id) }
+      else m with { types=el_add_to_module(m.types,module,made.id) } in
+    ElNode { state=made.state with { m=m with { owners=owners, display=names, canon=canon } }, id=made.id }
+fn el_add_to_module(move lists:Arr Arr i64 _ _, module:i64, id:i64) -> Arr Arr i64 _ _
+  = if module>=0 && module<len(lists) then let ids=lists[module] in set(lists,module,push(ids,id)) else lists
+fn el_update(move s:ElState, id:i64, a:i64, b:i64, c:i64, d:i64, e:i64) -> ElState
+  = let m=md_set(md_set(md_set(md_set(md_set(s.m,id,1,a),id,2,b),id,3,c),id,4,d),id,5,e) in s with { m=m }
+
+fn el_instance_at(borrow s:ElState, i:i64) -> ElInstance
+  = if i>=0 && i<len(s.instances) then s.instances[i]
+    else ElInstance { template=-1, key=tx_empty(), args=tx_ints(), decl=-1, ty=-1, active=false }
+fn el_find_instance(borrow s:ElState, decl:i64, borrow key:Arr u8 _) -> i64
+  = loop (i=0, found=-1) while found<0 && i<len(s.instances)
+      next (i+1,let item=el_instance_at(s,i) in if item.template==decl && tx_equal(item.key,key) then i else -1) yield found
+fn el_find_type(borrow s:ElState, name:i64) -> ElInstance
+  = let i=loop (i=0, found=-1) while found<0 && i<len(s.instances)
+      next (i+1,let item=el_instance_at(s,i) in if item.ty>=0 && md_node(s.m,item.decl).a==name then i else -1) yield found in
+    el_instance_at(s,i)
+fn el_set_instance(move s:ElState, i:i64, item:ElInstance) -> ElState
+  = if i>=0 && i<len(s.instances) then s with { instances=set(s.instances,i,item) } else s
+fn el_key(borrow s:ElState, borrow types:Arr i64 _) -> Arr u8 _
+  = loop (i=0, key=tx_empty()) while i<len(types)
+      next (i+1,dp_type(push(key,' '),s.m.ast,el_at(types,i))) yield key
+fn el_instance_name(move s:ElState, original:i64, generic:bool) -> ElNode
+  = if !generic then ElNode { state=s, id=md_node(s.m,original).a } else
+    let m=md_intern(s.m,concat("$neo.",int_text(len(s.instances)))) in
+    ElNode { state=s with { m=m }, id=md_last(m) }
+fn el_name(move s:ElState, borrow text:Arr u8 _) -> ElNode
+  = let m=md_intern(s.m,text) in ElNode { state=s with { m=m }, id=md_last(m) }
+
+fn el_array(move s:ElState, elem:i64, at:Node) -> ElNode
+  = if elem<0 then ElNode { state=s, id=-1 } else
+    if elem==el_scalar(s,n_t_u8()) && s.bytes>=0 then ElNode { state=s, id=s.bytes } else
+    el_emit(s,el_kind(n_t_arr(),at) with { a=elem, b=s.wildcard, c=0 })
+fn el_concrete(move s:ElState, borrow ctx:ElContext, id:i64) -> ElNode
+  = if !s.m.ok || id<0 then ElNode { state=s, id=id } else
+    let n=md_node(s.m,id) in
+    if n.kind==n_t_rec() then
+      let parameter=el_local(s.m,ctx.subst.names,n.a) in
+      if parameter>=0 then
+        if ast_list_len(s.m.ast,n.b)==0 then ElNode { state=s, id=el_at(ctx.subst.types,parameter) } else
+        ElNode { state=el_fail(s,ctx.module,n,"a type parameter cannot take type arguments"), id=-1 }
+      else let args=el_type_list(s,ctx,n.b) in el_type_use(args.state,ctx.module,n,n.a,args.ids)
+    else if n.kind==n_t_arr() || n.kind==n_t_ref() then
+      let item=el_concrete(s,ctx,n.a) in el_rewrite(item.state,id,n with { a=item.id })
+    else if n.kind==n_t_fn() then
+      let args=el_type_list(s,ctx,n.a) in let params=el_list_changed(args.state,n.a,args.ids) in
+      let ret=el_concrete(params.state,ctx,n.b) in el_rewrite(ret.state,id,n with { a=params.id, b=ret.id })
+    else ElNode { state=s, id=id }
+fn el_type_list(move s:ElState, borrow ctx:ElContext, list:i64) -> ElItems
+  = loop (i=0, out=ElItems { state=s, ids=tx_ints() }) while out.state.m.ok && i<ast_list_len(out.state.m.ast,list)
+      next (i+1,let id=ast_list_at(out.state.m.ast,list,i) in let item=el_concrete(out.state,ctx,id) in
+        ElItems { state=item.state, ids=push(out.ids,item.id) }) yield out
+fn el_type_use(move s:ElState, module:i64, at:Node, name:i64, borrow args:Arr i64 _) -> ElNode
+  = if !s.m.ok then ElNode { state=s, id=-1 } else let id=el_at(s.type_index,name) in
+    if id<0 then
+      let existing=el_find_type(s,name) in
+      if existing.ty>=0 then ElNode { state=s, id=existing.ty } else
+      ElNode { state=el_fail(s,module,at,concat("unknown type ",md_str(s.m,name))), id=-1 }
+    else el_record(s,module,at,id,args)
+fn el_arity(move s:ElState, module:i64, at:Node, name:i64, expected:i64, actual:i64) -> ElState
+  = el_fail(s,module,at,concat(md_str(s.m,name)," expects ",int_text(expected)," type arguments, got ",int_text(actual)))
+fn el_record(move s:ElState, module:i64, at:Node, id:i64, borrow args:Arr i64 _) -> ElNode
+  = let original=md_node(s.m,id) in let parameters=md_ids(s.m,original.c) in
+    if len(parameters)!=len(args) then ElNode { state=el_arity(s,module,original,original.a,len(parameters),len(args)), id=-1 } else
+    let key=el_key(s,args) in let found=el_find_instance(s,id,key) in
+    if found>=0 then
+      let item=el_instance_at(s,found) in
+      if !item.active then ElNode { state=s, id=item.ty } else
+      ElNode { state=el_fail(s,module,at,concat("recursive value type ",md_str(s.m,original.a))), id=-1 }
+    else if s.type_depth>=256 then
+      ElNode { state=el_fail(s,module,at,"type specialization limit exceeded (possible polymorphic recursion)"), id=-1 } else
+    let depth=s.type_depth in
+    let ctx=ElContext { module=el_at(s.m.owners,id), subst=ElBindings { names=parameters, types=args }, ret=-1 } in
+    let name=el_instance_name(s,id,len(args)>0) in
+    let decl=el_declare(name.state,id,original with { a=name.id, c=-1,
+      f=if original.d>=0 then bit_or(original.f,fl_enum_storage()) else original.f }) in
+    let ty=el_emit(decl.state,el_kind(n_t_rec(),at) with { a=name.id }) in
+    let index=len(ty.state.instances) in
+    let item=ElInstance { template=id, key=key, args=args, decl=decl.id, ty=ty.id, active=true } in
+    let s=ty.state with { instances=push(ty.state.instances,item), type_depth=depth+1 } in
+    let s=if original.d>=0 then el_enum_layout(s,ctx,decl.id,name.id,original) else
+      let fields=el_fields(s,ctx,original.b) in let list=el_list_changed(fields.state,original.b,fields.ids) in
+      el_update(list.state,decl.id,name.id,list.id,-1,-1,original.e) in
+    ElNode { state=el_set_instance(s with { type_depth=depth },index,item with { active=false }), id=ty.id }
+fn el_fields(move s:ElState, borrow ctx:ElContext, list:i64) -> ElItems
+  = loop (i=0, out=ElItems { state=s, ids=tx_ints() }) while out.state.m.ok && i<ast_list_len(out.state.m.ast,list)
+      next (i+1,let id=ast_list_at(out.state.m.ast,list,i) in let field=md_node(out.state.m,id) in
+        let ty=el_concrete(out.state,ctx,field.b) in let item=el_rewrite(ty.state,id,field with { b=ty.id }) in
+        ElItems { state=item.state, ids=push(out.ids,item.id) }) yield out
+
+fn el_erase_size(move s:ElState, id:i64) -> ElNode
+  = let n=md_node(s.m,id) in if n.kind!=n_t_arr() then ElNode { state=s, id=id } else
+    let child=el_erase_size(s,n.a) in el_array(child.state,child.id,n)
+type ElInference = { state:ElState, types:Arr i64 _ }
+fn el_unify(move infer:ElInference, borrow ctx:ElContext, at:Node, borrow names:Arr i64 _, template:i64, actual:i64) -> ElInference
+  = if !infer.state.m.ok || actual<0 then infer else
+    let t=md_node(infer.state.m,template) in let a=md_node(infer.state.m,actual) in
+    let param=if t.kind==n_t_rec() && ast_list_len(infer.state.m.ast,t.b)==0 then el_local(infer.state.m,names,t.a) else -1 in
+    if param>=0 then
+      let previous=el_at(infer.types,param) in let shape=el_erase_size(infer.state,actual) in
+      if previous>=0 && !tx_equal(dp_type(tx_empty(),shape.state.m.ast,previous),dp_type(tx_empty(),shape.state.m.ast,shape.id)) then
+        infer with { state=el_fail(shape.state,ctx.module,at,concat("conflicting inference for ",md_str(shape.state.m,t.a))) }
+      else ElInference { state=shape.state, types=set_at(infer.types,param,shape.id) }
+    else if t.kind==n_t_arr() && a.kind==n_t_arr() || t.kind==n_t_ref() && a.kind==n_t_ref() then
+      el_unify(infer,ctx,at,names,t.a,a.a)
+    else if t.kind==n_t_rec() && a.kind==n_t_rec() then
+      let item=el_find_type(infer.state,a.a) in
+      if item.template<0 || md_node(infer.state.m,item.template).a!=t.a then infer else
+      el_unify_list(infer,ctx,at,names,md_ids(infer.state.m,t.b),item.args)
+    else if t.kind==n_t_fn() && a.kind==n_t_fn() then
+      let params=el_unify_list(infer,ctx,at,names,md_ids(infer.state.m,t.a),md_ids(infer.state.m,a.a)) in
+      el_unify(params,ctx,at,names,t.b,a.b)
+    else infer
+fn el_unify_list(move infer:ElInference, borrow ctx:ElContext, at:Node, borrow names:Arr i64 _,
+    borrow templates:Arr i64 _, borrow actuals:Arr i64 _) -> ElInference
+  = loop (i=0, out=infer) while out.state.m.ok && i<len(templates) && i<len(actuals)
+      next (i+1,el_unify(out,ctx,at,names,el_at(templates,i),el_at(actuals,i))) yield out
+fn el_infer_arguments(move s:ElState, borrow ctx:ElContext, at:Node, borrow names:Arr i64 _,
+    borrow templates:Arr i64 _, borrow actuals:Arr i64 _) -> ElItems
+  = let empty=ElInference { state=s, types=arr(i in 0..len(names)) -1 } in
+    let found=el_unify_list(empty,ctx,at,names,templates,actuals) in
+    let missing=loop (i=0, out=tx_empty()) while i<len(names)
+      next (i+1,if el_at(found.types,i)>=0 then out else
+        concat(out,if len(out)>0 then ", " else "",md_str(found.state.m,el_at(names,i)))) yield out in
+    let state=if len(missing)==0 then found.state else
+      el_fail(found.state,ctx.module,at,concat("cannot infer ",missing,"; supply explicit ::<...> type arguments")) in
+    ElItems { state=state, ids=found.types }
+
+fn el_args(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, list:i64, wrapped:bool) -> ElArgs
+  = loop (i=0, out=ElArgs { state=s, ids=tx_ints(), types=tx_ints() }) while out.state.m.ok && i<ast_list_len(out.state.m.ast,list)
+      next (i+1,let id=ast_list_at(out.state.m.ast,list,i) in let n=md_node(out.state.m,id) in
+        let value=el_expr(out.state,ctx,env,if wrapped then n.b else id) in
+        let item=if wrapped then el_rewrite(value.state,id,n with { b=value.id }) else ElNode { state=value.state, id=value.id } in
+        ElArgs { state=item.state, ids=push(out.ids,item.id), types=push(out.types,value.ty) }) yield out
+fn el_parameter_types(borrow m:Mods, list:i64) -> Arr i64 _
+  = let ids=md_ids(m,list) in arr(i in 0..len(ids)) md_node(m,el_at(ids,i)).b
+fn el_params(borrow m:Mods, list:i64) -> ElBindings
+  = let ids=md_ids(m,list) in
+    loop (i=0, env=el_bindings()) while i<len(ids)
+      next (i+1,let p=md_node(m,el_at(ids,i)) in let t=md_node(m,p.b) in
+        let env=if t.kind==n_t_arr() && t.c==0 && !tx_equal(md_str(m,t.b),"_") then el_bind(env,t.b,-1) else env in
+        el_bind(env,p.a,p.b)) yield env
+
+fn el_function(move s:ElState, borrow caller:ElContext, at:Node, id:i64, borrow args:Arr i64 _) -> ElNode
+  = let f=md_node(s.m,id) in let params=md_ids(s.m,f.h) in
+    if !s.m.ok then ElNode { state=s, id=-1 } else
+    if len(params)!=len(args) then ElNode { state=el_arity(s,caller.module,at,f.a,len(params),len(args)), id=-1 } else
+    let key=el_key(s,args) in let old=el_find_instance(s,id,key) in
+    if old>=0 then ElNode { state=s, id=el_instance_at(s,old).decl } else
+    if len(args)>0 && s.fn_count>=256 then
+      ElNode { state=el_fail(s,caller.module,at,"generic specialization limit exceeded (possible polymorphic recursion)"), id=-1 } else
+    let ctx=ElContext { module=el_at(s.m.owners,id), subst=ElBindings { names=params, types=args }, ret=-1 } in
+    let sig=el_fields(s,ctx,f.b) in let plist=el_list_changed(sig.state,f.b,sig.ids) in
+    let ret=el_concrete(plist.state,ctx,f.c) in
+    let ctx=ctx with { ret=ret.id } in
+    let name=el_instance_name(ret.state,id,len(args)>0) in
+    let decl=el_declare(name.state,id,f with { a=name.id, b=plist.id, c=ret.id, h=-1 }) in
+    let item=ElInstance { template=id, key=key, args=args, decl=decl.id, ty=-1, active=false } in
+    let s=decl.state with { instances=push(decl.state.instances,item), fn_count=decl.state.fn_count+(if len(args)>0 then 1 else 0) } in
+    let env=el_params(s.m,plist.id) in
+    let env=loop (i=0, env=env) while i<len(env.types)
+      next (i+1,if el_at(env.types,i)>=0 then env else env with { types=set_at(env.types,i,el_scalar(s,n_t_i64())) }) yield env in
+    let predicates=el_parameter_predicates(s,ctx,env,plist.id) in
+    let post_env=el_bind(env,predicates.state.m.result,ret.id) in
+    let post=el_args(predicates.state,ctx,post_env,f.e,false) in let posts=el_list_changed(post.state,f.e,post.ids) in
+    let body=el_expr(posts.state,ctx,env,f.d) in
+    ElNode { state=el_update(body.state,decl.id,name.id,predicates.id,ret.id,body.id,posts.id), id=decl.id }
+fn el_parameter_predicates(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, list:i64) -> ElNode
+  = let params=loop (i=0, out=ElItems { state=s, ids=tx_ints() }) while out.state.m.ok && i<ast_list_len(out.state.m.ast,list)
+      next (i+1,let id=ast_list_at(out.state.m.ast,list,i) in let p=md_node(out.state.m,id) in
+        let preds=el_args(out.state,ctx,env,p.c,false) in let pred=el_list_changed(preds.state,p.c,preds.ids) in
+        let item=el_rewrite(pred.state,id,p with { c=pred.id }) in
+        ElItems { state=item.state, ids=push(out.ids,item.id) }) yield out in
+    el_list_changed(params.state,list,params.ids)
+
+fn el_field(borrow s:ElState, ty:i64, name:i64) -> i64
+  = let rec=md_node(s.m,ty) in let fields=md_node(s.m,el_find_type(s,rec.a).decl).b in let word=md_str(s.m,name) in
+    loop (i=0, found=-1) while found<0 && i<ast_list_len(s.m.ast,fields)
+      next (i+1,let f=md_node(s.m,ast_list_at(s.m.ast,fields,i)) in if tx_equal(md_str(s.m,f.a),word) then f.b else -1) yield found
+fn el_fn_shape(move s:ElState, borrow ctx:ElContext, id:i64) -> ElNode
+  = let concrete=el_concrete(s,ctx,id) in let ty=md_node(concrete.state.m,concrete.id) in
+    if ty.kind!=n_t_arr() then concrete else
+    let leaf=el_fn_shape(concrete.state,ctx,ty.a) in el_array(leaf.state,leaf.id,ty)
+
+fn el_callback(move s:ElState, borrow ctx:ElContext, id:i64, n:Node) -> ElExpr
+  = let arg=md_node(s.m,ast_list_at(s.m.ast,n.b,0)) in
+    let target=if ast_list_len(s.m.ast,n.b)==1 && arg.kind==n_var() then el_at(s.fn_index,arg.a) else -1 in
+    let f=md_node(s.m,target) in
+    if target<0 || ast_list_len(s.m.ast,f.h)>0 then el_expr_error(s,ctx.module,n,"function requires an internal nongeneric function")
+    else let owner=el_context(el_at(s.m.owners,target)) in
+    let args=loop (i=0, out=ElItems { state=s,ids=tx_ints() }) while i<ast_list_len(out.state.m.ast,f.b)
+      next (i+1,let p=md_node(out.state.m,ast_list_at(out.state.m.ast,f.b,i)) in
+        let item=el_fn_shape(out.state,owner,p.b) in ElItems { state=item.state,ids=push(out.ids,item.id) }) yield out in
+    let list=el_list(args.state,args.ids) in let ret=el_fn_shape(list.state,owner,f.c) in
+    let signature=el_emit(ret.state,el_kind(n_t_fn(),n) with { a=list.id,b=ret.id,c=f.g }) in
+    el_expr_node(signature.state,id,n with { e=signature.id },signature.id)
+
+fn el_call(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, id:i64, n:Node) -> ElExpr
+  = if tx_equal(md_str(s.m,n.a),"function") then el_callback(s,ctx,id,n) else
+    let lowered=el_args(s,ctx,env,n.b,false) in let args=el_list_changed(lowered.state,n.b,lowered.ids) in
+    let s=args.state in let target=el_at(s.fn_index,n.a) in let f=md_node(s.m,target) in
+    if !s.m.ok then ElExpr { state=s, id=id, ty=-1 } else
+    let owner=el_at(s.variant_index,n.a) in
+    if owner>=0 then el_construct(s,ctx,n,owner,lowered.ids,lowered.types) else
+    if target>=0 then
+      let names=md_ids(s.m,f.h) in
+      if len(names)==0 && ast_list_len(s.m.ast,n.c)==0 then
+        let owner=el_context(el_at(s.m.owners,target)) in let ret=el_concrete(s,owner,f.c) in
+        el_expr_node(ret.state,id,n with { b=args.id },ret.id)
+      else
+        let types=if ast_list_len(s.m.ast,n.c)>0 then el_type_list(s,ctx,n.c) else
+          el_infer_arguments(s,ctx,n,names,el_parameter_types(s.m,f.b),lowered.types) in
+        let instance=el_function(types.state,ctx,n,target,types.ids) in let made=md_node(instance.state.m,instance.id) in
+        el_expr_node(instance.state,id,n with { a=made.a, b=args.id, c=-1 },made.c)
+    else let name=md_str(s.m,n.a) in let first=el_at(lowered.types,0) in
+    if tx_equal(name,"hash_key") || tx_equal(name,"key_equal") then el_hash(s,ctx,n,lowered.ids,first,tx_equal(name,"key_equal")) else
+    if ast_list_len(s.m.ast,n.c)>0 then el_expr_error(s,ctx.module,n,concat("unknown generic function ",name)) else
+    if tx_equal(name,"adopt") then
+      let reference=el_emit(s,el_kind(n_t_ref(),n) with { a=first }) in
+      el_expr_node(reference.state,id,n with { b=args.id,e=reference.id },reference.id)
+    else if tx_equal(name,"borrow_ref") then
+      let ty=md_node(s.m,first).a in el_expr_node(s,id,n with { b=args.id,e=ty },ty)
+    else let sig=bi_signature(name) in
+    let callback=el_at(env.types,el_local(s.m,env.names,n.a)) in let callback_type=md_node(s.m,callback) in
+    let ty=if tx_equal(name,"set") || tx_equal(name,"push") || tx_equal(name,"concat") then first
+      else if tx_equal(name,"noop") then el_scalar(s,n_t_unit())
+      else if tx_equal(name,"null") || tx_equal(name,"data") || tx_equal(name,"addr") || tx_equal(name,"callback_address") then el_scalar(s,n_t_ptr())
+      else if tx_equal(name,"view") || tx_equal(name,"byte_uninit") || tx_equal(name,"byte_copy") || tx_equal(name,"byte_slice") ||
+          tx_equal(name,"byte_write_le") || tx_equal(name,"handler_call") then s.bytes
+      else if tx_equal(name,"byte_equal") || tx_equal(name,"key_equal") || tx_equal(name,"aes_hardware") || tx_equal(name,"ref_live") then el_scalar(s,n_t_bool())
+      else if tx_equal(name,"ref_release") then el_scalar(s,n_t_unit())
+      else if sig.result>0 then el_scalar(s,sig.result)
+      else if callback_type.kind==n_t_fn() then callback_type.b else el_scalar(s,n_t_i64()) in
+    el_expr_node(s,id,n with { b=args.id,g=if callback_type.kind==n_t_fn() then callback else -1 },ty)
+
+fn el_expr(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, id:i64) -> ElExpr
+  = let n=md_node(s.m,id) in let k=n.kind in
+    if !s.m.ok || id<0 then ElExpr { state=s, id=id, ty=-1 }
+    else if k==n_call() then el_call(s,ctx,env,id,n)
+    else if k==n_match() then el_match(s,ctx,env,n)
+    else if k==n_try() then el_expr_error(s,ctx.module,n,"error propagation requires a let binding: let value = result()? in ...")
+    else if k==n_let() && md_node(s.m,n.b).kind==n_try() then el_propagate(s,ctx,env,n)
+    else if k==n_var() then ElExpr { state=s, id=id, ty=el_at(env.types,el_local(s.m,env.names,n.a)) }
+    else if k==n_let() || k==n_using() then
+      let value=el_expr(s,ctx,env,n.b) in let inner=el_bind(env,n.a,value.ty) in
+      let body=el_expr(value.state,ctx,inner,n.c) in
+      if k==n_using() then
+        ; Cleanup is resolved per specialization, even when the syntax is shared.
+        let scope=el_emit(body.state,n with { b=value.id, c=body.id }) in ElExpr { state=scope.state, id=scope.id, ty=body.ty }
+      else el_expr_node(body.state,id,n with { b=value.id, c=body.id },body.ty)
+    else if k==n_reclit() then
+      let args=el_type_list(s,ctx,n.c) in let ty=el_type_use(args.state,ctx.module,n,n.a,args.ids) in
+      let made=md_node(ty.state.m,ty.id) in let values=el_args(ty.state,ctx,env,n.b,true) in
+      let list=el_list_changed(values.state,n.b,values.ids) in
+      el_expr_node(list.state,id,n with { a=made.a, b=list.id, c=-1 },ty.id)
+    else if k==n_field() || k==n_with() || k==n_len() then
+      let value=el_expr(s,ctx,env,n.a) in
+      if k==n_with() then
+        let values=el_args(value.state,ctx,env,n.b,true) in let list=el_list_changed(values.state,n.b,values.ids) in
+        el_expr_node(list.state,id,n with { a=value.id, b=list.id },value.ty)
+      else let ty=if k==n_field() then el_field(value.state,value.ty,n.b) else el_scalar(value.state,n_t_i64()) in
+        el_expr_node(value.state,id,n with { a=value.id },ty)
+    else if k==n_index() || k==n_check() then
+      let a=el_expr(s,ctx,env,n.a) in let b=el_expr(a.state,ctx,env,n.b) in
+      let t=md_node(b.state.m,a.ty) in
+      el_expr_node(b.state,id,n with { a=a.id, b=b.id },if k==n_check() then b.ty else if t.kind==n_t_arr() then t.a else -1)
+    else if k==n_if() then
+      let a=el_expr(s,ctx,env,n.a) in let b=el_expr(a.state,ctx,env,n.b) in let c=el_expr(b.state,ctx,env,n.c) in
+      el_expr_node(c.state,id,n with { a=a.id, b=b.id, c=c.id },if b.ty>=0 then b.ty else c.ty)
+    else if k==n_bin() || k==n_un() || k==n_cast() then
+      let a=el_expr(s,ctx,env,n.b) in
+      let b=if k==n_bin() then el_expr(a.state,ctx,env,n.c) else ElExpr { state=a.state, id=n.c, ty=-1 } in
+      let boolean=(k==n_bin() && ((n.a>=6 && n.a<=11) || n.a==22 || n.a==23)) || (k==n_un() && n.a==29) in
+      el_expr_node(b.state,id,n with { b=a.id, c=b.id },if boolean then el_scalar(b.state,n_t_bool()) else if k==n_cast() then n.a else a.ty)
+    else if k==n_sum() || k==n_arrc() then
+      let lo=el_expr(s,ctx,env,n.b) in let hi=el_expr(lo.state,ctx,env,n.c) in
+      let inner=el_bind(env,n.a,el_scalar(hi.state,n_t_i64())) in let body=el_expr(hi.state,ctx,inner,n.d) in
+      let ty=if k==n_arrc() then el_array(body.state,body.ty,n) else ElNode { state=body.state, id=body.ty } in
+      el_expr_node(ty.state,id,n with { b=lo.id, c=hi.id, d=body.id },ty.id)
+    else if k==n_loop() then el_loop(s,ctx,env,id,n)
+    else let ty=if k==n_str() then s.bytes else el_scalar(s,if k==n_num() then n_t_i64() else if k==n_flt() then n_t_f64()
+      else if k==n_bool() then n_t_bool() else if k==n_byte() then n_t_u8() else -1) in
+    ElExpr { state=s, id=id, ty=ty }
+
+type ElLoop = { state:ElState, ids:Arr i64 _, env:ElBindings }
+fn el_loop(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, id:i64, n:Node) -> ElExpr
+  = let initial=loop (i=0, out=ElLoop { state=s, ids=tx_ints(), env=env })
+      while out.state.m.ok && i<ast_list_len(out.state.m.ast,n.a)
+      next (i+1,let id=ast_list_at(out.state.m.ast,n.a,i) in let slot=md_node(out.state.m,id) in
+        let init=el_expr(out.state,ctx,env,slot.c) in let ann=md_node(init.state.m,slot.b) in
+        let ty=if slot.b>=0 then el_concrete(init.state,ctx,ann.a) else ElNode { state=init.state, id=init.ty } in
+        let item=el_rewrite(ty.state,id,slot with { c=init.id }) in
+        ElLoop { state=item.state, ids=push(out.ids,item.id), env=el_bind(out.env,slot.a,ty.id) }) yield out in
+    let slots=loop (i=0, out=ElItems { state=initial.state, ids=tx_ints() }) while out.state.m.ok && i<len(initial.ids)
+      next (i+1,let id=el_at(initial.ids,i) in let slot=md_node(out.state.m,id) in
+        let item=if slot.b<0 then ElNode { state=out.state, id=id } else
+          let ann=md_node(out.state.m,slot.b) in let ty=el_concrete(out.state,ctx,ann.a) in
+          let preds=el_args(ty.state,ctx,initial.env,ann.b,false) in let list=el_list_changed(preds.state,ann.b,preds.ids) in
+          let changed=el_rewrite(list.state,slot.b,ann with { a=ty.id, b=list.id }) in
+          el_rewrite(changed.state,id,slot with { b=changed.id }) in
+        ElItems { state=item.state, ids=push(out.ids,item.id) }) yield out in
+    let list=el_list_changed(slots.state,n.a,slots.ids) in
+    let cond=el_expr(list.state,ctx,initial.env,n.b) in
+    let nexts=el_args(cond.state,ctx,initial.env,n.c,false) in let updates=el_list_changed(nexts.state,n.c,nexts.ids) in
+    let result=el_expr(updates.state,ctx,initial.env,n.d) in
+    el_expr_node(result.state,id,n with { a=list.id, b=cond.id, c=updates.id, d=result.id },result.ty)
+
+fn el_all(borrow lists:Arr Arr i64 _ _) -> Arr i64 _
+  = loop (i=0, out=tx_ints()) while i<len(lists)
+      next (i+1,md_with_all(out,md_list(lists,i))) yield out
+fn el_index(borrow m:Mods, borrow ids:Arr i64 _) -> Arr i64 _
+  = loop (i=0, index=arr(j in 0..len(m.ast.strs)) -1) while i<len(ids)
+      next (i+1,let id=el_at(ids,i) in set_at(index,md_node(m,id).a,id)) yield index
+fn el_variant_index(borrow m:Mods, borrow ids:Arr i64 _) -> Arr i64 _
+  = loop (i=0, index=arr(j in 0..len(m.ast.strs)) -1) while i<len(ids)
+      next (i+1,let id=el_at(ids,i) in let variants=md_node(m,id).d in
+        loop (j=0, table=index) while j<ast_list_len(m.ast,variants)
+          next (j+1,let variant=md_node(m,ast_list_at(m.ast,variants,j)) in set_at(table,variant.a,id)) yield table) yield index
+fn el_validate_type(move s:ElState, id:i64) -> ElState
+  = let decl=md_node(s.m,id) in let module=el_at(s.m.owners,id) in
+    if decl.d>=0 && ast_list_len(s.m.ast,decl.d)==0 then el_fail(s,module,decl,"an enum requires at least one alternative")
+    else if decl.e>=0 && ast_list_len(s.m.ast,decl.c)>0 then
+      el_fail(s,module,decl,"resource types currently require a concrete nongeneric declaration") else s
+fn el_required(borrow m:Mods) -> bool
+  = loop (i=0, needed=false) while !needed && i<len(m.ast.nodes)/11
+      next (i+1,let n=md_node(m,i) in
+        (n.kind==n_type() && (ast_list_len(m.ast,n.c)>0 || n.d>=0)) ||
+        (n.kind==n_fn() && ast_list_len(m.ast,n.h)>0) ||
+        ((n.kind==n_call() || n.kind==n_reclit()) && ast_list_len(m.ast,n.c)>0) ||
+        (n.kind==n_call() && (tx_equal(md_str(m,n.a),"function") || tx_equal(md_str(m,n.a),"adopt"))) ||
+        n.kind==n_t_fn() || n.kind==n_t_ref() ||
+        (n.kind==n_t_rec() && ast_list_len(m.ast,n.b)>0) || n.kind==n_match() || n.kind==n_try()) yield needed
+fn el_program(move m:Mods) -> Mods
+  = if !m.ok || !el_required(m) then m else
+    let types=el_all(m.types) in let fns=el_all(m.fns) in
+    let type_index=el_index(m,types) in let fn_index=el_index(m,fns) in let variant_index=el_variant_index(m,types) in
+    let empty=arr(i in 0..len(m.paths)) tx_ints() in
+    let m=md_intern(m with { types=empty, fns=empty },"_") in let wildcard=md_last(m) in
+    let base=len(m.ast.nodes)/11 in
+    let scalars=arr(i in 0..8) base+i in
+    let m=loop (i=0, m=m) while i<8
+      next (i+1,m with { ast=m.ast with { nodes=ast_push_node(m.ast.nodes,el_kind(n_t_i64()+i,ast_none())) } }) yield m in
+    let state=ElState { m=m, type_index=type_index, fn_index=fn_index, variant_index=variant_index,
+      instances=arr(i in 0..0) ElInstance { template=-1, key=tx_empty(), args=tx_ints(), decl=-1, ty=-1, active=false },
+      scalar=scalars, wildcard=wildcard, bytes=-1, fn_count=0, type_depth=0 } in
+    let state=loop (i=0, state=state) while state.m.ok && i<len(types)
+      next (i+1,el_validate_type(state,el_at(types,i))) yield state in
+    let bytes=el_array(state,el_scalar(state,n_t_u8()),ast_none()) in let s=bytes.state with { bytes=bytes.id } in
+    let s=loop (i=0, s=s) while s.m.ok && i<len(types)
+      next (i+1,let id=el_at(types,i) in let n=md_node(s.m,id) in
+        if ast_list_len(s.m.ast,n.c)>0 then s else el_record(s,el_at(s.m.owners,id),n,id,tx_ints()).state) yield s in
+    loop (i=0, s=s) while s.m.ok && i<len(fns)
+      next (i+1,let id=el_at(fns,i) in let n=md_node(s.m,id) in let ctx=el_context(el_at(s.m.owners,id)) in
+        if ast_list_len(s.m.ast,n.h)>0 then
+          if bit_and(n.f,fl_external()+fl_exported())!=0 then el_fail(s,ctx.module,n,"generic functions cannot expose an external ABI") else s
+        else el_function(s,ctx,n,id,tx_ints()).state) yield s.m
+
+; An enum instance is a private record containing a tag and one set of
+; storage fields per alternative. The layout retains the alternative names
+; and their field lists for constructors and matches.
+type ElLayout = { state:ElState, fields:Arr i64 _, variants:Arr i64 _ }
+fn el_enum_layout(move s:ElState, borrow ctx:ElContext, decl:i64, name:i64, at:Node) -> ElState
+  = let tag=el_name(s,"__tag") in
+    let field=el_emit(tag.state,el_kind(n_tfield(),at) with { a=tag.id, b=el_scalar(tag.state,n_t_i64()) }) in
+    let layout=loop (i=0, out=ElLayout { state=field.state, fields=push(tx_ints(),field.id), variants=tx_ints() })
+      while out.state.m.ok && i<ast_list_len(out.state.m.ast,at.d)
+      next (i+1,el_enum_variant(out,ctx,md_node(out.state.m,ast_list_at(out.state.m.ast,at.d,i)),i)) yield out in
+    let fields=el_list(layout.state,layout.fields) in let variants=el_list(fields.state,layout.variants) in
+    let s=el_update(variants.state,decl,name,fields.id,-1,-1,-1) in s with { m=md_set(s.m,decl,7,variants.id) }
+fn el_enum_variant(move layout:ElLayout, borrow ctx:ElContext, variant:Node, tag:i64) -> ElLayout
+  = let types=el_type_list(layout.state,ctx,variant.b) in
+    let fields=loop (i=0, out=ElItems { state=types.state, ids=tx_ints() }) while out.state.m.ok && i<len(types.ids)
+      next (i+1,let name=el_name(out.state,concat("__variant_",int_text(tag),"_",int_text(i))) in
+        let field=el_emit(name.state,el_kind(n_tfield(),variant) with { a=name.id, b=el_at(types.ids,i) }) in
+        ElItems { state=field.state, ids=push(out.ids,field.id) }) yield out in
+    let list=el_list(fields.state,fields.ids) in let stored=el_emit(list.state,variant with { b=list.id }) in
+    ElLayout { state=stored.state, fields=md_with_all(layout.fields,fields.ids), variants=push(layout.variants,stored.id) }
+fn el_variant_pos(borrow m:Mods, variants:i64, name:i64) -> i64
+  = loop (i=0, found=-1) while found<0 && i<ast_list_len(m.ast,variants)
+      next (i+1,if md_node(m,ast_list_at(m.ast,variants,i)).a==name then i else -1) yield found
+fn el_payload_start(borrow m:Mods, variants:i64, tag:i64) -> i64
+  = loop (i=0, start=1) while i<tag
+      next (i+1,start+ast_list_len(m.ast,md_node(m,ast_list_at(m.ast,variants,i)).b)) yield start
+fn el_construct(move s:ElState, borrow ctx:ElContext, n:Node, owner:i64, borrow args:Arr i64 _, borrow types:Arr i64 _) -> ElExpr
+  = let original=md_node(s.m,owner) in let tag=el_variant_pos(s.m,original.d,n.a) in
+    let variant=md_node(s.m,ast_list_at(s.m.ast,original.d,tag)) in let count=ast_list_len(s.m.ast,variant.b) in
+    let names=md_ids(s.m,original.c) in
+    let bound=if ast_list_len(s.m.ast,n.c)>0 then el_type_list(s,ctx,n.c) else
+      el_infer_arguments(s,ctx,n,names,md_ids(s.m,variant.b),types) in
+    if !bound.state.m.ok then ElExpr { state=bound.state, id=-1, ty=-1 } else
+    if len(args)!=count then el_expr_error(bound.state,ctx.module,n,concat("constructor payload arity mismatch for ",md_str(bound.state.m,n.a))) else
+    let resolved=el_record(bound.state,ctx.module,n,owner,bound.ids) in
+    let ty=md_node(resolved.state.m,resolved.id) in let decl=md_node(resolved.state.m,el_find_type(resolved.state,ty.a).decl) in
+    let start=el_payload_start(resolved.state.m,decl.g,tag) in
+    let fields=el_enum_values(resolved.state,ctx,n,decl.b,tag,start,args) in let list=el_list(fields.state,fields.ids) in
+    let made=el_emit(list.state,el_kind(n_reclit(),n) with { a=ty.a, b=list.id, h=1 }) in
+    ElExpr { state=made.state, id=made.id, ty=resolved.id }
+fn el_enum_values(move s:ElState, borrow ctx:ElContext, at:Node, fields:i64, tag:i64, start:i64, borrow args:Arr i64 _) -> ElItems
+  = loop (i=0, out=ElItems { state=s, ids=tx_ints() }) while out.state.m.ok && i<ast_list_len(out.state.m.ast,fields)
+      next (i+1,let field=md_node(out.state.m,ast_list_at(out.state.m.ast,fields,i)) in
+        let value=if i==0 && tag>=0 then el_emit(out.state,el_num(tag,at))
+          else if i>=start && i-start<len(args) then ElNode { state=out.state, id=el_at(args,i-start) }
+          else el_zero(out.state,ctx,field.b,at) in
+        let init=el_emit(value.state,el_kind(n_finit(),at) with { a=field.a, b=value.id }) in
+        ElItems { state=init.state, ids=push(out.ids,init.id) }) yield out
+fn el_zero(move s:ElState, borrow ctx:ElContext, id:i64, at:Node) -> ElNode
+  = let ty=md_node(s.m,id) in let k=ty.kind in
+    if k==n_t_i64() then el_emit(s,el_num(0,at))
+    else if k==n_t_u8() || k==n_t_bool() || k==n_t_f64() then
+      let literal=if k==n_t_u8() then n_byte() else if k==n_t_bool() then n_bool() else n_flt() in
+      el_emit(s,el_kind(literal,at) with { a=0 })
+    else if k==n_t_i32() || k==n_t_u16() then
+      let zero=el_emit(s,el_num(0,at)) in el_emit(zero.state,el_kind(n_cast(),at) with { a=id, b=zero.id })
+    else if k==n_t_ptr() || k==n_t_unit() then
+      let name=el_name(s,if k==n_t_ptr() then "null" else "noop") in el_emit(name.state,el_kind(n_call(),at) with { a=name.id })
+    else if k==n_t_fn() || k==n_t_ref() then
+      let name=el_name(s,if k==n_t_fn() then "function_null" else "ref_null") in el_emit(name.state,el_kind(n_call(),at) with { a=name.id,e=id })
+    else if k==n_t_arr() then
+      let zero=el_emit(s,el_num(0,at)) in let binder=el_name(zero.state,"$empty") in
+      let elem=el_zero(binder.state,ctx,ty.a,at) in
+      el_emit(elem.state,el_kind(n_arrc(),at) with { a=binder.id, b=zero.id, c=zero.id, d=elem.id })
+    else if k==n_t_rec() then
+      let instance=el_find_type(s,ty.a) in let decl=md_node(s.m,instance.decl) in
+      let fields=el_enum_values(s,ctx,at,decl.b,-1,0,tx_ints()) in let list=el_list(fields.state,fields.ids) in
+      el_emit(list.state,el_kind(n_reclit(),at) with { a=ty.a, b=list.id, h=1 })
+    else ElNode { state=el_fail(s,ctx.module,at,concat("cannot create inactive alternative storage for ",dp_type(tx_empty(),s.m.ast,id))), id=-1 }
+
+type ElMatch = { state:ElState, bodies:Arr i64 _, tags:Arr i64 _, ty:i64, wildcard:bool }
+type ElArm = { state:ElState, env:ElBindings, seen:Arr i64 _ }
+fn el_match(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, at:Node) -> ElExpr
+  = let value=el_expr(s,ctx,env,at.a) in let ty=md_node(value.state.m,value.ty) in
+    let decl=md_node(value.state.m,el_find_type(value.state,ty.a).decl) in
+    if !value.state.m.ok then value else
+    if ty.kind!=n_t_rec() || !ast_flag(decl,fl_enum_storage()) then
+      el_expr_error(value.state,ctx.module,at,"match requires an enum value") else
+    let name=el_name(value.state,concat("$match.",int_text(len(value.state.m.ast.nodes)/11))) in
+    let arms=loop (i=0, out=ElMatch { state=name.state, bodies=tx_ints(), tags=tx_ints(), ty=-1, wildcard=false })
+      while out.state.m.ok && i<ast_list_len(out.state.m.ast,at.b)
+      next (i+1,let arm=md_node(out.state.m,ast_list_at(out.state.m.ast,at.b,i)) in
+        el_match_arm(out,ctx,env,at,arm,decl.g,name.id)) yield out in
+    if !arms.state.m.ok then ElExpr { state=arms.state, id=-1, ty=-1 } else
+    if len(arms.bodies)==0 then el_expr_error(arms.state,ctx.module,at,"empty match") else
+    let missing=if arms.wildcard then tx_empty() else el_match_missing(arms.state.m,decl.g,arms.tags) in
+    if len(missing)>0 then el_expr_error(arms.state,ctx.module,at,concat("non-exhaustive match; missing ",missing)) else
+    let tag=md_node(arms.state.m,ast_list_at(arms.state.m.ast,decl.b,0)).a in
+    let result=loop (i=len(arms.bodies)-2, out=ElNode { state=arms.state, id=el_at(arms.bodies,len(arms.bodies)-1) }) while i>=0
+      next (i-1,el_match_test(out,name.id,tag,el_at(arms.tags,i),el_at(arms.bodies,i),at)) yield out in
+    let scope=el_emit(result.state,el_kind(n_let(),at) with { a=name.id, b=value.id, c=result.id }) in
+    ElExpr { state=scope.state, id=scope.id, ty=arms.ty }
+fn el_match_arm(move out:ElMatch, borrow ctx:ElContext, borrow env:ElBindings, at:Node, arm:Node, variants:i64, binder:i64) -> ElMatch
+  = let wildcard=tx_equal(md_str(out.state.m,arm.a),"_") in
+    let tag=if wildcard then -1 else el_variant_pos(out.state.m,variants,arm.a) in
+    let fields=if tag<0 then -1 else md_node(out.state.m,ast_list_at(out.state.m.ast,variants,tag)).b in
+    let count=ast_list_len(out.state.m.ast,arm.b) in
+    let name=md_str(out.state.m,arm.a) in
+    let error=if out.wildcard then "unreachable arm after wildcard"
+      else if wildcard && count!=0 then "wildcard cannot bind payloads"
+      else if !wildcard && tag<0 then concat("unknown alternative ",name)
+      else if el_has(out.tags,tag) then concat("duplicate match arm ",name)
+      else if count!=ast_list_len(out.state.m.ast,fields) then concat("match payload arity mismatch for ",name) else "" in
+    if len(error)>0 then out with { state=el_fail(out.state,ctx.module,at,error) } else
+    let inner=loop (i=0, bound=ElArm { state=out.state, env=env, seen=tx_ints() }) while bound.state.m.ok && i<count
+      next (i+1,let name=ast_list_at(bound.state.m.ast,arm.b,i) in let word=md_str(bound.state.m,name) in
+        let field=md_node(bound.state.m,ast_list_at(bound.state.m.ast,fields,i)) in
+        if tx_equal(word,"_") then bound else if md_in(bound.state.m,bound.seen,word) then
+          bound with { state=el_fail(bound.state,ctx.module,at,"duplicate match binding") }
+        else ElArm { state=bound.state, env=el_bind(bound.env,name,field.b), seen=push(bound.seen,name) }) yield bound in
+    let body=el_expr(inner.state,ctx,inner.env,arm.c) in
+    let scoped=loop (i=count-1, item=ElNode { state=body.state, id=body.id }) while item.state.m.ok && i>=0
+      next (i-1,let name=ast_list_at(item.state.m.ast,arm.b,i) in
+        if tx_equal(md_str(item.state.m,name),"_") then item else
+        let field=md_node(item.state.m,ast_list_at(item.state.m.ast,fields,i)).a in
+        let value=el_match_field(item.state,binder,field,at) in
+        el_emit(value.state,el_kind(n_let(),at) with { a=name, b=value.id, c=item.id })) yield item in
+    ElMatch { state=scoped.state, bodies=push(out.bodies,scoped.id), tags=push(out.tags,tag),
+      ty=if out.ty>=0 then out.ty else body.ty, wildcard=wildcard }
+fn el_has(borrow ids:Arr i64 _, value:i64) -> bool
+  = loop (i=0, found=false) while !found && i<len(ids) next (i+1,el_at(ids,i)==value) yield found
+fn el_match_missing(borrow m:Mods, variants:i64, borrow tags:Arr i64 _) -> Arr u8 _
+  = let names=loop (i=0, names=tx_ints()) while i<ast_list_len(m.ast,variants)
+      next (i+1,if el_has(tags,i) then names else push(names,md_node(m,ast_list_at(m.ast,variants,i)).a)) yield names in
+    let sorted=md_sort(m,names) in
+    loop (i=0, out=tx_empty()) while i<len(sorted)
+      next (i+1,concat(out,if i==0 then "" else ", ",md_str(m,el_at(sorted,i)))) yield out
+fn el_match_field(move s:ElState, binder:i64, field:i64, at:Node) -> ElNode
+  = let value=el_emit(s,el_kind(n_var(),at) with { a=binder }) in
+    el_emit(value.state,el_kind(n_field(),at) with { a=value.id, b=field, h=1 })
+fn el_match_test(move tail:ElNode, binder:i64, field:i64, tag:i64, body:i64, at:Node) -> ElNode
+  = let value=el_match_field(tail.state,binder,field,at) in let num=el_emit(value.state,el_num(tag,at)) in
+    let test=el_emit(num.state,el_kind(n_bin(),at) with { a=6, b=value.id, c=num.id }) in
+    el_emit(test.state,el_kind(n_if(),at) with { a=test.id, b=body, c=tail.id })
+
+fn el_hash(move s:ElState, borrow ctx:ElContext, at:Node, borrow args:Arr i64 _, id:i64, equal:bool) -> ElExpr
+  = let ty=md_node(s.m,id) in let kind=ty.kind in
+    let bytes=kind==n_t_arr() && md_node(s.m,ty.a).kind==n_t_u8() in
+    let scalar=kind==n_t_i64() || kind==n_t_i32() || kind==n_t_u8() || kind==n_t_u16() || kind==n_t_bool() in
+    if !bytes && !scalar then el_expr_error(s,ctx.module,at,"hash-map keys must be integer, bool or bytes") else
+    if len(args)!=(if equal then 2 else 3) then
+      el_expr_error(s,ctx.module,at,if equal then "key_equal takes two keys" else "hash_key takes (key, seed0, seed1)") else
+    let result=el_scalar(s,if equal then n_t_bool() else n_t_i64()) in
+    if equal && scalar then
+      let value=el_emit(s,el_kind(n_bin(),at) with { a=6, b=el_at(args,0), c=el_at(args,1) }) in
+      ElExpr { state=value.state, id=value.id, ty=result } else
+    let target=if equal then "str_equal" else if bytes then "hash_bytes" else "hash_integer" in
+    let name=md_lookup(s.m,ctx.module,target) in
+    if el_at(s.fn_index,name)<0 then el_expr_error(s,ctx.module,at,concat("unknown function ",target)) else
+    let first=el_at(args,0) in
+    let value=if bytes || kind==n_t_i64() then ElNode { state=s, id=first }
+      else if kind==n_t_bool() then
+        let one=el_emit(s,el_num(1,at)) in let zero=el_emit(one.state,el_num(0,at)) in
+        el_emit(zero.state,el_kind(n_if(),at) with { a=first, b=one.id, c=zero.id })
+      else el_emit(s,el_kind(n_cast(),at) with { a=el_scalar(s,n_t_i64()), b=first }) in
+    let list=el_list(value.state,set_at(args,0,value.id)) in
+    let call=el_emit(list.state,el_kind(n_call(),at) with { a=name, b=list.id }) in
+    ElExpr { state=call.state, id=call.id, ty=result }
+
+type ElResultLayout = { decl:Node, ok_tag:i64, err_tag:i64, ok_field:Node, err_field:Node }
+fn el_result_layout(borrow s:ElState, id:i64) -> ElResultLayout
+  = let ty=md_node(s.m,id) in
+    let decl=if ty.kind!=n_t_rec() then ast_none() else md_node(s.m,el_find_type(s,ty.a).decl) in
+    let empty=ElResultLayout { decl=decl, ok_tag=-1, err_tag=-1, ok_field=ast_none(), err_field=ast_none() } in
+    if ast_list_len(s.m.ast,decl.g)!=2 then empty else
+    loop (i=0, out=empty) while i<2
+      next (i+1,let v=md_node(s.m,ast_list_at(s.m.ast,decl.g,i)) in let name=md_str(s.m,v.g) in
+        let field=md_node(s.m,ast_list_at(s.m.ast,v.b,0)) in
+        if ast_list_len(s.m.ast,v.b)!=1 then out
+        else if tx_equal(name,"Ok") then out with { ok_tag=i, ok_field=field }
+        else if tx_equal(name,"Err") then out with { err_tag=i, err_field=field } else out) yield out
+fn el_propagate(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, at:Node) -> ElExpr
+  = let input=md_node(s.m,at.b) in let value=el_expr(s,ctx,env,input.a) in
+    let from=el_result_layout(value.state,value.ty) in let target=el_result_layout(value.state,ctx.ret) in
+    if !value.state.m.ok then value else
+    if !ast_flag(from.decl,fl_enum_storage()) || !ast_flag(target.decl,fl_enum_storage()) then
+      el_expr_error(value.state,ctx.module,at,"? requires a Result-like enum and a Result-like function return type") else
+    if from.ok_tag<0 || from.err_tag<0 || target.ok_tag<0 || target.err_tag<0 then
+      el_expr_error(value.state,ctx.module,at,"? requires Ok(T), Err(E) alternatives") else
+    let m=value.state.m in
+    if !tx_equal(dp_type(tx_empty(),m.ast,from.err_field.b),dp_type(tx_empty(),m.ast,target.err_field.b)) then
+      el_expr_error(value.state,ctx.module,at,"? error types do not match") else
+    let name=el_name(value.state,concat("$result.",int_text(len(m.ast.nodes)/11))) in
+    let inner=el_bind(env,at.a,from.ok_field.b) in let body=el_expr(name.state,ctx,inner,at.c) in
+    let payload=el_match_field(body.state,name.id,from.ok_field.a,at) in
+    let success=el_emit(payload.state,el_kind(n_let(),at) with { a=at.a, b=payload.id, c=body.id }) in
+    let error=el_match_field(success.state,name.id,from.err_field.a,at) in
+    let start=el_payload_start(error.state.m,target.decl.g,target.err_tag) in
+    let fields=el_enum_values(error.state,ctx,at,target.decl.b,target.err_tag,start,push(tx_ints(),error.id)) in
+    let list=el_list(fields.state,fields.ids) in
+    let failed=el_emit(list.state,el_kind(n_reclit(),at) with { a=target.decl.a, b=list.id, h=1 }) in
+    let tag=md_node(failed.state.m,ast_list_at(failed.state.m.ast,from.decl.b,0)).a in
+    let result=el_match_test(failed,name.id,tag,from.ok_tag,success.id,at) in
+    let scope=el_emit(result.state,el_kind(n_let(),at) with { a=name.id, b=value.id, c=result.id }) in
+    ElExpr { state=scope.state, id=scope.id, ty=body.ty }

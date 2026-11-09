@@ -1,7 +1,8 @@
 ; HTTP/1.x connection lifecycle and framing, written in Neo.
 ; Each worker owns its connections (Linux io_uring or epoll, macOS kqueue, or poll on
 ; request). No C HTTP implementation.
-; Each connection has a 64-byte state and a bounded 64 KiB input buffer:
+; Each connection has a 64-byte state and an initially 64 KiB input buffer,
+; growing on demand to a bounded 16 MiB body plus 16 KiB headers:
 ; fd@0, input@8, have@16, output@24, length@32, sent@40, close@48.
 
 fn rt_lower (c : u8) -> u8
@@ -32,14 +33,18 @@ fn rt_skip_space (a : Arr u8 n, start : i64{start >= 0}) -> i64 {result >= 0}
 
 fn rt_body_length (headers : Arr u8 n) -> i64
   = let field = rt_header(headers, "content-length:", 0) in
-    if rt_header(headers, "transfer-encoding:", 0) >= 0 then -1
+    let encoding=rt_header(headers,"transfer-encoding:",0) in
+    if encoding>=0 then
+      let start=rt_skip_space(headers,encoding) in let end=rt_skip_space(headers,start+7) in
+      if field>=0 || rt_header(headers,"transfer-encoding:",encoding)>=0 || !rt_match_ci(headers,start,"chunked") then -1 else
+      if end>=0 && end+1<n then if headers[end]=='\r' && headers[end+1]=='\n' then -2 else -1 else -1
     else if field < 0 then 0
     else if rt_header(headers, "content-length:", field) >= 0 then -1
     else let start = rt_skip_space(headers, field) in
       let value = loop (i : i64{i >= 0} = start, acc = 0, digits = 0)
-        while i < n && headers[i] >= '0' && headers[i] <= '9' && acc <= 65536
+        while i < n && headers[i] >= '0' && headers[i] <= '9' && acc <= 16777216
         next (i + 1, acc * 10 + i64(headers[i]) - 48, digits + 1)
-        yield if digits == 0 || acc > 65536 then -1
+        yield if digits == 0 || acc > 16777216 then -1
           else let end = rt_skip_space(headers, i) in
             if end + 1 < n && headers[end] == '\r' && headers[end + 1] == '\n' then acc else -1 in value
 
@@ -59,6 +64,8 @@ fn rt_connection_token (headers : Arr u8 n, token : Arr u8 m) -> bool
 effect fn rt_drop (state : ptr) -> unit
   = let fd = load_i64(state, 0) in
     if fd < 0 then noop() else
+      let tasks=rt_http_render_cancel(fd) in
+      let cancelled = rt_async_cancel(fd) in
       let closed = rt_close(fd) in
       let input = ax_release(load_ptr(state, 8)) in
       let output = ax_release(load_ptr(state, 24)) in
@@ -69,15 +76,23 @@ effect fn rt_request (state : ptr, handler : ptr, input : ptr, n : i64, offset :
     let bytes = view(ptr_add(input, offset), n - offset) in
     let end = rt_find(bytes, "\r\n\r\n", 0) in
     if end < 0 then
-      let dropped = if n - offset == 65536 then rt_drop(state) else noop() in 0
+      let dropped = if n - offset >= 16384 then rt_drop(state) else noop() in 0
     else let header_bytes = end + 4 in
       check header_bytes >= 0 && header_bytes <= n - offset in
       let headers = view(ptr_add(input, offset), header_bytes) in
-      let body_bytes = rt_body_length(headers) in
-      if body_bytes < 0 || header_bytes + body_bytes > 65536 then let dropped = rt_drop(state) in 0
+      let declared = rt_body_length(headers) in
+      let framed = if declared== -2 then rt_chunked_end(bytes,header_bytes) else 0 in
+      let body_bytes = if declared== -2 && framed>=0 then framed-header_bytes else declared in
+      if declared== -2 && framed== -2 then 0 else
+      if declared== -2 && framed== -1 then let dropped=rt_drop(state) in 0 else
+      if body_bytes < 0 || header_bytes > 16384 || body_bytes > 16777216 then let dropped = rt_drop(state) in 0
       else let total = header_bytes + body_bytes in
         if total > n - offset then 0 else
+          let context = store_ptr(runtime_state(), 1616, state) in
+          let generation = store_i64(runtime_state(), 1624, wrapping_add(load_i64(runtime_state(), 1624), 1)) in
           let response = handler_call(handler, ptr_add(input, offset), total) in
+          let cleared = store_ptr(runtime_state(), 1616, null()) in
+          if len(response)==0 && load_i64(state,48)==2 then total else
           if len(response) == 0 then let dropped = rt_drop(state) in 0 else
             let closing = rt_connection_token(headers, "close") ||
               (rt_find(headers, "HTTP/1.0", 0) >= 0 && !rt_connection_token(headers, "keep-alive")) in
@@ -100,7 +115,7 @@ effect fn rt_request (state : ptr, handler : ptr, input : ptr, n : i64, offset :
               else noop() in
               let copied = memcpy(ptr_add(load_ptr(state, 24), length), ptr_add(data(response), skip), rest) in
               store_i64(state, 32, length + rest) in
-            let closed = store_i64(state, 48, if closing then 1 else 0) in total
+            let closed = store_i64(state, 48, if load_i64(state,48)==2 then 2 else if closing then 1 else 0) in total
 
 type RuntimeBatch = { offset : i64, more : bool, count : i64 }
 effect fn rt_batch_next (state : ptr, handler : ptr, input : ptr, n : i64, batch : RuntimeBatch) -> RuntimeBatch
@@ -111,7 +126,7 @@ effect fn rt_batch_next (state : ptr, handler : ptr, input : ptr, n : i64, batch
 
 effect fn rt_prepare (state : ptr, handler : ptr) -> unit
   = let n = load_i64(state, 16) in
-    check n >= 0 && n <= 65536 in
+    check n >= 0 && n <= 16793600 in
     let input = load_ptr(state, 8) in
     let reset = store_i64(state, 56, 0) in
     let batch = loop (b = RuntimeBatch { offset = 0, more = true, count = 0 })
@@ -134,15 +149,41 @@ effect fn rt_flush (state : ptr) -> unit
         let sent = store_i64(state, 40, 0) in
         if load_i64(state, 48) == 1 then rt_drop(state) else noop()
 
+; A synchronous handler may explicitly take over its response transport. Drain
+; earlier pipelined replies first, then mark this connection close-after-handler.
+; The standard library bounds writes by a monotonic deadline. No fd ownership
+; escapes: the runtime closes it when the handler returns an empty response.
+effect fn rt_http_stream_fd(deadline:i64) -> i64
+  = let state=load_ptr(runtime_state(),1616) in if state==null() || rt_fiber_current()!=null() then -1 else
+    let fd=load_i64(state,0) in if fd<0 || rt_nonblock(fd)<0 then -1 else
+    let drained=loop(done=load_i64(state,32)==0,alive=true) while !done && alive
+      next(let flushed=rt_flush(state) in load_i64(state,32)==0,
+        let remaining=deadline-rt_clock_ns()/1000000 in
+        load_i64(state,0)>=0 && remaining>0 && (load_i64(state,32)==0 || rt_wait_ready(fd,4,if remaining>2147483647 then 2147483647 else remaining)>0)) yield done && alive in
+    if !drained then -1 else let close=store_i64(state,48,1) in fd
+
+effect fn rt_http_stream_current(fd:i64,generation:i64) -> bool
+  = let state=load_ptr(runtime_state(),1616) in state!=null() &&
+    load_i64(runtime_state(),1624)==generation && load_i64(state,0)==fd && load_i64(state,48)==1
+
+effect fn rt_http_generation() -> i64 = load_i64(runtime_state(),1624)
+
+cold effect fn rt_http_discard_async(state:ptr)->unit
+  = let scratch=stack_alloc(4096) in let received=rt_read(load_i64(state,0),scratch,4096) in
+    if received==0 then rt_drop(state) else if received<0 && !rt_retry() then rt_drop(state) else noop()
+
 effect fn rt_step (state : ptr, events : i64, handler : ptr) -> unit
-  = if events / 8 % 2 == 1 || events / 32 % 2 == 1 then rt_drop(state) else
-    let flushed = if load_i64(state, 32) > 0 && events / 4 % 2 == 1 then rt_flush(state) else noop() in
+  = if events / 8 % 2 == 1 || events / 32 % 2 == 1 || load_i64(state,48)==2 && (events / 16 % 2==1 || bit_and(events,8192)!=0) then rt_drop(state) else
+    let discarded=if load_i64(state,48)!=2 || events%2!=1 then noop() else
+      rt_http_discard_async(state) in
+    let flushed = if load_i64(state,0)>=0 && load_i64(state, 32) > 0 && events / 4 % 2 == 1 then rt_flush(state) else noop() in
     if load_i64(state, 0) < 0 then noop() else
-      let prepared = if load_i64(state, 32) == 0 && load_i64(state, 16) > 0 then rt_prepare(state, handler) else noop() in
+      let prepared = if load_i64(state, 48)!=2 && load_i64(state, 32) == 0 && load_i64(state, 16) > 0 then rt_prepare(state, handler) else noop() in
       if load_i64(state, 0) < 0 then noop() else
-        let received = if load_i64(state, 32) == 0 && (events % 2 == 1 || events / 16 % 2 == 1) then
+        let received = if load_i64(state, 48)!=2 && load_i64(state, 32) == 0 && (events % 2 == 1 || events / 16 % 2 == 1) then
           let n = load_i64(state, 16) in
-          let count = rt_read(load_i64(state, 0), ptr_add(load_ptr(state, 8), n), 65536 - n) in
+          let room = rt_http_input_room(state) in
+          let count = if room>0 then rt_read(load_i64(state, 0), ptr_add(load_ptr(state, 8), n), room) else 0 in
           if count > 0 then
             let saved = store_i64(state, 16, n + count) in rt_prepare(state, handler)
           else if count == 0 then rt_drop(state)
@@ -228,6 +269,10 @@ export effect fn ax_serve (port : i64, handler : ptr) -> i64
     let workers = rt_threads() in
     let parent = rt_getpid() in
     let control = rt_map(65536) in
+    let flags=store_i64(control,16,load_i64(runtime_state(),1680)) in let grace=store_i64(control,24,load_i64(runtime_state(),1688)) in let count=store_i64(control,40,workers) in
+    let mask=stack_alloc(8) in let set=store_i64(mask,0,16386) in let old=ptr_add(control,48) in
+    let blocked=if load_i64(control,16)>0 then rt_signal_mask(rt_signal_block_mode(),mask,old) else 0 in
+    let checked=if blocked<0 then ax_trap(data("HTTP signal mask failed\0")) else noop() in
     let descriptors = stack_alloc(8) in
     let initialized = loop (i = 0) while i < workers
       next (let pair = rt_socketpair(descriptors) in
@@ -236,13 +281,50 @@ export effect fn ax_serve (port : i64, handler : ptr) -> i64
             let r = store_i64(control, 256 + i * 16, reader) in let w = store_i64(control, 264 + i * 16, writer) in
             let rn = rt_nonblock(reader) in let wn = rt_nonblock(writer) in i + 1)
       yield i in
+    let event_wakeups=rt_events_bind(control) in
     let worker = loop (i = 1, mine = 0) while mine == 0 && i < workers
       next (i + 1, let pid = rt_fork() in
-            if pid < 0 then let failed = ax_trap(data("HTTP worker fork failed\0")) in 0 else if pid == 0 then i else 0)
+            if pid < 0 then let failed = ax_trap(data("HTTP worker fork failed\0")) in 0 else if pid == 0 then i else let saved=store_i64(control,8192+i*8,pid) in 0)
       yield mine in
     let printed = if worker == 0 then
       let prefix = rt_write_all(2, data("neo: serving, workers="), 22) in
       let buffer = stack_alloc(64) in let start = rt_format_integer(buffer, 63, workers) in
       let newline = store_u8(buffer, 63, '\n') in rt_write_all(2, ptr_add(buffer, start), 64 - start)
       else noop() in
-    rt_serve_worker(listener, handler, control, worker, workers, parent)
+    let signal=rt_http_worker_signals(control) in
+    let result=rt_serve_worker(listener, handler, control, worker, workers, parent) in
+    if worker!=0 then let exited=ax_exit(result) in result else
+    let waited=if load_i64(control,16)>0 then rt_http_reap(control,workers) else noop() in
+    let restored=if signal>=0 then rt_signal_monitor_close(signal,load_i64(control,48)) else noop() in
+    let unbound=rt_events_bind(null()) in result
+
+; Input storage grows only for requests that fill the initial 64 KiB buffer.
+; Header and body bounds are independent; ordinary GETs retain their allocation.
+effect fn rt_http_input_room(state:ptr) -> i64
+  = let have=load_i64(state,16) in let input=load_ptr(state,8) in let cap=ax_allocation_capacity(input) in
+    let limit=16793600 in
+    if have>=limit then 0 else if have<cap then (if cap<limit then cap else limit)-have else
+      let target=if cap*2<limit then cap*2 else limit in let grown=ax_alloc(target) in
+      let copied=memcpy(grown,input,have) in let saved=store_ptr(state,8,grown) in let released=ax_release(input) in target-have
+
+; Returns the exact wire end for one chunked request, -2 for incomplete input,
+; -1 for invalid framing. A following pipelined request is never consumed.
+private fn rt_chunk_hex(byte:u8)->i64
+  = if byte>='0' && byte<='9' then i64(byte)-48 else if byte>='A' && byte<='F' then i64(byte)-55 else if byte>='a' && byte<='f' then i64(byte)-87 else -1
+type RuntimeChunked = {at:i64,result:i64,done:bool}
+private fn rt_chunked_step(bytes:Arr u8 n,state:RuntimeChunked)->RuntimeChunked
+  = if state.at<0 || state.at>n then state with {result= -1,done=true} else let end=rt_find(bytes,"\r\n",state.at) in
+    if end<0 then state with {result=if n-state.at>1024 then -1 else -2,done=true} else
+    if end<state.at || end+2>n then state with {result= -1,done=true} else
+    let parsed=loop(i:i64{i>=0}=state.at,value=0,digits=0,ok=true) while ok && i<end && i<n && bytes[i]!=';' next(i+1,
+      if value<=16777216 && rt_chunk_hex(bytes[i])>=0 then value*16+rt_chunk_hex(bytes[i]) else value,digits+1,rt_chunk_hex(bytes[i])>=0 && value<=16777216 && digits<8) yield if ok && digits>0 && value<=16777216 then value else -1 in
+    if parsed<0 || end-state.at>1024 then state with {result= -1,done=true} else
+    let from=end+2 in
+    if parsed==0 then
+      if from+2<=n && rt_match(bytes,from,"\r\n") then state with {result=from+2,done=true} else
+      let trailers=rt_find(bytes,"\r\n\r\n",from) in
+      if trailers>=0 then state with {result=if trailers-from<=16384 then trailers+4 else -1,done=true} else state with {result=if n-from>16384 then -1 else -2,done=true} else
+    if from+parsed+2>n then state with {result= -2,done=true} else
+    if !rt_match(bytes,from+parsed,"\r\n") then state with {result= -1,done=true} else state with {at=from+parsed+2}
+fn rt_chunked_end(bytes:Arr u8 n,start:i64{start>=0})->i64
+  = loop(state=RuntimeChunked {at=start,result= -2,done=false},count=0) while !state.done && count<4096 next(rt_chunked_step(bytes,state),count+1) yield if state.done then state.result else -1

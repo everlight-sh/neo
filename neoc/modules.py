@@ -36,7 +36,7 @@ def _identity(path,entry,manifests=None):
     return hashlib.sha256(os.path.relpath(path,entry.parent).encode()).hexdigest()[:16]
 
 
-def sources(entry, runtime=(), overlays=None):
+def sources(entry, runtime=(), overlays=None, package_root=None):
     entry=Path(entry).resolve();texts={};lexed={};order=[];active=[];imports={}
     # What resolution read besides source texts: each import as written and
     # where it resolved, package imports, and the manifests naming modules.
@@ -63,7 +63,7 @@ def sources(entry, runtime=(), overlays=None):
                 target=STDLIB/(relative+'.neo')
             elif name.startswith('pkg:'):
                 from .packages import resolve_import
-                try:target=resolve_import(name,path,entry)
+                try:target=resolve_import(name,path,package_root or entry)
                 except ValueError as exc:raise SourceError(str(exc),path,t.pos) from exc
                 packaged.append(str(path))
             else:target=path.parent/name

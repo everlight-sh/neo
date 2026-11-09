@@ -30,3 +30,12 @@ fn sse_feed(state:SSE,chunk:Arr u8 n,limit:i64) -> SSEFeed
         SSEFeed { state=parsed.state with { skip_lf=c==13 },events=parsed.events,ok=parsed.ok } else
       if len(current.pending)+len(current.data)>=limit then SSEFeed { state=current with { failed=true },events=result.events,ok=false } else
         SSEFeed { state=current with { pending=concat(current.pending,str_slice(chunk,i,i+1)),skip_lf=false },events=result.events,ok=true }) yield result
+
+import "std:json"
+; Shared server encoder; CR/LF in data form additional data fields.
+fn sse_encode(event:Arr u8 n,data:Arr u8 m,id:Arr u8 k) -> BytesResult
+  = if str_find(event,"\r").present || str_find(event,"\n").present || str_find(event,"\0").present || str_find(id,"\r").present || str_find(id,"\n").present || str_find(id,"\0").present || !json_value_string(data).ok then bytes_error(22,"invalid SSE fields",0) else
+    if !str_find(data,"\r").present && !str_find(data,"\n").present then bytes_ok(concat(if n>0 then concat("event: ",event,"\n") else "",if k>0 then concat("id: ",id,"\n") else "","data: ",data,"\n\n")) else
+    let text=loop(i=0,out=concat(if n>0 then concat("event: ",event,"\n") else "",if k>0 then concat("id: ",id,"\n") else "","data: ")) while i<m next(i+1,
+      let c=str_byte(data,i) in concat(out,if c==13 then "\ndata: " else if c==10 then if i>0 && str_byte(data,i-1)==13 then "" else "\ndata: " else str_slice(data,i,i+1))) yield out in
+    bytes_ok(concat(text,"\n\n"))

@@ -1,0 +1,77 @@
+import "std:fs"
+import "std:io"
+import "paths.neo"
+import "text.neo"
+
+effect(fs,unsafe) fn pf_kind(borrow path:Arr u8 _, follow:bool) -> i64
+  = if !io_path_valid(path) then -1 else let name=concat(path,"\0") in rt_path_kind(data(name),follow)
+
+effect(fs,unsafe) fn pf_mkdir(borrow path:Arr u8 _) -> IntResult
+  = let name=concat(path,"\0") in let status=rt_mkdir_mode(data(name),511) in
+    if status==0 then int_ok(1)
+    else int_error(i64(load_i32(rt_errno(),0)),concat("cannot create directory ",path),0)
+
+effect(fs,unsafe) fn pf_parents(borrow path:Arr u8 _) -> IntResult
+  = let made=pf_mkdir(path) in
+    if made.ok then made else if made.error.code==17 then int_ok(0)
+    else if made.error.code!=2 then made else
+    let parent=pt_head(path) in if len(parent)==0 || tx_equal(parent,path) then made else
+    let ready=pf_parents(parent) in if !ready.ok then ready else
+    let made=pf_mkdir(path) in if !made.ok && made.error.code==17 then int_ok(0) else made
+
+effect(fs,unsafe) fn pf_write_new(borrow path:Arr u8 _, borrow contents:Arr u8 _) -> IntResult
+  = let name=concat(path,"\0") in let fd=rt_open_mode(data(name),rt_open_exclusive(),438) in
+    if fd<0 then int_error(i64(load_i32(rt_errno(),0)),concat("cannot create file ",path),0) else
+    let written=file_write(fd,contents) in let closed=file_close(fd) in
+    let result=if !written.ok then written else closed in
+    if result.ok then result else
+    let removed=fs_remove(path) in int_error(result.error.code,concat(path,": ",result.error.message),0)
+
+effect(fs,unsafe) fn pf_mkdirs(borrow path:Arr u8 _) -> IntResult
+  = let made=pf_parents(path) in
+    if !made.ok then made else if made.value==1 || pf_kind(path,true)==4 then made
+    else int_error(20,concat("not a directory: ",path),0)
+
+type PfDirent = { name:Arr u8 _, kind:i64 }
+type PfDir = { entries:Arr PfDirent _, at:i64 }
+type PfDirRead = { entries:Arr PfDirent _, size:i64 }
+
+fn pf_entries() -> Arr PfDirent _ = arr(i in 0..0) PfDirent { name=tx_empty(), kind=0 }
+fn pf_dirent(borrow entries:Arr PfDirent _, i:i64) -> PfDirent
+  = if i>=0 && i<len(entries) then entries[i] else PfDirent { name=tx_empty(), kind=0 }
+
+effect(unsafe) fn pf_dir_step(move result:PfDir, buffer:ptr, size:i64, header:i64) -> PfDir
+  = let record=ptr_add(buffer,result.at) in
+    let step=i64(load_u8(record,16))+256*i64(load_u8(record,17)) in
+    if step<=header || step>size-result.at then result with { at=size } else
+    let name=ptr_add(record,header) in
+    let count=loop (i=0) while i<step-header && load_u8(name,i)!=u8(0) next (i+1) yield i in
+    let at=result.at+step in
+    if count<=0 || count==step-header then result with { at=at } else
+    let word=pt_copy(view(name,count)) in
+    if tx_equal(word,".") || tx_equal(word,"..") then result with { at=at } else
+    PfDir { entries=push(result.entries,PfDirent { name=word, kind=i64(load_u8(record,header-1)) }), at=at }
+
+effect(unsafe) fn pf_dir_batch(move entries:Arr PfDirent _, buffer:ptr, size:i64) -> Arr PfDirent _
+  = let header=rt_directory_name_offset() in
+    let read=loop (state=PfDir { entries=entries, at=0 }) while state.at<=size-header-1
+      next (pf_dir_step(state,buffer,size,header)) yield state in read.entries
+
+effect(fs,unsafe) fn pf_read_directory(fd:i64, buffer:ptr) -> i64
+  = loop (count=rt_read_directory(fd,buffer,32768)) while count<0 && load_i32(rt_errno(),0)==i32(4)
+      next (rt_read_directory(fd,buffer,32768)) yield count
+
+type PfDirectoryResult = { entries:Arr PfDirent _, ok:bool }
+effect(fs,unsafe) fn pf_directory_result(borrow path:Arr u8 _) -> PfDirectoryResult
+  = if !io_path_valid(path) then PfDirectoryResult { entries=pf_entries(), ok=false } else
+    let name=concat(path,"\0") in let fd=rt_open_directory(data(name)) in
+    if fd<0 then PfDirectoryResult { entries=pf_entries(), ok=false } else
+    let buffer=stack_alloc(32768) in
+    let read=loop (s=PfDirRead { size=pf_read_directory(fd,buffer), entries=pf_entries() })
+      while s.size>0 && s.size<=32768
+      next (let saved=pf_dir_batch(s.entries,buffer,s.size) in
+        PfDirRead { entries=saved, size=pf_read_directory(fd,buffer) }) yield s in
+    let closed=rt_close(fd) in PfDirectoryResult { entries=read.entries, ok=read.size==0 && closed==0 }
+
+effect(fs,unsafe) fn pf_directory(borrow path:Arr u8 _) -> Arr PfDirent _
+  = pf_directory_result(path).entries

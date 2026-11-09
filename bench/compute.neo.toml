@@ -1,0 +1,20 @@
+[[test]]
+name = "mandel"
+file = "../examples/mandel.neo"
+args = ["3000", "3000", "2000"]
+
+[[test]]
+name = "stencil"
+file = "../examples/stencil.neo"
+args = ["50000000", "20"]
+
+[[test]]
+name = "stencil-small"
+file = "../examples/stencil.neo"
+args = ["1000000", "2000"]
+
+[[test]]
+name = "nbody"
+file = "../examples/nbody.neo"
+args = ["16384", "10"]
+stdout-tolerance = 1e-9

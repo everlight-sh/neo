@@ -3,6 +3,7 @@
 ; State: envp@0, errno@8, cpu cache@16, slab bump@24, remaining@32,
 ; parked large block shared@136/private@144; private slab@152/160, heap mode@184,
 ; selected small-buffer allocator@192.
+; HTTP callback context@1616 and generation@1624, private to the current worker.
 ; Shared free lists/counts@256/768; private free lists/counts@512/1024.
 ; One private state per process. Freed mapped blocks are retained per class
 ; up to 64 MiB per heap kind (retained bytes@1280 shared, @1288 private).
@@ -252,8 +253,11 @@ export effect fn calloc (n : i64, size : i64) -> ptr
 effect fn rt_fork () -> i64
   = let pid = fork_syscall() in
     if pid != 0 then pid else
+      let signal_mask=if load_i64(runtime_state(),1728)==0 then 0 else rt_signal_mask(rt_signal_restore_mode(),ptr_add(runtime_state(),1736),null()) in
       let slab = memset(ptr_add(runtime_state(), 24), i32(0), 16) in
+      let events=load_ptr(runtime_state(),1856) in
       let reset = memset(ptr_add(runtime_state(), 256), i32(0), 1792) in
+      let inherited=store_ptr(runtime_state(),1856,events) in
       let cache = memset(ptr_add(runtime_state(),136),i32(0),32) in
       let handles = rt_handle_after_fork() in 0
 

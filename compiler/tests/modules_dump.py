@@ -1,9 +1,9 @@
 """Canonical dump of a program as neoc/modules.py loads it: the reference for
 `neoc modules ROOT FILE` (compiler/src/modules.neo), where ROOT is this
-repository. The two must match byte for byte. The runtime files are x86-64
-Linux's.
+repository. The two must match byte for byte. The default runtime is x86-64
+Linux's, and the optional target selects the platform sources.
 
-    python3 compiler/tests/modules_dump.py FILE
+    python3 compiler/tests/modules_dump.py FILE [TARGET]
 
 A failure to read a file prints as `cannot read PATH`, as Neo words it,
 instead of Python's exception text.
@@ -17,8 +17,9 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE)); sys.path.insert(0, str(ROOT))
 import ast_dump  # noqa: E402
 from neoc import modules as M, syntax as S  # noqa: E402
+from neoc.cli import runtime_files  # noqa: E402
 
-RUNTIME = ['core.neo', 'platform_linux_x86_64.neo', 'http.neo', 'handles.neo', 'http_linux.neo', 'http_uring.neo']
+DEFAULT_TARGET = 'x86_64-unknown-linux-gnu'
 # The same text always lexes to the same tokens, which nothing changes.
 S.lex = functools.lru_cache(maxsize=512)(S.lex)
 
@@ -38,9 +39,9 @@ def read_failure(exc):
 def pairs(names): return '(' + ' '.join(f'({k} {v})' for k, v in sorted(names.items())) + ')'
 
 
-def dump(entry):
+def dump(entry, target=DEFAULT_TARGET):
     entry = Path(entry).resolve()
-    try: program = M.sources(entry, [ROOT / 'runtime' / name for name in RUNTIME])
+    try: program = M.sources(entry, runtime_files(target))
     except M.SourceError as exc:
         d = exc.diagnostic; failed = read_failure(exc)
         return f"(error {d['file']} {d['pos'][0]}:{d['pos'][1]} {d['msg'] if failed is None else f'cannot read {failed}'})\n"
@@ -57,4 +58,4 @@ def dump(entry):
     return ''.join(line + '\n' for line in lines)
 
 
-if __name__ == '__main__': sys.stdout.buffer.write(dump(sys.argv[1]).encode('utf-8'))
+if __name__ == '__main__': sys.stdout.buffer.write(dump(*sys.argv[1:]).encode('utf-8'))

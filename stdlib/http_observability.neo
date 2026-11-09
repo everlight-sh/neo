@@ -1,0 +1,22 @@
+import "std:http_server"
+import "std:json"
+import "std:time"
+
+; Measure buffered handler/render work, excluding this header's encoding and
+; socket delivery. Empty async placeholders have no headers to decorate.
+fn web_server_timing(wire:Arr u8 n,started:i64,ended:i64)->Arr u8 _
+  = let split=str_find(wire,"\r\n\r\n") in if !split.present then wire else
+    let micros=if started>=0 && ended>=started then (ended-started)/1000 else 0 in
+    let fraction=micros%1000 in
+    concat(str_slice(wire,0,split.value),"\r\nServer-Timing: render;dur=",int_text(micros/1000),".",
+      if fraction<10 then "00" else if fraction<100 then "0" else "",int_text(fraction),str_slice(wire,split.value,n))
+
+; Optional structured access events. Never log bodies, cookies or query strings.
+; Streaming handlers log status zero because transport success is not observable
+; from the buffered return value. Monotonic duration covers the complete handler.
+effect(fs,process) fn web_trace(raw:Arr u8 n,wire:Arr u8 m,started:i64,ended:i64) -> Arr u8 _
+  = let request=web_request(raw,0) in let supplied=web_request_header(request,"x-request-id") in
+    let id=if len(supplied)>0 && len(supplied)<=64 && http_token(supplied) then supplied else concat(int_text(process_id()),"-",int_text(started)) in
+    let status=if m>=12 then int_parse(str_slice(wire,9,12)).value else 0 in
+    let printed=print_error(concat("{\"request_id\":",json_quote(id),",\"method\":",json_quote(request.method),",\"path\":",json_quote(request.path),",\"status\":",int_text(status),",\"duration_us\":",int_text(if ended>=started then (ended-started)/1000 else 0),"}\n")) in
+    let split=str_find(wire,"\r\n\r\n") in if !split.present then wire else concat(str_slice(wire,0,split.value),"\r\nX-Request-ID: ",id,str_slice(wire,split.value,m))

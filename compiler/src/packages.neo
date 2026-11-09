@@ -1,0 +1,189 @@
+; Native package lock, verification and offline vendoring.
+import "std:fs"
+import "std:hashmap"
+import "std:io"
+import "std:json"
+import "std:option"
+import "std:unicode"
+import "package_manifest.neo"
+import "package_source.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+
+fn pk_object() -> Json = json_value_object(tm_words(),arr(i in 0..0) json_value_null()).value
+fn pk_get(borrow object:Json, borrow key:Arr u8 _) -> Json = json_get(object,key).value
+fn pk_text(borrow object:Json, borrow key:Arr u8 _) -> Arr u8 _ = json_text(pk_get(object,key)).value
+fn pk_put(borrow object:Json, borrow key:Arr u8 _, borrow value:Json) -> Json
+  = json_object_set(object,key,value).value
+fn pk_set_text(borrow object:Json, borrow key:Arr u8 _, borrow value:Arr u8 _) -> Json
+  = pk_put(object,key,json_value_string(value).value)
+fn pk_keys(borrow object:Json) -> Arr Arr u8 _ _
+  = let keys=json_object_keys(object) in
+    loop (i=0, sorted=tm_words()) while i<len(keys)
+      next (i+1,tx_insert_word(sorted,tx_word(keys,i))) yield sorted
+
+; Match json.dumps's ASCII escaping, including supplementary code points.
+fn pk_quote_step(move out:Arr u8 _, code:i64) -> Arr u8 _
+  = if code==34 then concat(out,"\\\"") else if code==92 then concat(out,"\\\\")
+    else if code==8 then concat(out,"\\b") else if code==9 then concat(out,"\\t")
+    else if code==10 then concat(out,"\\n") else if code==12 then concat(out,"\\f")
+    else if code==13 then concat(out,"\\r") else if code>=32 && code<127 then push(out,u8(code))
+    else if code<65536 then tx_hex(concat(out,"\\u"),code,4)
+    else let n=code-65536 in tx_hex(concat(tx_hex(concat(out,"\\u"),55296+n/1024,4),"\\u"),56320+n%1024,4)
+fn pk_quote(borrow value:Arr u8 _) -> Arr u8 _
+  = let quoted=loop (i=0, text="\"") while i<len(value)
+      next (let rune=unicode_next(value,i) in if rune.ok then rune.end else i+1,
+        let rune=unicode_next(value,i) in pk_quote_step(text,if rune.ok then rune.code else 65533)) yield text in
+    push(quoted,'"')
+fn pk_indent(depth:i64) -> Arr u8 _
+  = if depth<=0 then "" else check depth<=256 in arr(i in 0..depth*2) ' '
+fn pk_pretty(borrow value:Json, depth:i64) -> Arr u8 _
+  = if value.kind==4 then pk_quote(json_text(value).value)
+    else if value.kind!=5 && value.kind!=6 then json_encode(value)
+    else if value.count==0 then (if value.kind==6 then "{}" else "[]")
+    else let object=value.kind==6 in let keys=if object then pk_keys(value) else tm_words() in
+    let count=if object then len(keys) else value.count in
+    let indent=pk_indent(depth+1) in
+    let body=loop (i=0, out=if object then "{" else "[") while i<count next (i+1,
+      let key=tx_word(keys,i) in
+      let item=if object then pk_get(value,key) else json_array_get(value,i).value in
+      concat(out,if i==0 then "\n" else ",\n",indent,
+        if object then concat(pk_quote(key),": ") else "",pk_pretty(item,depth+1))) yield out in
+    concat(body,"\n",pk_indent(depth),if object then "}" else "]")
+
+type PkGraph = { items:Json, paths:HashMap<Arr u8 _,Arr u8 _>, ids:HashMap<Arr u8 _,bool>, error:Arr u8 _ }
+type PkVisit = { graph:PkGraph, identity:Arr u8 _ }
+type PkEdges = { graph:PkGraph, dependencies:Json, paths:Json }
+fn pk_graph_empty() -> PkGraph
+  = PkGraph { items=pk_object(),paths=hashmap_empty::<Arr u8 _,Arr u8 _>(11,13),
+      ids=hashmap_empty::<Arr u8 _,bool>(17,19),error="" }
+fn pk_visit_error(move graph:PkGraph, borrow error:Arr u8 _) -> PkVisit
+  = PkVisit { graph=graph with { error=error },identity="" }
+
+effect(fs,unsafe) fn pk_visit_edge(move edges:PkEdges, borrow root:Arr u8 _, borrow from:Arr u8 _,
+                                  borrow active:Arr Arr u8 _ _, borrow spec:PkSpec) -> PkEdges
+  = let path=pt_realpath(pt_join(from,spec.path)) in let meta=pk_metadata(path,true) in
+    if len(meta.error)>0 then edges with { graph=edges.graph with { error=meta.error } }
+    else if !tx_equal(meta.version,spec.version) then
+      edges with { graph=edges.graph with { error=concat("version mismatch for dependency ",spec.alias) } }
+    else let child=pk_visit(edges.graph,root,path,active,meta) in
+      PkEdges { graph=child.graph,dependencies=pk_set_text(edges.dependencies,spec.alias,child.identity),
+        paths=pk_set_text(edges.paths,spec.alias,spec.path) }
+
+effect(fs,unsafe) fn pk_visit(move graph:PkGraph, borrow root:Arr u8 _, borrow path:Arr u8 _,
+                             borrow active:Arr Arr u8 _ _, borrow meta:PkMeta) -> PkVisit
+  = let cycle=loop (i=0, seen=false) while i<len(active) && !seen next (i+1,tx_equal(tx_word(active,i),path)) yield seen in
+    if cycle then
+      let chain=loop (i=0, text="cyclic package dependencies: ") while i<len(active)
+        next (i+1,concat(text,tx_word(active,i)," -> ")) yield text in pk_visit_error(graph,concat(chain,path))
+    else let existing=hashmap_get(graph.paths,path) in
+    if option_is_some(existing) then PkVisit { graph=graph,identity=option_or(existing,"") }
+    else let identity=pk_identity(meta) in
+    if option_is_some(hashmap_get(graph.ids,identity)) then
+      pk_visit_error(graph,concat("multiple source roots for ",identity,"; use one canonical local dependency"))
+    else let graph=graph with { ids=hashmap_put(graph.ids,identity,true) } in
+    let stack=push(active,path) in
+    let edges=loop (i=0, edges=PkEdges { graph=graph,dependencies=pk_object(),paths=pk_object() })
+      while i<len(meta.specs) && len(edges.graph.error)==0
+      next (i+1,pk_visit_edge(edges,root,path,stack,pk_spec(meta.specs,i))) yield edges in
+    let graph=edges.graph in
+    if len(graph.error)>0 then PkVisit { graph=graph,identity="" } else
+    let is_root=tx_equal(root,path) in
+    let hash=if is_root then bytes_ok("") else pk_digest(path) in
+    if !hash.ok then pk_visit_error(graph,hash.error.message) else
+    let item=pk_set_text(pk_set_text(pk_set_text(pk_object(),"name",meta.name),"version",meta.version),"path",pt_relpath(path,root)) in
+    let item=pk_put(item,"sha256",if is_root then json_value_null() else json_value_string(hash.value).value) in
+    let item=pk_put(pk_put(item,"dependencies",edges.dependencies),"dependency_paths",edges.paths) in
+    PkVisit { identity=identity,graph=graph with {
+      paths=hashmap_put(graph.paths,path,identity),items=pk_put(graph.items,identity,item) } }
+
+type PkLock = { value:Json, error:Arr u8 _ }
+fn pk_invalid(borrow error:Arr u8 _) -> PkLock = PkLock { value=json_value_null(),error=error }
+
+effect(fs,unsafe) fn pk_create(borrow root:Arr u8 _) -> PkLock
+  = let meta=pk_metadata(root,true) in if len(meta.error)>0 then pk_invalid(meta.error) else
+    let visited=pk_visit(pk_graph_empty(),root,root,tm_words(),meta) in
+    if len(visited.graph.error)>0 then pk_invalid(visited.graph.error)
+    else let lock=pk_set_text(pk_put(pk_object(),"format",json_value_int(1)),"root",visited.identity) in
+      PkLock { value=pk_put(lock,"packages",visited.graph.items),error="" }
+
+fn pk_sha(borrow text:Arr u8 _) -> bool
+  = len(text)==64 && loop (i=0, ok=true) while i<len(text) && ok
+      next (i+1,let c=tx_byte(text,i) in pk_digit(c) || c>=97 && c<=102) yield ok
+fn pk_shape(borrow identity:Arr u8 _, borrow item:Json, is_root:bool) -> Arr u8 _
+  = let dependencies=pk_get(item,"dependencies") in let paths=pk_get(item,"dependency_paths") in
+    let flag=json_get(item,"vendored") in
+    if !json_object_unique(item) || pk_get(item,"name").kind!=4 || pk_get(item,"version").kind!=4 ||
+      pk_get(item,"path").kind!=4 || tx_has(pk_text(item,"path"),0) ||
+      !json_object_unique(dependencies) || !json_object_unique(paths) then concat("invalid locked package ",identity)
+    else if (!is_root || (flag.present && json_bool(flag.value).value)) && !pk_sha(pk_text(item,"sha256")) then
+      concat("invalid locked source hash ",identity)
+    else if flag.present && flag.value.kind!=2 then concat("invalid vendor flag ",identity)
+    else loop (i=0, error="") while len(error)==0 && i<dependencies.count
+      next (i+1,if json_object_value_at(dependencies,i).value.kind==4 then "" else concat("invalid locked dependency ",identity)) yield error
+
+fn pk_vendor_path(borrow item:Json) -> Arr u8 _
+  = concat(".neo/vendor/",pk_text(item,"name"),"-",pk_text(item,"version"),"-",pt_slice(pk_text(item,"sha256"),0,12))
+
+effect(fs) fn pk_verify_edge(borrow root:Arr u8 _, borrow packages:Json, borrow identity:Arr u8 _, borrow path:Arr u8 _,
+                              borrow item:Json, borrow spec:PkSpec) -> Arr u8 _
+  = let target=pk_text(pk_get(item,"dependencies"),spec.alias) in let child=json_get(packages,target) in
+    let requested=pk_get(pk_get(item,"dependency_paths"),spec.alias) in let label=concat(identity,"/",spec.alias) in
+    if requested.kind!=4 || !tx_equal(json_text(requested).value,spec.path) then concat("locked dependency path changed: ",label)
+    else if !child.present || !tx_equal(pk_text(child.value,"version"),spec.version) then concat("locked dependency version changed: ",label)
+    else let actual=pt_realpath(pt_join(root,pk_text(child.value,"path"))) in
+    if json_bool(pk_get(child.value,"vendored")).value then
+      if tx_equal(actual,pt_realpath(pt_join(root,pk_vendor_path(child.value)))) then "" else concat("invalid vendored source location ",target)
+    else if !tx_equal(actual,pt_realpath(pt_join(path,spec.path))) then concat("locked dependency source path changed: ",label)
+    else ""
+
+effect(fs,unsafe) fn pk_verify_item(borrow root:Arr u8 _, borrow packages:Json, borrow identity:Arr u8 _, is_root:bool) -> Arr u8 _
+  = let item=pk_get(packages,identity) in let path=pt_realpath(pt_join(root,pk_text(item,"path"))) in
+    let meta=pk_metadata(path,false) in
+    if len(meta.error)>0 then meta.error else
+    let hash=if is_root then bytes_ok("") else pk_digest(path) in
+    if !hash.ok then hash.error.message
+    else if !tx_equal(pk_identity(meta),identity) || !tx_equal(meta.name,pk_text(item,"name")) ||
+        !tx_equal(meta.version,pk_text(item,"version")) || (!is_root && !tx_equal(hash.value,pk_text(item,"sha256"))) then
+      concat("locked source changed: ",identity,"; review changes and run neo pkg lock")
+    else let deps=pk_get(item,"dependencies") in
+    if deps.count!=len(meta.specs) || loop (i=0, missing=false) while !missing && i<len(meta.specs)
+        next (i+1,!json_get(deps,pk_spec(meta.specs,i).alias).present) yield missing then
+      concat("locked dependency aliases changed: ",identity)
+    else loop (i=0, error="") while len(error)==0 && i<len(meta.specs)
+      next (i+1,pk_verify_edge(root,packages,identity,path,item,pk_spec(meta.specs,i))) yield error
+
+effect(fs,unsafe) fn pk_validate(borrow root:Arr u8 _, borrow lock:Json) -> Arr u8 _
+  = let version=pk_get(lock,"format") in let identity=pk_text(lock,"root") in let packages=pk_get(lock,"packages") in
+    let root_item=json_get(packages,identity) in
+    if !json_object_unique(lock) || !json_int(version).ok || json_int(version).value!=1 || pk_get(lock,"root").kind!=4 ||
+        !json_object_unique(packages) || !root_item.present then "unsupported package lock format" else
+    let keys=json_object_keys(packages) in
+    let shape=loop (i=0, error="") while i<len(keys) && len(error)==0
+      next (i+1,let key=tx_word(keys,i) in pk_shape(key,pk_get(packages,key),tx_equal(key,identity))) yield error in
+    if len(shape)>0 then shape else
+    if !tx_equal(root,pt_realpath(pt_join(root,pk_text(root_item.value,"path")))) then "locked root must be the current project"
+    else loop (i=0, error="") while i<len(keys) && len(error)==0 next (i+1,
+      let key=tx_word(keys,i) in pk_verify_item(root,packages,key,tx_equal(key,identity))) yield error
+
+effect(fs,unsafe) fn pk_verify(borrow root:Arr u8 _) -> PkLock
+  = let file=pk_lock_path(root) in
+    let read=if pf_kind(file,true)==8 then fs_read(file) else bytes_error(2,"missing lock",0) in
+    let lock=json_parse(read.value) in
+    if !read.ok || !lock.ok then pk_invalid("missing or invalid neo.lock; run neo pkg lock")
+    else PkLock { value=lock.value,error=pk_validate(root,lock.value) }
+
+effect(fs,process,unsafe) fn pk_vendor(borrow root:Arr u8 _, borrow lock:Json) -> PkLock
+  = let original=pk_get(lock,"packages") in let identity=pk_text(lock,"root") in
+    let keys=json_object_keys(original) in
+    let copied=loop (i=0, state=PkLock { value=original,error="" }) while i<len(keys) && len(state.error)==0 next (i+1,
+      let key=tx_word(keys,i) in if tx_equal(key,identity) then state else
+      let item=pk_get(original,key) in let relative=pk_vendor_path(item) in
+      let source=pt_realpath(pt_join(root,pk_text(item,"path"))) in
+      let saved=pk_vendor_source(source,pt_join(root,relative),pk_text(item,"sha256")) in
+      if !saved.ok then state with { error=saved.error.message } else
+      let vendored=pk_put(pk_set_text(item,"path",relative),"vendored",json_value_bool(true)) in
+      state with { value=pk_put(state.value,key,vendored) }) yield state in
+    if len(copied.error)>0 then copied else
+    let result=pk_put(lock,"packages",copied.value) in PkLock { value=result,error=pk_validate(root,result) }

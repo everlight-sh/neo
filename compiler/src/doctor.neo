@@ -1,0 +1,68 @@
+import "std:fs"
+import "std:io"
+import "std:random"
+import "std:strings"
+import "build.neo"
+import "paths.neo"
+import "test_process.neo"
+import "text.neo"
+import "tool_version.neo"
+
+fn nd_pad(borrow value:Arr u8 _, width:i64) -> Arr u8 _
+  = let count=width-len(value) in if count<=0 then value
+    else check count>=0 in concat(value,arr(i in 0..count) ' ')
+effect(fs) fn nd_row(borrow name:Arr u8 _, borrow status:Arr u8 _, borrow detail:Arr u8 _) -> IntResult
+  = print_out(concat("  ",nd_pad(status,11)," ",nd_pad(name,9)," ",detail,"\n"))
+
+effect fn nd_smoke(borrow root:Arr u8 _) -> Arr u8 _
+  = let nonce=random_bytes(16) in if !nonce.ok then nonce.error.message else
+    let temp=env_get("TMPDIR") in
+    let stage=pt_abspath(pt_join(if len(temp.value)>0 then temp.value else "/tmp",
+      concat("neo-doctor-",tx_hex_bytes(tx_empty(),nonce.value)))) in
+    let created=fs_mkdir(stage) in if !created.ok then created.error.message else
+    let source=pt_join(stage,"hello.neo") in let binary=pt_join(stage,"hello") in
+    let saved=fs_write(source,"fn main () -> Arr u8 _ = \"ok\\n\"\n") in
+    let compiler=pt_realpath(cli_arg(0).value) in let environment=bd_environment() in
+    let args=push(push(push(push(push(push(tx_words(),"build"),root),source),"--dev"),"-o"),binary) in
+    let result=if !saved.ok then saved.error.message else
+      let built=nt_process(compiler,args,environment,120000,16384) in
+      if built.code!=0 || built.timeout then concat("build failed: ",nt_diagnostic(built))
+      else let ran=nt_process(binary,tx_words(),environment,30000,8192) in
+      if ran.code==0 && tx_equal(ran.output,"ok\n") then ""
+      else concat("the built program printed ",tx_repr(ran.output,false)," (exit ",int_text(ran.code),")") in
+    let removed=fs_remove(source) in let removed=fs_remove(binary) in let removed=fs_rmdir(stage) in result
+
+effect fn nd_version(borrow program:Arr u8 _) -> Arr u8 _
+  = if len(program)==0 then "" else
+    let result=bd_execute(program,push(tx_words(),"--version"),true) in
+    let end=str_find(result.output,"\n") in
+    if bd_exit_code(result.status)!=0 then "" else
+    str_trim(if end.present then pt_slice(result.output,0,end.value) else result.output)
+
+effect fn nd_hint(borrow target:Arr u8 _) -> Arr u8 _
+  = if str_find(target,"-apple-").present then "xcode-select --install"
+    else if len(bd_find_tool("apt-get"))>0 then "sudo apt install clang lld binutils"
+    else if len(bd_find_tool("dnf"))>0 then "sudo dnf install clang lld binutils"
+    else if len(bd_find_tool("pacman"))>0 then "sudo pacman -S clang lld binutils"
+    else if len(bd_find_tool("apk"))>0 then "sudo apk add clang lld binutils"
+    else "install clang and a linker with your package manager"
+
+effect fn nd_doctor(borrow root:Arr u8 _) -> unit
+  = let compiler=bd_clang() in let target=if len(compiler)>0 then bd_detect_target(compiler) else "" in
+    let supported=bd_target_valid(target) in let clang=nd_version(compiler) in
+    let linker=bd_find_tool("ld") in let lld=nd_version(bd_find_tool("ld.lld")) in
+    let title=print_out(concat("Neo ",tool_version(root),"\n")) in
+    let platform=nd_row("platform",if supported then "ok" else if len(clang)==0 then "unknown" else "unsupported",
+      if supported then target else "Neo supports x86-64 and ARM64 Linux, ARM64 macOS") in
+    let clang_row=nd_row("clang",if len(clang)>0 then "ok" else "missing",if len(clang)>0 then clang else "not found on PATH") in
+    let linker_row=nd_row("linker",if len(linker)>0 then "ok" else "missing",if len(linker)>0 then linker else "ld not found on PATH") in
+    let lld_row=nd_row("lld",if len(lld)>0 then "ok" else "optional",
+      if len(lld)>0 then lld else "not found; needed only to build for another CPU (--target)") in
+    if len(clang)==0 || len(linker)==0 then
+      let shown=print_out(concat("Install the missing tools with: ",nd_hint(target),"\n")) in process_exit(1)
+    else if !supported then process_exit(1)
+    else let smoke=nd_smoke(root) in
+      let check_row=nd_row("build",if len(smoke)==0 then "ok" else "failed",
+        if len(smoke)==0 then "built and ran hello world" else smoke) in
+      if len(smoke)>0 then process_exit(1)
+      else let shown=print_out("Ready: neo init app && cd app && neo run\n") in noop()

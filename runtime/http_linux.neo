@@ -12,7 +12,7 @@ effect fn rt_epoll_apply (epfd : i64, op : i64, fd : i64, mask : i64, token : i6
 
 effect fn rt_epoll_sync (epfd : i64, state : ptr, interests : ptr, index : i64) -> unit
   = if load_i64(state, 0) < 0 then noop() else
-    let wanted = if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1 in
+    let wanted = if load_i64(state,48)==2 then (if load_i64(state,32)>0 then 8197 else 8193) else if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1 in
     if wanted == load_i64(interests, index * 8) then noop() else
       let updated = rt_epoll_apply(epfd, 3, load_i64(state, 0), wanted, index + 2) in
       store_i64(interests, index * 8, wanted)
@@ -34,7 +34,7 @@ effect fn rt_epoll_compact (epfd : i64, states : ptr, interests : ptr, n : i64) 
 
 effect fn rt_epoll_listener (epfd : i64, listener : i64, control : ptr, worker : i64, local : ptr) -> unit
   = let wanted = if load_i64(control, 0) == worker then 1 else 0 in
-    if wanted == load_i64(local, 8) then noop() else
+    if atomic_load_i64(control,8)>0 || wanted == load_i64(local, 8) then noop() else
       let changed = rt_epoll_apply(epfd, if wanted == 1 then 1 else 2, listener, 1, 0) in
       store_i64(local, 8, wanted)
 
@@ -54,6 +54,7 @@ effect fn rt_http_epoll_worker (listener : i64, handler : ptr, control : ptr, wo
                               workers : i64{workers >= 1}, parent : i64) -> i64
   = let epfd = rt_epoll_create() in
     let valid = if epfd < 0 then ax_trap(data("epoll_create1 syscall failed\0")) else noop() in
+    let backend=store_i64(runtime_state(),1768,epfd+1) in
     let states = ax_alloc(1024 * 64) in
     let interests = ax_alloc(1024 * 8) in
     let events = ax_alloc(1026 * rt_epoll_event_bytes()) in
@@ -64,11 +65,20 @@ effect fn rt_http_epoll_worker (listener : i64, handler : ptr, control : ptr, wo
     ; Up to 32 ready connections per wait: unserved ones stay level-triggered
     ; ready, and new requests interleave instead of waiting out a full sweep.
     ; With one worker and 64 busy connections this cut p99 from 1.38 to 0.87 ms.
+    let signal=load_i64(runtime_state(),1696)-1 in
+    let monitored=if signal<0 then noop() else rt_epoll_apply(epfd,1,signal,1,1026) in
     let batch = 32 in
     loop (running = true) while running
-      next (let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+      next (let pending=load_i64(runtime_state(),1640)>0 || load_i64(runtime_state(),1784)>0 in let ticks=rt_async_tick(states,load_i64(local,0)) in
+            let draining=if signal<0 then false else rt_http_draining(control,states,load_i64(local,0),listener) in
+            if draining then false else
+            let synced=if !pending then noop() else
+              let changed=loop(i=0) while i<load_i64(local,0) next(let state=ptr_add(states,i*64) in let sync=if load_i64(state,0)>=0 then rt_epoll_sync(epfd,state,interests,i) else noop() in i+1) yield i in noop() in
+            let compacted=if !pending then noop() else let used=rt_epoll_compact(epfd,states,interests,load_i64(local,0)) in store_i64(local,0,used) in
+            let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
             let listening = rt_epoll_listener(epfd, listener, control, worker, local) in
-            let ready = rt_epoll_wait(epfd, events, batch) in
+            let delay=rt_async_timeout(if signal<0 then 1000 else 100) in
+            let ready = rt_epoll_wait_timeout(epfd,events,batch,delay) in
             if ready < 0 then if load_i32(rt_errno(), 0) == i32(4) then true
               else let failed = ax_trap(data("epoll_pwait syscall failed\0")) in false
             else let reset = store_i64(local, 16, 0) in let reset_accept = store_i64(local, 24, 0) in
@@ -77,8 +87,10 @@ effect fn rt_http_epoll_worker (listener : i64, handler : ptr, control : ptr, wo
                 next (let token = load_i64(events, i * rt_epoll_event_bytes() + rt_epoll_data_offset()) in
                       let mask = i64(load_i32(events, i * rt_epoll_event_bytes())) in
                       let stepped = if token == 0 then store_i64(local, 24, 1)
+                        else if bit_and(token,4095)>=2048 then rt_fiber_notify(token)
+                        else if token==1026 then rt_http_shutdown_signal(control,signal)
                         else if token == 1 then
-                          let drained = rt_read(load_i64(control, 256 + worker * 16), notification, 64) in noop()
+                          let drained = rt_read(load_i64(control, 256 + worker * 16), notification, 64) in rt_async_notified()
                         else let index = token - 2 in
                           if index < 0 || index >= n then ax_trap(data("invalid epoll token\0")) else
                             let state = ptr_add(states, index * 64) in
@@ -89,7 +101,7 @@ effect fn rt_http_epoll_worker (listener : i64, handler : ptr, control : ptr, wo
                 yield i in
               let compacted = if load_i64(local, 16) == 0 then noop() else
                 let used = rt_epoll_compact(epfd, states, interests, n) in store_i64(local, 0, used) in
-              let accepted = if load_i64(local, 24) == 1 then
+              let accepted = if atomic_load_i64(control,8)==0 && load_i64(local, 24) == 1 then
                 rt_epoll_accept(epfd, listener, states, interests, local, control, worker, workers) else noop() in true)
       yield 0
 
@@ -98,6 +110,7 @@ effect fn rt_serve_worker (listener : i64, handler : ptr, control : ptr, worker 
   = let fallback = rt_getenv_legacy(data("NEO_HTTP_POLL\0"), data("AXON_HTTP_POLL\0")) in
     let uring = rt_getenv_legacy(data("NEO_HTTP_URING\0"), data("AXON_HTTP_URING\0")) in
     let requested = uring != null() && load_u8(uring, 0) == '1' in
+    if load_i64(control,16)>0 then rt_http_epoll_worker(listener,handler,control,worker,workers,parent) else
     if fallback != null() && load_u8(fallback, 0) == '1' then
       rt_http_worker(listener, handler, control, worker, workers, parent)
     else if uring != null() && load_u8(uring, 0) == '0' then

@@ -1,0 +1,174 @@
+; Affine expressions as [constant, symbol, coefficient, ...], with sorted
+; symbols and zero coefficients omitted. Each integer occupies a signed limb
+; count followed by that many magnitude limbs. Empty means unavailable.
+import "text.neo"
+import "integer.neo"
+
+fn tl_end(borrow term:Arr i64 _, offset:i64) -> i64
+  = let head=tx_at(term,offset) in offset+1+(if head<0 then 0-head else head)
+fn tl_is_constant(borrow term:Arr i64 _) -> bool = len(term)>0 && tl_end(term,0)==len(term)
+fn tl_read(borrow term:Arr i64 _, offset:i64) -> TiInteger
+  = let head=tx_at(term,offset) in let count=if head<0 then 0-head else head in
+    TiInteger { sign=if head<0 then -1 else if head>0 then 1 else 0, limbs=arr(i in 0..count) tx_at(term,offset+1+i) }
+fn tl_write(move out:Arr i64 _, borrow value:TiInteger) -> Arr i64 _
+  = if len(value.limbs)>256 then tx_ints() else
+    loop (i=0, result=push(out,value.sign*len(value.limbs))) while i<len(value.limbs)
+      next (i+1,push(result,tx_at(value.limbs,i))) yield result
+
+fn tl_constant(x:i64) -> Arr i64 _ = tl_write(tx_ints(),ti_from_i64(x))
+fn tl_symbol(id:i64) -> Arr i64 _ = tl_write(push(tl_constant(0),id),ti_from_i64(1))
+
+fn tl_scale_by(borrow term:Arr i64 _, borrow factor:TiInteger) -> Arr i64 _
+  = if len(term)==0 then tx_ints() else if factor.sign==0 then tl_constant(0) else
+    loop (out=tl_write(tx_ints(),ti_multiply(tl_read(term,0),factor)), i=tl_end(term,0)) while len(out)>0 && i<len(term)
+      next (tl_write(push(out,tx_at(term,i)),ti_multiply(tl_read(term,i+1),factor)), tl_end(term,i+1)) yield out
+fn tl_scaled(borrow term:Arr i64 _, factor:i64) -> Arr i64 _ = tl_scale_by(term,ti_from_i64(factor))
+
+type TlMerge = { term:Arr i64 _, a:i64, b:i64 }
+fn tl_merge_step(move s:TlMerge, borrow a:Arr i64 _, borrow b:Arr i64 _) -> TlMerge
+  = let av=tx_at(a,s.a) in let bv=tx_at(b,s.b) in
+    let use_a=s.a<len(a) && (s.b>=len(b) || av<=bv) in
+    let use_b=s.b<len(b) && (s.a>=len(a) || bv<=av) in
+    let left=if use_a then tl_read(a,s.a+1) else ti_zero() in let right=if use_b then tl_read(b,s.b+1) else ti_zero() in
+    let coefficient=ti_add(left,right) in
+    let term=if coefficient.sign==0 then s.term else tl_write(push(s.term,if use_a then av else bv),coefficient) in
+    TlMerge { term=term, a=if use_a then tl_end(a,s.a+1) else s.a, b=if use_b then tl_end(b,s.b+1) else s.b }
+
+fn tl_add(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _
+  = if len(a)==0 || len(b)==0 then tx_ints() else
+    let constant=tl_write(tx_ints(),ti_add(tl_read(a,0),tl_read(b,0))) in
+    let merged=loop (s=TlMerge { term=constant, a=tl_end(a,0), b=tl_end(b,0) })
+      while len(s.term)>0 && (s.a<len(a) || s.b<len(b)) next (tl_merge_step(s,a,b)) yield s in merged.term
+fn tl_sub(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _ = tl_add(a,tl_scaled(b,-1))
+fn tl_mul(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _
+  = if tl_is_constant(a) then tl_scale_by(b,tl_read(a,0)) else if tl_is_constant(b) then tl_scale_by(a,tl_read(b,0)) else tx_ints()
+
+fn tl_rows() -> Arr Arr i64 _ _ = arr(i in 0..0) tx_ints()
+fn tl_row(borrow rows:Arr Arr i64 _ _, i:i64) -> Arr i64 _ = if i>=0 && i<len(rows) then rows[i] else tx_ints()
+fn tl_same(borrow a:Arr i64 _, borrow b:Arr i64 _) -> bool
+  = len(a)==len(b) && loop (i=0, same=true) while same && i<len(a)
+      next (i+1,tx_at(a,i)==tx_at(b,i)) yield same
+fn tl_contains(borrow rows:Arr Arr i64 _ _, borrow atom:Arr i64 _) -> bool
+  = loop (i=0, found=false) while !found && i<len(rows) next (i+1,tl_same(tl_row(rows,i),atom)) yield found
+fn tl_fact(move rows:Arr Arr i64 _ _, borrow atom:Arr i64 _) -> Arr Arr i64 _ _
+  = if len(atom)==0 || (tl_is_constant(atom) && tx_at(atom,0)<=0) || tl_contains(rows,atom) then rows else push(rows,atom)
+fn tl_join(move a:Arr Arr i64 _ _, borrow b:Arr Arr i64 _ _) -> Arr Arr i64 _ _
+  = loop (out=a, i=0) while i<len(b) next (tl_fact(out,tl_row(b,i)), i+1) yield out
+
+fn tl_coefficient(borrow term:Arr i64 _, id:i64) -> i64
+  = let i=loop (i=tl_end(term,0)) while i<len(term) && tx_at(term,i)<id next (tl_end(term,i+1)) yield i in
+    if i<len(term) && tx_at(term,i)==id then i+1 else -1
+
+; A row denotes term <= 0. Fourier-Motzkin combines opposite signs for a
+; symbol and drops its one-sided bounds. A positive constant is a contradiction.
+; Status is 2 while eliminating, 1 for unsatisfiable, 0 for feasible over
+; the rationals, and -1 when a coefficient or query exceeds the budget.
+type TlSystem = { rows:Arr Arr i64 _ _, status:i64 }
+type TlSplit = { pos:Arr Arr i64 _ _, neg:Arr Arr i64 _ _, rest:Arr Arr i64 _ _, status:i64 }
+
+fn tl_split_row(move split:TlSplit, borrow term:Arr i64 _, symbol:i64) -> TlSplit
+  = if len(term)==0 then split with { status=-1 }
+    else if tl_is_constant(term) then if tx_at(term,0)>0 then split with { status=1 } else split
+    else let c=tx_at(term,tl_coefficient(term,symbol)) in
+    if c>0 then split with { pos=push(split.pos,term) }
+    else if c<0 then split with { neg=push(split.neg,term) }
+    else split with { rest=push(split.rest,term) }
+
+fn tl_eliminate_pos(move s:TlSystem, borrow term:Arr i64 _, borrow negative:Arr Arr i64 _ _, symbol:i64) -> TlSystem
+  = let a=tl_read(term,tl_coefficient(term,symbol)) in
+    loop (o=s, i=0) while o.status==2 && i<len(negative)
+      next (let other=tl_row(negative,i) in let b=ti_negate(tl_read(other,tl_coefficient(other,symbol))) in
+            let combined=tl_add(tl_scale_by(term,b),tl_scale_by(other,a)) in
+            if len(combined)==0 then o with { status=-1 }
+            else if tl_is_constant(combined) && tx_at(combined,0)>0 then o with { status=1 }
+            else o with { rows=tl_fact(o.rows,combined) }, i+1) yield o
+
+fn tl_eliminate(borrow rows:Arr Arr i64 _ _) -> TlSystem
+  = let symbol=loop (i=0, id=-1) while i<len(rows) && id<0
+      next (i+1, let term=tl_row(rows,i) in if len(term)>0 && !tl_is_constant(term) then tx_at(term,tl_end(term,0)) else -1) yield id in
+    let split=loop (s=TlSplit { pos=tl_rows(), neg=tl_rows(), rest=tl_rows(), status=2 }, i=0)
+      while s.status==2 && i<len(rows) next (tl_split_row(s,tl_row(rows,i),symbol), i+1) yield s in
+    if split.status!=2 then TlSystem { rows=tl_rows(), status=split.status }
+    else if symbol<0 then TlSystem { rows=tl_rows(), status=0 }
+    else if len(split.pos)*len(split.neg)+len(split.rest)>256 then TlSystem { rows=tl_rows(), status=-1 }
+    else loop (s=TlSystem { rows=split.rest, status=2 }, i=0) while s.status==2 && i<len(split.pos)
+      next (tl_eliminate_pos(s,tl_row(split.pos,i),split.neg,symbol), i+1) yield s
+
+fn tl_prove(borrow facts:Arr Arr i64 _ _, borrow goal:Arr i64 _) -> i64
+  = if len(goal)==0 then -1
+    else if (tl_is_constant(goal) && tx_at(goal,0)<=0) || tl_contains(facts,goal) then 1
+    else if len(facts)>256 then -1
+    else let opposite=tl_sub(tl_constant(1),goal) in
+    if len(opposite)==0 then -1 else
+    let solved=loop (s=TlSystem { rows=push(facts,opposite), status=2 }, i=0) while s.status==2 && i<128
+      next (tl_eliminate(s.rows), i+1) yield s in
+    if solved.status==2 then -1 else solved.status
+
+; A formula is a disjunction of conjunctions. An unknown formula weakens to
+; true, so it can never establish a proof on its own. Track that weakening
+; so a failed search does not present it as a definitive result.
+type TlFormula = { branches:Arr Arr Arr i64 _ _ _, complete:bool }
+fn tl_false() -> TlFormula = TlFormula { branches=arr(i in 0..0) tl_rows(), complete=true }
+fn tl_true() -> TlFormula = TlFormula { branches=arr(i in 0..1) tl_rows(), complete=true }
+fn tl_unknown() -> TlFormula = tl_true() with { complete=false }
+fn tl_branch(borrow f:TlFormula, i:i64) -> Arr Arr i64 _ _
+  = if i>=0 && i<len(f.branches) then f.branches[i] else tl_rows()
+fn tl_is_true(borrow f:TlFormula) -> bool = f.complete && len(f.branches)==1 && len(tl_branch(f,0))==0
+fn tl_atom(borrow term:Arr i64 _) -> TlFormula
+  = if len(term)==0 then tl_unknown()
+    else if tl_is_constant(term) then if tx_at(term,0)<=0 then tl_true() else tl_false()
+    else TlFormula { branches=arr(i in 0..1) push(tl_rows(),term), complete=true }
+
+fn tl_intersect(borrow a:Arr Arr i64 _ _, borrow b:Arr Arr i64 _ _) -> Arr Arr i64 _ _
+  = loop (i=0, out=tl_rows()) while i<len(a)
+      next (i+1,let atom=tl_row(a,i) in if tl_contains(b,atom) then push(out,atom) else out) yield out
+
+fn tl_common(borrow f:TlFormula) -> Arr Arr i64 _ _
+  = loop (i=1, out=tl_branch(f,0)) while i<len(f.branches) && len(out)>0
+      next (i+1,tl_intersect(out,tl_branch(f,i))) yield out
+
+; Even when a disjunction exceeds the budget, facts shared by every branch
+; remain valid. Keeping them preserves earlier refinements after large joins.
+fn tl_weaken(borrow rows:Arr Arr i64 _ _) -> TlFormula
+  = TlFormula { branches=arr(i in 0..1) rows, complete=false }
+
+fn tl_and(borrow a:TlFormula, borrow b:TlFormula) -> TlFormula
+  = let left=len(a.branches) in let right=len(b.branches) in
+    if left==0 || right==0 then tl_false() else
+    if tl_is_true(a) then b else if tl_is_true(b) then a else
+    if left*right>256 then tl_weaken(tl_join(tl_common(a),tl_common(b))) else
+    let result=loop (i=0, out=tl_false().branches) while i<left
+      next (i+1, let first=tl_branch(a,i) in loop (j=0, out=out) while j<right
+        next (j+1,push(out,tl_join(first,tl_branch(b,j)))) yield out) yield out in
+    TlFormula { branches=result, complete=a.complete && b.complete }
+
+fn tl_or(borrow a:TlFormula, borrow b:TlFormula) -> TlFormula
+  = if tl_is_true(a) || tl_is_true(b) then tl_true() else
+    if len(a.branches)==0 then b else if len(b.branches)==0 then a else
+    if len(a.branches)+len(b.branches)>256 then tl_weaken(tl_intersect(tl_common(a),tl_common(b))) else
+    let result=loop (i=0, out=a.branches) while i<len(b.branches)
+      next (i+1,push(out,tl_branch(b,i))) yield out in
+    TlFormula { branches=result, complete=a.complete && b.complete }
+
+fn tl_entails(borrow facts:TlFormula, borrow goal:Arr i64 _) -> i64
+  = let status=loop (i=0, status=1) while status==1 && i<len(facts.branches)
+      next (i+1,tl_prove(tl_branch(facts,i),goal)) yield status in
+    if status==0 && !facts.complete then -1 else status
+
+fn tl_equal(borrow facts:TlFormula, borrow a:Arr i64 _, borrow b:Arr i64 _) -> i64
+  = let difference=tl_sub(a,b) in let one=tl_entails(facts,difference) in
+    if one!=1 then one else tl_entails(facts,tl_scaled(difference,-1))
+
+; The magnitude bound holds on every path. Add a sign bound only when
+; the current facts prove the dividend's sign, so nested divisions do
+; not introduce disjunctions for a sign the proof does not need.
+fn tl_division(borrow facts:TlFormula, borrow dividend:Arr i64 _, borrow divisor:Arr i64 _, borrow result:Arr i64 _, quotient:bool) -> TlFormula
+  = if len(dividend)==0 || !tl_is_constant(divisor) then tl_true() else
+    let d=tl_read(divisor,0) in if d.sign==0 then tl_true() else
+    let magnitude=d with { sign=1 } in
+    let limit=tl_write(tx_ints(),ti_add(magnitude,ti_from_i64(-1))) in
+    let rem=if quotient then tl_sub(dividend,tl_scale_by(result,d)) else result in
+    let lower=tl_scaled(rem,-1) in
+    let bounded=tl_and(tl_atom(tl_sub(rem,limit)),tl_atom(tl_sub(lower,limit))) in
+    if tl_entails(facts,tl_scaled(dividend,-1))==1 then tl_and(bounded,tl_atom(lower))
+    else if tl_entails(facts,dividend)==1 then tl_and(bounded,tl_atom(rem)) else bounded

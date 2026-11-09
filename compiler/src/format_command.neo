@@ -1,0 +1,70 @@
+; File selection and status reporting for neo fmt.
+import "std:io"
+import "std:strings"
+import "build.neo"
+import "formatter.neo"
+import "intrinsics.neo"
+import "modules.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+
+fn ff_ignored_name(borrow name:Arr u8 _) -> bool
+  = ff_one_of(name," .neo-build .axon-build .axon .kernel-build node_modules target ")
+
+fn ff_ignored_path(borrow path:Arr u8 _) -> bool
+  = let parts=pt_parts(path) in
+    loop (i=0, skip=false) while i<len(parts) && !skip
+      next (i+2,ff_ignored_name(ff_slice(path,tx_at(parts,i),tx_at(parts,i+1)))) yield skip
+
+effect(fs,unsafe) fn ff_is_directory(borrow path:Arr u8 _) -> bool
+  = if !io_path_valid(path) then false else
+    let name=concat(path,"\0") in let fd=rt_open_directory(data(name)) in
+    if fd<0 then false else let closed=rt_close(fd) in true
+
+; Sorting a directory's children before descending reproduces pathlib's
+; component order for a directory "a" beside a file "a.neo".
+fn ff_insert_entry(borrow sorted:Arr PfDirent _, borrow entry:PfDirent) -> Arr PfDirent _
+  = let at=loop (i=0) while i<len(sorted) && tx_less(pf_dirent(sorted,i).name,entry.name)
+      next (i+1) yield i in
+    arr(i in 0..len(sorted)+1) if i<at then pf_dirent(sorted,i) else if i==at then entry else pf_dirent(sorted,i-1)
+
+fn ff_source_name(borrow name:Arr u8 _) -> bool = bi_ends(name,".neo") || bi_ends(name,".ax")
+
+effect(fs,unsafe) fn ff_walk(borrow path:Arr u8 _, move out:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let entries=pf_directory(path) in
+    let ordered=loop (i=0, sorted=pf_entries()) while i<len(entries)
+      next (i+1,let entry=pf_dirent(entries,i) in
+        let relevant=entry.kind==4 || entry.kind==0 || ff_source_name(entry.name) in
+        if relevant && !ff_ignored_name(entry.name) then ff_insert_entry(sorted,entry) else sorted) yield sorted in
+    loop (i=0, found=out) while i<len(ordered)
+      next (i+1,let entry=pf_dirent(ordered,i) in let child=pt_join(if tx_equal(path,".") then "" else path,entry.name) in
+        if entry.kind==4 || (entry.kind==0 && !fs_readlink(child).ok && ff_is_directory(child)) then ff_walk(child,found)
+        else if ff_source_name(entry.name) then push(found,child)
+        else found) yield found
+
+type FfFiles = { changed:Arr Arr u8 _ _, error:Arr u8 _ }
+effect(fs) fn ff_file(move result:FfFiles, borrow path:Arr u8 _, checking:bool) -> FfFiles
+  = let read=fs_read(path) in
+    if !read.ok then result with { error=concat(path,": ",read.error.message) }
+    else if !utf8_valid(read.value) then result with { error=concat(path,": invalid UTF-8 source") } else
+    let source=tx_newlines(read.value) in let formatted=ff_format(source) in
+    if len(formatted.error)>0 then result with { error=concat(path,":",formatted.error) }
+    else if tx_equal(source,formatted.output) then result else
+    let saved=if checking then int_ok(0) else fs_write(path,formatted.output) in
+    if !saved.ok then result with { error=concat(path,": ",saved.error.message) }
+    else result with { changed=push(result.changed,path) }
+
+effect fn ff_command(borrow inputs:Arr Arr u8 _ _, checking:bool) -> unit
+  = let paths=if len(inputs)==0 then push(md_words(),".") else inputs in
+    let result=loop (i=0, files=FfFiles { changed=md_words(), error=tx_empty() })
+      while len(files.error)==0 && i<len(paths)
+      next (i+1,let path=pt_pathname(md_word(paths,i)) in
+        if ff_ignored_path(path) then files else
+        let selected=if ff_is_directory(path) then ff_walk(path,md_words()) else push(md_words(),path) in
+        loop (j=0, current=files) while len(current.error)==0 && j<len(selected)
+          next (j+1,ff_file(current,md_word(selected,j),checking)) yield current) yield files in
+    if len(result.error)>0 then bd_error(result.error) else
+    let shown=loop (i=0) while i<len(result.changed)
+      next (let wrote=print_out(concat(md_word(result.changed,i),"\n")) in i+1) yield i in
+    if checking && len(result.changed)>0 then process_exit(1) else noop()

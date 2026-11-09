@@ -1,0 +1,125 @@
+import "std:http_server"
+import "std:cancel"
+; Opt in before serve_effect. Timers and shutdown use kqueue/epoll; all
+; continuations must return promptly and use nonblocking I/O/task steps.
+effect(process) fn http_server_options(grace_ms:i64,asynchronous:bool)->IntResult
+  = let result=rt_http_config(grace_ms,asynchronous) in if result<0 then int_error(0-result,"Invalid HTTP runtime options",0) else int_ok(0)
+private fn http_async_hex(value:i64)->Arr u8 _
+  = let digits="0123456789abcdef" in if value<16 then str_slice(digits,value,value+1) else concat(http_async_hex(value/16),str_slice(digits,value%16,value%16+1))
+fn http_async_chunk(bytes:Arr u8 n)->Arr u8 _
+  = if n==0 then "" else concat(http_async_hex(n),"\r\n",bytes,"\r\n")
+private fn http_async_packet(capture:Arr u8 n,chunk:Arr u8 m,wake:i64,done:bool)->Arr u8 _
+  = check n<=16384 && m<=1048576 in
+    concat("NEOASY01",arr(i in 0..8) u8(bit_and(shift_right(wake,i*8),255)),arr(i in 0..8) u8(bit_and(shift_right(n,i*8),255)),
+      arr(i in 0..8) if i==0 && done then u8(1) else u8(0),capture,chunk)
+fn http_async_yield(capture:Arr u8 n,html:WebHtml,wake_ms:i64)->Arr u8 _
+  = http_async_packet(capture,http_async_chunk(html.bytes),wake_ms,false)
+fn http_async_finish(html:WebHtml)->Arr u8 _
+  = http_async_packet("",concat(http_async_chunk(html.bytes),"0\r\n\r\n"),0,true)
+effect(net,time,process) fn http_async_start(shell:WebHtml,capture:Arr u8 n,callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,wake_ms:i64,deadline_ms:i64)->BytesResult
+  = if len(shell.bytes)>1048576 then bytes_error(27,"Async shell exceeds its bound",0) else
+    let registered=rt_async_register(callback_address(callback),capture,wake_ms,deadline_ms) in
+    if registered<0 then bytes_error(0-registered,"Cannot admit async render",0) else
+    bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",http_async_chunk(shell.bytes)))
+
+import "std:async"
+; Callbacks use ordinary synchronous-looking code. All native socket waits
+; suspend their cooperative task, including HTTP(S), DNS and PostgreSQL I/O.
+type HttpDeferred = {capture:Arr u8 _,render:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,prefix:Arr u8 _,suffix:Arr u8 _,failure:Arr u8 _,deadline:i64}
+fn http_deferred(capture:Arr u8 n,render:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _)->HttpDeferred
+  = HttpDeferred {capture=capture,render=render,prefix="",suffix="",failure="",deadline=0}
+fn http_deferred_frame(task:HttpDeferred,prefix:Arr u8 n,suffix:Arr u8 m,failure:Arr u8 k,deadline:i64)->HttpDeferred
+  = task with {prefix=prefix,suffix=suffix,failure=failure,deadline=deadline}
+effect(fs,net,env,time,process) fn http_render_start_with_tail(shell:WebHtml,tasks:Arr HttpDeferred n,tail:WebHtml,deadline:i64)->BytesResult
+  = if len(shell.bytes)>1048576 || n<1 || n>32 then bytes_error(22,"Invalid deferred render bounds",0) else
+    let group=rt_http_render_open(n,deadline,false) in if group==null() then bytes_error(11,"Async render capacity unavailable",0) else
+    let admitted=loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in let task=tasks[i] in let token=rt_http_render_add(group,callback_address(task.render),task.capture) in token>0 && rt_http_render_envelope(token,task.prefix,task.suffix,task.failure,task.deadline)) yield ok in
+    if !admitted || !rt_http_render_tail(group,tail.bytes) || rt_http_render_commit(group)<0 then let aborted=rt_http_render_abort(group) in bytes_error(11,"Async render capacity unavailable",0) else
+    bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",http_async_chunk(shell.bytes)))
+effect(fs,net,env,time,process) fn http_response_async(capture:Arr u8 n,render:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,deadline:i64)->BytesResult
+  = let group=rt_http_render_open(1,deadline,true) in if group==null() then bytes_error(11,"Async response capacity unavailable",0) else
+    let token=rt_http_render_add(group,callback_address(render),capture) in
+    let timeout="HTTP/1.1 503 Service Unavailable\r\nContent-Length: 19\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nAsync render failed" in
+    if token<0 || !rt_http_render_envelope(token,"","",timeout,0) || rt_http_render_commit(group)<0 then
+      let aborted=rt_http_render_abort(group) in bytes_error(11,"Async response capacity unavailable",0) else bytes_ok("")
+; Flush an intermediate fragment from inside a render task, with bounded
+; queued output and cooperative backpressure. Never exposes the response fd.
+effect(net,time,process) fn http_render_write(html:WebHtml)->IntResult
+  = let job=rt_fiber_current() in if job==null() then int_error(22,"Not inside an async render",0) else
+    let group=load_ptr(job,320) in if group==null() || load_i64(group,64)!=0 || load_i64(job,360)!=0 || len(html.bytes)>4194304 then int_error(22,"Invalid raw stream write or framed deferred task",0) else
+    if !rt_http_render_lock(group) then int_error(125,"Async response closed or cancelled",0) else
+    let bytes=html.bytes in let sent=rt_http_render_emit(group,data(bytes),len(bytes),true) in let unlocked=store_i64(group,72,0) in
+    if sent then int_ok(len(bytes)) else int_error(125,"Async response closed or cancelled",0)
+
+effect(fs,net,env,time,process) fn http_render_start(shell:WebHtml,tasks:Arr HttpDeferred n,deadline:i64)->BytesResult
+  = http_render_start_with_tail(shell,tasks,web_html(""),deadline)
+
+; Small recurring callbacks carry owned state without allocating a task stack.
+; Each callback must return promptly, perform no blocking waits, and emit at
+; most 48 KiB. The runtime invokes it only once previous output has drained.
+fn http_async_resume(capture:Arr u8 n,bytes:Arr u8 m,wake:i64)->Arr u8 _
+  = check m<=49152 in http_async_packet(capture,http_async_chunk(bytes),wake,false)
+fn http_async_close(bytes:Arr u8 n)->Arr u8 _
+  = check n<=49152 in http_async_packet("",concat(http_async_chunk(bytes),"0\r\n\r\n"),0,true)
+effect(net,time,process) fn http_async_response(response:WebResponse,capture:Arr u8 n,callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,wake:i64,deadline:i64)->BytesResult
+  = if response.status!=200 || !web_header_safe(response.content_type) || len(response.body)>49152 || len(response.headers)>8192 || str_find(http_lower(response.headers),"content-length:").present || str_find(http_lower(response.headers),"transfer-encoding:").present then bytes_error(22,"Invalid async response",0) else
+    let admitted=rt_async_register(callback_address(callback),capture,wake,deadline) in
+    if admitted<0 then bytes_error(0-admitted,"Async stream capacity unavailable",0) else
+    bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: ",response.content_type,"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",response.headers,"\r\n",http_async_chunk(response.body)))
+effect(process) fn http_async_subscribers()->i64 = load_i64(runtime_state(),1640)
+effect(process) fn http_async_callback_count()->i64 = load_i64(runtime_state(),1896)
+effect(process) fn http_async_event_ready()->bool = bit_and(load_i64(runtime_state(),1912),2)!=0
+
+; Eight callback-owned scalar words persist until disconnect/finish. They are
+; initialized to zero on admission and cleared on slot reuse, with no JSON or
+; per-turn capture allocation. Get/set operate on the current callback (or the
+; callback just admitted by this request); they never expose a native pointer.
+type HttpAsyncState = {word0:i64,word1:i64,word2:i64,word3:i64,word4:i64,word5:i64,word6:i64,word7:i64}
+type HttpAsyncStateResult = {ok:bool,value:HttpAsyncState}
+effect(process) fn http_async_state_get()->HttpAsyncStateResult
+  = let job=rt_async_current_job() in HttpAsyncStateResult {ok=job!=null(),value=if job==null() then
+    HttpAsyncState {word0=0,word1=0,word2=0,word3=0,word4=0,word5=0,word6=0,word7=0} else
+    HttpAsyncState {word0=load_i64(job,80),word1=load_i64(job,88),word2=load_i64(job,96),word3=load_i64(job,104),word4=load_i64(job,112),word5=load_i64(job,120),word6=load_i64(job,128),word7=load_i64(job,136)}}
+effect(process) fn http_async_state_set(state:HttpAsyncState)->bool
+  = let job=rt_async_current_job() in if job==null() then false else
+    let a=store_i64(job,80,state.word0) in let b=store_i64(job,88,state.word1) in let c=store_i64(job,96,state.word2) in let d=store_i64(job,104,state.word3) in
+    let e=store_i64(job,112,state.word4) in let f=store_i64(job,120,state.word5) in let g=store_i64(job,128,state.word6) in let h=store_i64(job,136,state.word7) in true
+
+sealed type HttpAsyncFrame = {wire:Arr u8 _,token:i64,owner:i64}
+type HttpAsyncFrameResult = {ok:bool,frame:HttpAsyncFrame,error:Error}
+type HttpAsyncFrameKey = {namespace:i64,version:i64,epoch:i64,key:Arr u8 _,variant:Arr u8 _}
+private fn http_async_frame_error(code:i64)->HttpAsyncFrameResult
+  = HttpAsyncFrameResult {ok=false,frame=HttpAsyncFrame {wire="",token=0,owner=0},error=Error {code=code,message="Prepared frame unavailable",position=0}}
+fn http_async_no_frame()->HttpAsyncFrameResult = http_async_frame_error(11)
+fn http_async_prepare(bytes:Arr u8 n)->HttpAsyncFrameResult
+  = if n>49152 then http_async_frame_error(27) else
+    HttpAsyncFrameResult {ok=true,frame=HttpAsyncFrame {wire=http_async_chunk(bytes),token=0,owner=0},error=no_error()}
+effect(process) fn http_async_frame_find(key:HttpAsyncFrameKey)->HttpAsyncFrameResult
+  = let token=rt_frame_cache_find(key.namespace,key.version,key.epoch,key.key,key.variant) in if token<0 then http_async_frame_error(0-token) else
+    HttpAsyncFrameResult {ok=true,frame=HttpAsyncFrame {wire="",token=token,owner=rt_handle_pid()},error=no_error()}
+effect(process) fn http_async_frame_remember(key:HttpAsyncFrameKey,frame:HttpAsyncFrame)->HttpAsyncFrame
+  = if frame.token>0 then frame else
+    let token=rt_frame_cache_store(key.namespace,key.version,key.epoch,key.key,key.variant,frame.wire) in
+    if token<0 then frame else HttpAsyncFrame {wire="",token=token,owner=rt_handle_pid()}
+effect(process) fn http_async_frame_valid(frame:HttpAsyncFrame)->bool
+  = frame.token==0 || rt_frame_cache_size(frame.token,frame.owner)>=0
+effect(process) fn http_async_frame_size(frame:HttpAsyncFrame)->i64
+  = if frame.token==0 then len(frame.wire) else rt_frame_cache_size(frame.token,frame.owner)
+; A copied payload remains valid after cache eviction or fork. This slower
+; extraction supports batching/splitting; ordinary sends borrow cached bytes.
+effect(process) fn http_async_frame_payload(frame:HttpAsyncFrame)->BytesResult
+  = let wire=if frame.token==0 then frame.wire else rt_frame_cache_bytes(frame.token,frame.owner) in
+    if frame.token>0 && len(wire)==0 then bytes_error(11,"Prepared frame expired",0) else
+    if len(wire)==0 then bytes_ok("") else let end=str_find(wire,"\r\n") in
+    if !end.present || end.value+4>len(wire) then bytes_error(22,"Invalid prepared frame",0) else bytes_ok(str_slice(wire,end.value+2,len(wire)-2))
+; Return this directly from a short callback. A synchronous write borrows the
+; immutable frame. Any unsent suffix is copied before the call returns, so cache
+; replacement cannot corrupt a backpressured reader. Expired tokens close safely.
+effect(net,time,process) fn http_async_send_frame(frame:HttpAsyncFrame,wake:i64)->Arr u8 _
+  = let wire=frame.wire in let sent=if frame.token==0 then rt_async_direct(data(wire),len(wire),wake) else rt_frame_cache_send(frame.token,frame.owner,wake) in
+    if sent<0 then http_async_close("") else ""
+effect(net,time,process) fn http_async_send_bytes(bytes:Arr u8 n,wake:i64)->Arr u8 _
+  = let prepared=http_async_prepare(bytes) in if !prepared.ok then http_async_close("") else http_async_send_frame(prepared.frame,wake)
+type HttpAsyncFrameStats = {hits:i64,misses:i64,entries:i64}
+effect(process) fn http_async_frame_stats()->HttpAsyncFrameStats
+  = HttpAsyncFrameStats {hits=load_i64(runtime_state(),1936),misses=load_i64(runtime_state(),1944),entries=load_i64(runtime_state(),1952)}

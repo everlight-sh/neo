@@ -1,0 +1,14 @@
+import "std:http_server"
+effect(fs) fn main() -> unit
+  = let request=web_routed(web_request("POST /org/acme/items/42 HTTP/1.1\r\nCookie: session=a; other=b\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=caf%C3%A9&count=42",1000),"/org/[org]/items/[id]") in
+    check str_equal(web_param(request,"org").value,"acme") && str_equal(web_param(request,"id").value,"42") in
+    check str_equal(web_cookie(request,"session").value,"a") && str_equal(web_form(request,"name").value,"caf\xc3\xa9") && web_form_int(request,"count",1,100).value==42 in
+    check web_route_match("/docs/[...slug]","/docs/a/b") && !web_route_match("/docs/[...slug]","/docs") in
+    check web_route_match("/docs/[[...slug]]","/docs") && web_route_match("/docs/[[...slug]]","/docs/a") in
+    check !web_route_match("/docs/[...slug]","/docs/%2e%2e") && !web_route_match("/[a]/[b]","/x") in
+    check !web_cookie(web_request("GET / HTTP/1.1\r\nCookie: a=1; a=2\r\n\r\n",0),"a").present in
+    let redirect=web_redirect("/dashboard",303) in check redirect.status==303 && str_find(redirect.headers,"Location: /dashboard").present in
+    check web_with_header(web_reply(200,"ok","text/plain"),"X-Name","x\r\nInjected: y").status==500 in
+    check web_redirect("//evil.example",302).status==400 in
+    let empty=web_encode(web_status(web_reply(200,"hidden","text/plain"),204),false) in check !str_find(empty,"hidden").present in
+    let printed=print_out("HTTP server primitives OK\n") in noop()

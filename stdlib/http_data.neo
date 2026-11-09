@@ -1,0 +1,11 @@
+import "std:http_server"
+import "std:json"
+
+; Inert JSON for progressively enhanced pages. Escaping prevents markup or
+; </template> breakouts; this creates one text node instead of a hidden DOM tree.
+; Consumers parse template.content.textContent, never HTML or executable script.
+fn web_data(name:Arr u8 n,value:Json)->WebHtml
+  = check n>=1 && n<=64 && loop(i=0,ok=true) while ok && i<n next(i+1,
+      let c=str_byte(name,i) in c>=65 && c<=90 || c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==95) yield ok in
+    let encoded=json_encode(value) in check len(encoded)<=16777216 in
+    web_html(concat("<template data-web-data=\"",name,"\">",html_escape(encoded),"</template>"))

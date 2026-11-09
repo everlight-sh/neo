@@ -229,12 +229,13 @@ private fn http2_length_matches(headers:Arr HttpHeader n,size:i64,exempt:bool) -
 ; One request on the connection and its whole response. limit bounds the body. A
 ; request on a connection that was already open and turns out to be closed before
 ; any response is marked retry, as are streams the server refused or never processed.
-effect(net,time,process) fn http2_exchange<C>(io:HttpIO<C>,move conn:Http2,method:Arr u8 m,path:Arr u8 k,authority:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> Http2Result
-  = let id=conn.upcoming in let reused=conn.started in
-    if !http_method_valid(method) || !http_request_target(path) || h<1 || h>512 || !http_field_value(authority) || limit<0 || limit>1073741824 || q>1073741824 || id>2147483647 then
+effect(net,time,process) fn http2_exchange_headers<C>(io:HttpIO<C>,move conn:Http2,method:Arr u8 m,path:Arr u8 k,authority:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64,headers:Arr HttpHeader count) -> Http2Result
+  = let extra=http_headers_encode(headers) in let legal=loop(i=0,valid=extra.ok) while valid && i<count next(i+1,check i>=0 && i<count in let name=http_lower(headers[i].name) in !str_equal(name,"keep-alive") && !str_equal(name,"proxy-connection") && (!str_equal(name,"te") || str_equal(http_lower(headers[i].value),"trailers"))) yield valid in
+    let fields=arr(i in 0..count) HttpHeader {name=http_lower(headers[i].name),value=headers[i].value} in let block=hpack_encode(fields) in let id=conn.upcoming in let reused=conn.started in
+    if !legal || len(block)>8192 || !http_method_valid(method) || !http_request_target(path) || h<1 || h>512 || !http_field_value(authority) || limit<0 || limit>1073741824 || q>1073741824 || id>2147483647 then
       Http2Result { conn=conn,response=net_error(22,"invalid HTTP method, target, host or limit, or HTTP/2 stream ids exhausted"),headers=hpack_no_fields(),reusable=id<=2147483647,retry=false,unprocessed=false } else
     let head=str_equal(method,"HEAD") in let length=q>0 || str_equal(method,"POST") || str_equal(method,"PUT") || str_equal(method,"PATCH") in
-    let request=concat(if reused then "" else http2_preface(),http2_frame(1,if q==0 then 5 else 4,id,http2_request_block(method,path,authority,q,length))) in
+    let request=concat(if reused then "" else http2_preface(),http2_frame(1,if q==0 then 5 else 4,id,concat(http2_request_block(method,path,authority,q,length),block))) in
     let written=http2_write(io,request,deadline) in
     let conn=conn with { started=true,upcoming=id+2 } in
     if !written.ok then Http2Result { conn=conn,response=net_error(written.error.code,written.error.message),headers=hpack_no_fields(),reusable=false,
@@ -250,3 +251,6 @@ effect(net,time,process) fn http2_exchange<C>(io:HttpIO<C>,move conn:Http2,metho
     if !http2_length_matches(s.headers,len(s.body),head || s.status==204 || s.status==304) then
       Http2Result { conn=s.conn,response=net_error(71,"HTTP/2 body does not match its content-length"),headers=hpack_no_fields(),reusable=false,retry=false,unprocessed=false } else
       Http2Result { conn=s.conn,response=HttpResult { ok=true,status=s.status,body=s.body,error=no_error() },headers=s.headers,reusable=reusable,retry=false,unprocessed=false }
+
+effect(net,time,process) fn http2_exchange<C>(io:HttpIO<C>,move conn:Http2,method:Arr u8 m,path:Arr u8 k,authority:Arr u8 h,body:Arr u8 q,deadline:i64,limit:i64) -> Http2Result
+  = http2_exchange_headers(io,conn,method,path,authority,body,deadline,limit,hpack_no_fields())

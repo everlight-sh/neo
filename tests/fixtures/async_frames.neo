@@ -1,0 +1,29 @@
+import "std:http_async"
+private fn frame_key(version:i64,size:i64)->HttpAsyncFrameKey
+  = HttpAsyncFrameKey {namespace=17,version=version,epoch=1,key="fixed",variant=int_text(size)}
+private effect(fs,net,env,time,process) fn frame_step(capture:Arr u8 n)->Arr u8 _
+  = let got=http_async_state_get() in check got.ok in let state=got.value in
+    check str_equal(capture,"constant capture") && state.word7==9821 && state.word2>=0 && state.word2<=49152 in
+    if state.word0>=state.word1 then http_async_close("END") else
+    let now=monotonic_ms() in let key=frame_key(1,state.word2) in let hit=http_async_frame_find(key) in
+    let delayed=if state.word3==0 then 0 else loop(at=now.value) while at<now.value+5 next(monotonic_ms().value) yield at in
+    let frame=if hit.ok then hit.frame else
+      let prepared=http_async_prepare(arr(i in 0..state.word2) u8(65)) in check prepared.ok in http_async_frame_remember(key,prepared.frame) in
+    let saved=http_async_state_set(state with {word0=state.word0+1}) in
+    http_async_send_frame(frame,now.value+1)
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/stats") then web_encode(web_json(concat("{\"subscribers\":",int_text(http_async_subscribers()),"}")),false) else
+    if str_equal(request.path,"/evict") then
+      let prepared=http_async_prepare("replacement") in
+      let churn=loop(i=0) while i<128 next(let cached=http_async_frame_remember(frame_key(i+100,32768),prepared.frame) in i+1) yield i in
+      web_encode(web_reply(200,"EVICTED","text/plain"),false) else
+    if str_equal(request.path,"/frames") || str_equal(request.path,"/large") || str_equal(request.path,"/late-wake") then
+      let now=monotonic_ms() in
+      let admitted=http_async_response(web_reply(200,"SHELL","text/plain"),"constant capture",function(frame_step),now.value+5,now.value+10000) in
+      if !admitted.ok then web_encode(web_reply(503,"FULL","text/plain"),false) else
+      let fresh=http_async_state_get() in check fresh.ok && fresh.value.word0==0 && fresh.value.word7==0 in
+      let saved=http_async_state_set(HttpAsyncState {word0=0,word1=if str_equal(request.path,"/large") then 128 else 3,word2=if str_equal(request.path,"/large") then 32768 else 5,word3=if str_equal(request.path,"/late-wake") then 1 else 0,word4=0,word5=0,word6=0,word7=9821}) in admitted.value else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main(port:i64)->i64
+  = let options=http_server_options(250,true) in check options.ok in serve_effect(port,handler)

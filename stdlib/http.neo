@@ -67,9 +67,9 @@ fn http_header_apply (state: HttpHeaderState, line: Arr u8 n) -> HttpHeaderState
 fn http_chunk_length (text: Arr u8 n) -> IntResult
   = let extension = str_find(text, ";") in let digits = if extension.present then str_slice(text, 0, extension.value) else text in
     loop (i = 0, value = 0, valid = len(digits) > 0 && len(digits) <= 8) while valid && i < len(digits)
-      next (i + 1, if value <= 65536 then value * 16 + http_hex(str_byte(digits, i)) else value,
-        http_hex(str_byte(digits, i)) >= 0 && value <= 65536)
-      yield if valid && value <= 1048576 then int_ok(value) else int_error(1, "invalid HTTP chunk length", 0)
+      next (i + 1, if value <= 16777216 then value * 16 + http_hex(str_byte(digits, i)) else value,
+        http_hex(str_byte(digits, i)) >= 0 && value <= 16777216)
+      yield if valid && value <= 16777216 then int_ok(value) else int_error(1, "invalid HTTP chunk length", 0)
 fn http_hex (byte: i64) -> i64
   = if byte >= 48 && byte <= 57 then byte - 48 else if byte >= 65 && byte <= 70 then byte - 55 else if byte >= 97 && byte <= 102 then byte - 87 else -1
 fn http_chunk_step (raw: Arr u8 n, position: i64, body: Arr u8 m) -> HttpChunk
@@ -96,3 +96,13 @@ fn http_decode_response (wire: Arr u8 n) -> BytesResult
       loop (step = HttpChunk { valid = true, done = false, offset = 0, body = "" }) while step.valid && !step.done
         next (http_chunk_step(raw, step.offset, step.body))
         yield if step.valid then bytes_ok(step.body) else bytes_error(1, "invalid chunked HTTP body", step.offset)
+
+; Validated HTTP header collections shared by clients and streaming servers.
+type HttpHeader = { name:Arr u8 _,value:Arr u8 _ }
+fn http_headers_encode(headers:Arr HttpHeader n) -> BytesResult
+  = loop(i=0,out="",valid=n<=128) while valid && i<n next(i+1,
+      check i>=0 && i<n in concat(out,headers[i].name,": ",headers[i].value,"\r\n"),
+      check i>=0 && i<n in let name=http_lower(headers[i].name) in
+        http_token(headers[i].name) && http_field_value(headers[i].value) && len(out)+len(headers[i].name)+len(headers[i].value)+4<=16384 &&
+        !str_equal(name,"host") && !str_equal(name,"content-length") && !str_equal(name,"transfer-encoding") && !str_equal(name,"connection") && !str_equal(name,"upgrade"))
+      yield if valid then bytes_ok(out) else bytes_error(22,"invalid, reserved or excessive request headers",i)

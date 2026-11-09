@@ -32,13 +32,13 @@ effect fn rt_context_unmap(address:i64) -> i64
 
 effect fn rt_handle_new(fd:i64,kind:i64) -> i64
   = if fd < 0 then 0 - i64(load_i32(rt_errno(),0)) else
-    let prepared = if kind<4 then rt_cloexec(fd) else fd in
+    let prepared = if kind<4 || kind==21 then rt_cloexec(fd) else fd in
     if prepared<0 then -5 else
     let table = rt_handles() in
     let slot = loop(i = 0) while i < 4096 && load_i64(table,i * 32) != 0 next(i + 1) yield i in
     let generation = load_i64(runtime_state(),120) in
     if slot == 4096 || generation >= 2251799813685246 then
-      let closed = if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in -24 else
+      let closed = if kind==22 || kind==23 then 0 else if kind >= 5 && kind!=21 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in -24 else
       let generation = generation + 1 in
       let serial = store_i64(runtime_state(),120,generation) in
       let entry = ptr_add(table,slot * 32) in let g = store_i64(entry,0,generation) in let f = store_i64(entry,8,fd) in
@@ -58,7 +58,7 @@ effect fn rt_handle_drop(token:i64,kind:i64) -> unit
       let table = rt_handles() in let entry = ptr_add(table,((token - 1) % 4096) * 32) in
       let invalidate = store_i64(entry,0,0) in
       let live = store_i64(runtime_state(),128,load_i64(runtime_state(),128) - 1) in
-      let closed = if kind == 8 then rt_context_unmap(fd) else if kind >= 5 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in noop()
+      let closed = if (kind==22 || kind==23) then 0 else if kind == 8 then rt_context_unmap(fd) else if kind >= 5 && kind!=21 then rt_munmap(ptr_from_i64(fd),load_i64(ptr_from_i64(fd),0)) else rt_close(fd) in noop()
 
 effect fn rt_handle_live() -> i64 = load_i64(runtime_state(),128)
 
@@ -68,6 +68,6 @@ effect fn rt_handle_after_fork() -> unit
       let done = loop(i=0) while i<4096
         next(let entry=ptr_add(table,i*32) in
           let close=if load_i64(entry,0)>0 && (load_i64(entry,16)<4 || load_i64(entry,16)>=7) then
-            let fd=if load_i64(entry,16)>=5 then rt_munmap(ptr_from_i64(load_i64(entry,8)),load_i64(ptr_from_i64(load_i64(entry,8)),0)) else rt_close(load_i64(entry,8)) in
+            let fd=if (load_i64(entry,16)==22 || load_i64(entry,16)==23) then 0 else if load_i64(entry,16)>=5 && load_i64(entry,16)!=21 then rt_munmap(ptr_from_i64(load_i64(entry,8)),load_i64(ptr_from_i64(load_i64(entry,8)),0)) else rt_close(load_i64(entry,8)) in
             let clear=store_i64(entry,0,0) in
             store_i64(runtime_state(),128,load_i64(runtime_state(),128)-1) else noop() in i+1) yield i in noop()

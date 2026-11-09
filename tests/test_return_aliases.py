@@ -29,5 +29,20 @@ class ReturnAliases(unittest.TestCase):
     def test_mutual_recursion_never_assumes_no_alias(self):
         got=self.analyze('fn left(a:Arr u8 _,n:i64)->Arr u8 _=if n==0 then a else right(a,n-1) fn right(a:Arr u8 _,n:i64)->Arr u8 _=if n==0 then a else left(a,n-1)')
         self.assertEqual(got['left'],{0});self.assertEqual(got['right'],{0})
+    def test_prechecked_contracts_survive_untyped_bodies(self):
+        program=S.parse('fn fresh(n:i64{n>=0})->Arr u8 _=arr(i in 0..n) u8(0) fn identity(a:Arr u8 _)->Arr u8 _=a fn copy(n:i64{n>=0})->Arr u8 _=fresh(n) fn wrap(a:Arr u8 _)->Arr u8 _=identity(a) fn main()->i64=0')
+        hash_program(program);Checker(program).run();checked=summaries(program.fns)
+        def untype(node):
+            node.ty=None
+            for child in S.children(node):untype(child)
+        for fn in program.fns:
+            if fn.name in ('fresh','identity'):
+                fn.precompiled=True;fn.precompiled_return_aliases=sorted(checked[fn.name]);untype(fn.body)
+        got=summaries(program.fns)
+        self.assertEqual(got['fresh'],set());self.assertEqual(got['copy'],set())
+        self.assertEqual(got['identity'],{0});self.assertEqual(got['wrap'],{0})
+        del program.fns[0].precompiled_return_aliases
+        unknown=summaries(program.fns)
+        self.assertIn(-1,unknown['fresh']);self.assertIn(-1,unknown['copy'])
 
 if __name__=='__main__':unittest.main()

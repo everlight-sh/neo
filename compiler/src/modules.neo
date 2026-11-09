@@ -1,7 +1,6 @@
 ; Module loading, as neoc/modules.py sources() does it: follow the imports of
 ; the runtime files and the entry file, parse every module into one tree, give
 ; each declaration its program-wide name and rewrite every reference to it.
-; Package imports ("pkg:") are not supported yet.
 import "std:strings"
 import "std:io"
 import "std:fs"
@@ -15,6 +14,7 @@ import "parse.neo"
 import "paths.neo"
 import "toml.neo"
 import "dump.neo"
+import "package_import.neo"
 
 ; Names in insertion order, like a Python dict, for every module at once: a
 ; slot is found by the module's number, a NUL and the name. A module's names
@@ -39,23 +39,40 @@ fn bk_end(borrow b:Book, k:i64) -> i64 = if k>=0 && k+1<len(b.starts) then b.sta
 ; The program as it loads. Per module, in load order: its path, tokens and
 ; their text, its imports (four numbers each: the imported module, an alias
 ; index or -1, line and column), its types, functions and name prefix. canon
-; and display hold each declaration node's final and source names.
+; and display hold each declaration node's final and source names. Owners
+; maps declaration node IDs to their source modules.
 type Mods = { stdlib:Arr u8 _, runtime:Arr u8 _, entry:Arr u8 _,
-              ok:bool, unsupported:bool, err:Arr u8 _, efile:Arr u8 _, eline:i64, ecol:i64,
+              package_root:Arr u8 _, packages:PkImports, overlays:HashMap<Arr u8 _,Arr u8 _>,
+              ok:bool, err:Arr u8 _, efile:Arr u8 _, eline:i64, ecol:i64,
               active:Arr Arr u8 _ _, done:HashMap<Arr u8 _,i64>,
-              paths:Arr Arr u8 _ _, toks:Arr Arr i64 _ _, texts:Arr Arr u8 _ _, imports:Arr Arr i64 _ _, aliases:Arr Arr u8 _ _,
-              ast:Ast, types:Arr Arr i64 _ _, fns:Arr Arr i64 _ _, prefixes:Arr Arr u8 _ _, canon:Arr i64 _, display:Arr i64 _,
-              local:Book, imported:Book, surface:Book, base:Book, builtins:HashMap<Arr u8 _,i64>, result:i64 }
+              paths:Arr Arr u8 _ _, toks:Arr Arr i64 _ _, texts:Arr Arr u8 _ _, sources:Arr Arr u8 _ _, imports:Arr Arr i64 _ _, aliases:Arr Arr u8 _ _,
+              ast:Ast, types:Arr Arr i64 _ _, fns:Arr Arr i64 _ _, prefixes:Arr Arr u8 _ _, canon:Arr i64 _, display:Arr i64 _, owners:Arr i64 _,
+              local:Book, imported:Book, surface:Book, base:Book, builtins:HashMap<Arr u8 _,i64>, result:i64, stable_symbols:bool }
 
-fn md_words() -> Arr Arr u8 _ _ = arr(i in 0..0) tx_empty()
+fn md_words() -> Arr Arr u8 _ _ = tx_words()
 fn md_lists() -> Arr Arr i64 _ _ = arr(i in 0..0) tx_ints()
 fn md_fail(move m:Mods, borrow msg:Arr u8 _, borrow file:Arr u8 _, line:i64, col:i64) -> Mods
   = if !m.ok then m else m with { ok=false, err=pt_copy(msg), efile=pt_copy(file), eline=line, ecol=col }
-fn md_word(borrow words:Arr Arr u8 _ _, k:i64) -> Arr u8 _ = if k>=0 && k<len(words) then words[k] else tx_empty()
+fn md_word(borrow words:Arr Arr u8 _ _, k:i64) -> Arr u8 _ = tx_word(words,k)
 fn md_list(borrow lists:Arr Arr i64 _ _, k:i64) -> Arr i64 _ = if k>=0 && k<len(lists) then lists[k] else tx_ints()
 fn md_path(borrow m:Mods, k:i64) -> Arr u8 _ = md_word(m.paths,k)
+fn md_entry_module(borrow m:Mods) -> i64 = option_or(hashmap_get(m.done,m.entry),-1)
 fn md_str(borrow m:Mods, id:i64) -> Arr u8 _ = ast_str(m.ast,id)
 fn md_node(borrow m:Mods, id:i64) -> Node = ast_node(m.ast,id)
+fn md_find_decl(borrow m:Mods, borrow ids:Arr i64 _, name:i64) -> i64
+  = loop (i=0, id=-1) while id<0 && i<len(ids)
+      next (i+1, let candidate=tx_at(ids,i) in if md_node(m,candidate).a==name then candidate else -1) yield id
+fn md_find_type(borrow m:Mods, name:i64) -> i64
+  = loop (k=0, id=-1) while id<0 && k<len(m.types)
+      next (k+1,md_find_decl(m,md_list(m.types,k),name)) yield id
+fn md_resource_type(borrow m:Mods, id:i64) -> i64
+  = let t=md_node(m,id) in
+    let record=if t.kind==n_t_rec() then md_find_type(m,t.a) else -1 in
+    if md_node(m,record).e>=0 then record else -1
+fn md_resource_drop(borrow m:Mods, borrow fns:Arr i64 _, record:i64) -> i64
+  = let name=md_node(m,record).e in if name<0 then -1 else md_find_decl(m,fns,name)
+fn md_resource_consumed(borrow m:Mods, f:Node, p:Node) -> bool
+  = let record=md_resource_type(m,p.b) in record>=0 && (p.f==1 || md_node(m,record).e==f.a)
 fn md_set(move m:Mods, id:i64, field:i64, value:i64) -> Mods = if !m.ok then m else m with { ast=ast_set(m.ast,id,field,value) }
 fn md_intern(move m:Mods, borrow text:Arr u8 _) -> Mods = m with { ast=ast_add_str(m.ast,text) }
 fn md_last(borrow m:Mods) -> i64 = len(m.ast.strs)-1
@@ -64,7 +81,7 @@ fn md_last(borrow m:Mods) -> i64 = len(m.ast.strs)-1
 ; ones modules.py adds): no function may take one, and an undeclared one is
 ; left alone.
 fn md_builtin_names() -> Arr u8 _
-  = "addr adopt allocation_stats_enabled arithmetic_shift_right atomic_compare_exchange_i64 atomic_load_i32 atomic_load_i64 atomic_store_i32 atomic_store_i64 bit_and bit_or bit_xor bits_float borrow_ref byte_copy byte_equal byte_read_le byte_slice byte_swap64 byte_write_le concat count_trailing_zeros counter_frequency counter_ticks data float_bits fork_syscall function function_null handler_call hash_key invoke_finalizer invoke_region key_equal load_i32 load_i64 load_ptr load_u8 noop null ptr_add ptr_from_i64 ptr_to_i64 push ref_live ref_null ref_release runtime_state serve serve_effect set shift_left shift_right spawn_thread sqrt stack_alloc store_i32 store_i64 store_ptr store_u8 syscall6 view volatile_load_i64 volatile_load_u8 volatile_store_i64 volatile_store_u8 wrapping_add wrapping_mul wrapping_sub"
+  = "addr adopt aes_final_round_high aes_final_round_low aes_hardware aes_round_high aes_round_low allocation_stats_enabled arithmetic_shift_right atomic_compare_exchange_i64 atomic_load_i32 atomic_load_i64 atomic_store_i32 atomic_store_i64 bit_and bit_or bit_xor bits_float block_xor_high block_xor_low borrow_ref byte_copy byte_equal byte_read_le byte_slice byte_swap64 byte_uninit byte_write_le callback_address carryless_mul_high carryless_mul_low concat count_trailing_zeros counter_frequency counter_ticks data fiber_init fiber_swap float_bits fork_syscall function function_null handler_call hash_key invoke_clock_gettime invoke_finalizer invoke_region key_equal load_i32 load_i64 load_ptr load_u8 mul_high noop null ptr_add ptr_from_i64 ptr_to_i64 push ref_live ref_null ref_release runtime_state serve serve_effect set shift_left shift_right spawn_thread sqrt stack_alloc store_i32 store_i64 store_ptr store_u8 syscall6 view volatile_load_i64 volatile_load_u8 volatile_store_i64 volatile_store_u8 wrapping_add wrapping_mul wrapping_sub"
 fn md_builtins() -> HashMap<Arr u8 _,i64>
   = let names=md_builtin_names() in
     loop (m=hashmap_empty::<Arr u8 _,i64>(19,23), i=0) while i<len(names)
@@ -72,11 +89,17 @@ fn md_builtins() -> HashMap<Arr u8 _,i64>
 fn md_word_end(borrow p:Arr u8 _, i:i64) -> i64 = loop (j=i) while j<len(p) && tx_byte(p,j)!=32 next (j+1) yield j
 fn md_is_builtin(borrow m:Mods, borrow name:Arr u8 _) -> bool = option_is_some(hashmap_get(m.builtins,name))
 
-; The runtime files for x86-64 Linux, in neoc/cli.py's order.
-fn md_runtime_count() -> i64 = 6
-fn md_runtime_file(k:i64) -> Arr u8 _
-  = if k==0 then "core.neo" else if k==1 then "platform_linux_x86_64.neo" else if k==2 then "http.neo"
-    else if k==3 then "handles.neo" else if k==4 then "http_linux.neo" else "http_uring.neo"
+; Select the same runtime sources and load order as neoc/cli.py.
+fn md_runtime_count(borrow target:Arr u8 _) -> i64
+  = if len(target)==0 then 0 else if str_find(target,"-linux").present then 11 else 9
+fn md_runtime_file(k:i64, borrow target:Arr u8 _) -> Arr u8 _
+  = if k==0 then "core.neo" else if k==1 then
+      if !str_find(target,"-linux").present then "platform_macos.neo"
+      else if str_starts(target,"x86_64-") then "platform_linux_x86_64.neo" else "platform_linux.neo"
+    else if k==2 then "http.neo"
+    else if k==3 then "handles.neo" else if k==4 then "http_async.neo" else if k==5 then "async.neo"
+    else if k==6 then "events.neo" else if k==7 then "timers.neo" else if k==8 then "frame_cache.neo"
+    else if k==9 then "http_linux.neo" else "http_uring.neo"
 
 ; ---------------------------------------------------------------- reading modules
 fn md_active(borrow m:Mods, borrow path:Arr u8 _) -> bool
@@ -93,19 +116,17 @@ fn md_std_valid(borrow rel:Arr u8 _) -> bool
   = len(rel)>0 && loop (i=0, ok=true) while ok && i<=len(rel)
       next (pt_part_end(rel,i)+1, let j=pt_part_end(rel,i) in j>i && !pt_is_dots(rel,i,j,2)) yield ok
 
-type Target = { ok:bool, path:Arr u8 _, msg:Arr u8 _, unsupported:bool }
-effect(fs) fn md_target(borrow m:Mods, borrow name:Arr u8 _, borrow from:Arr u8 _) -> Target
+effect(fs,unsafe) fn md_target(borrow m:Mods, borrow name:Arr u8 _, borrow from:Arr u8 _) -> BytesResult
   = if len(name)>=4 && bytes_match_at(name,0,"std:") then
       let rel=pt_slice(name,4,len(name)) in
-      if !md_std_valid(rel) then Target { ok=false, path=tx_empty(), msg=pt_copy("invalid standard module path"), unsupported=false }
-      else Target { ok=true, path=pt_realpath(concat(m.stdlib,"/",rel,".neo")), msg=tx_empty(), unsupported=false }
-    else if len(name)>=4 && bytes_match_at(name,0,"pkg:") then
-      Target { ok=false, path=tx_empty(), msg=pt_copy("package imports are not supported yet"), unsupported=true }
-    else Target { ok=true, path=pt_realpath(pt_join(pt_parent(from),name)), msg=tx_empty(), unsupported=false }
+      if !md_std_valid(rel) then bytes_error(1,"invalid standard module path",0)
+      else bytes_ok(pt_realpath(concat(m.stdlib,"/",rel,".neo")))
+    else if len(name)>=4 && bytes_match_at(name,0,"pkg:") then pk_resolve_import(m.packages,name,from)
+    else bytes_ok(pt_realpath(pt_join(pt_parent(from),name)))
 
 type Scan = { m:Mods, k:i64, kids:Arr i64 _ }
 ; One token of a module being read: an import is followed at once.
-effect(fs) fn md_scan(move s:Scan, borrow toks:Arr i64 _, borrow text:Arr u8 _, borrow path:Arr u8 _) -> Scan
+effect(fs,unsafe) fn md_scan(move s:Scan, borrow toks:Arr i64 _, borrow text:Arr u8 _, borrow path:Arr u8 _) -> Scan
   = let t=lx_tok(toks,s.k) in
     if t.kind!=tk_kw() || t.code!=31 then s with { k=s.k+1 } else
     let u=lx_tok(toks,s.k+1) in
@@ -114,26 +135,28 @@ effect(fs) fn md_scan(move s:Scan, borrow toks:Arr i64 _, borrow text:Arr u8 _, 
     let aliased=tx_equal(md_text(text,lx_tok(toks,s.k+2)),"as") in let w=lx_tok(toks,s.k+3) in
     if aliased && w.kind!=tk_ident() then s with { m=md_fail(s.m,"import alias requires an identifier",path,t.line,t.col) }
     else if !utf8_valid(name) then s with { m=md_fail(s.m,"import path is not UTF-8",path,t.line,t.col) } else
-    let target=md_target(s.m,name,path) in
-    if !target.ok then
-      let m=md_fail(s.m,target.msg,path,t.line,t.col) in s with { m=m with { unsupported=target.unsupported } }
-    else let m=md_visit(s.m,target.path,path,t.line,t.col) in
+    let m=if len(s.m.packages.root)==0 && len(name)>=4 && bytes_match_at(name,0,"pkg:") then
+      s.m with { packages=pk_imports_load(s.m.package_root) } else s.m in
+    let target=md_target(m,name,path) in
+    if !target.ok then s with { m=md_fail(m,target.error.message,path,t.line,t.col) }
+    else let m=md_visit(m,target.value,path,t.line,t.col) in
     if !m.ok then s with { m=m } else
-    let child=option_or(hashmap_get(m.done,target.path),-1) in
+    let child=option_or(hashmap_get(m.done,target.value),-1) in
     let alias=if aliased then len(m.aliases) else -1 in
     let m=if aliased then m with { aliases=push(m.aliases,md_text(text,w)) } else m in
     Scan { m=m, k=s.k+1, kids=push(push(push(push(s.kids,child),alias),t.line),t.col) }
 
 ; Reads, lexes and follows the imports of path; parent is the importing file
 ; (empty for a root) and line, col the import.
-effect(fs) fn md_visit(move m:Mods, borrow path:Arr u8 _, borrow parent:Arr u8 _, line:i64, col:i64) -> Mods
+effect(fs,unsafe) fn md_visit(move m:Mods, borrow path:Arr u8 _, borrow parent:Arr u8 _, line:i64, col:i64) -> Mods
   = if !m.ok then m
     else let at=if len(parent)>0 then pt_copy(parent) else pt_copy(path) in
     if md_active(m,path) then let msg=concat("cyclic import: ",md_cycle(m,path)) in md_fail(m,msg,at,line,col)
     else if option_is_some(hashmap_get(m.done,path)) then m
-    else let read=fs_read(path) in
+    else let overlay=hashmap_get(m.overlays,path) in
+    let read=if option_is_some(overlay) then bytes_ok(option_or(overlay,"")) else fs_read(path) in
     if !read.ok || !utf8_valid(read.value) then md_fail(m,concat("cannot read ",path),at,line,col)
-    else let lx=lx_lex(tx_newlines(read.value)) in
+    else let source=tx_newlines(read.value) in let lx=lx_lex(source) in
     if !lx.ok then md_fail(m,concat(int_text(lx.eline),":",int_text(lx.ecol),": ",lx.err),path,lx.eline,lx.ecol)
     else let toks=lx.toks in let text=lx.text in
     let m=m with { active=push(m.active,pt_copy(path)) } in
@@ -141,7 +164,7 @@ effect(fs) fn md_visit(move m:Mods, borrow path:Arr u8 _, borrow parent:Arr u8 _
     let kids=scan.kids in let m=scan.m in
     if !m.ok then m else
     let id=len(m.paths) in let rest=md_pop(m.active) in
-    m with { active=rest, paths=push(m.paths,pt_copy(path)), toks=push(m.toks,toks), texts=push(m.texts,text),
+    m with { active=rest, paths=push(m.paths,pt_copy(path)), toks=push(m.toks,toks), texts=push(m.texts,text), sources=push(m.sources,source),
              imports=push(m.imports,kids), done=hashmap_put(m.done,path,id) }
 
 ; ---------------------------------------------------------------- parsing
@@ -211,7 +234,7 @@ fn md_declare_one(move m:Mods, k:i64, borrow prefix:Arr u8 _, id:i64, function:b
     let plain=function && (bit_and(n.f,fl_external()+fl_exported())!=0 || (tx_equal(md_path(m,k),m.entry) && tx_equal(name,"main"))) in
     let m=md_add(m,k,n.a,if plain then pt_copy(name) else concat(prefix,name),n) in
     if !m.ok then m else
-    let m=m with { canon=set_at(m.canon,id,md_last(m)) } in
+    let m=m with { canon=set_at(m.canon,id,md_last(m)), owners=set_at(m.owners,id,k) } in
     if function then m else md_variants(m,k,prefix,n)
 fn set_at(move a:Arr i64 _, i:i64, value:i64) -> Arr i64 _ = if i>=0 && i<len(a) then set(a,i,value) else a
 effect(fs) fn md_declare(move m:Mods, k:i64) -> Mods
@@ -368,6 +391,7 @@ fn md_rw_type_decl(move m:Mods, k:i64, id:i64) -> Mods
       next (md_rw_type(s,k,params,md_node(s,ast_list_at(s.ast,n.b,i)).b), i+1) yield s in
     let m=if n.d<0 then m else loop (s=m, i=0) while s.ok && i<ast_list_len(s.ast,n.d)
       next (let vid=ast_list_at(s.ast,n.d,i) in let v=md_node(s,vid) in
+            let s=md_set(s,vid,7,v.a) in
             let s=md_set(s,vid,1,bk_get(s.local,k,pt_copy(md_str(s,v.a)))) in md_rw_types(s,k,params,v.b), i+1) yield s in
     if !m.ok then m else md_rename(m,id)
 
@@ -392,16 +416,21 @@ fn md_rewrite(move m:Mods, k:i64) -> Mods
     loop (s=m, i:i64{i>=0}=0) while s.ok && i<len(fns) next (md_rw_fn(s,k,fns[i]), i+1) yield s
 
 ; ---------------------------------------------------------------- loading
-effect(fs) fn md_load(borrow root:Arr u8 _, borrow entry:Arr u8 _) -> Mods
-  = let base=pt_realpath(root) in
-    let m=Mods { stdlib=pt_join(base,"stdlib"), runtime=pt_join(base,"runtime"), entry=pt_realpath(entry),
-                 ok=true, unsupported=false, err=tx_empty(), efile=tx_empty(), eline=0, ecol=0,
+fn md_no_overlays() -> HashMap<Arr u8 _,Arr u8 _> = hashmap_empty::<Arr u8 _,Arr u8 _>(43,47)
+
+effect(fs,unsafe) fn md_load_overlay(borrow root:Arr u8 _, borrow entry:Arr u8 _, borrow target:Arr u8 _,
+                                    borrow package_root:Arr u8 _, borrow overlays:HashMap<Arr u8 _,Arr u8 _>) -> Mods
+  = let base=pt_realpath(root) in let entry=pt_realpath(entry) in
+    let m=Mods { stdlib=pt_join(base,"stdlib"), runtime=pt_join(base,"runtime"), entry=entry,
+                 package_root=if len(package_root)>0 then package_root else entry, packages=pk_imports_empty(), overlays=overlays,
+                 ok=true, err=tx_empty(), efile=tx_empty(), eline=0, ecol=0,
                  active=md_words(), done=hashmap_empty::<Arr u8 _,i64>(29,31),
-                 paths=md_words(), toks=md_lists(), texts=md_words(), imports=md_lists(), aliases=md_words(),
-                 ast=ast_empty(), types=md_lists(), fns=md_lists(), prefixes=md_words(), canon=tx_ints(), display=tx_ints(),
-                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1 } in
-    let m=loop (s=m, k=0) while s.ok && k<md_runtime_count()
-      next (md_visit(s,pt_realpath(pt_join(s.runtime,md_runtime_file(k))),tx_empty(),1,1), k+1) yield s in
+                 paths=md_words(), toks=md_lists(), texts=md_words(), sources=md_words(), imports=md_lists(), aliases=md_words(),
+                 ast=ast_empty(), types=md_lists(), fns=md_lists(), prefixes=md_words(), canon=tx_ints(), display=tx_ints(), owners=tx_ints(),
+                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1,stable_symbols=false } in
+    let count=md_runtime_count(target) in
+    let m=loop (s=m, k=0) while s.ok && k<count
+      next (md_visit(s,pt_realpath(pt_join(s.runtime,md_runtime_file(k,target))),tx_empty(),1,1), k+1) yield s in
     let entry_path=pt_copy(m.entry) in
     let m=md_visit(m,entry_path,tx_empty(),1,1) in
     if !m.ok then m else
@@ -409,12 +438,17 @@ effect(fs) fn md_load(borrow root:Arr u8 _, borrow entry:Arr u8 _) -> Mods
     let m=loop (s=m, k=0) while s.ok && k<len(s.paths) next (md_parse_one(s,k,names), k+1) yield s in
     if !m.ok then m else
     let count=len(m.ast.nodes)/11 in
-    let m=md_intern(m with { canon=arr(i in 0..count) -1, display=arr(i in 0..count) -1 },"result") in let m=m with { result=md_last(m) } in
+    let m=md_intern(m with { canon=arr(i in 0..count) -1, display=arr(i in 0..count) -1, owners=arr(i in 0..count) -1 },"result") in
+    let m=m with { result=md_last(m) } in
     let m=loop (s=m, k=0) while s.ok && k<len(s.paths) next (md_declare(s,k), k+1) yield s in
     if !m.ok then m else
     let m=md_base(m) in
     let m=loop (s=m, k=0) while s.ok && k<len(s.paths) next (md_scope(s,k), k+1) yield s in
     loop (s=m, k=0) while s.ok && k<len(s.paths) next (md_rewrite(s,k), k+1) yield s
+
+effect(fs,unsafe) fn md_load_program(borrow root:Arr u8 _, borrow entry:Arr u8 _, borrow target:Arr u8 _,
+                                     borrow package_root:Arr u8 _) -> Mods
+  = md_load_overlay(root,entry,target,package_root,md_no_overlays())
 
 ; ---------------------------------------------------------------- dump
 ; The canonical text of a loaded program; compiler/tests/modules_dump.py
@@ -461,11 +495,9 @@ fn md_decls(move out:Arr u8 _, borrow m:Mods, function:bool) -> Arr u8 _
       yield o
 
 fn md_dump(borrow m:Mods) -> Arr u8 _
-  = if !m.ok then
-      if m.unsupported then concat("(unsupported ",m.err,")\n")
-      else concat("(error ",m.efile," ",int_text(m.eline),":",int_text(m.ecol)," ",m.err,")\n")
+  = if !m.ok then concat("(error ",m.efile," ",int_text(m.eline),":",int_text(m.ecol)," ",m.err,")\n")
     else
-    let entry=option_or(hashmap_get(m.done,m.entry),-1) in
+    let entry=md_entry_module(m) in
     let o=loop (o=tx_empty(), k=0) while k<len(m.paths) next (md_module_line(o,m,k), k+1) yield o in
     let surface=md_sort(m,md_range_keys(m.surface,entry)) in
     let values=arr(i in 0..len(surface)) bk_get(m.surface,entry,md_str(m,tx_at(surface,i))) in

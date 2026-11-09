@@ -66,6 +66,9 @@ func main() {
 	var conns atomic.Int64
 	big := pattern(1<<20, 253)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/request-headers", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, r.Header.Get("Authorization")+"|"+r.Header.Get("Content-Type"))
+	})
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Neo-Proto", r.Proto)
 		io.WriteString(w, "Hello, World!")

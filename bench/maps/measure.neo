@@ -1,0 +1,78 @@
+; Measure the map workload at its stdin-acknowledged checkpoints on Linux.
+import "std:io"
+import "std:json"
+import "std:process"
+import "std:strings"
+import "std:time"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/test_process.neo"
+
+fn bm_phase(i:i64) -> Arr u8 _
+  = if i==0 then "insert" else if i==1 then "lookup" else if i==2 then "steady" else if i==3 then "update"
+    else if i==4 then "lookup_updated" else if i==5 then "delete" else "lookup_remaining"
+
+fn bm_checksum(i:i64,n:i64) -> i64
+  = if i==1 || i==2 then 7*n*(n-1)/2 else if i==4 then 11*n*(n-1)/2
+    else if i==6 then 11*(n/2)*(n/2) else 0
+
+effect(process,unsafe) fn bm_pid(process:Process) -> i64
+  = let address=rt_handle_fd(process_identity(process),10) in
+    if address<0 then -1 else load_i64(ptr_from_i64(address),8)
+
+fn bm_memory_field(borrow text:Arr u8 _, borrow key:Arr u8 _) -> IntResult
+  = let field=str_find(concat("\n",text),concat("\n",key,":")) in
+    if !field.present then int_error(22,concat("missing memory field ",key),0) else
+    let tail=str_slice(text,field.value+len(key)+1,len(text)) in let line=str_find(tail,"\n") in
+    let columns=nt_words(str_slice(tail,0,if line.present then line.value else len(tail))).words in
+    let value=int_parse(md_word(columns,0)) in
+    if !value.ok || value.value<0 || !str_equal(md_word(columns,1),"kB") then int_error(22,"invalid memory field",0)
+    else int_ok(value.value*1024)
+
+effect(fs) fn bm_memory(pid:i64) -> BytesResult
+  = let base=concat("/proc/",int_text(pid)) in
+    let status=fs_read(concat(base,"/status")) in let smaps=fs_read(concat(base,"/smaps_rollup")) in
+    if !status.ok || !smaps.ok then bytes_error(5,"could not sample process memory",0) else
+    let rss=bm_memory_field(status.value,"VmRSS") in let peak=bm_memory_field(status.value,"VmHWM") in
+    let pss=bm_memory_field(smaps.value,"Pss") in
+    if !rss.ok || !peak.ok || !pss.ok then bytes_error(22,"could not parse process memory",0)
+    else bytes_ok(concat(",\"rss_bytes\":",int_text(rss.value),",\"peak_rss_bytes\":",int_text(peak.value),",\"pss_bytes\":",int_text(pss.value)))
+
+effect fn bm_read_line(process:Process,deadline:i64) -> BytesResult
+  = loop (line=bytes_ok("")) while line.ok && len(line.value)<4096 && !str_find(line.value,"\n").present
+      next (if deadline_remaining(deadline)==0 then bytes_error(110,"checkpoint timed out",0) else
+        let chunk=process_try_read(process,1,4096) in
+        if chunk.ok && len(chunk.value)>0 then bytes_ok(concat(line.value,chunk.value)) else
+        let status=process_status(process) in
+        if !status.ok || !status.running then bytes_error(5,"workload exited before its checkpoint",0) else
+        if !chunk.ok && chunk.error.code!=4 && chunk.error.code!=rt_again() then chunk else
+        let paused=sleep_ms(2) in line)
+      yield if line.ok && !str_find(line.value,"\n").present then bytes_error(27,"checkpoint line too large",0) else line
+
+effect fn bm_record(process:Process,pid:i64,phase:i64,n:i64,deadline:i64) -> BytesResult
+  = let line=bm_read_line(process,deadline) in if !line.ok then line else
+    let fields=nt_words(line.value).words in let name=md_word(fields,0) in
+    let time=int_parse(md_word(fields,1)) in let sum_value=int_parse(md_word(fields,2)) in let count=int_parse(md_word(fields,3)) in
+    if len(fields)!=4 || !str_equal(name,bm_phase(phase)) || !time.ok || time.value<0 ||
+      !sum_value.ok || sum_value.value!=bm_checksum(phase,n) || !count.ok || count.value!=(if phase>=5 then n/2 else n) then
+      bytes_error(22,concat("unexpected ",bm_phase(phase)," checkpoint: ",line.value),0) else
+    let memory=bm_memory(pid) in if !memory.ok then memory else
+    let sent=process_try_write(process,"x",0) in
+    if !sent.ok || sent.value!=1 then bytes_error(5,"could not acknowledge checkpoint",0) else
+    bytes_ok(concat("{\"phase\":",json_quote(name),",\"ns\":",int_text(time.value),",\"checksum\":",int_text(sum_value.value),
+      ",\"count\":",int_text(count.value),memory.value,"}"))
+
+effect fn bm_wait(process:Process,deadline:i64) -> bool
+  = loop (status=process_status(process)) while status.ok && status.running && deadline_remaining(deadline)>0
+      next (let paused=sleep_ms(2) in process_status(process))
+      yield status.ok && !status.running && status.signal==0 && status.exit_code==0
+
+effect fn bm_measure(borrow binary:Arr u8 _, borrow environment:Arr Arr u8 _ _, n:i64, reserved:i64) -> BytesResult
+  = using child=process_start(binary,push(push(md_words(),int_text(n)),int_text(reserved)),environment) in
+    let pid=bm_pid(child) in if pid<=0 then bytes_error(5,"could not start map workload",0) else
+    let deadline=deadline_after(120000) in if !deadline.ok then bytes_error(5,"could not start checkpoint timer",0) else
+    let rows=loop (i=0, out=bytes_ok("[")) while i<7 && out.ok
+      next (i+1,let record=bm_record(child,pid,i,n,deadline.value) in if !record.ok then record else
+        bytes_ok(concat(out.value,if i==0 then "" else ",",record.value))) yield out in
+    let closed=process_close_input(child) in
+    if !rows.ok then rows else if !closed.ok || !bm_wait(child,deadline.value) then bytes_error(5,"map workload did not exit cleanly",0)
+    else bytes_ok(concat(rows.value,"]"))

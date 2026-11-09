@@ -54,11 +54,9 @@ class Server:
     def analyze(self,uri):
         source=path(uri);text=self.documents[source]['text'];diagnostics=[]
         try:
-            from .cli import RUNTIME, target_triple
-            target=target_triple();platform='linux' if 'linux' in target else 'macos'
-            binding='linux_x86_64' if platform=='linux' and target.startswith('x86_64') else platform
-            runtime=['core.neo','platform_'+binding+'.neo','http.neo','handles.neo']+(['http_linux.neo','http_uring.neo'] if platform=='linux' else [])
-            p=sources(source,[Path(RUNTIME)/name for name in runtime],overlays={p:d['text'] for p,d in self.documents.items()})
+            from .cli import runtime_files, target_triple
+            runtime=runtime_files(target_triple())
+            p=sources(source,runtime,overlays={p:d['text'] for p,d in self.documents.items()})
             self.catalog(p,source)
             checker=Checker(p,require_main=False);checker.run()
             errors=[{'file':source,'pos':o.get('pos',(1,1)),'kind':'unproven','msg':'unproven '+str(o.get('goal','obligation'))} for o in checker.obligations if o['status'] in ('unknown','unproven')]
@@ -74,7 +72,7 @@ class Server:
                     alias=' as '+tokens[i+3].text if i+3<len(tokens) and tokens[i+2].text=='as' and tokens[i+3].kind=='IDENT' else ''
                     imports.append('import '+json.dumps(name,ensure_ascii=False)+alias)
                 overlay={p:d['text'] for p,d in self.documents.items()};overlay[source]='\n'.join(imports)+'\nfn main() -> i64 = 0\n'
-                self.catalog(sources(source,[Path(RUNTIME)/name for name in runtime],overlays=overlay),source,imports_only=True)
+                self.catalog(sources(source,runtime,overlays=overlay),source,imports_only=True)
             except (SourceError,S.SyntaxError_,ValueError,RecursionError):pass
         except (CheckError,ElaborationError) as ex:errors=ex.errors
         except RecursionError:errors=[{'file':source,'pos':(1,1),'kind':'limit','msg':'source nesting exceeds compiler limit'}]

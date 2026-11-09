@@ -1,0 +1,278 @@
+; Keep crypto instructions in feature-specific helpers so the runtime probe
+; stays safe on processors without the extension.
+import "std:strings"
+
+fn na_crypto_x86() -> Arr u8 _
+  = "declare <2 x i64> @llvm.x86.aesni.aesenc(<2 x i64>, <2 x i64>)
+declare <2 x i64> @llvm.x86.aesni.aesenclast(<2 x i64>, <2 x i64>)
+declare <2 x i64> @llvm.x86.pclmulqdq(<2 x i64>, <2 x i64>, i8 immarg)
+@ax_aes_state = internal global i8 0
+define internal i1 @neo_crypto_hardware() {
+entry:
+  %known = load atomic i8, ptr @ax_aes_state monotonic, align 1
+  %ready = icmp ne i8 %known, 0
+  br i1 %ready, label %done, label %probe
+probe:
+  %r = call { i32, i32, i32, i32 } asm \"cpuid\", \"={ax},={bx},={cx},={dx},0,2,~{dirflag},~{fpsr},~{flags}\"(i32 1, i32 0)
+  %ecx = extractvalue { i32, i32, i32, i32 } %r, 2
+  %bits = and i32 %ecx, 34079234
+  %has = icmp eq i32 %bits, 34079234
+  %state = select i1 %has, i8 2, i8 1
+  store atomic i8 %state, ptr @ax_aes_state monotonic, align 1
+  br label %done
+done:
+  %final = phi i8 [ %known, %entry ], [ %state, %probe ]
+  %yes = icmp eq i8 %final, 2
+  ret i1 %yes
+}
+
+define internal i64 @neo_crypto_aes_round_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %r = call <2 x i64> @llvm.x86.aesni.aesenc(<2 x i64> %x, <2 x i64> %y)
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_round_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %r = call <2 x i64> @llvm.x86.aesni.aesenc(<2 x i64> %x, <2 x i64> %y)
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_final_round_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %r = call <2 x i64> @llvm.x86.aesni.aesenclast(<2 x i64> %x, <2 x i64> %y)
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_final_round_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %r = call <2 x i64> @llvm.x86.aesni.aesenclast(<2 x i64> %x, <2 x i64> %y)
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_carryless_mul_low(i64 %a, i64 %b) #77 {
+entry:
+  %x = insertelement <2 x i64> zeroinitializer, i64 %a, i32 0
+  %y = insertelement <2 x i64> zeroinitializer, i64 %b, i32 0
+  %r = call <2 x i64> @llvm.x86.pclmulqdq(<2 x i64> %x, <2 x i64> %y, i8 0)
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_carryless_mul_high(i64 %a, i64 %b) #77 {
+entry:
+  %x = insertelement <2 x i64> zeroinitializer, i64 %a, i32 0
+  %y = insertelement <2 x i64> zeroinitializer, i64 %b, i32 0
+  %r = call <2 x i64> @llvm.x86.pclmulqdq(<2 x i64> %x, <2 x i64> %y, i8 0)
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_block_xor_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %r = xor i64 %a, %c
+  ret i64 %r
+}
+define internal i64 @neo_crypto_block_xor_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %r = xor i64 %b, %d
+  ret i64 %r
+}
+attributes #77 = { noinline \"target-features\"=\"+aes,+pclmul,+sse4.1\" }
+"
+
+fn na_crypto_arm() -> Arr u8 _
+  = "declare <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8>, <16 x i8>)
+declare <16 x i8> @llvm.aarch64.crypto.aesmc(<16 x i8>)
+declare <16 x i8> @llvm.aarch64.neon.pmull64(i64, i64)
+@ax_aes_state = internal global i8 0
+define internal i1 @neo_crypto_hardware() {
+entry:
+  %known = load atomic i8, ptr @ax_aes_state monotonic, align 1
+  %ready = icmp ne i8 %known, 0
+  br i1 %ready, label %done, label %probe
+probe:
+  %envp = load ptr, ptr @ax_runtime_state, align 8
+  %none = icmp eq ptr %envp, null
+  br i1 %none, label %decide, label %env
+env:
+  %e = phi ptr [ %envp, %probe ], [ %e1, %env ]
+  %slot = load ptr, ptr %e, align 8
+  %e1 = getelementptr ptr, ptr %e, i64 1
+  %last = icmp eq ptr %slot, null
+  br i1 %last, label %aux, label %env
+aux:
+  %a = phi ptr [ %e1, %env ], [ %a1, %next ]
+  %type = load i64, ptr %a, align 8
+  %at = getelementptr i64, ptr %a, i64 1
+  %value = load i64, ptr %at, align 8
+  %end = icmp eq i64 %type, 0
+  br i1 %end, label %decide, label %match
+match:
+  %hwcap = icmp eq i64 %type, 16
+  br i1 %hwcap, label %decide, label %next
+next:
+  %a1 = getelementptr i64, ptr %a, i64 2
+  br label %aux
+decide:
+  %bits = phi i64 [ 0, %probe ], [ 0, %aux ], [ %value, %match ]
+  %crypto = and i64 %bits, 24
+  %has = icmp eq i64 %crypto, 24
+  %state = select i1 %has, i8 2, i8 1
+  store atomic i8 %state, ptr @ax_aes_state monotonic, align 1
+  br label %done
+done:
+  %final = phi i8 [ %known, %entry ], [ %state, %decide ]
+  %yes = icmp eq i8 %final, 2
+  ret i1 %yes
+}
+
+define internal i64 @neo_crypto_aes_round_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %xbytes = bitcast <2 x i64> %x to <16 x i8>
+  %ybytes = bitcast <2 x i64> %y to <16 x i8>
+  %sub = call <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8> %xbytes, <16 x i8> zeroinitializer)
+  %mix = call <16 x i8> @llvm.aarch64.crypto.aesmc(<16 x i8> %sub)
+  %bytes = xor <16 x i8> %mix, %ybytes
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_round_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %xbytes = bitcast <2 x i64> %x to <16 x i8>
+  %ybytes = bitcast <2 x i64> %y to <16 x i8>
+  %sub = call <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8> %xbytes, <16 x i8> zeroinitializer)
+  %mix = call <16 x i8> @llvm.aarch64.crypto.aesmc(<16 x i8> %sub)
+  %bytes = xor <16 x i8> %mix, %ybytes
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_final_round_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %xbytes = bitcast <2 x i64> %x to <16 x i8>
+  %ybytes = bitcast <2 x i64> %y to <16 x i8>
+  %sub = call <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8> %xbytes, <16 x i8> zeroinitializer)
+  %bytes = xor <16 x i8> %sub, %ybytes
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_aes_final_round_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %x0 = insertelement <2 x i64> poison, i64 %a, i32 0
+  %x = insertelement <2 x i64> %x0, i64 %b, i32 1
+  %y0 = insertelement <2 x i64> poison, i64 %c, i32 0
+  %y = insertelement <2 x i64> %y0, i64 %d, i32 1
+  %xbytes = bitcast <2 x i64> %x to <16 x i8>
+  %ybytes = bitcast <2 x i64> %y to <16 x i8>
+  %sub = call <16 x i8> @llvm.aarch64.crypto.aese(<16 x i8> %xbytes, <16 x i8> zeroinitializer)
+  %bytes = xor <16 x i8> %sub, %ybytes
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_carryless_mul_low(i64 %a, i64 %b) #77 {
+entry:
+  %bytes = call <16 x i8> @llvm.aarch64.neon.pmull64(i64 %a, i64 %b)
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 0
+  ret i64 %value
+}
+define internal i64 @neo_crypto_carryless_mul_high(i64 %a, i64 %b) #77 {
+entry:
+  %bytes = call <16 x i8> @llvm.aarch64.neon.pmull64(i64 %a, i64 %b)
+  %r = bitcast <16 x i8> %bytes to <2 x i64>
+  %value = extractelement <2 x i64> %r, i32 1
+  ret i64 %value
+}
+define internal i64 @neo_crypto_block_xor_low(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %r = xor i64 %a, %c
+  ret i64 %r
+}
+define internal i64 @neo_crypto_block_xor_high(i64 %a, i64 %b, i64 %c, i64 %d) #77 {
+entry:
+  %r = xor i64 %b, %d
+  ret i64 %r
+}
+attributes #77 = { noinline \"target-features\"=\"+aes\" }
+"
+
+fn na_crypto_none() -> Arr u8 _
+  = "define internal i1 @neo_crypto_hardware() { ret i1 false }
+@neo_crypto_missing = private constant [32 x i8] c\"crypto instructions unavailable\\00\"
+define internal i64 @neo_crypto_aes_round_low(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_aes_round_high(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_aes_final_round_low(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_aes_final_round_high(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_carryless_mul_low(i64 %a, i64 %b) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_carryless_mul_high(i64 %a, i64 %b) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_block_xor_low(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+define internal i64 @neo_crypto_block_xor_high(i64 %a, i64 %b, i64 %c, i64 %d) {
+entry:
+  call void @neo_runtime_trap(ptr @neo_crypto_missing)
+  unreachable
+}
+"
+
+fn na_crypto(borrow target:Arr u8 _, borrow text:Arr u8 _) -> Arr u8 _
+  = if !str_find(text,"@neo_crypto_").present then ""
+    else if str_starts(target,"x86_64-") then na_crypto_x86()
+    else if (str_starts(target,"aarch64-") || str_starts(target,"arm64-")) && str_find(target,"-linux").present then na_crypto_arm()
+    else na_crypto_none()

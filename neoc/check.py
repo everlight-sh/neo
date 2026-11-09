@@ -80,7 +80,7 @@ def free_vars(e: S.Node) -> Set[str]:
         for c in S.children(n): go(c)
     go(e); return out
 
-BUILTINS = {"byte_read_le","byte_equal","count_trailing_zeros","byte_copy","byte_write_le","byte_slice","adopt","borrow_ref","ref_live","ref_release","ref_null","function", "function_null","set", "push", "sqrt", "serve", "serve_effect", "concat", 'wrapping_add','wrapping_sub','wrapping_mul','bit_and','bit_or','bit_xor','byte_swap64','mul_high','shift_left','shift_right','arithmetic_shift_right','allocation_stats_enabled'}
+BUILTINS = {"callback_address","byte_read_le","byte_equal","count_trailing_zeros","byte_copy","byte_write_le","byte_slice","adopt","borrow_ref","ref_live","ref_release","ref_null","function", "function_null","set", "push", "sqrt", "serve", "serve_effect", "concat", 'wrapping_add','wrapping_sub','wrapping_mul','bit_and','bit_or','bit_xor','byte_swap64','mul_high','shift_left','shift_right','arithmetic_shift_right','allocation_stats_enabled'}
 
 # Raw memory/FFI operations form the trusted systems boundary. They are only
 # available in effect functions, never in refinements or parallel comprehensions.
@@ -121,6 +121,9 @@ SYSTEMS = {
     "aes_hardware": ([], S.BOOL),
     **{name: ([S.I64] * 4, S.I64) for name in ("aes_round_low", "aes_round_high", "aes_final_round_low", "aes_final_round_high", "block_xor_low", "block_xor_high")},
     **{name: ([S.I64, S.I64], S.I64) for name in ("carryless_mul_low", "carryless_mul_high")},
+    "fiber_swap": ([S.PTR,S.PTR],S.UNIT),
+    "fiber_init": ([S.PTR,S.PTR,S.PTR,S.PTR],S.UNIT),
+    "invoke_clock_gettime": ([S.PTR, S.I32, S.PTR], S.I32),
     "invoke_region": ([S.PTR, S.PTR, S.I64], S.UNIT),
     "invoke_finalizer": ([S.PTR,S.PTR],S.UNIT),
     "handler_call": ([S.PTR, S.PTR, S.I64], S.TArr(S.U8, "_")),
@@ -367,7 +370,7 @@ class Checker:
             """A body's capabilities are its own plus those required by the
             functions it names; collect both once, then iterate on names."""
             if isinstance(node, S.Call):
-                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float','aes_hardware') or node.name in ('addr','data','view'): fixed.add('unsafe')
+                if node.name in SYSTEMS and node.name not in ('float_bits','bits_float','aes_hardware') or node.name in ('addr','callback_address','data','view'): fixed.add('unsafe')
                 signature=getattr(node,'indirect_signature',None)
                 if signature is not None:fixed |= set(signature.capabilities or ())
                 else:names.append(node.name)
@@ -661,6 +664,12 @@ class Checker:
             if not isinstance(at, S.TArr): self.err("indexing a non-array", e, f); return None
             if it != S.I64: self.err("index must be i64", e.idx, f); return None
             self.bounds(env, e, e.arr, e.idx, at)
+            if isinstance(at.elem, S.TArr) and at.elem.size == "_":
+                # This row's actual length is unknown, even when the read is
+                # immediately passed to a consumer such as push or set.
+                size = Lin.var(self.sym("rowlen"))
+                self.ambient.append((cmp(">=", size, Lin.num(0)), env.conds))
+                return S.TArr(at.elem.elem, size)
             return at.elem
         if isinstance(e, S.Len):
             t = self.infer(e.expr, env)
@@ -771,6 +780,29 @@ class Checker:
                 return bt
             self.oblige(env, "range", cmp("<=", lo, hi), e, f"{S.show(e.lo)} <= {S.show(e.hi)}",
                         [f"check {S.show(e.lo)} <= {S.show(e.hi)} in …", "refine the bound's parameter"])
+            if isinstance(bt, S.TArr):
+                # Each iteration can allocate a row of a different length. A
+                # symbol introduced in the body describes that iteration only.
+                visible = set()
+                for binding in env.vars.values():
+                    if binding.lin is not None:
+                        visible.update(binding.lin.vars())
+                    ty = binding.ty
+                    while isinstance(ty, S.TArr):
+                        if isinstance(ty.size, Lin):
+                            visible.update(ty.size.vars())
+                        ty = ty.elem
+                visible.difference_update(i.vars())
+
+                def uniform(ty):
+                    if not isinstance(ty, S.TArr):
+                        return ty
+                    size = ty.size
+                    if isinstance(size, Lin) and not size.vars() <= visible:
+                        size = "_"
+                    return S.TArr(uniform(ty.elem), size)
+
+                bt = uniform(bt)
             return S.TArr(bt, hi - lo)
         if isinstance(e, S.Loop):
             return self.loop(e, env)
@@ -948,6 +980,13 @@ class Checker:
         if e.name in ("null", "noop"):
             if e.args: self.err(f"{e.name} takes no arguments", e, f); return None
             e.builtin = e.name; return S.PTR if e.name == "null" else S.UNIT
+        if e.name == "callback_address":
+            self.require_effect(e, env, {'unsafe'})
+            ty=self.infer(e.args[0],env) if len(e.args)==1 else None
+            byte_array=lambda value:isinstance(value,S.TArr) and value.elem==S.U8
+            if not isinstance(ty,S.TFn) or len(ty.params)!=1 or not byte_array(ty.params[0]) or not byte_array(ty.ret):
+                self.err('callback_address requires a byte-array callback',e,f);return None
+            e.builtin='callback_address';return S.PTR
         if e.name == "addr":
             self.require_effect(e, env, {'unsafe'})
             if len(e.args) != 1 or not isinstance(e.args[0], S.Var) or e.args[0].name not in self.fns:

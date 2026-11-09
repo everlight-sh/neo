@@ -1,21 +1,245 @@
-; The Neo compiler, written in Neo. So far it parses and loads modules:
-; `neoc parse FILE` and `neoc modules ROOT FILE` print the canonical dumps that
-; compiler/tests/ast_dump.py and modules_dump.py print from the Python compiler
-; (neoc/). ROOT holds stdlib/ and runtime/.
+; The native command-line compiler. ROOT supplies stdlib/ and runtime/.
 import "std:io"
+import "std:json"
+import "std:random"
 import "std:strings"
 import "text.neo"
 import "dump.neo"
 import "modules.neo"
+import "elaborate.neo"
+import "check.neo"
+import "resources.neo"
+import "llvm.neo"
+import "build.neo"
+import "build_report.neo"
+import "library_cache.neo"
+import "paths.neo"
+import "toml.neo"
+import "test.neo"
+import "format_command.neo"
+import "init.neo"
+import "package_command.neo"
+import "release.neo"
+import "doctor.neo"
+import "tool_version.neo"
+import "lsp.neo"
+import "graph.neo"
+import "test_process.neo"
+import "tool_diagnostics.neo"
 
 effect fn parse_file(borrow path:Arr u8 _) -> unit
   = let source=fs_read(path) in
     if !source.ok || !utf8_valid(source.value) then let shown=print_out("(ioerror)\n") in process_exit(1)
     else let shown=print_out(dp_source(tx_newlines(source.value))) in noop()
 
+effect fn check_output(borrow m:Mods, borrow report:TcReport, borrow format:Arr u8 _) -> unit
+  = let shown=td_check(m,report,format) in
+    let ty=report.result.value.ty in if ty>0 then noop() else process_exit(if ty==-1 then 2 else 1)
+
+effect fn cli_checked(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow target:Arr u8 _, borrow package_root:Arr u8 _, report_ok:bool, library:bool, allow_unproven:bool, borrow format:Arr u8 _) -> Mods
+  = let m=rs_program(el_program(md_load_program(root,path,target,package_root))) in
+    let checked=cli_check_modules(m,report_ok,library,allow_unproven,format) in m
+
+effect fn cli_check_modules(borrow m:Mods, report_ok:bool, library:bool, allow_unproven:bool, borrow format:Arr u8 _) -> unit
+  =
+    if !m.ok then let shown=td_modules(m,format) in
+      process_exit(1)
+    else let report=tc_program_proofs(m,!library,allow_unproven) in
+      if report_ok || report.result.value.ty<=0 then check_output(m,report,format) else noop()
+
+effect fn cli_ir(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _) -> Arr u8 _
+  = cli_ir_part(m,target,source_runtime,format,tx_ints(),0)
+
+effect fn cli_ir_part(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _,
+                      borrow selected:Arr i64 _, partition:i64) -> Arr u8 _
+  = let stats=env_get("NEO_ALLOC_STATS") in
+    let compiled=cg_program_part(m,target,stats.present && tx_equal(stats.value,"1"),source_runtime,selected,partition) in
+    let checked=if compiled.report.result.value.ty<=0 then check_output(m,compiled.report,format) else noop() in compiled.text
+
+fn cli_usage() -> Arr u8 _
+  = "usage: neo build [FILE] [-o OUTPUT] [--target TRIPLE] [--package-root PATH] [--dev | --opt-level N] [--emit-llvm | --report] [--allow-unproven]\n                 [--library-cache DIR [--library-root PATH]... [--no-cache]]\n       neo run [FILE] [--dev] [-- ARGS...]\n       neo init PATH\n       neo pkg {lock|verify|vendor} [PATH]\n       neo test [PROJECT] [--unit-only] [--target TRIPLE]\n       neo fmt [--check] [PATH...]\n       neo check FILE [--library] | neo parse FILE | neo modules FILE | neo emit-llvm FILE\n       neo graph FILE [--full]\n       neo release -o ARCHIVE [--native COMPILER]\n       neo lsp | neo version | neo doctor\n"
+
+type CliOptions = { paths:Arr Arr u8 _ _, output:Arr u8 _, target:Arr u8 _, package_root:Arr u8 _, native:Arr u8 _, level:Arr u8 _, diagnostics:Arr u8 _, report:bool, dev:bool, seed:bool, library:bool, allow_unproven:bool,
+                    cache_dir:Arr u8 _, library_roots:Arr Arr u8 _ _, no_cache:bool,
+                    ir:bool, help:bool, error:bool, unit_only:bool, format_check:bool, graph_full:bool, literal_paths:bool, args:i64 }
+
+effect(env) fn cli_option(borrow command:Arr u8 _, move opts:CliOptions, i:i64) -> CliOptions
+  = let flag=cli_arg(i) in let next_arg=cli_arg(i+1) in let name=flag.value in
+    let build=tx_equal(command,"build") in let run=tx_equal(command,"run") in let format=tx_equal(command,"fmt") in
+    let init=tx_equal(command,"init") in let pkg=tx_equal(command,"pkg") in
+    let release=tx_equal(command,"release") in
+    if opts.literal_paths then opts with { paths=push(opts.paths,name), args=i+1 }
+    else if tx_equal(name,"-h") || tx_equal(name,"--help") then opts with { help=true }
+    else if format && tx_equal(name,"--check") then opts with { format_check=true, args=i+1 }
+    else if (format || init || pkg) && tx_equal(name,"--") then opts with { literal_paths=true, args=i+1 }
+    else if tx_equal(command,"test") && tx_equal(name,"--unit-only") then opts with { unit_only=true, args=i+1 }
+    else if run && tx_equal(name,"--") then opts with { args=i+1 }
+    else if (build || run) && tx_equal(name,"--dev") then opts with { dev=true, args=i+1 }
+    else if build && tx_equal(name,"--allow-unproven") then opts with { allow_unproven=true, args=i+1 }
+    else if build && tx_equal(name,"--report") then opts with { report=true, args=i+1 }
+    else if build && tx_equal(name,"--no-cache") then opts with { no_cache=true, args=i+1 }
+    else if build && tx_equal(name,"--library-cache") && len(next_arg.value)>0 then opts with { cache_dir=next_arg.value,args=i+2 }
+    else if build && tx_equal(name,"--library-root") && len(next_arg.value)>0 then
+      opts with { library_roots=push(opts.library_roots,next_arg.value),args=i+2 }
+    else if build && str_starts(name,"--library-cache=") && len(name)>16 then
+      opts with { cache_dir=pt_slice(name,16,len(name)),args=i+1 }
+    else if build && str_starts(name,"--library-root=") && len(name)>15 then
+      opts with { library_roots=push(opts.library_roots,pt_slice(name,15,len(name))),args=i+1 }
+    else if (build || tx_equal(command,"check") || tx_equal(command,"graph")) && tx_equal(name,"--diagnostic-format") &&
+      (tx_equal(next_arg.value,"json") || tx_equal(next_arg.value,"human")) then
+      opts with { diagnostics=next_arg.value, args=i+2 }
+    else if build && tx_equal(name,"--emit-llvm") then opts with { ir=true, args=i+1 }
+    else if build && tx_equal(name,"--seed-runtime") then opts with { seed=true, args=i+1 }
+    else if build && tx_equal(name,"--package-root") && next_arg.present then
+      opts with { package_root=next_arg.value, args=i+2 }
+    else if build && str_starts(name,"--package-root=") then
+      opts with { package_root=pt_slice(name,15,len(name)), args=i+1 }
+    else if tx_equal(command,"graph") && tx_equal(name,"--full") then opts with { graph_full=true, args=i+1 }
+    else if tx_equal(command,"check") && tx_equal(name,"--library") then opts with { library=true, args=i+1 }
+    else if release && tx_equal(name,"--native") && len(next_arg.value)>0 then opts with { native=next_arg.value, args=i+2 }
+    else if (build || release) && (tx_equal(name,"-o") || tx_equal(name,"--output")) && len(next_arg.value)>0 then
+      opts with { output=next_arg.value, args=i+2 }
+    else if (build || run) && tx_equal(name,"--opt-level") && len(next_arg.value)==1 &&
+      tx_byte(next_arg.value,0)>=48 && tx_byte(next_arg.value,0)<=51 then opts with { level=next_arg.value, args=i+2 }
+    else if !format && !init && !pkg && !release && (tx_equal(name,"--target") || (build && tx_equal(name,"--runtime-source"))) &&
+      bd_target_valid(next_arg.value) then opts with { target=next_arg.value, args=i+2 }
+    else if (format || (len(opts.paths)<2 && (init || pkg || len(name)>0))) && tx_byte(name,0)!=45 then
+      opts with { paths=push(opts.paths,name), args=i+1 }
+    else opts with { error=true }
+
+effect(env) fn cli_options(borrow command:Arr u8 _) -> CliOptions
+  = let initial=CliOptions { paths=md_words(), output=tx_empty(), target=tx_empty(), package_root=tx_empty(), native=tx_empty(), level=tx_empty(), diagnostics=tx_empty(), report=false,
+                             dev=false, seed=false, library=false, allow_unproven=false, ir=false, help=false, error=false, unit_only=false,
+                             cache_dir="",library_roots=md_words(),no_cache=false,
+                             format_check=false, graph_full=false, literal_paths=false, args=2 } in
+    loop (opts=initial) while !opts.error && !opts.help && cli_arg(opts.args).present &&
+      !(tx_equal(command,"run") && tx_equal(cli_arg(opts.args-1).value,"--"))
+      next (cli_option(command,opts,opts.args)) yield opts
+
+effect(fs,env) fn cli_root() -> Arr u8 _
+  = let configured=env_get("NEO_ROOT") in
+    if configured.present then pt_abspath(configured.value) else fs_cwd().value
+
+effect(fs,process) fn cli_entry() -> Arr u8 _
+  = let cwd=fs_cwd().value in let source=md_manifest(cwd) in
+    if !source.ok then let exited=bd_error(concat("no neo.toml at ",cwd)) in tx_empty() else
+    let data=tm_parse(tx_newlines(source.value)) in
+    if !data.ok then let exited=bd_error(concat("invalid project manifest in ",cwd)) in tx_empty()
+    else pt_join(cwd,if data.has_entry then data.entry else "src/main.neo")
+
+fn cli_output(borrow path:Arr u8 _) -> Arr u8 _
+  = let name=pt_tail(path) in
+    let end=loop (i=len(name)-1) while i>0 && tx_byte(name,i)!=46 next (i-1) yield i in
+    if end>0 then pt_slice(name,0,end) else concat(name,".out")
+
+effect fn cli_version(borrow root:Arr u8 _) -> unit
+  = let version=tool_version(root) in
+    let shown=print_out(concat("Neo",if len(version)==0 then "" else concat(" ",version),"\n")) in noop()
+
+effect(process,unsafe) fn cli_wait(pid:i64) -> i64
+  = if pid<0 then 127 else
+    let slot=stack_alloc(8) in let initialized=store_i64(slot,0,0) in
+    let waited=loop (result=rt_wait_status(pid,slot,0)) while result<0 && load_i32(rt_errno(),0)==i32(4)
+      next (rt_wait_status(pid,slot,0)) yield result in
+    if waited<0 then 127 else let status=i64(load_i32(slot,0)) in
+    let signal=bit_and(status,127) in if signal!=0 then 128+signal else bit_and(shift_right(status,8),255)
+
+effect fn cli_launch(borrow executable:Arr u8 _, first:i64) -> i64
+  = let configured=env_get("NEO_RUNNER") in let words=nt_words(configured.value) in
+    if words.escape || words.quote!=0 then let shown=print_error("neoc: invalid NEO_RUNNER quoting\n") in 127
+    else let program=concat(executable,"\0") in let state=runtime_state() in
+    let argv=ptr_add(load_ptr(state,48),(first-1)*8) in let envp=load_ptr(state,0) in
+    if len(words.words)==0 then
+      let pid=rt_fork() in if pid!=0 then cli_wait(pid) else
+      let saved=store_ptr(argv,0,data(program)) in let failed=rt_exec(data(program),argv,envp) in
+      let exited=process_exit(127) in 127
+    else let runner=bd_find_tool(tx_word(words.words,0)) in
+    if len(runner)==0 then let shown=print_error("neoc: NEO_RUNNER executable not found\n") in 127 else
+    let n=len(words.words) in let argc=load_i64(state,40) in
+    let args=nt_extend(push(tx_words(),runner),words.words,1) in
+    let blob=loop (i=0, text="") while i<n next (i+1,concat(text,tx_word(args,i),"\0")) yield text in
+    let total=n+1+argc-first in
+    let args=stack_alloc((total+1)*8) in let storage=stack_alloc(len(blob)) in
+    let copied=memcpy(storage,data(blob),len(blob)) in
+    let stored=loop (i=0, offset=0) while i<n next (i+1,
+      let saved=store_ptr(args,i*8,ptr_add(storage,offset)) in
+      let end=loop (at=offset) while at<len(blob) && tx_byte(blob,at)!=0 next (at+1) yield at in end+1) yield offset in
+    let saved=store_ptr(args,n*8,data(program)) in
+    let count=loop (i=n+1) while i<total next (
+      let saved=store_ptr(args,i*8,load_ptr(argv,(i-n)*8)) in i+1) yield i in
+    let terminated=store_ptr(args,total*8,null()) in let pid=rt_fork() in
+    if pid!=0 then cli_wait(pid) else
+      let saved=store_ptr(args,n*8,data(program)) in let failed=rt_exec(storage,args,envp) in
+      let exited=process_exit(127) in 127
+
+effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliOptions, run:bool) -> unit
+  = let started=bd_clock() in let requested=env_get("NEO_OPT_LEVEL") in
+    let level=if len(opts.level)>0 then opts.level else if requested.present then requested.value else if opts.dev then "1" else "2" in
+    if len(level)!=1 || tx_byte(level,0)<48 || tx_byte(level,0)>51 then bd_error("optimization level must be 0..3") else
+    let caching=len(opts.cache_dir)>0 && !opts.ir in
+    if caching && (opts.seed || opts.allow_unproven) then bd_error("prepared libraries require fully checked source runtime builds") else
+    if len(opts.library_roots)>0 && len(opts.cache_dir)==0 then bd_error("--library-root requires --library-cache") else
+    let config=bd_configuration(opts.target,opts.seed,level) in
+    if len(config.error)>0 then bd_error(config.error) else
+    let target=if opts.seed then tx_empty() else config.target in
+    let loaded=md_load_program(root,path,target,opts.package_root) in let parsed=bd_clock() in
+    let m=rs_program(el_program(loaded)) in let elaborated=bd_clock() in
+    let format=if opts.report && len(opts.diagnostics)==0 then "json" else opts.diagnostics in
+    let checked_program=cli_check_modules(m,false,false,opts.allow_unproven,format) in let checked=bd_clock() in
+    let m=m with { stable_symbols=caching } in
+    let selected=if caching then lc_selection(m,opts.library_roots) else tx_ints() in
+    let ir=st_executable(m,cli_ir_part(m,config.target,!opts.seed,format,selected,if caching then 1 else 0),config.target,!opts.seed) in
+    let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2) else "" in
+    let lowered=bd_clock() in
+    if opts.ir then let shown=print_out(ir) in noop() else
+    if run then
+      let random=random_bytes(16) in if !random.ok then bd_error(random.error.message) else
+      let tmp=env_get("TMPDIR") in
+      let output=pt_abspath(pt_join(if tmp.present && len(tmp.value)>0 then tmp.value else "/tmp",
+        concat("neo-run-",tx_hex_bytes(tx_empty(),random.value)))) in
+      let linked=bd_link(config,ir,output) in
+      let status=cli_launch(output,opts.args) in let removed=fs_remove(output) in process_exit(status)
+    else let output=if len(opts.output)>0 then opts.output else cli_output(path) in
+    if !io_path_valid(output) || tx_equal(pt_realpath(output),pt_realpath(path)) then bd_error("invalid output path") else
+    let prepared=if caching then lc_prepare(config,opts.cache_dir,library_ir,lc_sources(m,selected),opts.no_cache)
+      else LcArtifact { bytes="",key="",directory="",hit=false,compile_ns=0 } in
+    let output=pt_abspath(output) in let linked=bd_link_profile(config,ir,prepared.bytes,output,opts.report) in
+    if !opts.report then noop() else
+    let stages=BrStages { started=started,parsed=parsed,elaborated=elaborated,checked=checked,lowered=lowered } in
+    let shown=br_print(m,stages,linked,config,output,opts.dev,opts.allow_unproven,if caching then lc_report(prepared) else "") in noop()
+
+effect fn cli_inspect(borrow command:Arr u8 _, borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliOptions) -> unit
+  = if tx_equal(command,"emit-llvm") then
+      let m=cli_checked(root,path,"","",false,false,false,"") in let shown=print_out(cli_ir(m,"",false,"")) in noop()
+    else let target=if len(opts.target)>0 then opts.target else if len(opts.paths)==2 && tx_equal(command,"check") then "" else
+      let config=bd_configuration("",false,"2") in
+      let ready=if len(config.error)>0 then bd_error(config.error) else noop() in config.target in
+    if tx_equal(command,"modules") then
+      let shown=print_out(md_dump(md_load_program(root,path,target,""))) in noop()
+    else if tx_equal(command,"graph") then
+      let m=el_program(md_load_program(root,path,target,"")) in
+      if !m.ok then let shown=td_modules(m,opts.diagnostics) in process_exit(1)
+      else let shown=print_out(ng_report(m,opts.graph_full)) in noop()
+    else let checked=cli_checked(root,path,target,"",true,opts.library,false,opts.diagnostics) in noop()
+
 effect fn main() -> unit
-  = let command=cli_arg(1) in let first=cli_arg(2) in let second=cli_arg(3) in
-    if command.present && first.present && tx_equal(command.value,"parse") then parse_file(first.value)
-    else if command.present && first.present && second.present && tx_equal(command.value,"modules") then
-      let shown=print_out(md_dump(md_load(first.value,second.value))) in noop()
-    else let shown=print_error("usage: neoc parse FILE | neoc modules ROOT FILE\n") in process_exit(2)
+  = let command=cli_arg(1).value in let opts=cli_options(command) in let count=len(opts.paths) in
+    let root=if count==2 then md_word(opts.paths,0) else cli_root() in
+    let path=md_word(opts.paths,count-1) in
+    if opts.help || tx_equal(command,"--help") || tx_equal(command,"-h") then let shown=print_out(cli_usage()) in noop()
+    else if opts.error then let shown=print_error(cli_usage()) in process_exit(2)
+    else if tx_equal(command,"fmt") then ff_command(opts.paths,opts.format_check)
+    else if count==1 && tx_equal(command,"init") then ni_init(path)
+    else if tx_equal(command,"pkg") && count>=1 && count<=2 && pk_action(md_word(opts.paths,0)) then
+      pk_command(md_word(opts.paths,0),if count==2 then path else ".")
+    else if count==0 && (tx_equal(command,"version") || tx_equal(command,"--version")) then cli_version(root)
+    else if count==0 && tx_equal(command,"lsp") then ls_command(root)
+    else if count==0 && tx_equal(command,"doctor") then nd_doctor(root)
+    else if count==0 && tx_equal(command,"release") && len(opts.output)>0 then rl_command(root,opts.output,opts.native)
+    else if count==1 && tx_equal(command,"parse") then parse_file(path)
+    else if count<=1 && tx_equal(command,"test") then nt_test(root,if count==0 then "." else path,opts.target,opts.unit_only)
+    else if tx_equal(command,"build") || (tx_equal(command,"run") && count<=1) then
+      cli_build(root,if count==0 then cli_entry() else path,opts,tx_equal(command,"run"))
+    else if count>0 && (tx_equal(command,"check") || tx_equal(command,"modules") || tx_equal(command,"graph") || tx_equal(command,"emit-llvm")) then
+      cli_inspect(command,root,path,opts)
+    else let shown=print_error(cli_usage()) in process_exit(2)

@@ -1,0 +1,20 @@
+import "std:events"
+import "std:sse"
+effect fn main()->i64
+  = let invalid=events_configure(0,3,256) in check !invalid.ok in
+    let configured=events_configure(2,3,256) in let twice=events_configure(2,3,256) in check configured.ok && !twice.ok in
+    let channel=event_channel("orders") in let valid=event_channel_ok(channel) in let bad=event_channel("bad/name") in let bad_valid=event_channel_ok(bad) in check valid && !bad_valid in
+    let first=event_publish_once(channel,"invoice","{\"amount\":29}",1000,10) in check first.ok && first.value==1 in
+    let duplicate=event_publish_once(channel,"invoice","{}",1000,10) in check duplicate.value==1 in
+    let reserved=event_publish(channel,"neokit-reset","{}",0) in let invalid_json=event_publish(channel,"x","bad json",0) in check !reserved.ok && !invalid_json.ok in
+    let child=process_fork() in check child.ok in
+    if child.value==0 then let shared=event_channel("orders") in let sent=event_publish(shared,"signup","{}",1001) in
+      check sent.ok && sent.value==2 in let exited=ax_exit(0) in 0 else
+    let joined=process_wait(child.value) in check joined.ok && joined.value==0 in
+    let batch=event_read(channel,0,4) in check batch.ok && len(batch.events)==2 && batch.events[1].sequence==2 in
+    let third=event_publish(channel,"invoice","{}",1002) in let fourth=event_publish(channel,"invoice","{}",1003) in
+    check str_equal(batch.events[0].json,"{\"amount\":29}") in
+    let reset=event_read(channel,0,4) in check reset.ok && reset.reset && reset.oldest==2 && len(reset.events)==1 && reset.events[0].sequence==4 in
+    let replay=event_read(channel,2,4) in check replay.ok && !replay.reset && len(replay.events)==2 && replay.events[0].sequence==3 in
+    let frame=sse_encode("invoice","café\n東京","epoch.4") in check frame.ok && str_find(frame.value,"data: 東京\n\n").present in
+    check !sse_encode("bad\nevent","x","1").ok in 42

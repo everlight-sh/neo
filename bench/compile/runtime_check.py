@@ -51,7 +51,7 @@ def build():
                            *((f'examples/{k}.neo', k) for k in KERNELS), ('bench/core/orders_json.neo', 'orders_json'),
                            ('examples/library_bench.neo', 'library_bench')):
             profile = ['--dev'] if label in os.environ.get('NEO_DEV', '').split(',') else []
-            subprocess.run(['./neo', 'build', path, '-o', str(OUT / f'{label}-{name}'), *profile], cwd=tree, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(['./neoc.sh', 'build', path, '-o', str(OUT / f'{label}-{name}'), *profile], cwd=tree, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(['go', 'build', '-o', str(OUT / 'server'), './server'], cwd=FETCH / 'go', check=True,
                    env=dict(os.environ, GOWORK='off'))
     rng = random.Random(7)

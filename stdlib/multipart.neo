@@ -1,0 +1,35 @@
+import "std:http_server"
+
+; Bounded multipart/form-data. Binary values stay bytes; never trust filenames
+; as filesystem paths. Nested multipart and RFC 5987 extended names are rejected.
+type MultipartPart = { ok:bool,name:Arr u8 _,filename:Arr u8 _,content_type:Arr u8 _,body:Arr u8 _,offset:i64,done:bool }
+private fn multipart_bad() -> MultipartPart = MultipartPart { ok=false,name="",filename="",content_type="",body="",offset=0,done=true }
+fn multipart_boundary(content_type:Arr u8 n) -> OptionBytes
+  = let marker=str_find(http_lower(content_type),"boundary=") in
+    if !str_starts(http_lower(content_type),"multipart/form-data;") || !marker.present then none_bytes() else
+    let tail=str_trim(str_slice(content_type,marker.value+9,n)) in let end=str_find(tail,";") in let value=str_trim(if end.present then str_slice(tail,0,end.value) else tail) in
+    let value=if str_starts(value,"\"") && str_equal(str_slice(value,len(value)-1,len(value)),"\"") && len(value)>=2 then str_slice(value,1,len(value)-1) else value in
+    if len(value)<1 || len(value)>70 || !http_token(value) then none_bytes() else some_bytes(value)
+private fn multipart_disposition(value:Arr u8 n,name:Arr u8 m) -> OptionBytes
+  = let marker=str_find(value,concat("; ",name,"=\"")) in if !marker.present then none_bytes() else
+    let from=marker.value+m+4 in let tail=str_slice(value,from,n) in let end=str_find(tail,"\"") in
+    if !end.present || str_find(str_slice(tail,0,end.value),"\\").present then none_bytes() else some_bytes(str_slice(tail,0,end.value))
+fn multipart_next(body:Arr u8 n,boundary:Arr u8 m,at:i64) -> MultipartPart
+  = if m<1 || m>70 || n>16777216 || at<0 || at>n || !http_token(boundary) then multipart_bad() else
+    let marker=concat("--",boundary) in
+    if !str_equal(str_slice(body,at,at+len(marker)),marker) then multipart_bad() else
+    let start=at+len(marker) in
+    if str_equal(str_slice(body,start,n),"--\r\n") || str_equal(str_slice(body,start,n),"--") then MultipartPart {ok=true,name="",filename="",content_type="",body="",offset=n,done=true} else
+    if !str_equal(str_slice(body,start,start+2),"\r\n") then multipart_bad() else
+    let rest=str_slice(body,start+2,n) in let split=str_find(rest,"\r\n\r\n") in
+    if !split.present || split.value>8192 then multipart_bad() else
+    let headers=concat("PART / HTTP/1.1\r\n",str_slice(rest,0,split.value),"\r\n\r\n") in
+    let disposition=web_header(headers,"content-disposition") in let name=multipart_disposition(disposition,"name") in let filename=multipart_disposition(disposition,"filename") in
+    let from=start+2+split.value+4 in let tail=str_slice(body,from,n) in let end=str_find(tail,concat("\r\n",marker)) in
+    if !str_starts(disposition,"form-data;") || !name.present || len(name.value)>256 || !utf8_valid(name.value) || !end.present || !web_header_safe(filename.value) || str_find(disposition,"filename*=").present then multipart_bad() else
+      MultipartPart {ok=true,name=name.value,filename=filename.value,content_type=web_header(headers,"content-type"),body=str_slice(tail,0,end.value),offset=from+end.value+2,done=false}
+fn web_upload(request:WebRequest,name:Arr u8 n) -> MultipartPart
+  = let boundary=multipart_boundary(web_request_header(request,"content-type")) in if !boundary.present then multipart_bad() else
+    loop(part=multipart_next(request.body,boundary.value,0),found=multipart_bad(),count=0) while part.ok && !part.done && count<128
+      next(multipart_next(request.body,boundary.value,part.offset),if str_equal(part.name,name) then part else found,count+1)
+      yield if part.ok && part.done then found else multipart_bad()

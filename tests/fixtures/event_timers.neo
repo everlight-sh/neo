@@ -1,0 +1,15 @@
+import "std:events"
+import "std:timer"
+private effect(fs,net,env,time,process) fn produce(capture:Arr u8 n)->Arr u8 _
+  = let now=time_unix_ms() in let published=event_publish(event_channel("timer"),"tick","{}",now.value) in ""
+effect fn main()->i64
+  = let configured=events_configure(2,8,256) in check configured.ok in
+    let invalid=timer_interval_start(0,function(produce),"") in check !invalid.ok in
+    let timer=timer_interval_start(20,function(produce),"owned capture") in check timer.ok in
+    let child=process_fork() in check child.ok in
+    if child.value==0 then let count=timer_interval_count() in check count==0 in let stop=timer_interval_stop(timer.value) in let exited=ax_exit(0) in 0 else
+    let joined=process_wait(child.value) in check joined.ok && joined.value==0 in
+    let pumped=loop(i=0) while i<3 next(let turn=timer_poll(40) in i+1) yield i in
+    let latest=event_latest(event_channel("timer")) in check latest.ok && latest.latest>=3 && latest.latest<=6 in
+    let stopped=timer_interval_stop(timer.value) in let count=timer_interval_count() in check count==0 in
+    let turn=timer_poll(30) in let unchanged=event_latest(event_channel("timer")) in check unchanged.latest==latest.latest in 42

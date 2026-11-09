@@ -1,0 +1,136 @@
+import "std:hashmap"
+import "std:io"
+import "std:json"
+import "std:option"
+import "std:strings"
+import "std:unicode"
+import "ast.neo"
+import "check.neo"
+import "elaborate.neo"
+import "lex.neo"
+import "lsp_wire.neo"
+import "modules.neo"
+import "paths.neo"
+import "resources.neo"
+import "text.neo"
+import "toml.neo"
+import "tool_type.neo"
+
+fn ls_uri_safe(c:i64) -> bool
+  = c>=65 && c<=90 || c>=97 && c<=122 || c>=48 && c<=57 || c==45 || c==46 || c==95 || c==126 || c==47
+fn ls_uri_digit(d:i64) -> u8 = u8(if d<10 then 48+d else 55+d)
+fn ls_uri(borrow path:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out="file://") while i<len(path) next (i+1,
+      let c=tx_byte(path,i) in if ls_uri_safe(c) then push(out,u8(c))
+      else push(push(push(out,'%'),ls_uri_digit(c/16)),ls_uri_digit(c%16))) yield out
+
+fn ls_path(borrow uri:Arr u8 _) -> BytesResult
+  = let head=if str_starts(uri,"file://localhost/") then 16 else
+      if str_starts(uri,"file:///") then 7 else if str_starts(uri,"file:/") && !str_starts(uri,"file://") then 5 else -1 in
+    if head<0 then bytes_error(22,"LSP supports local file URIs",0) else
+    let end=loop (i=head) while i<len(uri) && tx_byte(uri,i)!=35 && tx_byte(uri,i)!=63 next (i+1) yield i in
+    let path=loop (i=head, out="") while i<end next (
+      if tx_byte(uri,i)==37 && i+2<end && tm_hex(tx_byte(uri,i+1))>=0 && tm_hex(tx_byte(uri,i+2))>=0 then i+3 else i+1,
+      let c=tx_byte(uri,i) in let a=tm_hex(tx_byte(uri,i+1)) in let b=tm_hex(tx_byte(uri,i+2)) in
+      push(out,u8(if c==37 && i+2<end && a>=0 && b>=0 then 16*a+b else c))) yield out in
+    if !io_path_valid(path) || !utf8_valid(path) then bytes_error(22,"invalid file URI",0) else bytes_ok(path)
+
+type LsLinePos = { at:i64, line:i64 }
+fn ls_line_at(borrow text:Arr u8 _, line:i64) -> LsLinePos
+  = loop (p=LsLinePos { at=0,line=0 }, i=0) while p.line<line && i<len(text)
+      next (if tx_byte(text,i)==10 then LsLinePos { at=i+1,line=p.line+1 } else p,i+1) yield p
+
+fn ls_rune_end(borrow text:Arr u8 _, at:i64) -> i64
+  = let rune=unicode_next(text,at) in if rune.ok then rune.end else at+1
+fn ls_rune_units(borrow text:Arr u8 _, at:i64) -> i64
+  = if unicode_next(text,at).code>65535 then 2 else 1
+fn ls_position(borrow text:Arr u8 _, line:i64, column:i64) -> Arr u8 _
+  = let p=ls_line_at(text,line) in
+    let units=loop (i=p.at, c=0, units=0) while c<column && i<len(text) && tx_byte(text,i)!=10
+      next (ls_rune_end(text,i),c+1,units+ls_rune_units(text,i)) yield units in
+    concat("{\"line\":",int_text(p.line),",\"character\":",int_text(units),"}")
+fn ls_offset(borrow text:Arr u8 _, line:i64, units:i64) -> i64
+  = let start=ls_line_at(text,line).at in
+    loop (i=start, used=0) while i<len(text) && tx_byte(text,i)!=10 && used+ls_rune_units(text,i)<=units
+      next (ls_rune_end(text,i),used+ls_rune_units(text,i)) yield i
+fn ls_range(borrow start:Arr u8 _, borrow end:Arr u8 _) -> Arr u8 _
+  = concat("{\"start\":",start,",\"end\":",end,"}")
+fn ls_end(borrow text:Arr u8 _) -> Arr u8 _
+  = let last=ls_line_at(text,len(text)) in ls_position(text,last.line,len(text))
+
+type LsSymbol = { name:Arr u8 _, label:Arr u8 _, path:Arr u8 _, line:i64, col:i64, kind:i64 }
+type LsDoc = { path:Arr u8 _, text:Arr u8 _, version:i64, names:Arr Arr u8 _ _,
+               index:HashMap<Arr u8 _,LsSymbol>, symbols:Arr LsSymbol _ }
+fn ls_empty_symbol() -> LsSymbol = LsSymbol { name="",label="",path="",line=0,col=0,kind=0 }
+fn ls_doc(borrow path:Arr u8 _, borrow text:Arr u8 _, version:i64) -> LsDoc
+  = LsDoc { path=path,text=text,version=version,names=tx_words(),
+    index=hashmap_empty::<Arr u8 _,LsSymbol>(13,17),symbols=arr(i in 0..0) ls_empty_symbol() }
+fn ls_at(borrow docs:Arr LsDoc _, i:i64) -> LsDoc
+  = if i>=0 && i<len(docs) then docs[i] else ls_doc("","",0)
+fn ls_find(borrow docs:Arr LsDoc _, borrow path:Arr u8 _) -> i64
+  = let i=loop (i=0) while i<len(docs) && !tx_equal(ls_at(docs,i).path,path) next (i+1) yield i in
+    if i<len(docs) then i else -1
+fn ls_overlay(borrow docs:Arr LsDoc _) -> HashMap<Arr u8 _,Arr u8 _>
+  = loop (i=0, overlay=md_no_overlays()) while i<len(docs)
+      next (i+1,let doc=ls_at(docs,i) in hashmap_put(overlay,doc.path,doc.text)) yield overlay
+
+fn ls_symbol(borrow m:Mods, id:i64) -> LsSymbol
+  = let n=md_node(m,id) in let name=md_str(m,tx_at(m.display,id)) in
+    let function=n.kind==n_fn() in
+    let args=if !function then "" else loop (i=0, out="") while i<ast_list_len(m.ast,n.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,n.b,i)) in
+        concat(out,if i==0 then "" else ", ",md_str(m,p.a),": ",tool_type(m,p.b))) yield out in
+    LsSymbol { name=name,label=if function then concat("fn ",name,"(",args,") -> ",tool_type(m,n.c)) else concat("type ",name),
+      path=md_path(m,tx_at(m.owners,id)),line=n.line,col=n.col,kind=if function then 3 else 22 }
+
+type LsCatalog = { by_id:HashMap<i64,LsSymbol>, local:Arr LsSymbol _ }
+fn ls_collect(borrow m:Mods, entry:i64, imports_only:bool) -> LsCatalog
+  = loop (k=0, catalog=LsCatalog { by_id=hashmap_empty::<i64,LsSymbol>(19,23),local=arr(i in 0..0) ls_empty_symbol() })
+      while k<len(m.paths) next (k+1,if imports_only && k==entry then catalog else
+      let ids=md_with_all(md_list(m.types,k),md_list(m.fns,k)) in
+      loop (i=0, out=catalog) while i<len(ids) next (i+1,
+        let id=tx_at(ids,i) in let symbol=ls_symbol(m,id) in
+        LsCatalog { by_id=hashmap_put(out.by_id,tx_at(m.canon,id),symbol),
+          local=if k==entry then push(out.local,symbol) else out.local }) yield out) yield catalog
+
+fn ls_catalog(move doc:LsDoc, borrow m:Mods, imports_only:bool) -> LsDoc
+  = let entry=md_entry_module(m) in let names=md_scope_names(m,entry) in let catalog=ls_collect(m,entry,imports_only) in
+    loop (i=0, out=ls_doc(doc.path,doc.text,doc.version) with { symbols=catalog.local })
+      while i<len(names) next (i+1,let name=md_str(m,tx_at(names,i)) in
+        if imports_only && tx_equal(name,"main") then out else
+        let item=hashmap_get(catalog.by_id,md_lookup(m,entry,name)) in
+        out with { names=push(out.names,name),
+          index=if option_is_some(item) then hashmap_put(out.index,name,option_or(item,ls_empty_symbol())) else out.index }) yield out
+
+fn ls_import_lines(borrow text:Arr u8 _) -> Arr u8 _
+  = let lx=lx_lex(tx_newlines(text)) in
+    loop (i=0, out="") while i+1<lx_tok_count(lx.toks)
+      next (i+1,let t=lx_tok(lx.toks,i) in let u=lx_tok(lx.toks,i+1) in
+        if t.kind!=tk_kw() || t.code!=31 || u.kind!=tk_str() then out else
+        let name=md_text(lx.text,u) in let marker=md_text(lx.text,lx_tok(lx.toks,i+2)) in let alias=lx_tok(lx.toks,i+3) in
+        concat(out,"import ",json_quote(name),if tx_equal(marker,"as") && alias.kind==tk_ident()
+          then concat(" as ",md_text(lx.text,alias)) else "","\n")) yield out
+
+fn ls_diagnostic(borrow doc:LsDoc, borrow path:Arr u8 _, line:i64, col:i64,
+                 borrow code:Arr u8 _, borrow message:Arr u8 _) -> Arr u8 _
+  = let local=tx_equal(path,doc.path) in let start=ls_position(doc.text,if local then line-1 else 0,if local then col-1 else 0) in
+    let end=if local then ls_position(doc.text,line-1,col) else start in
+    concat("[{\"range\":",ls_range(start,end),",\"severity\":1,\"code\":",json_quote(code),
+      ",\"source\":\"neo\",\"message\":",json_quote(if local then message else concat(path,": ",message)),"}]")
+
+effect fn ls_analyze(move doc:LsDoc, borrow root:Arr u8 _, borrow target:Arr u8 _, borrow overlay:HashMap<Arr u8 _,Arr u8 _>) -> LsDoc
+  = let m=md_load_overlay(root,doc.path,target,"",overlay) in
+    let diagnostics=if !m.ok then ls_diagnostic(doc,m.efile,m.eline,m.ecol,"source",m.err)
+      else let checked=rs_program(el_program(m)) in
+        if !checked.ok then ls_diagnostic(doc,checked.efile,checked.eline,checked.ecol,"type",checked.err)
+        else let report=tc_program_mode(checked,false) in let ty=report.result.value.ty in
+          if ty>0 then "[]" else let n=md_node(checked,report.result.at) in
+          ls_diagnostic(doc,if report.module<0 then doc.path else md_path(checked,report.module),n.line,n.col,
+            if ty== -2 then "unproven" else "type",
+            if ty== -2 then concat("unproven ",report.result.message) else report.result.message) in
+    let sent=ls_notify("textDocument/publishDiagnostics",concat("{\"uri\":",json_quote(ls_uri(doc.path)),
+      ",\"version\":",int_text(doc.version),",\"diagnostics\":",diagnostics,"}")) in
+    if m.ok then ls_catalog(doc,m,false) else
+    let imports=ls_import_lines(doc.text) in
+    let fallback=md_load_overlay(root,doc.path,"","",hashmap_put(overlay,doc.path,concat(imports,"fn main() -> i64 = 0\n"))) in
+    if fallback.ok then ls_catalog(doc,fallback,true) else doc

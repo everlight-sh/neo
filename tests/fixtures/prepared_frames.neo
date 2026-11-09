@@ -1,0 +1,33 @@
+import "std:event_stream"
+effect fn main()->i64
+  = let outside=http_async_state_get() in check !outside.ok in
+    let key=HttpAsyncFrameKey {namespace=7,version=1,epoch=9,key="event",variant="café"} in
+    let missing=http_async_frame_find(key) in check !missing.ok in
+    let prepared=http_async_prepare("data: café\n\n") in check prepared.ok in
+    let cached=http_async_frame_remember(key,prepared.frame) in
+    let found=http_async_frame_find(key) in let copied=http_async_frame_payload(cached) in
+    check found.ok && copied.ok && str_equal(copied.value,"data: café\n\n") in
+    let wrong=http_async_frame_find(key with {variant="different"}) in check !wrong.ok in
+    let replacement=http_async_prepare("data: replacement\n\n") in
+    let newer=http_async_frame_remember(key with {version=65},replacement.frame) in
+    let old_valid=http_async_frame_valid(cached) in let stale=http_async_frame_payload(cached) in
+    check !old_valid && !stale.ok && str_equal(copied.value,"data: café\n\n") in
+    let valid=http_async_frame_valid(newer) in check valid in
+    let child=process_fork() in check child.ok in
+    if child.value==0 then
+      let inherited=http_async_frame_valid(newer) in let count=http_async_frame_stats() in
+      check !inherited && count.entries==0 in
+      let own=http_async_frame_remember(key with {version=65},replacement.frame) in
+      let still_invalid=http_async_frame_valid(newer) in let own_valid=http_async_frame_valid(own) in
+      check !still_invalid && own_valid in let exited=ax_exit(0) in 0 else
+    let joined=process_wait(child.value) in check joined.ok && joined.value==0 in
+    let filled=loop(i=0) while i<128 next(let held=http_async_frame_remember(key with {version=i+1000},prepared.frame) in i+1) yield i in
+    let stats=http_async_frame_stats() in check stats.entries==64 && stats.hits>=1 && stats.misses>=2 in
+    let too_large=http_async_prepare(arr(i in 0..49153) u8(65)) in check !too_large.ok in
+    let bus=events_configure(1,2,4096) in check bus.ok in let channel=event_channel("prepared") in
+    let identity=event_channel_id(channel) in let reopened=event_channel_from_id(identity) in let valid=event_channel_ok(reopened) in check valid in
+    let sent=event_publish(channel,"notice","{\"text\":\"café\"}",10) in check sent.ok in
+    let batch=event_latest(channel) in check batch.ok && len(batch.events)==1 in
+    let first=event_stream_frame(channel,batch.epoch,batch.events[0]) in
+    let again=event_stream_frame(channel,batch.epoch,batch.events[0]) in check first.ok && again.ok in
+    let payload=http_async_frame_payload(again.frame) in check payload.ok && str_find(payload.value,"data: {\"text\":\"café\"}").present in 42

@@ -1,0 +1,35 @@
+import "std:io"
+import "std:time"
+; Structured owners for cooperative byte-result tasks. Lexical resource frames
+; stay live while waiting; dropping an unfinished owner cancels and detaches it.
+resource type AsyncBytes = {token:i64} drop async_bytes_release
+effect(fs,net,env,time,process) fn async_bytes(callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,capture:Arr u8 n,deadline:i64)->AsyncBytes
+  = AsyncBytes {token=rt_fiber_spawn(callback_address(callback),capture,deadline)}
+effect(process) fn async_bytes_status(task:AsyncBytes)->IntResult
+  = if task.token<0 then int_error(0-task.token,"Async task admission failed",0) else
+    let job=rt_fiber_lookup(task.token) in if job==null() then int_error(9,"Async task is no longer live",0) else int_ok(if load_i64(job,248)==3 then 1 else 0)
+effect(process) fn async_bytes_cancel(task:AsyncBytes)->unit = rt_fiber_cancel(task.token)
+private effect(fs,net,time,process) fn async_bytes_release(task:AsyncBytes)->unit = rt_fiber_release(task.token)
+effect(fs,net,env,time,process) fn async_bytes_await(task:AsyncBytes,deadline:i64)->BytesResult
+  = if task.token<0 then bytes_error(0-task.token,"Async task admission failed",0) else
+    let result=rt_fiber_await(task.token,deadline) in if result<0 then bytes_error(0-result,"Async task failed or was cancelled",0) else bytes_ok(rt_fiber_result(task.token))
+effect(process) fn async_cancelled()->bool = rt_fiber_cancelled()
+effect(fs,net,env,time,process) fn async_drain(deadline:i64)->IntResult
+  = if rt_fiber_current()!=null() then int_error(16,"Cannot drain from inside a task",0) else
+    loop(active=load_i64(runtime_state(),1784)) while active>0 && rt_clock_ns()/1000000<deadline next(
+      let tick=rt_fiber_tick() in let polled=rt_fiber_poll(rt_fiber_timeout(10)) in load_i64(runtime_state(),1784)) yield
+      if active==0 then int_ok(0) else int_error(110,"Async drain deadline elapsed",0)
+
+; Report a typed loader failure without leaking protocol error details into HTML.
+effect(process) fn async_fail(code:i64)->unit
+  = let job=rt_fiber_current() in if job==null() then noop() else store_i64(job,288,if code>0 && code<4096 then code else 5)
+
+type AsyncStats={live:i64,waiting:i64,completed:i64,capture_bytes:i64,result_bytes:i64}
+effect(process) fn async_stats()->AsyncStats
+  = let slots=load_ptr(runtime_state(),1744) in
+    let waiting=if slots==null() then 0 else loop(i=0,count=0) while i<256 next(i+1,count+(if load_i64(slots,i*384+248)==2 then 1 else 0)) yield count in
+    let complete=if slots==null() then 0 else loop(i=0,count=0) while i<256 next(i+1,count+(if load_i64(slots,i*384+248)==3 then 1 else 0)) yield count in
+    AsyncStats {live=load_i64(runtime_state(),1784),waiting=waiting,completed=complete,capture_bytes=load_i64(runtime_state(),1824),result_bytes=load_i64(runtime_state(),1832)}
+
+effect(process) fn async_yield()->unit = rt_fiber_yield()
+effect(time,process) fn async_checkpoint()->unit = rt_fiber_checkpoint()

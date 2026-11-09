@@ -1,0 +1,40 @@
+; Signed integers for the proof engine. Magnitudes use std:bigint's
+; little-endian base-65536 limbs. Zero has no limbs and sign zero.
+import "std:bigint"
+import "text.neo"
+
+type TiInteger = { sign:i64, limbs:Arr i64 _ }
+fn ti_zero() -> TiInteger = TiInteger { sign=0, limbs=tx_ints() }
+fn ti_from_i64(value:i64) -> TiInteger
+  = if value==0 then ti_zero() else
+    ; Logical shifts also handle the unsigned magnitude of the minimum i64.
+    let magnitude=if value<0 then wrapping_sub(0,value) else value in
+    let limbs=loop (bits=magnitude, out=tx_ints()) while bits!=0
+      next (shift_right(bits,16),push(out,bit_and(bits,65535))) yield out in
+    TiInteger { sign=if value<0 then -1 else 1, limbs=limbs }
+
+fn ti_add_limbs(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _
+  = let count=if len(a)>len(b) then len(a) else len(b) in
+    loop (i=0, carry=0, out=tx_ints()) while i<count
+      next (i+1,shift_right(tx_at(a,i)+tx_at(b,i)+carry,16),push(out,bit_and(tx_at(a,i)+tx_at(b,i)+carry,65535)))
+      yield if carry==0 then out else push(out,carry)
+
+; The caller supplies a >= b, so no borrow can escape the high limb.
+fn ti_sub_limbs(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _
+  = big_trim(loop (i=0, carry=0, out=tx_ints()) while i<len(a)
+      next (i+1,if tx_at(a,i)-tx_at(b,i)-carry<0 then 1 else 0,push(out,bit_and(tx_at(a,i)-tx_at(b,i)-carry,65535))) yield out)
+
+fn ti_add(borrow a:TiInteger, borrow b:TiInteger) -> TiInteger
+  = if a.sign==0 then b else if b.sign==0 then a
+    else if a.sign==b.sign then TiInteger { sign=a.sign, limbs=ti_add_limbs(a.limbs,b.limbs) }
+    else let order=big_compare(a.limbs,b.limbs) in
+    if order==0 then ti_zero()
+    else if order>0 then TiInteger { sign=a.sign, limbs=ti_sub_limbs(a.limbs,b.limbs) }
+    else TiInteger { sign=b.sign, limbs=ti_sub_limbs(b.limbs,a.limbs) }
+
+fn ti_negate(borrow value:TiInteger) -> TiInteger = value with { sign=0-value.sign }
+fn ti_multiply(borrow a:TiInteger, borrow b:TiInteger) -> TiInteger
+  = if a.sign==0 || b.sign==0 then ti_zero()
+    else if len(a.limbs)==1 && tx_at(a.limbs,0)==1 then b with { sign=a.sign*b.sign }
+    else if len(b.limbs)==1 && tx_at(b.limbs,0)==1 then a with { sign=a.sign*b.sign }
+    else TiInteger { sign=a.sign*b.sign, limbs=big_mul(a.limbs,b.limbs) }

@@ -1,0 +1,116 @@
+; Test configuration from the same TOML scanner used by the module loader.
+import "std:numbers"
+import "std:strings"
+import "modules.neo"
+import "text.neo"
+import "toml.neo"
+
+type NtCase = { name:Arr u8 _, file:Arr u8 _, args:Arr Arr u8 _ _, environment:Arr Arr u8 _ _, build_environment:Arr Arr u8 _ _,
+                input:Arr u8 _, expected:Arr u8 _, has_stdout:bool, binary_stdout:bool, tolerance:f64, exit_code:i64, timeout:i64,
+                reject:bool, diagnostic:Arr u8 _, generated:bool, code:Arr u8 _, valid:bool }
+type NtPlan = { cases:Arr NtCase _, docs:Arr Arr u8 _ _, units:Arr Arr u8 _ _,
+                python:bool, integration:Arr u8 _, valid:bool }
+
+fn nt_empty_case() -> NtCase
+  = NtCase { name=tx_empty(), file=tx_empty(), args=md_words(), environment=md_words(), build_environment=md_words(), expected=tx_empty(),
+      input="",has_stdout=false,binary_stdout=false,tolerance=0.0,exit_code=0,timeout=30000,reject=false,diagnostic=tx_empty(),
+      generated=false, code=tx_empty(), valid=true }
+fn nt_cases() -> Arr NtCase _ = arr(i in 0..0) nt_empty_case()
+fn nt_case_at(borrow cases:Arr NtCase _, i:i64) -> NtCase
+  = if i>=0 && i<len(cases) then cases[i] else nt_empty_case() with { valid=false }
+fn nt_field_at(borrow fields:Arr TmField _, i:i64) -> TmField
+  = if i>=0 && i<len(fields) then fields[i] else TmField { path=md_words(),value=tx_empty(),test=-1 }
+
+fn nt_string(borrow value:Arr u8 _) -> Toml
+  = if tx_byte(value,0)==34 || tx_byte(value,0)==39 then tm_string(tm_state(value,false))
+    else tm_fail(tm_state(value,false))
+
+fn nt_hex(borrow text:Arr u8 _) -> BytesResult
+  = let valid=loop (i=0, ok=len(text)%2==0) while ok && i<len(text)
+      next (i+1,tm_hex(tx_byte(text,i))>=0) yield ok in
+    if !valid then bytes_error(22,"invalid hex test data",0) else
+    bytes_ok(arr(i in 0..len(text)/2) u8(16*tm_hex(tx_byte(text,i*2))+tm_hex(tx_byte(text,i*2+1))))
+
+type NtValues = { parser:Toml, values:Arr Arr u8 _ _ }
+fn nt_value_step(move s:NtValues, scalars:bool) -> NtValues
+  = let t=s.parser in let c=tm_at(t) in
+    let parsed=if c==34 || c==39 then tm_string(t) else if scalars then tm_scalar(t) else tm_fail(t) in
+    if !parsed.ok then s with { parser=parsed } else
+    let word=if parsed.vstr then parsed.word else if tx_equal(parsed.word,"true") then "True"
+      else if tx_equal(parsed.word,"false") then "False" else parsed.word in
+    let next_token=tm_blank(parsed) in let separator=tm_at(next_token) in
+    let after=if separator==44 then tm_blank(tm_skip(next_token,1))
+      else if separator==93 then next_token else tm_fail(next_token) in
+    NtValues { parser=after, values=push(s.values,word) }
+
+fn nt_values(borrow raw:Arr u8 _, scalars:bool) -> NtValues
+  = let initial=NtValues { parser=tm_blank(tm_expect(tm_state(raw,false),91)), values=md_words() } in
+    let values=loop (s=initial) while s.parser.ok && tm_at(s.parser)!=93
+      next (nt_value_step(s,scalars)) yield s in
+    values with { parser=tm_expect(values.parser,93) }
+
+fn nt_case_field(move c:NtCase, borrow field:TmField) -> NtCase
+  = let key=md_word(field.path,1) in let raw=field.value in
+    if len(field.path)==3 && (tx_equal(key,"env") || tx_equal(key,"build-env")) then
+      let value=nt_string(raw) in let name=md_word(field.path,2) in
+      if !value.ok || len(name)==0 || tx_has(name,61) || tx_has(name,0) || tx_has(value.word,0) then c with { valid=false }
+      else let entry=concat(name,"=",value.word) in
+        if tx_equal(key,"env") then c with { environment=push(c.environment,entry) }
+        else c with { build_environment=push(c.build_environment,entry) }
+    else if len(field.path)!=2 then c
+    else if tx_equal(key,"args") then
+      let list=nt_values(raw,true) in c with { args=list.values, valid=c.valid && list.parser.ok }
+    else if tx_equal(key,"exit") then
+      let code=int_parse(raw) in c with { exit_code=code.value, valid=c.valid && code.ok }
+    else if tx_equal(key,"timeout") then
+      let time=float_parse(raw) in
+      if !time.ok || !(time.value>=0.0 && time.value<=2147483.0) then c with { valid=false }
+      else c with { timeout=i64(time.value*1000.0) }
+    else if tx_equal(key,"stdout-tolerance") then
+      let tolerance=float_parse(raw) in
+      c with { tolerance=tolerance.value,valid=c.valid && tolerance.ok && tolerance.value>0.0 && tolerance.value<1.0 }
+    else if tx_equal(key,"reject") then
+      c with { reject=tx_equal(raw,"true"), valid=c.valid && (tx_equal(raw,"true") || tx_equal(raw,"false")) }
+    else if tx_equal(key,"stdin-hex") || tx_equal(key,"stdout-hex") then
+      let text=nt_string(raw) in let bytes=nt_hex(text.word) in if !text.ok || !bytes.ok then c with { valid=false }
+      else if tx_equal(key,"stdin-hex") then c with { input=bytes.value }
+      else c with { expected=bytes.value,has_stdout=true,binary_stdout=true }
+    else if tx_equal(key,"name") || tx_equal(key,"file") || tx_equal(key,"stdin") || tx_equal(key,"stdout") || tx_equal(key,"diagnostic") then
+      let text=nt_string(raw) in if !text.ok then c with { valid=false }
+      else if tx_equal(key,"name") then c with { name=text.word }
+      else if tx_equal(key,"file") then c with { file=text.word }
+      else if tx_equal(key,"stdin") then c with { input=text.word }
+      else if tx_equal(key,"stdout") then c with { expected=text.word,has_stdout=true,binary_stdout=false }
+      else c with { diagnostic=text.word }
+    else c
+
+fn nt_read_case(borrow toml:Toml, row:i64) -> NtCase
+  = let result=loop (i=0, c=nt_empty_case()) while c.valid && i<len(toml.fields)
+      next (i+1,let field=nt_field_at(toml.fields,i) in
+        if field.test==row && tx_equal(md_word(field.path,0),"test") then nt_case_field(c,field) else c) yield c in
+    result with { valid=result.valid && len(result.name)>0 && io_path_valid(result.file) &&
+      (result.tolerance==0.0 || !result.binary_stdout) }
+
+fn nt_tool_field(move plan:NtPlan, borrow field:TmField, borrow tool:Arr u8 _) -> NtPlan
+  = let key=md_word(field.path,2) in
+    if len(field.path)==1 && tx_equal(md_word(field.path,0),"test") then plan with { valid=false }
+    else if len(field.path)!=3 || !tx_equal(md_word(field.path,0),"tool") || !tx_equal(md_word(field.path,1),tool) then plan
+    else if tx_equal(key,"doc-tests") || tx_equal(key,"test-globs") then
+      let list=nt_values(field.value,false) in
+      if !list.parser.ok then plan with { valid=false } else
+      if tx_equal(key,"doc-tests") then plan with { docs=list.values } else plan with { units=list.values }
+    else if tx_equal(key,"python-tests") || tx_equal(key,"integration") then
+      let value=nt_string(field.value) in if !value.ok then plan with { valid=false }
+      else if tx_equal(key,"python-tests") then plan with { python=len(value.word)>0 }
+      else plan with { integration=value.word }
+    else plan
+
+fn nt_plan(move source:Arr u8 _) -> NtPlan
+  = let toml=tm_read(tx_newlines(source),true) in
+    let default_globs=push(push(md_words(),"tests/*_test.neo"),"tests/*_test.ax") in
+    let cases=if !toml.ok then nt_cases() else
+      check toml.tests>=0 in arr(i in 0..toml.tests) nt_read_case(toml,i) in
+    let tool=if toml.neo_tool then "neo" else "axon" in
+    loop (i=0, plan=NtPlan { cases=cases, docs=md_words(), units=default_globs, python=false, integration="", valid=toml.ok })
+      while plan.valid && i<len(toml.fields)
+      next (i+1,nt_tool_field(plan,nt_field_at(toml.fields,i),tool)) yield plan

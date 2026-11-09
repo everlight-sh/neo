@@ -1,15 +1,14 @@
 """Compare `neoc modules` with neoc/modules.py on a corpus of Neo sources.
 
-    python3 compiler/tests/modules_differential.py NEOC [--keep DIR] [--show N] [--originals] [--every K] [ROOT ...]
+    python3 compiler/tests/modules_differential.py NEOC [--target TRIPLE] [--keep DIR] [--show N] [--originals] [--every K] [ROOT ...]
 
 The corpus is that of differential.py. Each case is an entry file: a corpus
 file as it is, or a changed copy written beside it, so that its relative
 imports and package manifest still apply. The changes provoke the loader's
 errors: a missing, cyclic or invalid standard import, a repeated alias, a
 repeated declaration, unknown names, and one random deletion and insertion.
---every K changes only every Kth file. Cases that reach a package import,
-which the Neo loader does not support yet, and cases on which the Python
-loader crashes are counted, not compared.
+--every K changes only every Kth file. Cases on which the Python loader
+crashes are counted separately.
 """
 import argparse
 from concurrent.futures import ProcessPoolExecutor
@@ -48,7 +47,7 @@ def variants(label, text):
 
 
 def compare(job):
-    neoc, label, text, keep = job
+    neoc, label, text, keep, target = job
     source = Path(label.split('#')[0].split('@')[0])
     original = '@' not in label and '#' not in label
     if original: path = source
@@ -56,11 +55,13 @@ def compare(job):
         path = source.parent / f'.neodiff-{hashlib.sha256(label.encode()).hexdigest()[:12]}.neo'
         path.write_text(text.replace(SELF, path.name), encoding='utf-8')
     try:
-        try: expected = modules_dump.dump(path).encode()
+        try: expected = modules_dump.dump(path, target or modules_dump.DEFAULT_TARGET).encode()
         except (RecursionError, ValueError, IndexError, UnicodeError, TypeError, AttributeError, KeyError, RuntimeError) as exc:
             return 'crash', label, type(exc).__name__
-        run = subprocess.run([neoc, 'modules', str(modules_dump.ROOT), str(path)], capture_output=True, timeout=120)
-        if run.returncode == 0 and run.stdout.startswith(b'(unsupported'): return 'pkg', label, ''
+        args = [neoc, 'modules', str(modules_dump.ROOT), str(path)]
+        if target:
+            args.extend(['--target', target])
+        run = subprocess.run(args, capture_output=True, timeout=120)
         if run.returncode == 0 and run.stdout == expected: return 'ok', label, ''
         if keep:
             name = hashlib.sha256(label.encode()).hexdigest()[:12]
@@ -79,6 +80,7 @@ def compare(job):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('neoc'); ap.add_argument('roots', nargs='*'); ap.add_argument('--keep')
+    ap.add_argument('--target', help='compare the runtime sources selected for this target')
     ap.add_argument('--show', type=int, default=20); ap.add_argument('--originals', action='store_true', help='no changed copies')
     ap.add_argument('--every', type=int, default=1, help='change only every Kth file')
     args = ap.parse_intermixed_args()
@@ -87,14 +89,14 @@ def main():
     jobs = []
     for k, (label, text) in enumerate(differential.sources(args.roots or [differential.REPO])):
         cases = [(label, text)] if args.originals or k % args.every else variants(label, text)
-        jobs += [(neoc, case, body, args.keep) for case, body in cases]
-    counts = {'ok': 0, 'diff': 0, 'pkg': 0, 'crash': 0}; shown = 0
+        jobs += [(neoc, case, body, args.keep, args.target) for case, body in cases]
+    counts = {'ok': 0, 'diff': 0, 'crash': 0}; shown = 0
     with ProcessPoolExecutor() as pool:
         for status, label, detail in pool.map(compare, jobs, chunksize=8):
             counts[status] += 1
             if status == 'diff' and shown < args.show:
                 shown += 1; print(f'DIFF {label}: {detail}', flush=True)
-    print(f"{len(jobs)} cases: {counts['ok']} match, {counts['diff']} differ, {counts['pkg']} reach a package import, "
+    print(f"{len(jobs)} cases: {counts['ok']} match, {counts['diff']} differ, "
           f"{counts['crash']} skipped (Python loader crashed)")
     raise SystemExit(1 if counts['diff'] else 0)
 

@@ -1,0 +1,3 @@
+; Shared typed read/write transport callbacks for network protocols.
+import "std:strings"
+type HttpIO<C> = { context:C,read:Effect<net,time,process>(C,i64)->BytesResult,write:Effect<net,time,process>(C,Arr u8 _,i64)->IntResult }

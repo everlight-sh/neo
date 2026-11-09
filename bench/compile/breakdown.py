@@ -45,7 +45,7 @@ def main():
         for label, tree in TREES:
             for profile in ([], ['--dev']) if label in dev else ([],):
                 started = time.perf_counter()
-                r = subprocess.run(['./neo', 'build', path, '-o', '/tmp/breakdown-bin', '--report', '--no-cache', *profile],
+                r = subprocess.run(['./neoc.sh', 'build', path, '-o', '/tmp/breakdown-bin', '--report', '--no-cache', *profile],
                                    cwd=tree, capture_output=True, text=True)
                 wall = time.perf_counter() - started
                 if r.returncode != 0: raise SystemExit(f'{label} {program}: build failed\n{r.stdout[-2000:]}{r.stderr[-2000:]}')

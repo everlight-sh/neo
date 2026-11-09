@@ -1,0 +1,28 @@
+import "std:http_async"
+private effect(fs,net,env,time,process) fn pressure(capture:Arr u8 n)->Arr u8 _
+  = if str_equal(capture,"hold") then let waited=sleep_ms(20000) in "HELD" else
+    let bytes=arr(i in 0..16384) u8(97+i%26) in
+    loop(i=0,ok=true) while i<512 && ok next(i+1,let sent=http_render_write(web_html(bytes)) in sent.ok) yield if ok then "END" else ""
+private effect(fs,net,env,time,process) fn immediate(capture:Arr u8 n)->Arr u8 _ = "CHILD"
+private effect(fs,net,env,time,process) fn root_render(capture:Arr u8 n)->Arr u8 _
+  = let deadline=deadline_after(5000) in
+    let huge=if str_equal(capture,"/rollback") then arr(i in 0..16793600) u8(65) else "small" in
+    let brief=deadline_after(10) in
+    let part=http_deferred(huge,function(immediate)) in
+    let begin=http_render_start(web_html("SHELL"),arr(i in 0..if str_equal(capture,"/rollback") then 4 else 1) if str_equal(capture,"/queued-timeout") then http_deferred_frame(part,"","","TIMEOUT",brief.value) else part,deadline.value) in
+    if !begin.ok then web_encode_close(web_reply(503,"ROLLBACK","text/plain"),false) else
+    let waited=sleep_ms(50) in let failed=if str_equal(capture,"/root-fail") then async_fail(5) else noop() in begin.value
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/stats") then let stats=async_stats() in let handles=rt_handle_live() in
+      web_encode(web_json(concat("{\"live\":",int_text(stats.live),",\"captures\":",int_text(stats.capture_bytes),",\"results\":",int_text(stats.result_bytes),",\"handles\":",int_text(handles),"}")),false) else
+    if str_equal(request.path,"/queued-timeout") || str_equal(request.path,"/handoff") || str_equal(request.path,"/rollback") || str_equal(request.path,"/root-fail") then
+      let timer=deadline_after(10000) in let started=http_response_async(request.path,function(root_render),timer.value) in
+      if started.ok then started.value else web_encode_close(web_reply(503,"CAPACITY","text/plain"),false) else
+    if str_equal(request.path,"/large") || str_equal(request.path,"/hold") then
+      let timer=deadline_after(if web_query_get(request.query,"short").present then 150 else 30000) in
+      let started=http_render_start(web_html("SHELL"),arr(i in 0..1) http_deferred(if str_equal(request.path,"/hold") then "hold" else "large",function(pressure)),timer.value) in
+      if started.ok then started.value else web_encode(web_reply(503,"CAPACITY","text/plain"),false) else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main(port:i64)->i64
+  = let options=http_server_options(250,true) in check options.ok in serve_effect(port,handler)

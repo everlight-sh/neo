@@ -1,0 +1,13 @@
+import "std:http_async"
+private effect(fs,net,env,time,process) fn finish_fragment(state:Arr u8 n)->Arr u8 _
+  = let now=monotonic_ms() in
+    if str_equal(state,"first") then http_async_yield("second",web_html("<p>First deferred fragment</p>"),now.value+300) else
+    http_async_finish(web_html("<p>Second deferred fragment</p></body></html>"))
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/wait") then let now=monotonic_ms() in
+      let started=http_async_start(web_html("<!doctype html><html><body><p>Shell ready</p>"),"first",function(finish_fragment),now.value+300,now.value+10000) in
+      if started.ok then started.value else web_encode(web_reply(503,"Busy","text/plain"),false) else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main(port:i64,grace:i64)->i64
+  = let options=http_server_options(grace,true) in check options.ok in serve_effect(port,handler)

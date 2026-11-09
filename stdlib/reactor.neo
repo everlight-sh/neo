@@ -2,6 +2,7 @@ import "std:socket"
 import "std:datagram"
 import "std:process"
 import "std:vec"
+import "std:signals"
 
 ; Non-owning generational interests. Owners must stay live through each wait.
 ; Every wait resolves the generation again, so a reused fd cannot satisfy a
@@ -18,7 +19,7 @@ private fn reactor_error(code:i64,message:Arr u8 _,cancelled:bool) -> Readiness
 private effect(net,process) fn interest_fd(interest:Interest) -> i64
   = let address=rt_handle_fd(interest.owner,interest.kind) in
     if address<0 || (interest.events!=1 && interest.events!=4 && interest.events!=5) then -1 else
-    if interest.kind==2 || interest.kind==3 then address else
+    if interest.kind==2 || interest.kind==3 || interest.kind==21 then address else
     if interest.kind==10 && (interest.stream==1 || interest.stream==2) && !(interest.stream==2 && interest.events!=1) then
       load_i64(ptr_from_i64(address),if interest.stream==1 then 16 else 24) else -1
 private effect(net,process) fn reactor_prepare(interests:Arr Interest n,p:ptr) -> bool
@@ -52,3 +53,5 @@ effect(net,time,process) fn reactor_wait(interests:Arr Interest n,deadline:i64,c
 fn listener_interest(listener:Listener,key:i64) -> Interest = Interest { owner=listener_identity(listener),kind=3,stream=0,events=1,key=key }
 
 fn datagram_interest(socket:Datagram,events:i64,key:i64) -> Interest = Interest { owner=datagram_identity(socket),kind=2,stream=0,events=events,key=key }
+
+fn shutdown_signal_interest(signal:ShutdownSignal,key:i64)->Interest = Interest {owner=shutdown_signal_identity(signal),kind=21,stream=0,events=1,key=key}

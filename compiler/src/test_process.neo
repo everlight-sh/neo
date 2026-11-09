@@ -1,0 +1,136 @@
+; Run test compiler and program processes without a shell or Python.
+import "std:process"
+import "std:numbers"
+import "std:strings"
+import "std:time"
+import "build.neo"
+import "modules.neo"
+import "paths.neo"
+import "test_manifest.neo"
+import "text.neo"
+
+fn nt_extend(move out:Arr Arr u8 _ _, borrow words:Arr Arr u8 _ _, start:i64) -> Arr Arr u8 _ _
+  = loop (i=start, result=out) while i<len(words)
+      next (i+1,push(result,md_word(words,i))) yield result
+
+fn nt_env_key(borrow entry:Arr u8 _) -> Arr u8 _
+  = let end=str_find(entry,"=") in if end.present then pt_slice(entry,0,end.value) else entry
+fn nt_env_put(borrow environment:Arr Arr u8 _ _, borrow entry:Arr u8 _) -> Arr Arr u8 _ _
+  = let name=nt_env_key(entry) in
+    let kept=loop (i=0, out=md_words()) while i<len(environment)
+      next (i+1,let old=md_word(environment,i) in if tx_equal(nt_env_key(old),name) then out else push(out,old)) yield out in
+    push(kept,entry)
+fn nt_env_merge(borrow base:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = loop (i=0, env=base) while i<len(extra)
+      next (i+1,nt_env_put(env,md_word(extra,i))) yield env
+fn nt_env(borrow base:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = nt_env_merge(nt_env_put(base,"NEO_THREADS=1"),extra)
+
+; Shell-style quoting for the optional executable prefix, without expansion.
+type NtWords = { words:Arr Arr u8 _ _, word:Arr u8 _, quote:i64, escape:bool, active:bool }
+fn nt_word_end(move s:NtWords) -> NtWords
+  = if !s.active then s else s with { words=push(s.words,s.word), word=tx_empty(), active=false }
+fn nt_word_step(move s:NtWords, byte:i64) -> NtWords
+  = if s.escape then s with { word=push(s.word,u8(byte)), escape=false }
+    else if byte==92 && s.quote!=39 then s with { escape=true, active=true }
+    else if s.quote!=0 then
+      if byte==s.quote then s with { quote=0 } else s with { word=push(s.word,u8(byte)) }
+    else if byte==34 || byte==39 then s with { quote=byte, active=true }
+    else if byte==32 || byte==9 || byte==10 || byte==13 then nt_word_end(s)
+    else s with { word=push(s.word,u8(byte)), active=true }
+fn nt_words(borrow text:Arr u8 _) -> NtWords
+  = let end=loop (i=0, s=NtWords { words=md_words(), word=tx_empty(), quote=0, escape=false, active=false })
+      while i<len(text) next (i+1,nt_word_step(s,tx_byte(text,i))) yield s in nt_word_end(end)
+
+type NtProcess = { output:Arr u8 _, errors:Arr u8 _, code:i64, ok:bool, timeout:bool, overflow:bool, pending:bool }
+
+fn nt_collect(borrow old:Arr u8 _, borrow chunk:Arr u8 _, limit:i64) -> Arr u8 _
+  = if len(old)>=limit || len(chunk)==0 then old else
+    concat(old,pt_slice(chunk,0,if len(chunk)<limit-len(old) then len(chunk) else limit-len(old)))
+
+effect(process,fs,time) fn nt_process_step(process:Process, move result:NtProcess, deadline:i64, limit:i64) -> NtProcess
+  = let state=process_status(process) in
+    let timed=state.running && deadline>=0 && deadline_remaining(deadline)==0 in
+    let read=process_try_read(process,1,4096) in let err=process_try_read(process,2,4096) in
+    let out=if read.ok then read.value else tx_empty() in let errors=if err.ok then err.value else tx_empty() in
+    let data_ready=len(out)>0 || len(errors)>0 in
+    let paused=if state.running && !data_ready && !timed then sleep_ms(5) else int_ok(0) in
+    NtProcess { output=nt_collect(result.output,out,limit), errors=nt_collect(result.errors,errors,16384),
+      code=if !state.ok then 127 else if state.signal!=0 then 0-state.signal else state.exit_code,
+      ok=state.ok, timeout=timed, overflow=result.overflow || (len(out)>0 && len(out)>limit-len(result.output)),
+      pending=!timed && state.ok && (state.running || data_ready) }
+
+type NtPump = { result:NtProcess, sent:i64, closed:bool }
+effect fn nt_pump(process:Process, borrow input:Arr u8 _, move state:NtPump, deadline:i64, limit:i64) -> NtPump
+  = let written=if state.closed || state.sent==len(input) then int_ok(0) else process_try_write(process,input,state.sent) in
+    let sent=state.sent+(if written.ok then written.value else 0) in
+    let failed=!written.ok && written.error.code!=4 && written.error.code!=rt_again() in
+    let closing=!state.closed && (failed || sent==len(input)) in
+    let closed=if closing then process_close_input(process) else int_ok(0) in
+    let result=nt_process_step(process,state.result,deadline,limit) in
+    let result=if failed && !result.pending && result.code==0 then result with { ok=false,errors="child did not consume stdin" } else result in
+    NtPump { result=result,sent=sent,closed=state.closed || closing }
+
+effect fn nt_process_input(borrow executable:Arr u8 _, borrow arguments:Arr Arr u8 _ _,
+                           borrow environment:Arr Arr u8 _ _, borrow input:Arr u8 _, timeout:i64, limit:i64) -> NtProcess
+  = let empty=NtProcess { output=tx_empty(),errors=tx_empty(),code=127,ok=false,timeout=false,overflow=false,pending=true } in
+    let end=if timeout<0 then int_ok(-1) else deadline_after(timeout) in
+    if !end.ok then empty with { errors=end.error.message, pending=false } else
+    using child=process_start(executable,arguments,environment) in
+    let state=loop (s=NtPump { result=empty,sent=0,closed=false }) while s.result.pending
+      next (nt_pump(child,input,s,end.value,limit)) yield s in
+    if state.result.ok && state.result.code==0 && state.sent<len(input) then
+      state.result with { ok=false,errors="child did not consume stdin" } else state.result
+
+effect fn nt_process(borrow executable:Arr u8 _, borrow arguments:Arr Arr u8 _ _,
+                     borrow environment:Arr Arr u8 _ _, timeout:i64, limit:i64) -> NtProcess
+  = nt_process_input(executable,arguments,environment,"",timeout,limit)
+
+type NtRun = { root:Arr u8 _, project:Arr u8 _, compiler:Arr u8 _, target:Arr u8 _,
+               source:Arr u8 _, binary:Arr u8 _, runner:Arr u8 _,
+               runner_args:Arr Arr u8 _ _, environment:Arr Arr u8 _ _ }
+
+fn nt_compile_args(borrow run:NtRun, borrow path:Arr u8 _, reject:bool) -> Arr Arr u8 _ _
+  = let args=push(push(push(md_words(),if reject then "check" else "build"),run.root),path) in
+    let args=if reject then args else push(push(args,"-o"),run.binary) in
+    push(push(args,"--target"),run.target)
+
+fn nt_diagnostic(borrow result:NtProcess) -> Arr u8 _
+  = if len(result.output)==0 then str_trim(result.errors) else
+    str_trim(concat(result.output,if len(result.errors)>0 then "\n" else "",result.errors))
+
+fn nt_magnitude(value:f64) -> f64 = if value<0.0 then 0.0-value else value
+fn nt_stdout_matches(borrow c:NtCase, borrow actual:Arr u8 _) -> bool
+  = if c.binary_stdout then tx_equal(actual,c.expected)
+    else if c.tolerance<=0.0 then tx_equal(tx_newlines(actual),c.expected) else
+    let wanted=float_parse(str_trim(c.expected)) in let got=float_parse(str_trim(actual)) in
+    let scale=nt_magnitude(wanted.value) in
+    wanted.ok && got.ok && nt_magnitude(got.value-wanted.value)<=c.tolerance*(if scale<1.0 then 1.0 else scale)
+
+effect fn nt_program_case(borrow run:NtRun, borrow c:NtCase) -> Arr u8 _
+  = let args=if len(run.runner)==0 then c.args else nt_extend(push(run.runner_args,run.binary),c.args,0) in
+    let executable=if len(run.runner)==0 then run.binary else run.runner in
+    let cap=if len(c.expected)>8192 then 2*len(c.expected)+1 else 16384 in
+    let result=nt_process_input(executable,args,nt_env(run.environment,c.environment),c.input,c.timeout,cap) in
+    if result.timeout then concat("timed out after ",int_text(c.timeout)," ms")
+    else if !result.ok then concat("could not run the test: ",nt_diagnostic(result))
+    else if result.code!=c.exit_code then concat("exit ",int_text(result.code),", expected ",int_text(c.exit_code),": ",nt_diagnostic(result))
+    else if c.has_stdout && (result.overflow || !nt_stdout_matches(c,result.output)) then
+      concat("stdout differs: expected ",tx_repr(pt_slice(c.expected,0,if len(c.expected)>512 then 512 else len(c.expected)),true),
+        ", got ",tx_repr(pt_slice(result.output,0,if len(result.output)>512 then 512 else len(result.output)),true))
+    else tx_empty()
+
+effect fn nt_execute_case(borrow run:NtRun, borrow c:NtCase) -> Arr u8 _
+  = if !c.valid then "invalid test case or unreadable source" else
+    let path=if c.generated then run.source else pt_realpath(pt_join(run.project,c.file)) in
+    let saved=if c.generated then fs_write(path,c.code) else int_ok(0) in
+    if !saved.ok then saved.error.message else
+    let built=nt_process(run.compiler,nt_compile_args(run,path,c.reject),
+      nt_env_merge(run.environment,c.build_environment),-1,16384) in
+    if !built.ok then concat("could not run the compiler: ",nt_diagnostic(built))
+    else if c.reject then
+      if built.code==0 then "expected the checker to reject this source"
+      else if (built.code!=1 && built.code!=2) || (len(c.diagnostic)>0 && !str_find(built.output,c.diagnostic).present) then
+        concat("unexpected rejection: ",nt_diagnostic(built)) else tx_empty()
+    else if built.code!=0 then concat("build failed: ",nt_diagnostic(built))
+    else nt_program_case(run,c)

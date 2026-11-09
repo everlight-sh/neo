@@ -1,0 +1,131 @@
+; Prepared objects contain the dependency closure and are linked from a
+; validated snapshot. The application is checked and lowered on every build.
+import "std:fs"
+import "std:hashmap"
+import "std:io"
+import "std:json"
+import "std:option"
+import "std:random"
+import "std:sha256"
+import "std:strings"
+import "build.neo"
+import "build_report.neo"
+import "modules.neo"
+import "packages.neo"
+import "paths.neo"
+import "project_fs.neo"
+import "text.neo"
+
+type LcArtifact = { bytes:Arr u8 _, key:Arr u8 _, directory:Arr u8 _, hit:bool, compile_ns:i64 }
+
+fn lc_visit(borrow m:Mods, move selected:Arr i64 _, module:i64, entry:i64) -> Arr i64 _
+  = if module==entry || module<0 || module>=len(selected) || tx_at(selected,module)==1 then selected else
+    let edges=md_list(m.imports,module) in
+    loop (i=0, seen=set(selected,module,1)) while i<len(edges)
+      next (i+4,lc_visit(m,seen,tx_at(edges,i),entry)) yield seen
+
+fn lc_in_roots(borrow path:Arr u8 _, borrow roots:Arr Arr u8 _ _) -> bool
+  = loop (i=0, found=false) while !found && i<len(roots)
+      next (i+1,let root=md_word(roots,i) in tx_equal(path,root) || pt_within(path,root)) yield found
+
+effect(fs) fn lc_selection(borrow m:Mods, borrow requested:Arr Arr u8 _ _) -> Arr i64 _
+  = let roots=loop (i=0, roots=md_words()) while i<len(requested)
+      next (i+1,push(roots,pt_realpath(md_word(requested,i)))) yield roots in
+    let entry=md_entry_module(m) in
+    loop (i=0, selected=arr(k in 0..len(m.paths)) 0) while i<len(m.paths)
+      next (i+1,let path=md_path(m,i) in
+        if pt_within(path,m.runtime) || pt_within(path,m.stdlib) || lc_in_roots(path,roots)
+        then lc_visit(m,selected,i,entry) else selected) yield selected
+
+fn lc_digest(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes(tx_empty(),sha256(bytes))
+
+; AST IDs in private LLVM labels are local to a build. Normalize them for
+; cache identity. Cross-object function names already use canonical names.
+type LcIr = { at:i64, from:i64, count:i64, names:HashMap<Arr u8 _,i64>, hash:Sha256Stream }
+fn lc_private_symbol(borrow ir:Arr u8 _, at:i64) -> bool
+  = bytes_match_at(ir,at,"%neo_record_") || bytes_match_at(ir,at,"@neo_failure_") ||
+    bytes_match_at(ir,at,"@neo_bytes_") || bytes_match_at(ir,at,"@neo_arena_finalizer_") ||
+    bytes_match_at(ir,at,"@neo_retain_record_") || bytes_match_at(ir,at,"@neo_release_record_") ||
+    bytes_match_at(ir,at,"@neo.slot.")
+fn lc_symbol_char(byte:i64) -> bool
+  = (byte>=48 && byte<=57) || (byte>=65 && byte<=90) || (byte>=97 && byte<=122) || byte==46 || byte==95
+fn lc_ir_step(borrow ir:Arr u8 _, move s:LcIr) -> LcIr
+  = let at=loop (i=s.at) while i<len(ir) && tx_byte(ir,i)!=37 && tx_byte(ir,i)!=64 next (i+1) yield i in
+    if at==len(ir) then s with { at=at } else if !lc_private_symbol(ir,at) then s with { at=at+1 } else
+    let byte=tx_byte(ir,at) in
+    let end=loop (i=at+1) while lc_symbol_char(tx_byte(ir,i)) next (i+1) yield i in
+    let symbol=pt_slice(ir,at,end) in let old=hashmap_get(s.names,symbol) in
+    let id=option_or(old,s.count) in
+    let hash=sha256_stream_add(s.hash,pt_slice(ir,s.from,at)) in
+    let hash=sha256_stream_add(hash,concat(if byte==37 then "%neo_canonical_" else "@neo_canonical_",int_text(id))) in
+    LcIr { at=end,from=end,count=s.count+(if option_is_some(old) then 0 else 1),hash=hash,
+      names=if option_is_some(old) then s.names else hashmap_put(s.names,symbol,id) }
+fn lc_ir_digest(borrow ir:Arr u8 _) -> Arr u8 _
+  = let initial=LcIr { at=0,from=0,count=0,names=hashmap_empty::<Arr u8 _,i64>(47,53),hash=sha256_stream_start() } in
+    let state=loop (s=initial) while s.at<len(ir) next (lc_ir_step(ir,s)) yield s in
+    let hash=sha256_stream_add(state.hash,pt_slice(ir,state.from,len(ir))) in
+    tx_hex_bytes(tx_empty(),sha256_stream_finish(hash))
+
+fn lc_sources(borrow m:Mods, borrow selected:Arr i64 _) -> Arr u8 _
+  = let state=loop (i=0, hash=sha256_stream_start()) while i<len(m.paths)
+      next (i+1,if tx_at(selected,i)!=1 then hash else
+        sha256_stream_add(hash,concat(md_path(m,i),"\0",lc_digest(md_word(m.sources,i)),"\n"))) yield hash in
+    tx_hex_bytes(tx_empty(),sha256_stream_finish(state))
+
+effect(fs) fn lc_object(borrow path:Arr u8 _) -> BytesResult
+  = let opened=file_open(path,0) in
+    if !opened.ok then bytes_error(opened.error.code,opened.error.message,0) else
+    let chunks=loop (part=file_read_chunk(opened.value,65536), pieces=md_words())
+      while part.ok && len(part.value)>0 next (file_read_chunk(opened.value,65536),push(pieces,part.value))
+      yield if part.ok then bytes_ok(str_concat_parts(pieces)) else part in
+    let closed=file_close(opened.value) in
+    if !closed.ok && chunks.ok then bytes_error(closed.error.code,closed.error.message,0) else chunks
+
+effect(fs) fn lc_read(borrow directory:Arr u8 _, borrow identity:Arr u8 _) -> Arr u8 _
+  = let manifest=fs_read(pt_join(directory,"manifest.json")) in
+    if !manifest.ok then "" else let parsed=json_parse(manifest.value) in
+    if !parsed.ok || !tx_equal(pk_text(parsed.value,"identity"),identity) then "" else
+    let ir=bd_file_digest(pt_join(directory,"library.ll")) in
+    if !ir.ok || !tx_equal(ir.value,pk_text(parsed.value,"ir_sha256")) then "" else
+    let binary=lc_object(pt_join(directory,"library.o")) in
+    if !binary.ok || !tx_equal(lc_digest(binary.value),pk_text(parsed.value,"object_sha256")) then "" else binary.value
+
+effect fn lc_compile(borrow config:BdConfig, borrow cache:Arr u8 _, borrow ir:Arr u8 _) -> BytesResult
+  = let token=random_bytes(16) in if !token.ok then bytes_error(token.error.code,token.error.message,0) else
+    let stage=pt_join(cache,concat(".prepare-",tx_hex_bytes(tx_empty(),token.value))) in
+    let created=fs_mkdir(stage) in if !created.ok then bytes_error(created.error.code,created.error.message,0) else
+    let source=pt_join(stage,"library.ll") in let object=pt_join(stage,"library.o") in
+    let written=fs_write(source,ir) in
+    let status=if written.ok then bd_exit_code(bd_execute(config.clang,bd_compile_arguments(config,source,object,""),false).status) else 1 in
+    let artifact=if !written.ok then bytes_error(written.error.code,written.error.message,0)
+      else if status==0 then lc_object(object) else bytes_error(5,"Clang could not prepare the dependency object",0) in
+    let clean_source=fs_remove(source) in let clean_object=fs_remove(object) in let removed=fs_rmdir(stage) in
+    if artifact.ok && !removed.ok then bytes_error(removed.error.code,removed.error.message,0) else artifact
+
+effect fn lc_publish(borrow directory:Arr u8 _, borrow ir:Arr u8 _, borrow identity:Arr u8 _, borrow bytes:Arr u8 _) -> unit
+  = let made=pf_mkdirs(directory) in if !made.ok then bd_error(made.error.message) else
+    let saved_ir=fs_atomic_replace(pt_join(directory,"library.ll"),ir) in
+    if !saved_ir.ok then bd_error(saved_ir.error.message) else
+    let saved_object=fs_atomic_replace(pt_join(directory,"library.o"),bytes) in
+    if !saved_object.ok then bd_error(saved_object.error.message) else
+    let manifest=concat("{\"identity\":",json_quote(identity),",\"ir_sha256\":",json_quote(lc_digest(ir)),
+      ",\"object_sha256\":",json_quote(lc_digest(bytes)),"}\n") in
+    let committed=fs_atomic_replace(pt_join(directory,"manifest.json"),manifest) in
+    if !committed.ok then bd_error(committed.error.message) else noop()
+
+effect fn lc_prepare(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow sources:Arr u8 _, force:bool) -> LcArtifact
+  = let cache=pt_realpath(path) in let ir_digest=lc_ir_digest(ir) in
+    let version=bd_execute(config.clang,push(md_words(),"--version"),true) in
+    let key=lc_digest(concat("neo-prepared-object-v2\0",config.target,"\0",config.level,"\0",config.clang,"\0",
+      version.output,"\0",ir_digest,"\0",sources)) in
+    let directory=pt_join(cache,key) in let cached=if force || bd_exit_code(version.status)!=0 then "" else lc_read(directory,ir_digest) in
+    if len(cached)>0 then LcArtifact { bytes=cached,key=key,directory=directory,hit=true,compile_ns=0 } else
+    let ready=pf_mkdirs(cache) in
+    let checked=if !ready.ok then bd_error(ready.error.message) else noop() in
+    let started=bd_clock() in let made=lc_compile(config,cache,ir) in let elapsed=bd_elapsed(started,bd_clock()) in
+    let published=if !made.ok then bd_error(made.error.message) else lc_publish(directory,ir,ir_digest,made.value) in
+    LcArtifact { bytes=made.value,key=key,directory=directory,hit=false,compile_ns=elapsed }
+
+fn lc_report(borrow cache:LcArtifact) -> Arr u8 _
+  = concat("{\"cache\":",if cache.hit then "\"hit\"" else "\"miss\"",",\"key\":",json_quote(cache.key),
+      ",\"directory\":",json_quote(cache.directory),",\"compile_seconds\":",br_seconds(cache.compile_ns),"}")

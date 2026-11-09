@@ -1,0 +1,6 @@
+import "std:io"
+import "std:sha256"
+
+effect(fs) fn main() -> unit
+  = let input=file_read(0,1048576) in check input.ok in
+    let output=print_out(sha256(input.value)) in check output.ok in noop()
