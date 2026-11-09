@@ -28,6 +28,10 @@ private fn str_find_byte(borrow text:Arr u8 n, needle:u8) -> i64
 
 fn str_find (text: Arr u8 n, needle: Arr u8 m) -> OptionInt
   = let found = if m==1 then str_find_byte(text,needle[0]) else
+    if m==4 then let word=byte_read_le(needle,0,4) in
+      loop (i:i64{i>=0}=0, position= -1) while position<0 && i<=n-4
+        next (i+1,if byte_read_le(text,i,4)==word then i else -1) yield position
+    else
     loop (i = 0, position = -1) while position < 0 && i + m <= n
       next (i + 1, let equal=loop(j=0,same=true) while same && j<m
         next(j+1,check j>=0 && j<m && i+j>=0 && i+j<n in text[i+j]==needle[j]) yield same in if equal then i else -1) yield position in

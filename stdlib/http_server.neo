@@ -22,7 +22,7 @@ fn web_reason(status:i64) -> Arr u8 _
     else if status==403 then "Forbidden" else if status==404 then "Not Found" else if status==405 then "Method Not Allowed" else if status==409 then "Conflict"
     else if status==413 then "Content Too Large" else if status==415 then "Unsupported Media Type" else if status==422 then "Unprocessable Content" else if status==429 then "Too Many Requests" else if status==503 then "Service Unavailable" else "Internal Server Error"
 fn web_header_safe(value:Arr u8 n) -> bool
-  = !str_find(value,"\r").present && !str_find(value,"\n").present && !str_find(value,"\0").present && http_field_value(value)
+  = http_field_value(value)
 fn web_with_header(response:WebResponse,name:Arr u8 n,value:Arr u8 m) -> WebResponse
   = if !http_token(name) || !web_header_safe(value) || str_equal(http_lower(name),"content-length") || str_equal(http_lower(name),"transfer-encoding") || str_equal(http_lower(name),"connection") || str_equal(http_lower(name),"content-type")
     then web_reply(500,"Invalid response header","text/plain; charset=utf-8") else response with { headers=concat(response.headers,name,": ",value,"\r\n") }
@@ -35,7 +35,7 @@ fn web_encode_connection(response:WebResponse,head:bool,close:bool) -> Arr u8 _
   = let empty=response.status==204 || response.status==304 in
     concat("HTTP/1.1 ",int_text(response.status)," ",web_reason(response.status),"\r\n",if empty then "" else concat("Content-Length: ",int_text(len(response.body)),"\r\n"),
       "Content-Type: ",if web_header_safe(response.content_type) then response.content_type else "application/octet-stream","\r\n",
-      if str_find(http_lower(response.headers),"cache-control:").present then "" else concat("Cache-Control: ",if response.immutable then "public, max-age=31536000, immutable" else "no-store","\r\n"),
+      if len(response.headers)>0 && str_find(http_lower(response.headers),"cache-control:").present then "" else concat("Cache-Control: ",if response.immutable then "public, max-age=31536000, immutable" else "no-store","\r\n"),
       "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
       response.headers,if close then "Connection: close\r\n\r\n" else "Connection: keep-alive\r\n\r\n",if head || empty then "" else response.body)
 

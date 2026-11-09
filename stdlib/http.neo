@@ -48,7 +48,8 @@ fn http_token(text:Arr u8 n) -> bool
   = n>0 && loop(i=0,valid=true) while valid && i<n
       next(i+1,let byte=str_byte(text,i) in byte>=48 && byte<=57 || byte>=65 && byte<=90 || byte>=97 && byte<=122 || str_find("!#$%&'*+-.^_`|~",str_slice(text,i,i+1)).present) yield valid
 fn http_field_value(text:Arr u8 n) -> bool
-  = loop(i=0,valid=true) while valid && i<n next(i+1,let byte=str_byte(text,i) in byte==9 || byte>=32 && byte!=127) yield valid
+  = loop(i:i64{i>=0}=0,valid=true) while valid && i<n
+      next(i+1,let byte=text[i] in byte=='\t' || byte>=' ' && byte!=u8(127)) yield valid
 fn http_lower (text: Arr u8 n) -> Arr u8 _
   = arr(i in 0..n) if text[i] >= 'A' && text[i] <= 'Z' then u8(i64(text[i]) + 32) else text[i]
 fn http_line_end (bytes: Arr u8 n, start: i64) -> i64

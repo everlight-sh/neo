@@ -12,3 +12,7 @@ fn test_incomplete_target() -> bool
 fn test_chunked_request_body() -> bool
   = let request=web_request("POST /a HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n",0) in
     str_equal(request.body,"abc") && str_equal(request.path,"/a")
+
+fn test_response_header_validation() -> bool
+  = web_header_safe("application/json\t") && !web_header_safe("text/plain\r\nX-Injected: yes") &&
+    !web_header_safe("text/plain\0") && !web_header_safe("text/plain\x7f")
