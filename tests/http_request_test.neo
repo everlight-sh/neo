@@ -1,0 +1,14 @@
+import "std:http_server"
+
+fn test_request_target() -> bool
+  = let request=web_request("GET /healthz/?x=a?b HTTP/1.1\r\nHost: localhost\r\n\r\n",42) in
+    str_equal(request.method,"GET") && str_equal(request.path,"/healthz") &&
+    str_equal(request.query,"x=a?b") && len(request.body)==0 && request.stamp==42
+
+fn test_incomplete_target() -> bool
+  = let request=web_request("GET /broken?x=1",0) in
+    str_equal(request.method,"GET") && len(request.path)==0 && len(request.query)==0
+
+fn test_chunked_request_body() -> bool
+  = let request=web_request("POST /a HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n",0) in
+    str_equal(request.body,"abc") && str_equal(request.path,"/a")

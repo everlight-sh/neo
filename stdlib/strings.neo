@@ -14,8 +14,21 @@ fn str_slice (borrow text: Arr u8 n, start: i64, end: i64) -> Arr u8 _
 fn str_starts (text: Arr u8 n, prefix: Arr u8 m) -> bool
   = m <= n && loop (i: i64{i >= 0} = 0, equal = true) while equal && i < m
       next (i + 1, text[i] == prefix[i]) yield equal
+
+private fn str_find_byte(borrow text:Arr u8 n, needle:u8) -> i64
+  = let ones=72340172838076673 in let repeated=wrapping_mul(i64(needle),ones) in
+    loop (i:i64{i>=0}=0, found= -1) while found<0 && i<=n-8
+      next (i+8, let word=bit_xor(byte_read_le(text,i,8),repeated) in
+        ; The first set high bit marks the first zero byte in the XOR.
+        let zeroes=bit_and(bit_and(wrapping_sub(word,ones),bit_xor(word,-1)),-9187201950435737472) in
+        if zeroes==0 then -1 else i+count_trailing_zeros(zeroes)/8)
+      yield if found>=0 then found else
+        loop (j:i64{j>=0}=i, at= -1) while at<0 && j<n
+          next (j+1, if text[j]==needle then j else -1) yield at
+
 fn str_find (text: Arr u8 n, needle: Arr u8 m) -> OptionInt
-  = let found = loop (i = 0, position = -1) while position < 0 && i + m <= n
+  = let found = if m==1 then str_find_byte(text,needle[0]) else
+    loop (i = 0, position = -1) while position < 0 && i + m <= n
       next (i + 1, let equal=loop(j=0,same=true) while same && j<m
         next(j+1,check j>=0 && j<m && i+j>=0 && i+j<n in text[i+j]==needle[j]) yield same in if equal then i else -1) yield position in
     if found < 0 then none_int() else some_int(found)

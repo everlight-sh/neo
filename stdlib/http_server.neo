@@ -39,15 +39,32 @@ fn web_encode_connection(response:WebResponse,head:bool,close:bool) -> Arr u8 _
       "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
       response.headers,if close then "Connection: close\r\n\r\n" else "Connection: keep-alive\r\n\r\n",if head || empty then "" else response.body)
 
+private type WebTarget = { method_end:i64, end:i64, query:i64 }
+private fn web_target(borrow request:Arr u8 n) -> WebTarget
+  = let first=str_find(request," ") in
+    if !first.present then WebTarget { method_end= -1,end= -1,query= -1 } else
+    check first.value>=0 && first.value<n in
+    loop (i:i64{i>=0}=first.value+1, query= -1) while i<n && request[i]!=' '
+      next (i+1,if query<0 && request[i]=='?' then i else query)
+      yield WebTarget { method_end=first.value,end=if i<n then i else -1,query=query }
+
+private fn web_target_query(borrow request:Arr u8 _, target:WebTarget) -> Arr u8 _
+  = if target.end<0 || target.query<0 then "" else str_slice(request,target.query+1,target.end)
+
 fn web_query(request: Arr u8 n) -> Arr u8 _
-  = let first=str_find(request," ") in if !first.present then "" else
-    let rest=str_slice(request,first.value+1,n) in let end=str_find(rest," ") in
-    if !end.present then "" else let target=str_slice(rest,0,end.value) in let query=str_find(target,"?") in
-    if query.present then str_slice(target,query.value+1,len(target)) else ""
+  = web_target_query(request,web_target(request))
 fn web_normal_path(path: Arr u8 n) -> Arr u8 _
   = if n>1 && str_byte(path,n-1)==47 then str_slice(path,0,n-1) else path
 fn web_request(raw: Arr u8 n, stamp: i64) -> WebRequest
-  = WebRequest { method=http_method(raw),path=web_normal_path(http_path(raw)),query=web_query(raw),body=(if str_equal(http_lower(web_header(raw,"transfer-encoding")),"chunked") then http_decode_chunked(http_body(raw),16777216).value else http_body(raw)),param="",raw=raw,route="",server=true,stamp=stamp }
+  = let target=web_target(raw) in
+    let method=if target.method_end<0 then "" else str_slice(raw,0,target.method_end) in
+    let path=if target.end<0 then "" else
+      str_slice(raw,target.method_end+1,if target.query<0 then target.end else target.query) in
+    let body=http_body(raw) in
+    let decoded=if len(body)>0 && str_equal(http_lower(web_header(raw,"transfer-encoding")),"chunked")
+      then http_decode_chunked(body,16777216).value else body in
+    WebRequest { method=method,path=web_normal_path(path),query=web_target_query(raw,target),body=decoded,
+      param="",raw=raw,route="",server=true,stamp=stamp }
 fn web_static_request(path: Arr u8 n) -> WebRequest
   = WebRequest { method="GET",path=path,query="",body="",param="",raw="",route="",server=false,stamp=0 }
 

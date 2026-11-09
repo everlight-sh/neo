@@ -70,10 +70,12 @@ fn cg_guard(move s:CgState, borrow bad:Arr u8 _, borrow message:Arr u8 _, precon
 fn cg_arithmetic_guard(move s:CgState, borrow message:Arr u8 _) -> CgState
   = let diagnostic=concat(message," at ",s.name,":",int_text(s.line)) in cg_guard(s,s.value.operand,diagnostic,false)
 
-fn cg_string(move s:CgState, id:i64, borrow bytes:Arr u8 _) -> CgState
-  = let symbol=concat("@neo_bytes_",int_text(id)) in
+fn cg_string(move s:CgState, borrow bytes:Arr u8 _) -> CgState
+  ; Specializations and repeated lowering can reuse the same AST literal.
+  = let symbol=concat("@neo_bytes_",int_text(s.function),"_",int_text(s.serial)) in
     let operand=concat("{ ptr ",symbol,", i64 ",int_text(len(bytes)),", i64 1, ptr inttoptr (i64 1 to ptr) }") in
-    s with { globals=concat(s.globals,cg_bytes(symbol,bytes,false)), value=cg_array_value(cg_value(n_t_u8(),""),operand) }
+    s with { serial=s.serial+1, globals=concat(s.globals,cg_bytes(symbol,bytes,false)),
+      value=cg_array_value(cg_value(n_t_u8(),""),operand) }
 
 fn cg_extract(move s:CgState, borrow array:CgValue, field:i64, ty:i64) -> CgState
   = cg_ins(s,ty,concat("extractvalue ",cg_typed(array),", ",int_text(field)))
@@ -338,7 +340,13 @@ fn cg_byte_read(move s:CgState, borrow bytes:CgValue, borrow offset:Arr u8 _, bo
     let s=cg_ins(s,n_t_i64(),concat("sub i64 ",s.value.operand,", ",width)) in
     let s=cg_byte_bounds(s,offset,s.value.operand,"byte read bounds") in
     let s=cg_extract(s,bytes,0,n_t_ptr()) in let s=cg_offset(s,"i8",s.value.operand,offset) in
-    cg_release(cg_ins(s,n_t_i64(),concat("call i64 @neo.bytes.read(ptr ",s.value.operand,", i64 ",width,")")),bytes)
+    let loaded=if tx_equal(width,"8") then
+      cg_ins(s,n_t_i64(),concat("load i64, ptr ",s.value.operand,", align 1"))
+    else if tx_equal(width,"4") then
+      let word=cg_ins(s,n_t_i32(),concat("load i32, ptr ",s.value.operand,", align 1")) in
+      cg_ins(word,n_t_i64(),concat("zext i32 ",word.value.operand," to i64"))
+    else cg_ins(s,n_t_i64(),concat("call i64 @neo.bytes.read(ptr ",s.value.operand,", i64 ",width,")")) in
+    cg_release(loaded,bytes)
 
 fn cg_byte_copy(move s:CgState, borrow original:CgValue, borrow offset:Arr u8 _, borrow source:CgValue) -> CgState
   = let s=cg_extract(s,original,1,n_t_i64()) in let length=s.value.operand in
@@ -379,10 +387,7 @@ fn cg_byte_slice(move s:CgState, borrow bytes:CgValue, borrow lo:Arr u8 _, borro
 
 fn cg_byte_builtin(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue _) -> CgState
   = let first=cg_arg(values,0) in let second=cg_arg(values,1) in let third=cg_arg(values,2) in
-    if tx_equal(name,"byte_equal") then
-      let s=cg_ins(s,n_t_bool(),concat("call i1 @neo.bytes.equal(",cg_arg_text(values),")")) in
-      cg_release(cg_release(s,second),first)
-    else if tx_equal(name,"byte_read_le") then cg_byte_read(s,first,second.operand,third.operand)
+    if tx_equal(name,"byte_read_le") then cg_byte_read(s,first,second.operand,third.operand)
     else if tx_equal(name,"byte_copy") then cg_byte_copy(s,first,second.operand,third)
     else if tx_equal(name,"byte_write_le") then cg_byte_write(s,first,second.operand,third.operand,cg_arg(values,3).operand)
     else cg_byte_slice(s,first,second.operand,third.operand)
@@ -537,7 +542,7 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       tx_equal(name,"ref_release") || tx_equal(name,"ref_null") then cg_reference(m,fns,env,s,id,n,name)
     else if tx_equal(name,"data") then
       let id=ast_list_at(m.ast,n.b,0) in let arg=md_node(m,id) in
-      let bytes=if arg.kind==n_var() then s with { value=cg_lookup(m,env,arg.a) } else cg_string(s,id,md_str(m,arg.a)) in
+      let bytes=if arg.kind==n_var() then s with { value=cg_lookup(m,env,arg.a) } else cg_string(s,md_str(m,arg.a)) in
       cg_extract(bytes,bytes.value,0,n_t_ptr())
     else if tx_equal(name,"byte_uninit") then
       let size=cg_expr(m,fns,env,s,ast_list_at(m.ast,n.b,0)) in
@@ -549,6 +554,7 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
       let state=args.state with { line=n.line } in
       if tx_equal(name,"concat") then cg_concat(state,args.values) else cg_array_edit(state,args.values,tx_equal(name,"push"))
+    else if tx_equal(name,"byte_equal") then cg_byte_equal(m,fns,env,s,n.b)
     else if bi_bytes(name) then
       let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
       cg_byte_builtin(args.state with { line=n.line },name,args.values)
@@ -696,6 +702,44 @@ fn cg_field_type(borrow m:Mods, fields:i64, index:i64) -> CgValue
 fn cg_field_get(move s:CgState, borrow base:CgValue, borrow field:CgValue, index:i64) -> CgState
   = cg_ins_value(s,field,concat("extractvalue ",cg_typed(base),", ",int_text(index)))
 
+type CgRead = { state:CgState, borrowed:bool }
+
+; Only lexical observations can run while an earlier operand is borrowed.
+fn cg_observer(borrow m:Mods, id:i64) -> bool
+  = let n=md_node(m,id) in let kind=n.kind in
+    if kind==n_field() || kind==n_len() then cg_observer(m,n.a)
+    else if kind==n_un() || kind==n_cast() then cg_observer(m,n.b)
+    else if kind==n_bin() then cg_observer(m,n.b) && cg_observer(m,n.c)
+    else if kind==n_index() then cg_observer(m,n.a) && cg_observer(m,n.b)
+    else kind==n_var() || kind==n_num() || kind==n_flt() || kind==n_bool() || kind==n_byte() || kind==n_str()
+
+; A lexical binding owns its storage through an observation. A temporary
+; instead transfers its reference to the observer, which must release it.
+fn cg_read(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgRead
+  = let n=md_node(m,id) in
+    if n.kind==n_var() then CgRead { state=s with { value=cg_lookup(m,env,n.a) },borrowed=true }
+    else if n.kind==n_field() then cg_read_field(m,fns,env,s,n)
+    else CgRead { state=cg_expr(m,fns,env,s,id),borrowed=false }
+
+fn cg_read_field(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgRead
+  = let base=cg_read(m,fns,env,s,n.a) in if base.state.error>=0 then base else
+    let value=base.state.value in let fields=md_node(m,value.record).b in let index=cg_field_index(m,fields,n.b) in
+    let field=cg_field_get(base.state,value,cg_field_type(m,fields,index),index) in
+    let state=if base.borrowed then field else cg_release(cg_retain(field,field.value),value) in
+    CgRead { state=state,borrowed=base.borrowed }
+
+fn cg_byte_equal(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64) -> CgState
+  = let first_id=ast_list_at(m.ast,list,0) in let second_id=ast_list_at(m.ast,list,1) in
+    let left=if cg_observer(m,second_id) then cg_read(m,fns,env,s,first_id)
+      else CgRead { state=cg_expr(m,fns,env,s,first_id),borrowed=false } in
+    if left.state.error>=0 then left.state else
+    let first=left.state.value in let right=cg_read(m,fns,env,left.state,second_id) in
+    if right.state.error>=0 then right.state else
+    let second=right.state.value in
+    let equal=cg_ins(right.state,n_t_bool(),concat("call i1 @neo.bytes.equal(",cg_typed(first),", ",cg_typed(second),")")) in
+    let state=if right.borrowed then equal else cg_release(equal,second) in
+    if left.borrowed then state else cg_release(state,first)
+
 fn cg_record_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64, literal:bool) -> CgState
   = let fields=md_node(m,s.value.record).b in
     let count=if literal then ast_list_len(m.ast,fields) else ast_list_len(m.ast,list) in
@@ -716,10 +760,7 @@ fn cg_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding 
       let value=cg_value(n_t_rec(),"zeroinitializer") with { record=tc_find_record(m,n.a) } in
       cg_record_fill(m,fns,env,s with { value=value },n.b,true)
     else let base=cg_expr(m,fns,env,s,n.a) in if base.error>=0 then base else
-    if n.kind==n_with() then cg_record_fill(m,fns,env,base,n.b,false) else
-    let value=base.value in let fields=md_node(m,value.record).b in let index=cg_field_index(m,fields,n.b) in
-    let extracted=cg_field_get(base,value,cg_field_type(m,fields,index),index) in
-    cg_release(cg_retain(extracted,extracted.value),value)
+      cg_record_fill(m,fns,env,base,n.b,false)
 
 fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
   = let n=md_node(m,id) in let kind=n.kind in let s=s with { line=n.line } in
@@ -727,21 +768,28 @@ fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     else if kind==n_flt() then s with { value=cg_value(n_t_f64(),tx_hex("0x",n.a,16)) }
     else if kind==n_bool() then s with { value=cg_value(n_t_bool(),if n.a==0 then "false" else "true") }
     else if kind==n_byte() then s with { value=cg_value(n_t_u8(),int_text(n.a)) }
-    else if kind==n_str() then cg_string(s,id,md_str(m,n.a))
+    else if kind==n_str() then cg_string(s,md_str(m,n.a))
     else if kind==n_var() then let value=cg_lookup(m,env,n.a) in cg_retain(s with { value=value },value)
     else if kind==n_if() then cg_if(m,fns,env,s,n)
     else if kind==n_call() then cg_call(m,fns,env,s,id,n)
     else if kind==n_arrc() || kind==n_sum() then cg_range(m,fns,env,s,id,n)
     else if kind==n_loop() then cg_loop(m,fns,env,s,n)
-    else if kind==n_reclit() || kind==n_field() || kind==n_with() then cg_record_expr(m,fns,env,s,n)
+    else if kind==n_reclit() || kind==n_with() then cg_record_expr(m,fns,env,s,n)
+    else if kind==n_field() then
+      let read=cg_read_field(m,fns,env,s,n) in
+      if read.state.error>=0 || !read.borrowed then read.state else cg_retain(read.state,read.state.value)
     else if kind==n_check() then
       let message=concat("check failed: ",cg_show(m,n.a)," at ",int_text(n.line),":",int_text(n.col)) in
       let s=cg_assertion(m,fns,env,s,n.a,message,false) in if s.error>=0 then s else cg_expr(m,fns,env,s,n.b)
     else if kind==n_len() || kind==n_index() then
-      let s=cg_expr(m,fns,env,s,n.a) in if s.error>=0 then s else let array=s.value in
-      if kind==n_len() then cg_release(cg_extract(s,array,1,n_t_i64()),array) else
-      let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else
-      let loaded=cg_load_element(s,array,s.value) in cg_release(cg_retain(loaded,loaded.value),array)
+      let base=if kind==n_len() || cg_observer(m,n.b) then cg_read(m,fns,env,s,n.a)
+        else CgRead { state=cg_expr(m,fns,env,s,n.a),borrowed=false } in
+      if base.state.error>=0 then base.state else
+      let array=base.state.value in
+      let read=if kind==n_len() then cg_extract(base.state,array,1,n_t_i64()) else
+        let s=cg_expr(m,fns,env,base.state,n.b) in if s.error>=0 then s else
+        let loaded=cg_load_element(s,array,s.value) in cg_retain(loaded,loaded.value) in
+      if base.borrowed || read.error>=0 then read else cg_release(read,array)
     else if kind==n_bin() || kind==n_un() || kind==n_cast() || kind==n_let() || kind==n_using() then
       let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let value=s.value in
       if kind==n_using() then
@@ -878,16 +926,32 @@ fn cg_failure_runtime(executable:bool, source_runtime:bool) -> Arr u8 _
       "define internal void @neo_precondition_trap(ptr %message) noreturn {\n  call void @llvm.trap()\n  unreachable\n}\n")
 
 fn cg_byte_runtime() -> Arr u8 _
-  = "define internal i1 @neo.bytes.equal(%ax_arr %a, %ax_arr %b) {
+  = "define internal i1 @neo.bytes.equal(%ax_arr %a, %ax_arr %b) alwaysinline {
 entry:
   %n = extractvalue %ax_arr %a, 1
   %m = extractvalue %ax_arr %b, 1
   %pa = extractvalue %ax_arr %a, 0
   %pb = extractvalue %ax_arr %b, 0
   %same = icmp eq i64 %n, %m
-  br i1 %same, label %loop, label %no
+  br i1 %same, label %identity, label %no
+identity:
+  %identical = icmp eq ptr %pa, %pb
+  %limit = sub i64 %n, 8
+  br i1 %identical, label %yes, label %words
+words:
+  %at = phi i64 [ 0, %identity ], [ %advance, %word ]
+  %full = icmp sle i64 %at, %limit
+  br i1 %full, label %word, label %loop
+word:
+  %aw = getelementptr i8, ptr %pa, i64 %at
+  %bw = getelementptr i8, ptr %pb, i64 %at
+  %ax = load i64, ptr %aw, align 1
+  %bx = load i64, ptr %bw, align 1
+  %match = icmp eq i64 %ax, %bx
+  %advance = add i64 %at, 8
+  br i1 %match, label %words, label %no
 loop:
-  %i = phi i64 [ 0, %entry ], [ %next, %byte ]
+  %i = phi i64 [ %at, %words ], [ %next, %byte ]
   %done = icmp eq i64 %i, %n
   br i1 %done, label %yes, label %byte
 byte:

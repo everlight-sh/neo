@@ -16,6 +16,19 @@ done
 launcher_root=$(CDPATH= cd -- "${self%/*}" && pwd -P)
 export NEO_ROOT=${NEO_ROOT:-$launcher_root}
 
+# Large source files can exhaust the platform's default soft stack limit.
+if stack=$(ulimit -S -s 2>/dev/null) && hard_stack=$(ulimit -H -s 2>/dev/null); then
+  wanted_stack=65536
+  case $hard_stack in
+    ''|unlimited) ;;
+    *) [ "$hard_stack" -ge "$wanted_stack" ] || wanted_stack=$hard_stack ;;
+  esac
+  case $stack in
+    ''|unlimited) ;;
+    *) [ "$stack" -ge "$wanted_stack" ] || ulimit -S -s "$wanted_stack" 2>/dev/null || : ;;
+  esac
+fi
+
 if [ -n "${NEOC:-}" ]; then
   exec "$NEOC" "$@"
 elif [ -x "$launcher_root/bin/neoc" ]; then

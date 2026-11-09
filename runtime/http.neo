@@ -9,8 +9,11 @@ fn rt_lower (c : u8) -> u8
   = if c >= 'A' && c <= 'Z' then u8(i64(c) + 32) else c
 
 fn rt_match (a : Arr u8 n, at : i64{at >= 0}, b : Arr u8 m) -> bool
-  = at + m <= n && loop (i : i64{i >= 0} = 0, ok = true)
-      while ok && i < m next (i + 1, a[at + i] == b[i]) yield ok
+  = at <= n - m &&
+    (if m==4 then byte_read_le(a,at,4)==byte_read_le(b,0,4)
+     else if m==8 then byte_read_le(a,at,8)==byte_read_le(b,0,8)
+     else loop (i : i64{i >= 0} = 0, ok = true)
+       while ok && i < m next (i + 1, a[at + i] == b[i]) yield ok)
 
 fn rt_match_ci (a : Arr u8 n, at : i64{at >= 0}, b : Arr u8 m) -> bool
   = at + m <= n && loop (i : i64{i >= 0} = 0, ok = true)
