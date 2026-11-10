@@ -1,9 +1,24 @@
 import "std:pbkdf2"
 import "std:base64"
 import "std:io"
+; Expected keys are from Python's hashlib.pbkdf2_hmac.
+fn derives(password:Arr u8 n,salt:Arr u8 m,iterations:i64,length:i64,expected:Arr u8 k) -> bool
+  = let key=pbkdf2_sha256(password,salt,iterations,length) in key.ok && str_equal(base64_encode(key.value),expected)
+; The chained rounds against their definition: U1 xor HMAC(U1) xor HMAC(HMAC(U1)).
+fn chain_matches(key:Arr u8 n) -> bool
+  = let prepared=hmac_sha256_prepare(key) in let first=hmac_sha256_prepared(prepared,"first block") in
+    let second=hmac_sha256_prepared(prepared,first) in let third=hmac_sha256_prepared(prepared,second) in
+    let expected=arr(i in 0..32) check i>=0 && i<len(first) && i<len(second) && i<len(third) in
+      u8(bit_xor(bit_xor(i64(first[i]),i64(second[i])),i64(third[i]))) in
+    crypto_equal(hmac_sha256_xor_chain(prepared,first,3),expected) && crypto_equal(hmac_sha256_xor_chain(prepared,first,1),first)
 effect(fs) fn main() -> unit
   = let first=pbkdf2_sha256("password","salt",2,32) in check first.ok && str_equal(base64_encode(first.value),"rk0Mla9rRtMtCt/5KPBt0CowP47zwlHf1uLYWpVHTEM=") in
+    check derives("password","salt",1,32,"Eg+2z/z4syxD5yJSVsT4N6hlSMkszDVICAWYfLcL4Xs=") in
+    check derives("password","salt",4096,32,"xeR41ZKIyEGqUw22hFxMjZYok6ABzk4RpJY4c6qYE0o=") in
+    check derives("passwordPASSWORDpassword","saltSALTsaltSALTsaltSALTsaltSALTsalt",4096,40,"NIyJ28vTKy8y2BS4EW6EzysXNH68GAAYHE4qH7jdU+HGNVGMfaxH6Q==") in
+    check derives("password","salt",3,65,"rTUkCsaD/r+vPNSdhFRz+7uqJDf1+C1aQVrgCsdsa/zPmpuNbS/koecAxEYLBA2+1pLBy4WnR/NViMCJMPz8Qaw=") in
     let key=arr(i in 0..130) u8(i%256) in let message="reusable HMAC schedule" in
     check crypto_equal(hmac_sha256(key,message),hmac_sha256_prepared(hmac_sha256_prepare(key),message)) in
+    check chain_matches("key") && chain_matches(key) in
     check !pbkdf2_sha256("x","y",0,32).ok && !pbkdf2_sha256("x","y",2,0).ok in
     let printed=print_out("PBKDF2 and reusable HMAC OK\n") in noop()

@@ -22,3 +22,8 @@ fn test_known_digest() -> bool
 fn test_shorter_text() -> bool
   = let running=sha256_absorb(sha256_start(),message(200)) in str_equal(sha256_finish(running,message(10)),sha256(message(10)))
     && str_equal(sha256_finish(sha256_absorb(running,message(70)),message(70)),sha256(message(70)))
+; Padding at every length from empty to several blocks, against Python's hashlib:
+; the SHA-256 of the 301 digests concatenated.
+fn test_every_length_known() -> bool
+  = let digests=loop(n=0,out="") while n<=300 next(n+1,concat(out,sha256(message(n)))) yield out in
+    str_equal(sha256(digests),"\x77\x22\x02\x43\x65\xd2\x78\x36\x07\x9c\xbf\x29\xde\x35\xd0\x60\xb9\x38\x3d\x7c\x71\x30\x83\x19\x96\x61\x39\x2f\x98\x32\x16\xd4")

@@ -131,16 +131,21 @@ effect fn rt_fiber_step(job:ptr,now:i64)->i64
     if ready then 1 else 0
 effect fn rt_fiber_tick_limit(budget:i64)->unit
   = if load_i64(runtime_state(),1784)==0 then noop() else
-    let slots=load_ptr(runtime_state(),1744) in let now=rt_clock_ns()/1000000 in
+    let slots=load_ptr(runtime_state(),1744) in let started=rt_clock_ns() in let now=started/1000000 in
     let polled=if load_i64(runtime_state(),1768)==0 then rt_fiber_poll(0) else noop() in
     let limit=rt_fiber_limit() in let cursor=load_i64(runtime_state(),1840) in
     ; Fibers added above this range are ready on the next tick. The timeout
     ; scan sees the expanded range and returns zero for those ready fibers.
+    ; A batch also ends once it has run for a millisecond, so a fiber that
+    ; holds the CPU (a key derivation, a large render) is followed by the
+    ; caller's socket work, not by more fibers. Those left ready keep the next
+    ; wait nonblocking and resume from the saved cursor.
     let next_slot=loop(slot=if cursor<limit then cursor else 0,visited=0,ran=0)
       while visited<limit && ran<budget
       next(if slot+1==limit then 0 else slot+1,visited+1,
         let job=ptr_add(slots,slot*384) in
-        ran+(if load_i64(job,248)==0 then 0 else rt_fiber_step(job,now))) yield slot in
+        if load_i64(job,248)==0 then ran else if rt_fiber_step(job,now)==0 then ran else
+        if rt_clock_ns()-started>=1000000 then budget else ran+1) yield slot in
     store_i64(runtime_state(),1840,next_slot)
 effect fn rt_fiber_tick()->unit = rt_fiber_tick_limit(32)
 effect fn rt_fiber_timeout(maximum:i64)->i64

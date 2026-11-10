@@ -136,16 +136,22 @@ private fn sha_compress(s:Sha256State,w:ShaWords) -> Sha256State
     let r=sha_rounds56(r,w) in
     Sha256State { a=sha_u32(wrapping_add(s.a,r.a)),b=sha_u32(wrapping_add(s.b,r.b)),c=sha_u32(wrapping_add(s.c,r.c)),d=sha_u32(wrapping_add(s.d,r.d)),e=sha_u32(wrapping_add(s.e,r.e)),f=sha_u32(wrapping_add(s.f,r.f)),g=sha_u32(wrapping_add(s.g,r.g)),h=sha_u32(wrapping_add(s.h,r.h)) }
 ; generated: end sha_compress
-; A big-endian word of the padded message: text, the 0x80 marker, zeros, and
-; the bit length in the last 8 bytes.
-private fn sha_pad_word(text:Arr u8 n,at:i64,padded:i64) -> i64
-  = check n<=1152921504606846975 in
-    loop(k=0,value=0) while k<4
-      next(k+1,let p=at+k in
-        let byte=if p>=0 && p<n then str_byte(text,p) else if p==n then 128 else if p>=padded-8 && p<padded then bit_and(shift_right(n*8,(padded-1-p)*8),255) else 0 in
-        bit_or(shift_left(value,8),byte)) yield value
 private fn sha_high(value:i64) -> i64 = shift_right(value,32)
-private fn sha_block(state:Sha256State,text:Arr u8 n,block:i64,padded:i64) -> Sha256State
+; A big-endian word of the padded message: text, the 0x80 marker, zeros, and
+; the bit length in the last 8 bytes. padded leaves at least nine bytes after
+; the text, so the length words never share a word with text or the marker.
+; Only the word that holds the end of the text is assembled byte by byte.
+private fn sha_pad_word(borrow text:Arr u8 n,at:i64,padded:i64) -> i64
+  = check n<=1152921504606846975 in
+    if at>=0 && at<=n-4 then sha_high(byte_swap64(byte_read_le(text,at,4)))
+    else if at==padded-8 then shift_right(n*8,32)
+    else if at==padded-4 then sha_u32(n*8)
+    else if at>n then 0
+    else loop(k=0,value=0) while k<4
+      next(k+1,let p=at+k in
+        let byte=if p>=0 && p<n then i64(text[p]) else if p==n then 128 else 0 in
+        bit_or(shift_left(value,8),byte)) yield value
+private fn sha_block(state:Sha256State,borrow text:Arr u8 n,block:i64,padded:i64) -> Sha256State
   = let at=block*64 in
     let w=if at>=0 && at+64<=n then
       let v0=byte_swap64(byte_read_le(text,at,8)) in let v1=byte_swap64(byte_read_le(text,at+8,8)) in
@@ -227,3 +233,32 @@ fn hmac_sha256_prepare(key:Arr u8 n) -> HMACSHA256
     HMACSHA256 {inner=sha256_absorb(sha256_start(),ipad),outer=sha256_absorb(sha256_start(),opad),ipad=ipad,opad=opad}
 fn hmac_sha256_prepared(key:HMACSHA256,message:Arr u8 n) -> Arr u8 _
   = sha256_finish(key.outer,concat(key.opad,sha256_finish(key.inner,concat(key.ipad,message))))
+
+; Chained MACs for key derivation. Each round MACs the previous 32-byte digest,
+; so digests stay as state words and both compressions hash one fixed layout:
+; eight message words, the 0x80 marker and a 768-bit length (the 64-byte pad
+; block plus the digest). A round allocates nothing and reads no byte array,
+; which keeps a derivation's uninterruptible CPU time to the compressions.
+private fn sha_digest_state(digest:Arr u8 n) -> Sha256State
+  = check n==32 in
+    let v0=byte_swap64(byte_read_le(digest,0,8)) in let v1=byte_swap64(byte_read_le(digest,8,8)) in
+    let v2=byte_swap64(byte_read_le(digest,16,8)) in let v3=byte_swap64(byte_read_le(digest,24,8)) in
+    Sha256State { a=sha_u32(sha_high(v0)),b=sha_u32(v0),c=sha_u32(sha_high(v1)),d=sha_u32(v1),
+      e=sha_u32(sha_high(v2)),f=sha_u32(v2),g=sha_u32(sha_high(v3)),h=sha_u32(v3) }
+private fn sha_digest_block(state:Sha256State,m:Sha256State) -> Sha256State
+  = sha_compress(state,ShaWords { w0=m.a,w1=m.b,w2=m.c,w3=m.d,w4=m.e,w5=m.f,w6=m.g,w7=m.h,
+      w8=2147483648,w9=0,w10=0,w11=0,w12=0,w13=0,w14=0,w15=768 })
+private fn sha_state_xor(x:Sha256State,y:Sha256State) -> Sha256State
+  = Sha256State { a=bit_xor(x.a,y.a),b=bit_xor(x.b,y.b),c=bit_xor(x.c,y.c),d=bit_xor(x.d,y.d),
+      e=bit_xor(x.e,y.e),f=bit_xor(x.f,y.f),g=bit_xor(x.g,y.g),h=bit_xor(x.h,y.h) }
+; XOR of the chained MACs U1..U(rounds), where U1=first and each later MAC keys
+; the digest before it: PBKDF2's block function after its first MAC. first must
+; be a 32-byte digest; fewer than two rounds return it unchanged.
+fn hmac_sha256_xor_chain(key:HMACSHA256,first:Arr u8 n,rounds:i64) -> Arr u8 _
+  = check n==32 && key.inner.blocks==1 && key.outer.blocks==1 in
+    let inner=key.inner.state in let outer=key.outer.state in let start=sha_digest_state(first) in
+    let none=Sha256State { a=0,b=0,c=0,d=0,e=0,f=0,g=0,h=0 } in
+    let total=loop(round=1,previous=start,earlier=none) while round<rounds
+      next(round+1,sha_digest_block(outer,sha_digest_block(inner,previous)),sha_state_xor(earlier,previous))
+      yield sha_state_xor(earlier,previous) in
+    arr(i in 0..32) u8(shift_right(sha_word(total,i/4),(3-i%4)*8))

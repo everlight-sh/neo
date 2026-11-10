@@ -85,7 +85,10 @@ synchronous; contended advisory `file_lock` waits retry nonblocking and yield.
 Database result sets are still buffered by their protocol library; this is
 concurrent query waiting, not a PostgreSQL cursor/row-streaming API. There is no
 general async language syntax, arbitrary closure capture, preemptive scheduling
-or resumable traps. Pure CPU work must yield explicitly.
+or resumable traps. Pure CPU work must yield explicitly. An HTTP worker resumes
+at most eight tasks between socket waits and stops a batch once it has run for a
+millisecond, so one task that holds the CPU delays other requests by its own
+run time, not by the tasks queued behind it.
 
 Native tests cover nested tasks, contended file locks, delayed HTTP/TLS/DNS,
 timeouts, repeated handle reuse, backpressure, cancellation, admission rollback,
