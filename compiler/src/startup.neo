@@ -51,10 +51,12 @@ fn st_linux(borrow target:Arr u8 _) -> Arr u8 _
       "  %status = call i32 @main(i32 %argc, ptr %argv)\n  %code = sext i32 %status to i64\n",
       "  call void @ax_exit(i64 %code)\n  unreachable\n}\n")
 
-fn st_executable(borrow m:Mods, borrow ir:Arr u8 _, borrow target:Arr u8 _, source_runtime:bool) -> Arr u8 _
+; The text an executable adds after the program's module: its C entry point
+; and, on Linux, the process entry. The emitter's source_filename declaration
+; must precede module declarations, so this follows the module.
+fn st_startup(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool) -> Arr u8 _
   = let entry=bk_get(m.local,md_entry_module(m),"main") in let id=md_find_decl(m,tc_functions(m),entry) in
-    ; The emitter's source_filename declaration must precede module declarations.
     let declarations=if source_runtime then "" else concat("declare void @ax_runtime_init(ptr)\ndeclare void @ax_usage(ptr, ptr)\n",
       "declare i64 @ax_parse_i64(ptr, ptr)\ndeclare void @ax_print_i64(i64)\n",
       "declare void @ax_print_f64(double)\ndeclare void @ax_print_bytes(ptr, i64)\n") in
-    concat(ir,declarations,st_main(m,id),if str_find(target,"linux").present then st_linux(target) else "")
+    concat(declarations,st_main(m,id),if str_find(target,"linux").present then st_linux(target) else "")

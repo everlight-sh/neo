@@ -526,7 +526,8 @@ contains data, length, an ownership flag and a control pointer (32 bytes on the
 64-bit targets). A mutation detaches a shared buffer; nested array children are
 retained until they themselves change. Record arrays keep their SoA layout, so
 length-changing pushes still relocate that layout. Reference counts use native
-atomic operations; final release destroys owned children and returns the block
+atomic operations, or plain ones in a natively compiled program that cannot
+start a thread; final release destroys owned children and returns the block
 to Neo's allocator. There is no tracing GC or external runtime dependency.
 
 Static literals use an immortal control marker and need no heap allocation when

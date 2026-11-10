@@ -48,12 +48,12 @@ effect fn cli_check_modules(borrow m:Mods, report_ok:bool, library:bool, allow_u
       if report_ok || report.result.value.ty<=0 then check_output(m,report,format) else noop()
 
 effect fn cli_ir(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _) -> Arr u8 _
-  = cli_ir_part(m,target,source_runtime,format,tx_ints(),0)
+  = cli_ir_part(m,target,source_runtime,format,tx_ints(),0,"")
 
 effect fn cli_ir_part(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _,
-                      borrow selected:Arr i64 _, partition:i64) -> Arr u8 _
+                      borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _) -> Arr u8 _
   = let stats=env_get("NEO_ALLOC_STATS") in
-    let compiled=cg_program_part(m,target,stats.present && tx_equal(stats.value,"1"),source_runtime,selected,partition) in
+    let compiled=cg_program_part(m,target,stats.present && tx_equal(stats.value,"1"),source_runtime,selected,partition,startup) in
     let checked=if compiled.report.result.value.ty<=0 then check_output(m,compiled.report,format) else noop() in compiled.text
 
 fn cli_usage() -> Arr u8 _
@@ -188,8 +188,9 @@ effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliO
     let checked_program=cli_check_modules(m,false,false,opts.allow_unproven,format) in let checked=bd_clock() in
     let m=m with { stable_symbols=caching } in
     let selected=if caching then lc_selection(m,opts.library_roots) else tx_ints() in
-    let ir=st_executable(m,cli_ir_part(m,config.target,!opts.seed,format,selected,if caching then 1 else 0),config.target,!opts.seed) in
-    let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2) else "" in
+    let startup=st_startup(m,config.target,!opts.seed) in
+    let ir=concat(cli_ir_part(m,config.target,!opts.seed,format,selected,if caching then 1 else 0,startup),startup) in
+    let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2,"") else "" in
     let lowered=bd_clock() in
     if opts.ir then let shown=print_out(ir) in noop() else
     if run then

@@ -116,7 +116,7 @@ effect fn lc_publish(borrow directory:Arr u8 _, borrow ir:Arr u8 _, borrow ident
 effect fn lc_prepare(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow sources:Arr u8 _, force:bool) -> LcArtifact
   = let cache=pt_realpath(path) in let ir_digest=lc_ir_digest(ir) in
     let version=bd_execute(config.clang,push(md_words(),"--version"),true) in
-    let key=lc_digest(concat("neo-prepared-object-v2\0",config.target,"\0",config.level,"\0",config.clang,"\0",
+    let key=lc_digest(concat("neo-prepared-object-v3\0",config.target,"\0",config.level,"\0",config.clang,"\0",
       version.output,"\0",ir_digest,"\0",sources)) in
     let directory=pt_join(cache,key) in let cached=if force || bd_exit_code(version.status)!=0 then "" else lc_read(directory,ir_digest) in
     if len(cached)>0 then LcArtifact { bytes=cached,key=key,directory=directory,hit=true,compile_ns=0 } else

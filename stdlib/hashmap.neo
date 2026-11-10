@@ -37,12 +37,16 @@ fn hashmap_get<K,V>(map: HashMap<K,V>, key: K) -> Option<V>
     if at < 0 then None::<V>() else check at < len(table) in
     if table[at].state != u8(1) then None::<V>() else table[at].value
 
+; The map hands its table to hashmap_store and takes the result back, so a
+; map with one owner updates its slot in place and does not copy the table.
+private fn hashmap_state<K,V>(borrow map: HashMap<K,V>, at: i64) -> u8
+  = let table = map.table in check at >= 0 && at < len(table) in table[at].state
+private fn hashmap_store<K,V>(move table: Arr HashSlot<K,V> n, at: i64, key: K, value: V) -> Arr HashSlot<K,V> _
+  = check at >= 0 && at < n in set(table,at,HashSlot::<K,V> { state = u8(1), key = Some::<K>(key), value = Some::<V>(value) })
 fn hashmap_insert_slot<K,V>(move map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>
-  = let at = hashmap_slot::<K,V>(map,key) in
-    let count = map.count in let occupied = map.occupied in let seed0 = map.seed0 in let seed1 = map.seed1 in
-    let table = map.table in check at >= 0 && at < len(table) in let previous = table[at].state in
-    HashMap::<K,V> { table = set(table,at,HashSlot::<K,V> { state = u8(1), key = Some::<K>(key), value = Some::<V>(value) }),
-      count = count + (if previous == u8(1) then 0 else 1), occupied = occupied + (if previous == u8(0) then 1 else 0), seed0 = seed0, seed1 = seed1 }
+  = let at = hashmap_slot::<K,V>(map,key) in let previous = hashmap_state::<K,V>(map,at) in
+    map with { table = hashmap_store::<K,V>(map.table,at,key,value),
+      count = map.count + (if previous == u8(1) then 0 else 1), occupied = map.occupied + (if previous == u8(0) then 1 else 0) }
 
 fn hashmap_rehash<K,V>(move map: HashMap<K,V>, capacity: i64) -> HashMap<K,V>
   = let seed0 = map.seed0 in let seed1 = map.seed1 in let table = map.table in
@@ -59,7 +63,8 @@ fn hashmap_put<K,V>(move map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>
   = let capacity = len(map.table) in
     let prepared = if map.occupied * 10 < capacity * 7 then map else
       check capacity <= 4611686018427387903 in
-      hashmap_rehash::<K,V>(map,if map.count * 10 < capacity * 4 then capacity else capacity * 2) in
+      let roomy = if map.count * 10 < capacity * 4 then capacity else capacity * 2 in
+      hashmap_rehash::<K,V>(map,roomy) in
     hashmap_insert_slot::<K,V>(prepared,key,value)
 
 fn hashmap_delete<K,V>(move map: HashMap<K,V>, key: K) -> HashMap<K,V>

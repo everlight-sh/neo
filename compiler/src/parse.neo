@@ -64,10 +64,11 @@ fn ps_push_r(move p:P) -> P = let item=p.r in ps_push(p,item)
 fn ps_items(borrow p:P, base:i64) -> Arr i64 _
   = let start=if base<0 then 0 else base in let n=len(p.acc)-start in
     arr(i in 0..(if n<0 then 0 else n)) if start+i>=0 && start+i<len(p.acc) then p.acc[start+i] else -1
+; lists is handed over and back, so its single owner appends in place.
+fn ps_list_append(move lists:Arr i64 _, borrow items:Arr i64 _) -> Arr i64 _
+  = loop (l=push(lists,len(items)), k:i64{k>=0}=0) while k<len(items) next (push(l,items[k]), k+1) yield l
 fn ps_list_of(move p:P, borrow items:Arr i64 _) -> P
-  = let id=len(p.lists) in
-    let lists=loop (l=push(p.lists,len(items)), k:i64{k>=0}=0) while k<len(items) next (push(l,items[k]), k+1) yield l in
-    p with { lists=lists, r=id }
+  = let id=len(p.lists) in p with { lists=ps_list_append(p.lists,items), r=id }
 ; The items pushed since acc had length base, as a list.
 fn ps_list(move p:P, base:i64) -> P
   = let items=ps_items(p,base) in let rest=tx_take(p.acc,base) in ps_list_of(p with { acc=rest },items)

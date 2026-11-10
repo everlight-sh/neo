@@ -304,7 +304,9 @@ fn json_key_equal (raw: Arr u8 n, start: i64, end: i64, name: Arr u8 m) -> bool
       let decoded = json_text(Json { kind = 4, raw = str_slice(raw, start, end), count = 0, offsets = arr(k in 0..0) 0 }) in
       decoded.ok && str_equal(decoded.value, name)
 type JsonIndex = { ok: bool, end: i64, count: i64, entries: Arr i64 _ }
-fn json_index_room (entries: Arr i64 n, needed: i64) -> Arr i64 _
+; entries is handed over and back, so json_index_entry writes a member's four
+; offsets into the one index buffer and does not copy it per offset.
+fn json_index_room (move entries: Arr i64 n, needed: i64) -> Arr i64 _
   = if needed >= 0 && needed + 4 <= n then entries else
     let size = if n < 16 then 16 else n * 2 in check size >= n && size >= needed + 4 in
     arr(i in 0..size) if i < n then entries[i] else 0
