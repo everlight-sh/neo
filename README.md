@@ -42,6 +42,15 @@ See [docs/getting-started.md](docs/getting-started.md).
 `--target TRIPLE` overrides Clang's detected target. To rebuild the compiler
 from the checkout, run `./compiler/bootstrap.sh`.
 
+An executable's module holds only the functions its entry point, its exported
+functions and the startup code can reach, so a small program does not pay for
+optimising the rest of the runtime and the libraries. The native compiler
+honours `inline fn` and `cold fn`. It also marks every pure function of at most
+400 lowered lines as worth expanding, and `-O2` and `-O3` builds raise LLVM's
+limit for those functions (`-inlinehint-threshold=2000`); `--dev` builds do not.
+A module that never calls `spawn_thread` has one thread, so its reference
+counts are plain loads and stores instead of atomic operations.
+
 The Python reference remains available explicitly through `./neoc.sh`.
 Its default build uses LLVM `-O3`. Its `--dev` profile uses `-O1` and leaves
 small pure helpers and calls with constant arguments as ordinary calls.

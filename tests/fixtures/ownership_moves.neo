@@ -1,0 +1,41 @@
+import "std:hashmap"
+import "std:option"
+import "std:io"
+; Value semantics where the native compiler hands buffers over and updates
+; them in place: every name that is still read must keep the value it had.
+type Bag = { items:Arr i64 _, label:Arr u8 _, count:i64 }
+type Nest = { bag:Bag, extra:Arr i64 _ }
+; Order-sensitive checksums that wrap instead of trapping on overflow.
+fn mix(a:i64, b:i64) -> i64 = wrapping_add(wrapping_mul(a,1000003),b)
+fn total(borrow a:Arr i64 _) -> i64 = loop(i:i64{i>=0}=0,acc=len(a)) while i<len(a) next(i+1,mix(acc,a[i])) yield acc
+fn add(move b:Bag, v:i64) -> Bag = b with { items=push(b.items,v), count=b.count+1 }
+fn add_twice(move b:Bag, v:i64) -> Bag = b with { count=b.count+2, items=push(push(b.items,v),v+1) }
+fn put(move b:Bag, at:i64, v:i64) -> Bag = if at<0 || at>=len(b.items) then b else b with { items=set(b.items,at,v) }
+fn relabel(move b:Bag, borrow label:Arr u8 _) -> Bag = b with { label=concat(b.label,label) }
+fn deep(move n:Nest, v:i64) -> Nest = n with { bag=n.bag with { items=push(n.bag.items,v), count=n.bag.count+1 } }
+fn both(borrow seen:Bag, move grown:Bag) -> i64 = let larger=add(grown,99) in mix(total(seen.items),total(larger.items))
+fn keep_or_grow(move b:Bag, grow:bool) -> Bag = if grow then add(b,len(b.items)) else b
+; A snapshot taken before the record is handed on, and read afterwards.
+fn snapshots(n:i64) -> i64
+  = let base=Bag { items=arr(i in 0..3) i, label="b", count=3 } in
+    let a=add(base,10) in let b=add(a,20) in let c=add_twice(add(b,30),40) in
+    let held=c.items in let named=c.label in
+    let d=relabel(put(add(c,50),0,n),"!") in
+    let e=keep_or_grow(keep_or_grow(d,true),false) in
+    mix(mix(mix(mix(mix(mix(mix(mix(mix(mix(mix(mix(total(base.items),total(a.items)),total(b.items)),total(held)),len(named)),
+      total(d.items)),len(d.label)),total(e.items)),base.count),a.count),b.count),d.count),both(d,d))
+fn loops(n:i64) -> i64
+  = let grown=loop(bag=Bag { items=arr(i in 0..0) 0, label="", count=0 },i=0) while i<n next(add(bag,i*i),i+1) yield bag in
+    let saved=grown.items in
+    let more=loop(bag=grown,i=0) while i<n next(put(add(bag,i),i,0-i),i+1) yield bag in
+    let nest=loop(x=Nest { bag=more, extra=arr(i in 0..2) i },i=0) while i<3 next(deep(x,i+7),i+1) yield x in
+    mix(mix(mix(mix(mix(mix(total(saved),total(more.items)),more.count),total(nest.bag.items)),nest.bag.count),total(nest.extra)),total(grown.items))
+fn maps(n:i64) -> i64
+  = let first=hashmap_put(hashmap_empty::<Arr u8 _,i64>(1,2),"k",1) in
+    let second=hashmap_put(first,"j",2) in let third=hashmap_put(second,"k",3) in
+    let many=loop(m=third,i=0) while i<n next(hashmap_put(m,concat("key",arr(j in 0..1) u8(65+i%26),arr(j in 0..1) u8(48+i%10)),i),i+1) yield m in
+    mix(mix(mix(mix(mix(mix(mix(mix(option_or(hashmap_get(first,"k"),-1),option_or(hashmap_get(first,"j"),-1)),option_or(hashmap_get(second,"k"),-1)),
+      option_or(hashmap_get(third,"k"),-1)),hashmap_len(first)),hashmap_len(third)),hashmap_len(many)),
+      option_or(hashmap_get(many,"keyB1"),-1)),option_or(hashmap_get(third,"keyB1"),-1))
+effect(fs) fn main(n:i64{n>=0,n<=1000}) -> unit
+  = let printed=print_out(concat(int_text(snapshots(n))," ",int_text(loops(n))," ",int_text(maps(n)),"\n")) in noop()

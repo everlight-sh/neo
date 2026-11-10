@@ -73,6 +73,11 @@ fn bd_compile_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow objec
     let args=push(push(push(push(push(md_words(),concat("--target=",target)),concat("-O",config.level)),
       "-Wno-override-module"),"-ffunction-sections"),"-fdata-sections") in
     let args=if str_starts(target,"arm64-") || str_starts(target,"aarch64-") then push(args,"-mno-outline-atomics") else args in
+    ; x86-64: start every loop on a 32-byte boundary, so a hot loop's speed
+    ; does not depend on where the code before it happens to end.
+    let args=if str_starts(target,"x86_64-") then push(args,"-falign-loops=32") else args in
+    ; Release builds expand the short pure functions the emitter marks.
+    let args=if tx_equal(config.level,"2") || tx_equal(config.level,"3") then push(push(args,"-mllvm"),"-inlinehint-threshold=2000") else args in
     let args=if len(remarks)==0 then args else push(push(args,"-fsave-optimization-record"),concat("-foptimization-record-file=",remarks)) in
     push(push(push(push(args,"-c"),ir),"-o"),object)
 

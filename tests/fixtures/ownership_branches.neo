@@ -1,0 +1,59 @@
+import "std:io"
+; Value semantics where only one branch of an `if` hands a buffer on, where
+; byte writers update a unique buffer in place, and for empty arrays, which
+; are constants: every name that is still read must keep the value it had.
+type Pair = { left:Arr i64 _, right:Arr u8 _ }
+type Tally = { x:f64, y:f64, k:i64 }
+fn mix(a:i64, b:i64) -> i64 = wrapping_add(wrapping_mul(a,1000003),b)
+fn total(borrow a:Arr i64 _) -> i64 = loop(i:i64{i>=0}=0,acc=len(a)) while i<len(a) next(i+1,mix(acc,a[i])) yield acc
+fn bytes(borrow a:Arr u8 _) -> i64 = loop(i:i64{i>=0}=0,acc=len(a)) while i<len(a) next(i+1,mix(acc,i64(a[i]))) yield acc
+; The buffer comes back as it is, or a larger one is built from it.
+fn room(move a:Arr i64 n, needed:i64) -> Arr i64 _
+  = if needed>=0 && needed<n then a else arr(i in 0..n*2+1) if i<n then a[i] else 0
+fn put(move a:Arr i64 n, at:i64, value:i64) -> Arr i64 _ = if at>=0 && at<n then set(a,at,value) else a
+fn no_text() -> Arr u8 _ = arr(i in 0..0) u8(0)
+fn no_words() -> Arr Arr u8 _ _ = arr(i in 0..0) no_text()
+fn grow_or_count(move a:Arr i64 _, grow:bool) -> i64 = if grow then total(push(a,7)) else len(a)
+fn one_side(move p:Pair, left:bool) -> i64 = if left then total(push(p.left,1)) else bytes(p.right)
+fn nested(move a:Arr i64 _, borrow b:Arr i64 _, way:i64) -> i64
+  = if way==0 then total(b) else if way==1 then total(push(a,len(b))) else mix(total(a),total(b))
+fn stamp(move text:Arr u8 n, at:i64, value:i64) -> Arr u8 _
+  = if at>=0 && at+8<=n then byte_write_le(text,at,value,8) else text
+fn paste(move text:Arr u8 n, at:i64, borrow part:Arr u8 m) -> Arr u8 _
+  = if at>=0 && at+m<=n then byte_copy(text,at,part) else text
+fn branches(n:i64) -> i64
+  = let base=arr(i in 0..4) i*3+n in
+    let same=room(base,2) in let larger=room(put(same,0,n),9) in let edited=put(put(larger,1,5),8,n) in
+    let pair=Pair { left=edited, right="right" } in
+    mix(mix(mix(mix(mix(mix(mix(mix(mix(total(base),total(same)),total(larger)),total(edited)),
+      grow_or_count(edited,true)),grow_or_count(base,false)),one_side(pair,true)),one_side(pair,false)),
+      nested(base,same,n%3)),mix(nested(larger,base,(n+1)%3),total(pair.left)))
+fn writes(n:i64) -> i64
+  = let blank=arr(i in 0..24) u8(48+i%10) in
+    let first=stamp(blank,0,n) in let second=stamp(stamp(first,8,n+1),16,n+2) in
+    let third=paste(paste(second,3,"abc"),30,"zz") in
+    let chained=byte_write_le(byte_copy(byte_write_le(arr(i in 0..16) u8(0),0,n,4),4,"neo!"),8,n*3,8) in
+    let again=byte_copy(chained,12,"tail") in
+    mix(mix(mix(mix(mix(bytes(blank),bytes(first)),bytes(second)),bytes(third)),bytes(chained)),bytes(again))
+; Text grown by concat, with earlier values still named.
+fn texts(n:i64) -> i64
+  = let grown=loop(acc=no_text(),i=0) while i<n%40 next(concat(acc,int_text(i),","),i+1) yield acc in
+    let pair=loop(acc=no_text(),i=0,kept=no_text()) while i<n%17+3
+      next(concat(acc,"ab"),i+1,if i==2 then acc else kept) yield mix(bytes(acc),bytes(kept)) in
+    let base=concat("x",int_text(n)) in let longer=concat(base,"-tail") in let twice=concat(base,base) in
+    let cut=if len(longer)>=3 then byte_slice(longer,1,3) else longer in
+    let marked=if len(cut)>=1 then byte_write_le(cut,0,35,1) else cut in
+    mix(mix(mix(mix(mix(mix(bytes(grown),pair),bytes(base)),bytes(longer)),bytes(twice)),bytes(marked)),bytes(concat(concat(base,"!"),longer)))
+fn empties(n:i64) -> i64
+  = let none=arr(i in 0..0) 0 in let one=push(none,n) in let two=push(push(none,1),2) in
+    let words=no_words() in let named=push(push(words,"a"),"bc") in
+    let lengths=sum(i in 0..len(named)) len(named[i]) in
+    mix(mix(mix(mix(mix(len(none),total(one)),total(two)),len(words)),len(named)),lengths)
+fn loops(n:i64) -> i64
+  = let kept=loop(acc=arr(i in 0..0) 0,i=0) while i<n next(if i%3==0 then push(acc,i) else acc,i+1) yield acc in
+    let swapped=loop(acc=arr(i in 0..2) i,i=0) while i<n
+      next(if i%4==1 then arr(j in 0..1) i else push(acc,i),i+1) yield acc in
+    let tally=sum(i in 0..n) Tally { x=f64(i)*0.5, y=f64(i*i), k=i*3 } in
+    mix(mix(mix(mix(total(kept),total(swapped)),i64(tally.x*4.0)),i64(tally.y)),tally.k)
+effect(fs) fn main(n:i64{n>=0,n<=1000}) -> unit
+  = let printed=print_out(concat(int_text(branches(n))," ",int_text(writes(n))," ",int_text(empties(n))," ",int_text(loops(n))," ",int_text(texts(n)),"\n")) in noop()

@@ -31,12 +31,13 @@ fn el_scalar(borrow s:ElState, kind:i64) -> i64 = el_at(s.scalar,kind-n_t_i64())
 fn el_emit(move s:ElState, n:Node) -> ElNode
   = let id=len(s.m.ast.nodes)/11 in
     ElNode { state=s with { m=s.m with { ast=s.m.ast with { nodes=ast_push_node(s.m.ast.nodes,n) } } }, id=id }
+; The lists table is handed over and back, so its single owner appends in place.
+fn el_list_append(move lists:Arr i64 _, borrow ids:Arr i64 _) -> Arr i64 _
+  = loop (i=0, out=push(lists,len(ids))) while i<len(ids) next (i+1,push(out,el_at(ids,i))) yield out
 fn el_list(move s:ElState, borrow ids:Arr i64 _) -> ElNode
   = if len(ids)==0 then ElNode { state=s, id=-1 } else
     let id=len(s.m.ast.lists) in
-    let lists=loop (i=0, out=push(s.m.ast.lists,len(ids))) while i<len(ids)
-      next (i+1,push(out,el_at(ids,i))) yield out in
-    ElNode { state=s with { m=s.m with { ast=s.m.ast with { lists=lists } } }, id=id }
+    ElNode { state=s with { m=s.m with { ast=s.m.ast with { lists=el_list_append(s.m.ast.lists,ids) } } }, id=id }
 fn el_list_changed(move s:ElState, old:i64, borrow ids:Arr i64 _) -> ElNode
   = let same=len(ids)==ast_list_len(s.m.ast,old) &&
       loop (i=0, same=true) while same && i<len(ids)
@@ -66,7 +67,7 @@ fn el_declare(move s:ElState, original:i64, n:Node) -> ElNode
 fn el_add_to_module(move lists:Arr Arr i64 _ _, module:i64, id:i64) -> Arr Arr i64 _ _
   = if module>=0 && module<len(lists) then let ids=lists[module] in set(lists,module,push(ids,id)) else lists
 fn el_update(move s:ElState, id:i64, a:i64, b:i64, c:i64, d:i64, e:i64) -> ElState
-  = let m=md_set(md_set(md_set(md_set(md_set(s.m,id,1,a),id,2,b),id,3,c),id,4,d),id,5,e) in s with { m=m }
+  = s with { m=md_set(md_set(md_set(md_set(md_set(s.m,id,1,a),id,2,b),id,3,c),id,4,d),id,5,e) }
 
 fn el_instance_at(borrow s:ElState, i:i64) -> ElInstance
   = if i>=0 && i<len(s.instances) then s.instances[i]
@@ -85,10 +86,10 @@ fn el_key(borrow s:ElState, borrow types:Arr i64 _) -> Arr u8 _
       next (i+1,dp_type(push(key,' '),s.m.ast,el_at(types,i))) yield key
 fn el_instance_name(move s:ElState, original:i64, generic:bool) -> ElNode
   = if !generic then ElNode { state=s, id=md_node(s.m,original).a } else
-    let m=md_intern(s.m,concat("$neo.",int_text(len(s.instances)))) in
-    ElNode { state=s with { m=m }, id=md_last(m) }
+    let s=s with { m=md_intern(s.m,concat("$neo.",int_text(len(s.instances)))) } in let id=md_last(s.m) in
+    ElNode { state=s, id=id }
 fn el_name(move s:ElState, borrow text:Arr u8 _) -> ElNode
-  = let m=md_intern(s.m,text) in ElNode { state=s with { m=m }, id=md_last(m) }
+  = let s=s with { m=md_intern(s.m,text) } in let id=md_last(s.m) in ElNode { state=s, id=id }
 
 fn el_array(move s:ElState, elem:i64, at:Node) -> ElNode
   = if elem<0 then ElNode { state=s, id=-1 } else

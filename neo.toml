@@ -206,3 +206,15 @@ name="pbkdf2-and-hmac"
 file="tests/fixtures/pbkdf2.neo"
 args=[]
 stdout="PBKDF2 and reusable HMAC OK\n"
+
+[[test]]
+name="handed-over-buffers-keep-value-semantics"
+file="tests/fixtures/ownership_moves.neo"
+args=["40"]
+stdout="5575349817732508845 -8602600051536385465 3482258423081068811\n"
+
+[[test]]
+name="one-sided-handovers-and-byte-writes-keep-value-semantics"
+file="tests/fixtures/ownership_branches.neo"
+args=["40"]
+stdout="5953455920797871870 -4396072728567268518 -7673095368488778031 1019463432550118032 2398809650377320370\n"
