@@ -48,8 +48,19 @@ optimising the rest of the runtime and the libraries. The native compiler
 honours `inline fn` and `cold fn`. It also marks every pure function of at most
 400 lowered lines as worth expanding, and `-O2` and `-O3` builds raise LLVM's
 limit for those functions (`-inlinehint-threshold=2000`); `--dev` builds do not.
-A module that never calls `spawn_thread` has one thread, so its reference
-counts are plain loads and stores instead of atomic operations.
+A program that can reach no function that starts a thread has one thread, so
+its reference counts are plain loads and stores instead of atomic operations.
+
+The runtime is the same for every program, so a build compiles it once and
+keeps the object in `NEO_CACHE_DIR`, else `$XDG_CACHE_HOME/neo`, else
+`~/.cache/neo`. Later builds compile only the program, link the kept object,
+and skip the proof check of the runtime sources that object was built from.
+The object is found again by the compiler binary, the runtime sources, the
+target, the optimisation level and Clang, so changing any of them builds a
+new one. Clang's default target is remembered in the same directory.
+`NEO_RUNTIME_CACHE=0` compiles the runtime with the program as one module, as
+do `--emit-llvm`, `--seed-runtime` and `--allow-unproven`, and any build that
+cannot create the cache directory.
 
 The Python reference remains available explicitly through `./neoc.sh`.
 Its default build uses LLVM `-O3`. Its `--dev` profile uses `-O1` and leaves

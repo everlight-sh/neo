@@ -186,7 +186,7 @@ fn cg_cleanup(borrow m:Mods, move s:CgState, borrow binding:CgBinding, destructo
     cg_release(cg_block(cg_jump(s,done),done),binding.value) with { value=result }
 fn cg_symbol(borrow m:Mods, id:i64) -> Arr u8 _
   = let f=md_node(m,id) in let abi=tc_abi_boundary(f) in
-    if !abi && !m.stable_symbols then concat("@neo_fn_",int_text(id)) else
+    if !abi && !m.stable_symbols && tx_at(m.shared,tx_at(m.owners,id))!=1 then concat("@neo_fn_",int_text(id)) else
     let name=if abi then md_str(m,f.a) else concat("neo.fn.",md_str(m,f.a)) in
     let escaped=loop (i=0, out=tx_empty()) while i<len(name)
       next (i+1,let b=tx_byte(name,i) in if b>=128 then tx_hex_byte(push(out,'\\'),b) else push(out,u8(b))) yield out in
@@ -711,7 +711,7 @@ fn cg_intrinsic(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue 
     else if tx_equal(name,"syscall6") || tx_equal(name,"fork_syscall") then cg_syscall(s,values,tx_equal(name,"fork_syscall"),id)
     else if tx_equal(name,"spawn_thread") then
       if !str_find(s.target,"-linux").present then s with { error=id } else
-      cg_ins(s,result,concat("call i64 @neo_spawn_thread(",cg_arg_text(values),")"))
+      cg_ins(cg_write(s,"  store i64 1, ptr @neo_threads, align 8\n"),result,concat("call i64 @neo_spawn_thread(",cg_arg_text(values),")"))
     else if tx_equal(name,"fiber_swap") || tx_equal(name,"fiber_init") then
       if len(s.target)==0 then s with { error=id } else
       cg_write(s with { value=cg_unit() },concat("  call void @neo_",name,"(",cg_arg_text(values),")\n"))
@@ -1340,9 +1340,20 @@ fn cg_slot_refs(borrow element:CgValue, retain:bool) -> Arr u8 _
 ; neo_unique: the value holds the only reference to a counted buffer.
 ; neo_spare: it also starts at the block's first element, and the block's
 ; size class (16 << class) holds %bytes after a %header-byte element header.
-; atomic: another thread may hold references too. A program that cannot start
-; a thread counts with plain loads and stores.
-fn cg_array_runtime(source_runtime:bool, atomic:bool) -> Arr u8 _
+; counting: 0 plain loads and stores, for a module that cannot start a thread;
+; 1 atomic; 2 decided as the program runs, for an object that is linked with
+; code it cannot see: atomic once spawn_thread has set @neo_threads.
+fn cg_count(counting:i64, add:bool) -> Arr u8 _
+  = let word=if add then "add" else "sub" in let tag=if counting==2 then ".plain" else "" in
+    let locked=concat("atomicrmw ",word," ptr %address, i64 1 ",if add then "monotonic" else "acq_rel","\n") in
+    let plain=concat("load i64, ptr %address, align 8\n  %next",tag," = ",word," i64 %old",tag,", 1\n",
+      "  store i64 %next",tag,", ptr %address, align 8\n") in
+    if counting==1 then concat("  %old = ",locked) else if counting==0 then concat("  %old = ",plain) else
+    concat("  %threads = load i64, ptr @neo_threads, align 8\n  %several = icmp ne i64 %threads, 0\n",
+      "  br i1 %several, label %count.locked, label %count.plain\ncount.locked:\n  %old.locked = ",locked,"  br label %count.done\n",
+      "count.plain:\n  %old.plain = ",plain,"  br label %count.done\n",
+      "count.done:\n  %old = phi i64 [ %old.locked, %count.locked ], [ %old.plain, %count.plain ]\n")
+fn cg_array_runtime(source_runtime:bool, counting:i64) -> Arr u8 _
   = concat(if source_runtime then "" else "declare ptr @ax_heap_alloc(i64)\ndeclare void @ax_free(ptr, i64)\n",
       "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n",
       "define internal void @neo.init.elements(ptr %payload, ptr %drop, i64 %stride, i64 %length) {\nentry:\n",
@@ -1359,16 +1370,12 @@ fn cg_array_runtime(source_runtime:bool, atomic:bool) -> Arr u8 _
       "  %control = extractvalue %ax_arr %value, 3\n  %bits = ptrtoint ptr %control to i64\n",
       "  %counted = icmp ugt i64 %bits, 1\n  br i1 %counted, label %retain, label %done\n",
       "retain:\n  %raw = and i64 %bits, -4\n  %address = inttoptr i64 %raw to ptr\n",
-      if atomic then "  %old = atomicrmw add ptr %address, i64 1 monotonic\n"
-      else "  %old = load i64, ptr %address, align 8\n  %more = add i64 %old, 1\n  store i64 %more, ptr %address, align 8\n",
-      "  br label %done\ndone:\n  ret void\n}\n",
+      cg_count(counting,true),"  br label %done\ndone:\n  ret void\n}\n",
       "define internal void @neo_release(%ax_arr %value) alwaysinline {\nentry:\n",
       "  %control = extractvalue %ax_arr %value, 3\n  %bits = ptrtoint ptr %control to i64\n",
       "  %counted = icmp ugt i64 %bits, 1\n  br i1 %counted, label %release, label %done\n",
       "release:\n  %raw = and i64 %bits, -4\n  %address = inttoptr i64 %raw to ptr\n",
-      if atomic then "  %old = atomicrmw sub ptr %address, i64 1 acq_rel\n"
-      else "  %old = load i64, ptr %address, align 8\n  %fewer = sub i64 %old, 1\n  store i64 %fewer, ptr %address, align 8\n",
-      "  %last = icmp eq i64 %old, 1\n",
+      cg_count(counting,false),"  %last = icmp eq i64 %old, 1\n",
       "  br i1 %last, label %destroy, label %done\ndestroy:\n",
       "  call void @neo.destroy(ptr %address, i64 %bits)\n  br label %done\ndone:\n  ret void\n}\n",
       ; The last release, kept out of line: every release site stays a count update.
@@ -1530,16 +1537,18 @@ fn cg_record_layout(borrow m:Mods, move p:CgProgram, module:i64, id:i64) -> CgPr
 fn cg_partition_module(borrow selected:Arr i64 _, module:i64, partition:i64) -> bool
   = partition!=2 || tx_at(selected,module)==1
 
-fn cg_records(borrow m:Mods, move p:CgProgram) -> CgProgram
+; own: only the records of the cached runtime object's modules, whose code
+; uses no others, so that object is the same for every program.
+fn cg_records(borrow m:Mods, move p:CgProgram, own:bool) -> CgProgram
   = let layouts=loop (k=0, code=p) while code.report.result.value.ty>0 && k<len(m.paths)
-      next (k+1,let ids=md_list(m.types,k) in
+      next (k+1,let ids=if own && tx_at(m.shared,k)!=1 then tx_ints() else md_list(m.types,k) in
         loop (i=0, out=code) while out.report.result.value.ty>0 && i<len(ids)
           next (i+1,cg_record_layout(m,out,k,tx_at(ids,i))) yield out) yield code in
     if layouts.report.result.value.ty<=0 then layouts else
     ; LLVM permits forward references in named layouts, but a by-value call
     ; in an ownership helper requires the argument layout to be defined first.
     let text=loop (k=0, out=layouts.text) while k<len(m.paths)
-      next (k+1,let ids=md_list(m.types,k) in loop (i=0, code=out) while i<len(ids)
+      next (k+1,let ids=if own && tx_at(m.shared,k)!=1 then tx_ints() else md_list(m.types,k) in loop (i=0, code=out) while i<len(ids)
         next (i+1,let id=tx_at(ids,i) in concat(code,cg_record_refs(m,id,true),cg_record_refs(m,id,false))) yield code) yield out in
     layouts with { text=text }
 
@@ -1575,8 +1584,16 @@ fn cg_piece_function(borrow m:Mods, move p:CgPieces, id:i64, borrow function:CgS
     if id<0 || id>=len(p.units) then p with { pieces=push(p.pieces,text), roots=push(p.roots,index) } else
     let p=p with { pieces=push(p.pieces,text), units=set(p.units,id,index) } in
     let p=if cg_reach_root(m,id) then p with { roots=push(p.roots,index) } else p in
-    if !tc_abi_boundary(md_node(m,id)) then p else let symbol=cg_symbol(m,id) in
+    let symbol=cg_symbol(m,id) in if len(symbol)<3 || tx_byte(symbol,1)!=34 then p else
     p with { names=push(p.names,pt_slice(symbol,2,len(symbol)-1)), owners=push(p.owners,index) }
+
+; The declaration of a function that lives in another object: kept when the
+; module refers to its symbol.
+fn cg_piece_import(borrow m:Mods, move p:CgPieces, id:i64) -> CgPieces
+  = let index=len(p.pieces) in let symbol=cg_symbol(m,id) in
+    let p=p with { pieces=push(p.pieces,cg_import_function(m,id)) } in
+    if len(symbol)<3 || tx_byte(symbol,1)!=34 then p with { roots=push(p.roots,index) }
+    else p with { names=push(p.names,pt_slice(symbol,2,len(symbol)-1)), owners=push(p.owners,index) }
 
 fn cg_reach_mark(move r:CgReach, piece:i64) -> CgReach
   = if piece<0 || piece>=len(r.kept) || tx_at(r.kept,piece)==1 then r
@@ -1603,19 +1620,43 @@ fn cg_reach_scan(borrow text:Arr u8 _, borrow p:CgPieces, move found:CgReach) ->
   = loop (i=0, r=found) while i<len(text)
       next (i+1,if tx_byte(text,i)!=64 then r else cg_reach_mark(r,cg_reach_symbol(text,i+1,p))) yield r
 
+; The named functions of the kept object that can start a thread: those that
+; call spawn_thread and those that refer to one that can. A program that
+; refers to none of them has one thread (see cg_program_part).
+fn cg_refers(borrow text:Arr u8 _, borrow p:CgPieces, borrow flags:Arr i64 _) -> bool
+  = loop (i=0, found=false) while !found && i<len(text)
+      next (i+1,tx_byte(text,i)==64 && tx_at(flags,cg_reach_symbol(text,i+1,p))==1) yield found
+type CgSpawn = { flags:Arr i64 _, changed:bool }
+fn cg_spawn_round(borrow p:CgPieces, move s:CgSpawn) -> CgSpawn
+  = loop (i=0, out=s with { changed=false }) while i<len(p.pieces)
+      next (i+1,if tx_at(out.flags,i)==1 || !cg_refers(md_word(p.pieces,i),p,out.flags) then out
+        else check i>=0 && i<len(out.flags) in CgSpawn { flags=set(out.flags,i,1), changed=true }) yield out
+fn cg_spawners(borrow p:CgPieces) -> Arr u8 _
+  = let direct=arr(i in 0..len(p.pieces)) if str_find(md_word(p.pieces,i),"call i64 @neo_spawn_thread(").present then 1 else 0 in
+    let all=loop (s=CgSpawn { flags=direct, changed=true }) while s.changed next (cg_spawn_round(p,s)) yield s.flags in
+    loop (k=0, out=" ") while k<len(p.names)
+      next (k+1,if tx_at(all,tx_at(p.owners,k))==1 then concat(out,md_word(p.names,k)," ") else out) yield out
+; Whether a program's text can start a thread: it calls spawn_thread or
+; refers to one of the kept object's functions that can.
+fn cg_threaded(borrow text:Arr u8 _, borrow list:Arr u8 _) -> bool
+  = str_find(text,"call i64 @neo_spawn_thread(").present ||
+    loop (i=1, found=false) while !found && i<len(list)
+      next (md_word_end(list,i)+1,let name=pt_slice(list,i,md_word_end(list,i)) in
+        len(name)>0 && (str_find(text,concat("@\"",name,"\"")).present || str_find(text,concat("@",name,"(")).present)) yield found
+
 ; The array helpers a module with this text is given (see cg_program_part).
-fn cg_array_helpers(borrow text:Arr u8 _, source_runtime:bool, atomic:bool) -> Arr u8 _
-  = if str_find(text,"@neo_own_view(").present then concat(cg_array_runtime(source_runtime,atomic),cg_view_runtime())
+fn cg_array_helpers(borrow text:Arr u8 _, source_runtime:bool, counting:i64) -> Arr u8 _
+  = if str_find(text,"@neo_own_view(").present then concat(cg_array_runtime(source_runtime,counting),cg_view_runtime())
     else if str_find(text,"@neo_retain(").present || str_find(text,"@neo_release(").present ||
       str_find(text,"@ax_heap_alloc(").present || str_find(text,"define %ax_arr @neo_entry(").present then
-      cg_array_runtime(source_runtime,atomic) else tx_empty()
+      cg_array_runtime(source_runtime,counting) else tx_empty()
 
 ; The pieces an executable keeps. The array helpers call the allocator, and
 ; which of them a module needs depends on what it keeps: none, the counting
 ; helpers, or those and the view helper. The choice only grows, so it settles.
 type CgKept = { helpers:Arr u8 _, pieces:Arr Arr u8 _ _, settled:bool }
 fn cg_keep_more(borrow p:CgPieces, borrow startup:Arr u8 _, source_runtime:bool, move k:CgKept) -> CgKept
-  = let helpers=cg_array_helpers(str_concat_parts(k.pieces),source_runtime,true) in
+  = let helpers=cg_array_helpers(str_concat_parts(k.pieces),source_runtime,1) in
     if tx_equal(helpers,k.helpers) then k with { settled=true }
     else CgKept { helpers=helpers, pieces=cg_reachable(p,concat(startup,helpers)), settled=false }
 fn cg_kept(borrow p:CgPieces, borrow startup:Arr u8 _, source_runtime:bool) -> Arr Arr u8 _ _
@@ -1645,6 +1686,8 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
       if partition==2 || (len(target)>0 && !source_runtime) then "@ax_runtime_state = external hidden global [256 x i64]\n"
       else concat("@ax_runtime_state = ",if partition==1 then "hidden" else "internal"," global [256 x i64] zeroinitializer, align ",
         if str_starts(target,"x86_64-") && str_find(target,"-linux").present then "4096\n" else "16\n"),
+      if partition==2 then "@neo_threads = external hidden global i64\n"
+      else concat("@neo_threads = ",if partition==1 then "hidden" else "internal"," global i64 0, align 8\n"),
       if partition==2 then "@ax_native_alloc_stats = external hidden constant i1\n" else
       concat("@ax_native_alloc_stats = ",if len(target)>0 then "hidden" else "internal",
         " constant i1 ",if allocation_stats then "true\n" else "false\n"),
@@ -1655,7 +1698,8 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
       "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n\n",cg_byte_runtime()) in
     ; A library generic can be instantiated with an application record. Keep
     ; those layouts available to both LLVM modules for the shared ABI.
-    let start=cg_records(m,CgProgram { text=header, report=TcReport { result=tc_type(n_t_unit()), module=-1 } }) in
+    let start=cg_records(m,CgProgram { text=header, report=TcReport { result=tc_type(n_t_unit()), module=-1 } },
+      partition==2 && len(m.shared)>0) in
     let first=CgPieces { pieces=push(md_words(),start.text),report=start.report,units=arr(i in 0..len(m.ast.nodes)/11) -1,
       names=md_words(),owners=tx_ints(),roots=push(tx_ints(),0) } in
     let p=loop (k=0, p=first)
@@ -1663,8 +1707,7 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
       next (k+1,if !cg_partition_module(selected,k,partition) then p else let ids=md_list(m.fns,k) in
         loop (i=0, out=p) while out.report.result.value.ty>0 && i<len(ids)
           next (i+1,let id=tx_at(ids,i) in
-            if partition==1 && tx_at(selected,k)==1 then
-              let index=len(out.pieces) in out with { pieces=push(out.pieces,cg_import_function(m,id)),roots=push(out.roots,index) } else
+            if partition==1 && tx_at(selected,k)==1 then cg_piece_import(m,out,id) else
             let function=cg_function(m,fns,id,false,target,views,source_runtime,partition==2) in
             if function.error>=0 then out with { report=TcReport { result=tc_unsupported(function.error,"LLVM lowering outside the supported subset"), module=k } }
             else cg_piece_function(m,out,id,function)) yield out) yield p in
@@ -1674,15 +1717,20 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
       if code.error>=0 then p with { report=TcReport { result=tc_unsupported(code.error,"LLVM lowering outside the supported subset"), module=module } }
       else cg_piece_function(m,p,-1,code) in
     if entry.report.result.value.ty<=0 then CgProgram { text="",report=entry.report } else
-    let prune=partition==0 && source_runtime && len(target)>0 && !m.stable_symbols in
+    let prune=(partition==0 || (partition==1 && len(m.shared)>0)) && source_runtime && len(target)>0 && !m.stable_symbols in
     let text=str_concat_parts(if prune then cg_kept(entry,startup,source_runtime) else entry.pieces) in
     let text=concat(text,na_runtime(target,text,partition),na_crypto(target,text),
       if !source_runtime && str_find(text,"call ptr @ax_alloc(").present then "declare ptr @ax_alloc(i64)\n" else "",
       if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "") in
-    ; Threads start only through spawn_thread, so a module that never calls it
-    ; has one thread and needs no atomic reference counts.
-    let atomic=!prune || str_find(text,"@neo_spawn_thread(").present in
-    CgProgram { text=concat(text,cg_array_helpers(text,source_runtime,atomic)),report=entry.report }
+    ; Threads start only through spawn_thread, so a whole program that never
+    ; calls it has one thread and needs no atomic reference counts. An object
+    ; linked with others tests the flag spawn_thread sets, unless it is the
+    ; program itself and refers to nothing in the kept object that can start one.
+    let alone=if partition==0 then prune && !str_find(text,"call i64 @neo_spawn_thread(").present
+      else partition==1 && prune && len(m.threaded)>0 && !cg_threaded(concat(text,startup),m.threaded) in
+    let counting=if alone then 0 else if partition==0 then 1 else 2 in
+    let noted=if partition==2 && len(m.shared)>0 then concat("; neo-threads:",cg_spawners(entry),"\n") else tx_empty() in
+    CgProgram { text=concat(text,cg_array_helpers(text,source_runtime,counting),noted),report=entry.report }
 
 fn cg_program(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool) -> CgProgram
   = cg_program_part(m,target,allocation_stats,source_runtime,tx_ints(),0,"")

@@ -16,7 +16,13 @@ import "paths.neo"
 import "project_fs.neo"
 import "text.neo"
 
-type LcArtifact = { bytes:Arr u8 _, key:Arr u8 _, directory:Arr u8 _, hit:bool, compile_ns:i64 }
+; threads: the kept runtime's functions that can start a thread, as its IR
+; lists them (cg_spawners), or empty.
+type LcArtifact = { bytes:Arr u8 _, key:Arr u8 _, directory:Arr u8 _, hit:bool, compile_ns:i64, threads:Arr u8 _ }
+fn lc_threads(borrow ir:Arr u8 _) -> Arr u8 _
+  = let mark="\n; neo-threads:" in let found=str_find(ir,mark) in if !found.present then tx_empty() else
+    let from=found.value+len(mark) in
+    let end=loop (i=from) while i<len(ir) && tx_byte(ir,i)!=10 next (i+1) yield i in pt_slice(ir,from,end)
 
 fn lc_visit(borrow m:Mods, move selected:Arr i64 _, module:i64, entry:i64) -> Arr i64 _
   = if module==entry || module<0 || module>=len(selected) || tx_at(selected,module)==1 then selected else
@@ -36,6 +42,13 @@ effect(fs) fn lc_selection(borrow m:Mods, borrow requested:Arr Arr u8 _ _) -> Ar
       next (i+1,let path=md_path(m,i) in
         if pt_within(path,m.runtime) || pt_within(path,m.stdlib) || lc_in_roots(path,roots)
         then lc_visit(m,selected,i,entry) else selected) yield selected
+
+; The runtime's modules and what they import: the part of every program that
+; is compiled once and kept (see cli_runtime_cache).
+fn lc_runtime_selection(borrow m:Mods) -> Arr i64 _
+  = let entry=md_entry_module(m) in
+    loop (i=0, selected=arr(k in 0..len(m.paths)) 0) while i<len(m.paths)
+      next (i+1,if pt_within(md_path(m,i),m.runtime) then lc_visit(m,selected,i,entry) else selected) yield selected
 
 fn lc_digest(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes(tx_empty(),sha256(bytes))
 
@@ -109,22 +122,68 @@ effect fn lc_publish(borrow directory:Arr u8 _, borrow ir:Arr u8 _, borrow ident
     let saved_object=fs_atomic_replace(pt_join(directory,"library.o"),bytes) in
     if !saved_object.ok then bd_error(saved_object.error.message) else
     let manifest=concat("{\"identity\":",json_quote(identity),",\"ir_sha256\":",json_quote(lc_digest(ir)),
-      ",\"object_sha256\":",json_quote(lc_digest(bytes)),"}\n") in
+      ",\"object_sha256\":",json_quote(lc_digest(bytes)),",\"threads\":",json_quote(lc_threads(ir)),"}\n") in
     let committed=fs_atomic_replace(pt_join(directory,"manifest.json"),manifest) in
     if !committed.ok then bd_error(committed.error.message) else noop()
 
-effect fn lc_prepare(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow sources:Arr u8 _, force:bool) -> LcArtifact
+; A cheap identity for the running compiler: its size and a checksum of all
+; its bytes. Any rebuild of the compiler changes it.
+fn lc_words(borrow part:Arr u8 _, total:i64) -> i64
+  = loop (i=0, mixed=total) while i+8<=len(part)
+      next (i+8,wrapping_add(wrapping_mul(mixed,1099511628211),byte_read_le(part,i,8))) yield wrapping_add(mixed,len(part))
+type LcSelf = { part:BytesResult, mixed:i64, size:i64 }
+effect fn lc_self() -> Arr u8 _
+  = let own=file_open("/proc/self/exe",0) in
+    let opened=if own.ok then own else file_open(pt_realpath(cli_arg(0).value),0) in
+    if !opened.ok then tx_empty() else
+    let read=loop (s=LcSelf { part=file_read_chunk(opened.value,65536),mixed=0,size=0 }) while s.part.ok && len(s.part.value)>0
+      next (LcSelf { part=file_read_chunk(opened.value,65536),mixed=lc_words(s.part.value,s.mixed),size=s.size+len(s.part.value) }) yield s in
+    let closed=file_close(opened.value) in
+    if !read.part.ok || read.size==0 then tx_empty() else concat(int_text(read.size),":",int_text(read.mixed))
+
+fn lc_hex(borrow text:Arr u8 _) -> bool
+  = len(text)==64 && loop (i=0, ok=true) while ok && i<len(text)
+      next (i+1,let c=tx_byte(text,i) in (c>=48 && c<=57) || (c>=97 && c<=102)) yield ok
+
+; Where this compiler notes which kept object belongs to these runtime
+; sources, or "" when it cannot identify itself. With the note a build finds
+; the object without lowering the runtime again to compute its key.
+effect fn lc_note(borrow config:BdConfig, borrow path:Arr u8 _, borrow sources:Arr u8 _) -> Arr u8 _
+  = let self=lc_self() in let tool=bd_tool_identity(config.clang) in
+    if len(self)==0 || len(tool)==0 then tx_empty() else
+    pt_join(pt_realpath(path),concat("recall-",lc_digest(concat("neo-runtime-recall-v1\0",config.target,"\0",config.level,"\0",
+      tool,"\0",self,"\0",sources))))
+effect fn lc_recall(borrow path:Arr u8 _, borrow note:Arr u8 _) -> LcArtifact
+  = let none=LcArtifact { bytes="",key="",directory="",hit=false,compile_ns=0,threads="" } in
+    let key=str_trim(fs_read(note).value) in if !lc_hex(key) then none else
+    let directory=pt_join(pt_realpath(path),key) in
+    let manifest=fs_read(pt_join(directory,"manifest.json")) in if !manifest.ok then none else
+    let parsed=json_parse(manifest.value) in if !parsed.ok then none else
+    let binary=lc_object(pt_join(directory,"library.o")) in
+    if !binary.ok || len(binary.value)==0 || !tx_equal(lc_digest(binary.value),pk_text(parsed.value,"object_sha256")) then none
+    else LcArtifact { bytes=binary.value,key=key,directory=directory,hit=true,compile_ns=0,threads=pk_text(parsed.value,"threads") }
+effect fn lc_remember(borrow note:Arr u8 _, borrow key:Arr u8 _) -> unit
+  = let saved=if len(note)>0 && lc_hex(key) then fs_atomic_replace(note,concat(key,"\n")) else int_ok(0) in noop()
+
+; The kept object for this library IR, when one is there and intact: hit
+; says so. key and directory name its place either way.
+effect fn lc_find(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow sources:Arr u8 _, force:bool) -> LcArtifact
   = let cache=pt_realpath(path) in let ir_digest=lc_ir_digest(ir) in
-    let version=bd_execute(config.clang,push(md_words(),"--version"),true) in
-    let key=lc_digest(concat("neo-prepared-object-v3\0",config.target,"\0",config.level,"\0",config.clang,"\0",
-      version.output,"\0",ir_digest,"\0",sources)) in
-    let directory=pt_join(cache,key) in let cached=if force || bd_exit_code(version.status)!=0 then "" else lc_read(directory,ir_digest) in
-    if len(cached)>0 then LcArtifact { bytes=cached,key=key,directory=directory,hit=true,compile_ns=0 } else
-    let ready=pf_mkdirs(cache) in
+    let tool=bd_tool_identity(config.clang) in
+    let key=lc_digest(concat("neo-prepared-object-v4\0",config.target,"\0",config.level,"\0",tool,"\0",ir_digest,"\0",sources)) in
+    let directory=pt_join(cache,key) in let cached=if force || len(tool)==0 then "" else lc_read(directory,ir_digest) in
+    LcArtifact { bytes=cached,key=key,directory=directory,hit=len(cached)>0,compile_ns=0,threads=lc_threads(ir) }
+
+; Compiles the library IR and keeps the object where lc_find looked.
+effect fn lc_make(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow found:LcArtifact) -> LcArtifact
+  = let cache=pt_realpath(path) in let ready=pf_mkdirs(cache) in
     let checked=if !ready.ok then bd_error(ready.error.message) else noop() in
     let started=bd_clock() in let made=lc_compile(config,cache,ir) in let elapsed=bd_elapsed(started,bd_clock()) in
-    let published=if !made.ok then bd_error(made.error.message) else lc_publish(directory,ir,ir_digest,made.value) in
-    LcArtifact { bytes=made.value,key=key,directory=directory,hit=false,compile_ns=elapsed }
+    let published=if !made.ok then bd_error(made.error.message) else lc_publish(found.directory,ir,lc_ir_digest(ir),made.value) in
+    LcArtifact { bytes=made.value,key=found.key,directory=found.directory,hit=false,compile_ns=elapsed,threads=found.threads }
+
+effect fn lc_prepare(borrow config:BdConfig, borrow path:Arr u8 _, borrow ir:Arr u8 _, borrow sources:Arr u8 _, force:bool) -> LcArtifact
+  = let found=lc_find(config,path,ir,sources,force) in if found.hit then found else lc_make(config,path,ir,found)
 
 fn lc_report(borrow cache:LcArtifact) -> Arr u8 _
   = concat("{\"cache\":",if cache.hit then "\"hit\"" else "\"miss\"",",\"key\":",json_quote(cache.key),

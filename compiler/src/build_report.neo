@@ -12,7 +12,9 @@ import "packages.neo"
 import "paths.neo"
 import "text.neo"
 
-type BrStages = { started:i64, parsed:i64, elaborated:i64, checked:i64, lowered:i64 }
+; staged: when the runtime object's IR was ready, which a build that keeps
+; that object lowers before the check; that time counts as lowering.
+type BrStages = { started:i64, parsed:i64, elaborated:i64, staged:i64, checked:i64, lowered:i64 }
 
 fn br_seconds(ns:i64) -> Arr u8 _ = float_text(f64(ns)/1000000000.0).value
 fn br_phase(start:i64, finish:i64) -> Arr u8 _ = br_seconds(bd_elapsed(start,finish))
@@ -41,8 +43,8 @@ effect(fs,time) fn br_print(borrow m:Mods, borrow stages:BrStages, borrow linked
       ",\"optimization\":{\"profile\":",if dev then "\"dev\"" else "\"release\"",",\"level\":",config.level,
       ",\"llvm_passes\":",json_encode(br_remarks(linked.remarks)),"},\"allow_unproven\":",if allow_unproven then "true" else "false",
       ",\"sources\":",br_sources(m),",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),
-      ",\"elaborate_seconds\":",br_phase(stages.parsed,stages.elaborated),",\"check_seconds\":",br_phase(stages.elaborated,stages.checked),
-      ",\"lower_seconds\":",br_phase(stages.checked,stages.lowered),"},\"build\":{\"cache\":\"disabled\",\"compile_seconds\":",
+      ",\"elaborate_seconds\":",br_phase(stages.parsed,stages.elaborated),",\"check_seconds\":",br_phase(stages.staged,stages.checked),
+      ",\"lower_seconds\":",br_phase(stages.checked-(stages.staged-stages.elaborated),stages.lowered),"},\"build\":{\"cache\":\"disabled\",\"compile_seconds\":",
       br_seconds(linked.compile_ns),",\"link_seconds\":",br_seconds(linked.link_ns),",\"llvm_seconds\":",
       br_seconds(linked.compile_ns+linked.link_ns),",\"total_seconds\":",br_phase(stages.started,now),"}",
       if len(library)==0 then "" else concat(",\"native_libraries\":",library),"}\n"))
