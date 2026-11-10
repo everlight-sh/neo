@@ -47,7 +47,12 @@ type Mods = { stdlib:Arr u8 _, runtime:Arr u8 _, entry:Arr u8 _,
               active:Arr Arr u8 _ _, done:HashMap<Arr u8 _,i64>,
               paths:Arr Arr u8 _ _, toks:Arr Arr i64 _ _, texts:Arr Arr u8 _ _, sources:Arr Arr u8 _ _, imports:Arr Arr i64 _ _, aliases:Arr Arr u8 _ _,
               ast:Ast, types:Arr Arr i64 _ _, fns:Arr Arr i64 _ _, prefixes:Arr Arr u8 _ _, canon:Arr i64 _, display:Arr i64 _, owners:Arr i64 _,
-              local:Book, imported:Book, surface:Book, base:Book, builtins:HashMap<Arr u8 _,i64>, result:i64, stable_symbols:bool }
+              local:Book, imported:Book, surface:Book, base:Book, builtins:HashMap<Arr u8 _,i64>, result:i64, stable_symbols:bool,
+              ; shared: per module, 1 when its functions are compiled into the cached runtime object.
+              shared:Arr i64 _,
+              ; threaded: the symbols of the kept object that can start a thread, each
+              ; between spaces; empty when that is not known.
+              threaded:Arr u8 _ }
 
 fn md_words() -> Arr Arr u8 _ _ = tx_words()
 fn md_lists() -> Arr Arr i64 _ _ = arr(i in 0..0) tx_ints()
@@ -427,7 +432,7 @@ effect(fs,unsafe) fn md_load_overlay(borrow root:Arr u8 _, borrow entry:Arr u8 _
                  active=md_words(), done=hashmap_empty::<Arr u8 _,i64>(29,31),
                  paths=md_words(), toks=md_lists(), texts=md_words(), sources=md_words(), imports=md_lists(), aliases=md_words(),
                  ast=ast_empty(), types=md_lists(), fns=md_lists(), prefixes=md_words(), canon=tx_ints(), display=tx_ints(), owners=tx_ints(),
-                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1,stable_symbols=false } in
+                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1,stable_symbols=false,shared=tx_ints(),threaded=tx_empty() } in
     let count=md_runtime_count(target) in
     let m=loop (s=m, k=0) while s.ok && k<count
       next (md_visit(s,pt_realpath(pt_join(s.runtime,md_runtime_file(k,target))),tx_empty(),1,1), k+1) yield s in

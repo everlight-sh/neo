@@ -873,20 +873,28 @@ fn tc_module(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, mod
     loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<len(ids)
       next (i+1, if signatures then tc_signature(m,fns,tx_at(ids,i)) else tc_body(m,fns,required,module,tx_at(ids,i),allow_unproven)) yield result
 
-fn tc_pass(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, signatures:bool, allow_unproven:bool) -> TcReport
+; proven: per module, 1 when its function bodies need no check in this build.
+fn tc_pass(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, signatures:bool, allow_unproven:bool,
+           borrow proven:Arr i64 _) -> TcReport
   = loop (k=0, report=TcReport { result=tc_type(n_t_unit()), module=-1 }) while report.result.value.ty>0 && k<len(m.paths)
-      next (k+1, TcReport { result=tc_module(m,fns,required,k,signatures,allow_unproven), module=k }) yield report
+      next (k+1, if !signatures && tx_at(proven,k)==1 then report
+        else TcReport { result=tc_module(m,fns,required,k,signatures,allow_unproven), module=k }) yield report
 
 fn tc_functions(borrow m:Mods) -> Arr i64 _
   = loop (k=0, ids=tx_ints()) while k<len(m.paths) next (k+1, md_with_all(ids,md_list(m.fns,k))) yield ids
 
-fn tc_program_proofs(borrow m:Mods, require_main:bool, allow_unproven:bool) -> TcReport
+; proven: modules whose bodies an earlier build of these exact sources checked
+; (the kept runtime object is that build's result); their signatures are
+; still read, since the rest of the program is checked against them.
+fn tc_program_rest(borrow m:Mods, require_main:bool, allow_unproven:bool, borrow proven:Arr i64 _) -> TcReport
   = let records=tc_records(m) in if records.result.value.ty<=0 then records else
     let fns=tc_functions(m) in
-    let signatures=tc_pass(m,fns,tx_ints(),true,false) in if signatures.result.value.ty<=0 then signatures else
+    let signatures=tc_pass(m,fns,tx_ints(),true,false,tx_ints()) in if signatures.result.value.ty<=0 then signatures else
     let entry=bk_get(m.local,md_entry_module(m),"main") in
     if require_main && md_find_decl(m,fns,entry)<0 then TcReport { result=tc_error(-1,"no `main` function"), module=-1 }
-    else tc_pass(m,fns,te_program(m,fns),false,allow_unproven)
+    else tc_pass(m,fns,te_program(m,fns),false,allow_unproven,proven)
+fn tc_program_proofs(borrow m:Mods, require_main:bool, allow_unproven:bool) -> TcReport
+  = tc_program_rest(m,require_main,allow_unproven,tx_ints())
 
 fn tc_program_mode(borrow m:Mods, require_main:bool) -> TcReport = tc_program_proofs(m,require_main,false)
 

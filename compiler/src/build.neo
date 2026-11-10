@@ -7,6 +7,7 @@ import "std:strings"
 import "std:time"
 import "text.neo"
 import "paths.neo"
+import "project_fs.neo"
 import "modules.neo"
 import "startup.neo"
 
@@ -35,21 +36,41 @@ effect(env,unsafe) fn bd_environment() -> Arr Arr u8 _ _
             check count>=0 in push(out,view(p,count))) yield out
 
 type BdPoll = { status:ProcessStatus, pending:bool, output:Arr u8 _ }
-effect(process,fs,time) fn bd_poll(process:Process, borrow previous:Arr u8 _, capture:bool) -> BdPoll
+effect(process,fs,time) fn bd_poll(process:Process, borrow previous:Arr u8 _, capture:bool, quiet:bool) -> BdPoll
   = let status=process_status(process) in
     let output=process_try_read(process,1,4096) in let errors=process_try_read(process,2,4096) in
     let wrote_output=if output.ok && !capture then print_out(output.value) else int_ok(0) in
-    let wrote_errors=if errors.ok then print_error(errors.value) else int_ok(0) in
+    let wrote_errors=if errors.ok && !quiet then print_error(errors.value) else int_ok(0) in
     let data_ready=(output.ok && len(output.value)>0) || (errors.ok && len(errors.value)>0) in
-    let paused=if status.running && !data_ready then sleep_ms(5) else int_ok(0) in
+    let paused=if status.running && !data_ready then sleep_ms(1) else int_ok(0) in
     let collected=if capture && output.ok && len(previous)<128 then concat(previous,output.value) else previous in
     BdPoll { status=status, pending=status.ok && (status.running || data_ready), output=collected }
 
-effect(process,fs,env,time,unsafe) fn bd_execute(borrow clang:Arr u8 _, borrow arguments:Arr Arr u8 _ _, capture:bool) -> BdPoll
+; quiet: the tool's error output is dropped, for an attempt that is repeated
+; with its errors shown when it fails.
+effect(process,fs,env,time,unsafe) fn bd_run(borrow clang:Arr u8 _, borrow arguments:Arr Arr u8 _ _, capture:bool, quiet:bool) -> BdPoll
   = using child=process_start(clang,arguments,bd_environment()) in
     let closed=process_close_input(child) in
-    loop (poll=bd_poll(child,tx_empty(),capture)) while poll.pending
-      next (bd_poll(child,poll.output,capture)) yield poll
+    loop (poll=bd_poll(child,tx_empty(),capture,quiet)) while poll.pending
+      next (bd_poll(child,poll.output,capture,quiet)) yield poll
+effect(process,fs,env,time,unsafe) fn bd_execute(borrow clang:Arr u8 _, borrow arguments:Arr Arr u8 _ _, capture:bool) -> BdPoll
+  = bd_run(clang,arguments,capture,false)
+
+; Where Neo keeps what it can reuse between builds, or "": NEO_CACHE_DIR, else
+; the user's cache directory.
+effect(env,fs) fn bd_cache_base() -> Arr u8 _
+  = let named=env_get("NEO_CACHE_DIR") in let shared=env_get("XDG_CACHE_HOME") in let home=env_get("HOME") in
+    let base=if named.present && len(named.value)>0 then named.value
+      else if shared.present && len(shared.value)>0 then pt_join(shared.value,"neo")
+      else if home.present && len(home.value)>0 then pt_join(pt_join(home.value,".cache"),"neo") else tx_empty() in
+    if len(base)==0 then base else pt_abspath(base)
+
+; A tool's identity for cache keys: its path and size, read without running
+; it. An updated Clang at the same path has another size.
+effect(fs,unsafe) fn bd_tool_identity(borrow path:Arr u8 _) -> Arr u8 _
+  = let opened=file_open(path,0) in if !opened.ok then tx_empty() else
+    let size=rt_file_size(opened.value) in let closed=file_close(opened.value) in
+    if size<=0 then tx_empty() else concat(path,":",int_text(size))
 
 fn bd_exit_code(status:ProcessStatus) -> i64
   = if !status.ok then 127 else if status.signal!=0 then 128+status.signal else status.exit_code
@@ -69,6 +90,9 @@ effect(fs,process) fn bd_error(borrow message:Arr u8 _) -> unit
   = let wrote=print_error(concat("neoc: ",message,"\n")) in process_exit(1)
 
 fn bd_compile_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow object:Arr u8 _, borrow remarks:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(push(push(bd_compile_flags(config,remarks),"-c"),ir),"-o"),object)
+
+fn bd_compile_flags(borrow config:BdConfig, borrow remarks:Arr u8 _) -> Arr Arr u8 _ _
   = let target=config.target in
     let args=push(push(push(push(push(md_words(),concat("--target=",target)),concat("-O",config.level)),
       "-Wno-override-module"),"-ffunction-sections"),"-fdata-sections") in
@@ -78,12 +102,23 @@ fn bd_compile_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow objec
     let args=if str_starts(target,"x86_64-") then push(args,"-falign-loops=32") else args in
     ; Release builds expand the short pure functions the emitter marks.
     let args=if tx_equal(config.level,"2") || tx_equal(config.level,"3") then push(push(args,"-mllvm"),"-inlinehint-threshold=2000") else args in
-    let args=if len(remarks)==0 then args else push(push(args,"-fsave-optimization-record"),concat("-foptimization-record-file=",remarks)) in
-    push(push(push(push(args,"-c"),ir),"-o"),object)
+    ; Linux code is position independent whichever way Clang was configured
+    ; and whether or not it also links (bd_build_arguments).
+    let args=if str_find(target,"-linux").present then push(args,"-fPIE") else args in
+    if len(remarks)==0 then args else push(push(args,"-fsave-optimization-record"),concat("-foptimization-record-file=",remarks))
 
 fn bd_link_arguments(borrow config:BdConfig, borrow object:Arr u8 _, borrow libraries:Arr Arr u8 _ _, borrow output:Arr u8 _) -> Arr Arr u8 _ _
   = let target=config.target in let args=push(push(push(md_words(),concat("--target=",target)),"-nostdlib"),object) in
     let args=md_words_append(args,libraries) in
+    let args=if len(config.runtime)>0 then push(args,config.runtime) else args in
+    let args=push(push(args,"-o"),output) in
+    if str_find(target,"-apple-").present then push(push(args,"-lSystem"),"-Wl,-dead_strip")
+    else push(push(args,"-static"),"-Wl,-e,_start,--no-undefined,--gc-sections")
+
+; One Clang run that compiles the module and links it: a build then starts
+; one tool instead of two.
+fn bd_build_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow libraries:Arr Arr u8 _ _, borrow output:Arr u8 _) -> Arr Arr u8 _ _
+  = let target=config.target in let args=md_words_append(push(push(bd_compile_flags(config,""),"-nostdlib"),ir),libraries) in
     let args=if len(config.runtime)>0 then push(args,config.runtime) else args in
     let args=push(push(args,"-o"),output) in
     if str_find(target,"-apple-").present then push(push(args,"-lSystem"),"-Wl,-dead_strip")
@@ -121,9 +156,13 @@ effect(process,fs,env,time,unsafe) fn bd_link_profile(borrow config:BdConfig, bo
     let prepared=if len(library)==0 then int_ok(0) else fs_write(dependency,library) in
     let libraries=if len(library)==0 then md_words() else push(md_words(),dependency) in
     let started=bd_clock() in
-    let compiled=if saved.ok && prepared.ok then bd_exit_code(bd_execute(config.clang,bd_compile_arguments(config,source,object,if profile then remark_file else ""),false).status) else 1 in
+    ; A profiled build times the two steps apart. Any other build tries one
+    ; run first, and repeats it as two to say which step failed.
+    let direct=if profile || !saved.ok || !prepared.ok then 1
+      else bd_exit_code(bd_run(config.clang,bd_build_arguments(config,source,libraries,binary),false,true).status) in
+    let compiled=if direct==0 then 0 else if saved.ok && prepared.ok then bd_exit_code(bd_execute(config.clang,bd_compile_arguments(config,source,object,if profile then remark_file else ""),false).status) else 1 in
     let after_compile=bd_clock() in
-    let linked=if compiled==0 then bd_exit_code(bd_execute(config.clang,bd_link_arguments(config,object,libraries,binary),false).status) else 1 in
+    let linked=if direct==0 then 0 else if compiled==0 then bd_exit_code(bd_execute(config.clang,bd_link_arguments(config,object,libraries,binary),false).status) else 1 in
     let finished=bd_clock() in
     let remarks=if profile && compiled==0 then fs_read(remark_file).value else "" in
     let digest=if profile && linked==0 then bd_file_digest(binary).value else "" in
@@ -161,6 +200,15 @@ effect(process,fs,env,time,unsafe) fn bd_configuration(borrow requested:Arr u8 _
       else if !bd_target_valid(probe) then config with { error=concat("unsupported target ",probe) }
       else config with { target=probe }
 
+; Clang's default target. It is asked once per Clang and remembered in the
+; cache directory, since starting Clang costs as much as a small build's own work.
 effect(process,fs,env,time,unsafe) fn bd_detect_target(borrow clang:Arr u8 _) -> Arr u8 _
-  = let probe=bd_execute(clang,push(md_words(),"-print-target-triple"),true) in
-    if bd_exit_code(probe.status)==0 then str_trim(probe.output) else tx_empty()
+  = let base=bd_cache_base() in let tool=bd_tool_identity(clang) in
+    let note=if len(base)==0 || len(tool)==0 then tx_empty()
+      else pt_join(base,concat("target-",tx_hex_bytes(tx_empty(),sha256(tool)))) in
+    let known=if len(note)==0 then tx_empty() else str_trim(fs_read(note).value) in
+    if bd_target_valid(known) then known else
+    let probe=bd_execute(clang,push(md_words(),"-print-target-triple"),true) in
+    let target=if bd_exit_code(probe.status)==0 then str_trim(probe.output) else tx_empty() in
+    let saved=if len(note)>0 && bd_target_valid(target) && pf_mkdirs(base).ok then fs_atomic_replace(note,concat(target,"\n")) else int_ok(0) in
+    target

@@ -1,4 +1,5 @@
 ; The native command-line compiler. ROOT supplies stdlib/ and runtime/.
+import "std:fs"
 import "std:io"
 import "std:json"
 import "std:random"
@@ -14,6 +15,7 @@ import "build.neo"
 import "build_report.neo"
 import "library_cache.neo"
 import "paths.neo"
+import "project_fs.neo"
 import "toml.neo"
 import "test.neo"
 import "format_command.neo"
@@ -41,10 +43,15 @@ effect fn cli_checked(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow target:
     let checked=cli_check_modules(m,report_ok,library,allow_unproven,format) in m
 
 effect fn cli_check_modules(borrow m:Mods, report_ok:bool, library:bool, allow_unproven:bool, borrow format:Arr u8 _) -> unit
+  = cli_check_rest(m,report_ok,library,allow_unproven,format,tx_ints())
+
+; proven: modules whose bodies need no check (see tc_program_rest).
+effect fn cli_check_rest(borrow m:Mods, report_ok:bool, library:bool, allow_unproven:bool, borrow format:Arr u8 _,
+                         borrow proven:Arr i64 _) -> unit
   =
     if !m.ok then let shown=td_modules(m,format) in
       process_exit(1)
-    else let report=tc_program_proofs(m,!library,allow_unproven) in
+    else let report=tc_program_rest(m,!library,allow_unproven,proven) in
       if report_ok || report.result.value.ty<=0 then check_output(m,report,format) else noop()
 
 effect fn cli_ir(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _) -> Arr u8 _
@@ -172,6 +179,18 @@ effect fn cli_launch(borrow executable:Arr u8 _, first:i64) -> i64
       let saved=store_ptr(args,n*8,data(program)) in let failed=rt_exec(storage,args,envp) in
       let exited=process_exit(127) in 127
 
+; Where the compiled runtime is kept between builds, or "" to compile it with
+; each program. The runtime is the same for every program, so a build normally
+; compiles only the program and links the kept object. NEO_RUNTIME_CACHE=0
+; turns this off.
+effect fn cli_runtime_cache() -> Arr u8 _
+  = let wanted=env_get("NEO_RUNTIME_CACHE") in if wanted.present && tx_equal(wanted.value,"0") then tx_empty() else
+    let base=bd_cache_base() in if len(base)==0 then base else let directory=pt_join(base,"runtime") in
+    ; A directory this build cannot write to (a read-only home) is not used.
+    let token=random_bytes(8) in if !pf_mkdirs(directory).ok || !token.ok then tx_empty() else
+    let trial=pt_join(directory,concat(".try-",tx_hex_bytes(tx_empty(),token.value))) in
+    if !fs_mkdir(trial).ok then tx_empty() else let removed=fs_rmdir(trial) in directory
+
 effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliOptions, run:bool) -> unit
   = let started=bd_clock() in let requested=env_get("NEO_OPT_LEVEL") in
     let level=if len(opts.level)>0 then opts.level else if requested.present then requested.value else if opts.dev then "1" else "2" in
@@ -185,28 +204,42 @@ effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliO
     let loaded=md_load_program(root,path,target,opts.package_root) in let parsed=bd_clock() in
     let m=rs_program(el_program(loaded)) in let elaborated=bd_clock() in
     let format=if opts.report && len(opts.diagnostics)==0 then "json" else opts.diagnostics in
-    let checked_program=cli_check_modules(m,false,false,opts.allow_unproven,format) in let checked=bd_clock() in
-    let m=m with { stable_symbols=caching } in
-    let selected=if caching then lc_selection(m,opts.library_roots) else tx_ints() in
+    let kept=if caching || opts.ir || opts.seed || opts.allow_unproven || !m.ok then tx_empty() else cli_runtime_cache() in
+    let split=caching || len(kept)>0 in
+    let none=LcArtifact { bytes="",key="",directory="",hit=false,compile_ns=0,threads="" } in
+    ; The runtime is the toolchain's own code. Its object is looked up before
+    ; the check: when the kept one matches, an earlier build of these exact
+    ; sources checked them and only the rest of the program is checked now.
+    let shared=if len(kept)>0 then lc_runtime_selection(m) else tx_ints() in
+    let sources=if len(kept)>0 then lc_sources(m,shared) else "" in
+    let note=if len(kept)>0 then lc_note(config,kept,sources) else "" in
+    let recalled=if len(note)>0 then lc_recall(kept,note) else none in
+    let runtime_ir=if len(kept)>0 && !recalled.hit then cli_ir_part(m with { shared=shared },config.target,true,format,shared,2,"") else "" in
+    let found=if recalled.hit then recalled else if len(kept)>0 then lc_find(config,kept,runtime_ir,sources,false) else none in
+    let staged=bd_clock() in
+    let checked_program=cli_check_rest(m,false,false,opts.allow_unproven,format,if found.hit then shared else tx_ints()) in let checked=bd_clock() in
+    let selected=if caching then lc_selection(m,opts.library_roots) else shared in
+    let m=m with { stable_symbols=caching, shared=shared, threaded=found.threads } in
     let startup=st_startup(m,config.target,!opts.seed) in
-    let ir=concat(cli_ir_part(m,config.target,!opts.seed,format,selected,if caching then 1 else 0,startup),startup) in
-    let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2,"") else "" in
+    let ir=concat(cli_ir_part(m,config.target,!opts.seed,format,selected,if split then 1 else 0,startup),startup) in
+    let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2,"") else runtime_ir in
     let lowered=bd_clock() in
     if opts.ir then let shown=print_out(ir) in noop() else
+    let prepared=if caching then lc_prepare(config,opts.cache_dir,library_ir,lc_sources(m,selected),opts.no_cache)
+      else if len(kept)==0 || found.hit then found else lc_make(config,kept,library_ir,found) in
+    let remembered=if len(kept)>0 && !recalled.hit then lc_remember(note,prepared.key) else noop() in
     if run then
       let random=random_bytes(16) in if !random.ok then bd_error(random.error.message) else
       let tmp=env_get("TMPDIR") in
       let output=pt_abspath(pt_join(if tmp.present && len(tmp.value)>0 then tmp.value else "/tmp",
         concat("neo-run-",tx_hex_bytes(tx_empty(),random.value)))) in
-      let linked=bd_link(config,ir,output) in
+      let linked=bd_link_profile(config,ir,prepared.bytes,output,false) in
       let status=cli_launch(output,opts.args) in let removed=fs_remove(output) in process_exit(status)
     else let output=if len(opts.output)>0 then opts.output else cli_output(path) in
     if !io_path_valid(output) || tx_equal(pt_realpath(output),pt_realpath(path)) then bd_error("invalid output path") else
-    let prepared=if caching then lc_prepare(config,opts.cache_dir,library_ir,lc_sources(m,selected),opts.no_cache)
-      else LcArtifact { bytes="",key="",directory="",hit=false,compile_ns=0 } in
     let output=pt_abspath(output) in let linked=bd_link_profile(config,ir,prepared.bytes,output,opts.report) in
     if !opts.report then noop() else
-    let stages=BrStages { started=started,parsed=parsed,elaborated=elaborated,checked=checked,lowered=lowered } in
+    let stages=BrStages { started=started,parsed=parsed,elaborated=elaborated,staged=staged,checked=checked,lowered=lowered } in
     let shown=br_print(m,stages,linked,config,output,opts.dev,opts.allow_unproven,if caching then lc_report(prepared) else "") in noop()
 
 effect fn cli_inspect(borrow command:Arr u8 _, borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliOptions) -> unit
