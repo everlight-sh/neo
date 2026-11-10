@@ -20,7 +20,7 @@ jobs:
           - os: macos-15
             platform: darwin-arm64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Install the published native seed
@@ -45,6 +45,13 @@ jobs:
           epoch=$(git show -s --format=%ct HEAD)
           native() { env -i PATH="$tools" HOME="$HOME" SDKROOT="${SDKROOT:-}" SOURCE_DATE_EPOCH="$epoch" "$@"; }
           native ./compiler/bootstrap.sh --seed "$RUNNER_TEMP/neo-seed/bin/neo"
+          # The seed's code generator is older than this compiler's. Rebuild the
+          # compiler with itself so the shipped binary has the current one, and
+          # once more to confirm that it reproduces itself.
+          native ./compiler/bootstrap.sh
+          cp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
+          native ./compiler/bootstrap.sh
+          cmp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
           native ./neo release -o "dist/neo-$version-$PLATFORM.tar.gz"
           native ./neo release -o "$RUNNER_TEMP/neo-repeat.tar.gz"
           cmp "dist/neo-$version-$PLATFORM.tar.gz" "$RUNNER_TEMP/neo-repeat.tar.gz"

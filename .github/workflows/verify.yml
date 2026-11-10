@@ -35,6 +35,13 @@ jobs:
           done
           native() { env -i PATH="$tools" HOME="$HOME" SDKROOT="${SDKROOT:-}" "$@"; }
           native ./compiler/bootstrap.sh --seed "$RUNNER_TEMP/neo-seed/bin/neo"
+          # The seed's code generator is older than this compiler's. Rebuild the
+          # compiler with itself so the shipped binary has the current one, and
+          # once more to confirm that it reproduces itself.
+          native ./compiler/bootstrap.sh
+          cp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
+          native ./compiler/bootstrap.sh
+          cmp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
           native ./neo test --unit-only
           native ./neo test tests/integration.neo.toml
           native ./neo release -o "$RUNNER_TEMP/neo-release-a.tar.gz"
