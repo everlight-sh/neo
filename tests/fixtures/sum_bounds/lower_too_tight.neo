@@ -1,0 +1,4 @@
+; Terms of at least 1 do not bound the sum below by 2 per term.
+fn w (c : u8) -> i64 {result >= 1, result <= 6} = 3
+fn total (s : Arr u8 n) -> i64 {result >= 2 * n} = sum(i in 0..n) w(s[i])
+fn main () -> i64 = 0

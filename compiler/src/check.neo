@@ -549,6 +549,25 @@ fn tc_uniform_size(borrow env:TcEnv, borrow term:Arr i64 _) -> Arr i64 _
       next (tl_end(term,i+1),tc_environment_has_symbol(env,tx_at(term,i))) yield ok in
     if visible then term else tx_ints()
 
+; The bound constants the reference checker tried for a sum's body.
+fn tc_sum_constant(i:i64) -> i64
+  = if i<7 then i else if i==7 then 8 else if i==8 then 10 else if i==9 then 16 else if i==10 then 100 else 1000
+; A sum of span terms, each between low and high, lies between low*span and
+; high*span when span >= 0 (sums trap on overflow). A sum of nonnegative
+; terms is nonnegative even over an empty range.
+fn tc_sum_bounds(borrow outer:TlFormula, borrow body:TlFormula, borrow term:Arr i64 _, borrow result:Arr i64 _, borrow span:Arr i64 _) -> TlFormula
+  = if len(term)==0 || len(result)==0 then tl_true() else
+    let low=loop (i=0, low=-1) while i<10 && tl_entails(body,tl_sub(tl_constant(tc_sum_constant(i)),term))==1
+      next (i+1,tc_sum_constant(i)) yield low in
+    ; A body that is not at most 1000 is not at most any smaller constant.
+    let high=if tl_entails(body,tl_sub(term,tl_constant(1000)))!=1 then -1 else
+      loop (i=0) while i<11 && tl_entails(body,tl_sub(term,tl_constant(tc_sum_constant(i))))!=1 next (i+1) yield tc_sum_constant(i) in
+    let sign=if low>=0 then tc_condition(result,tl_constant(0),9).yes else tl_true() in
+    if (low<=0 && high<0) || tl_entails(outer,tl_scaled(span,-1))!=1 then sign else
+    let lower=if low>0 then tl_atom(tl_sub(tl_scaled(span,low),result)) else tl_true() in
+    let upper=if high>=0 then tl_atom(tl_sub(result,tl_scaled(span,high))) else tl_true() in
+    tl_and(sign,tl_and(lower,upper))
+
 fn tc_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
   = let lo=tc_infer(m,fns,env,n.b) in if lo.value.ty<=0 then lo else
     let hi=tc_infer(m,fns,tc_assume(env,lo.value.known),n.c) in if hi.value.ty<=0 then hi else
@@ -561,10 +580,9 @@ fn tc_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Nod
     if n.kind==n_sum() then
       if tc_numeric(value.value.ty) || tc_numeric_record(m,value.value) then
         let result=tc_fresh_result(value.value,id) in
-        let sign=if value.value.ty==n_t_i64() &&
-          tl_entails(tl_and(inner.facts,value.value.known),tl_scaled(value.value.term,-1))==1 then
-          tc_condition(result.term,tl_constant(0),9).yes else tl_true() in
-        tc_known(tc_success(result),tl_and(known,sign))
+        let bounds=if value.value.ty!=n_t_i64() then tl_true() else
+          tc_sum_bounds(env.facts,tl_and(inner.facts,value.value.known),value.value.term,result.term,span) in
+        tc_known(tc_success(result),tl_and(known,bounds))
       else tc_error(n.d,concat("sum body must be numeric or a numeric record, got ",tc_show(value.value)))
     else
       ; Each iteration can produce a different nested length. Retain only
