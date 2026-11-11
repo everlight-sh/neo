@@ -731,8 +731,7 @@ exit = 1
 diagnostic = "missing effect capabilities: fs"
 
 # test_callbacks.py: function values in records run; effect, length, refinement,
-# capability, type and arity rules are enforced. (Two gaps are in
-# tests/porting/language-failures.md.)
+# capability, type and arity rules are enforced.
 [[test]]
 name = "callbacks-closure"
 file = "fixtures/test_callbacks/closure.neo"
@@ -803,6 +802,27 @@ file = "fixtures/test_callbacks/implicit_capabilities.neo"
 reject = true
 exit = 1
 diagnostic = "effect function values require explicit capabilities"
+
+[[test]]
+name = "callbacks-unknown-capability"
+file = "fixtures/test_callbacks/unknown_capability.neo"
+reject = true
+exit = 1
+diagnostic = "unknown function-value effect capabilities: bogus"
+
+[[test]]
+name = "callbacks-unknown-capability-parameter"
+file = "fixtures/test_callbacks/unknown_capability_parameter.neo"
+reject = true
+exit = 1
+diagnostic = "unknown function-value effect capabilities: zap"
+
+[[test]]
+name = "callbacks-unknown-capability-loop"
+file = "fixtures/test_callbacks/unknown_capability_loop.neo"
+reject = true
+exit = 1
+diagnostic = "unknown function-value effect capabilities: bogus"
 
 [[test]]
 name = "callbacks-argument-type"

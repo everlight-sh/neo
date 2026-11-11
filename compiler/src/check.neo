@@ -184,6 +184,18 @@ fn tc_decl_supported(borrow m:Mods, id:i64, outer:bool) -> bool
         next (i+1,tc_decl_supported(m,ast_list_at(m.ast,t.a,i),false)) yield ok
     else t.kind==n_t_arr() && (outer || (t.c==0 && tx_equal(md_str(m,t.b),"_"))) && tc_decl_supported(m,t.a,false)
 
+; Capabilities named in the function-value types of a declared type that
+; are not effect capabilities, in sorted order.
+fn tc_unknown_capabilities(borrow m:Mods, id:i64) -> Arr u8 _
+  = let t=md_node(m,id) in
+    if t.kind==n_t_arr() then tc_unknown_capabilities(m,t.a) else if t.kind!=n_t_fn() then tx_empty() else
+    let count=ast_list_len(m.ast,t.a) in
+    loop (i=0, names=te_unknown(m,t with { g=t.c })) while len(names)==0 && i<=count
+      next (i+1,tc_unknown_capabilities(m,if i<count then ast_list_at(m.ast,t.a,i) else t.b)) yield names
+fn tc_known_capabilities(borrow m:Mods, at:i64, id:i64, good:TcResult) -> TcResult
+  = let unknown=tc_unknown_capabilities(m,id) in
+    if len(unknown)==0 then good else tc_error(at,concat("unknown function-value effect capabilities: ",unknown))
+
 fn tc_named_node(borrow m:Mods, list:i64, name:i64) -> i64
   = let text=md_str(m,name) in
     loop (i=0, id=-1) while id<0 && i<ast_list_len(m.ast,list)
@@ -679,6 +691,7 @@ fn tc_loop_inits(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, 
             let declared=tc_decl_type(m,ann.a) in
             let result=if value.value.ty<=0 || s.b<0 then value
               else if !tc_decl_supported(m,ann.a,false) then tc_unsupported(s.b,"loop state annotation outside the current checker")
+              else if len(tc_unknown_capabilities(m,ann.a))>0 then tc_known_capabilities(m,s.b,ann.a,value)
               else if !tc_shape_equal(value.value,declared) then tc_error(id,concat("loop state ",md_str(m,s.a),
                 " initialised with ",tc_show(value.value),", declared ",tc_show(declared))) else value in
             TcArgs { values=push(a.values,result.value), result=result, known=tl_and(a.known,result.value.known) }) yield a
@@ -757,7 +770,7 @@ fn tc_param(borrow m:Mods, id:i64, main:bool, boundary:bool) -> TcResult
     else if array && md_node(m,p.b).c!=0 then tc_error(id,"array parameter sizes must be variables")
     else if p.f==2 && (boundary || (!array && value.ty!=n_t_rec())) then tc_error(id,"borrow parameters require an internal array or record type")
     else if main && value.ty!=n_t_i64() then tc_error(id,"main parameters must be i64 (parsed from argv)")
-    else tc_success(value)
+    else tc_known_capabilities(m,id,p.b,tc_success(value))
 
 fn tc_bind_parameter_array(borrow m:Mods, move context:TcContext, id:i64) -> TcContext
   = let p=md_node(m,id) in let t=md_node(m,p.b) in if t.kind!=n_t_arr() then context else
@@ -792,7 +805,7 @@ fn tc_signature(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> TcResult
     else if boundary && tc_abi_duplicate(m,fns,id) then tc_error(id,concat("duplicate function ",md_str(m,f.a)))
     else if ast_list_len(m.ast,f.h)>0 || !tc_decl_supported(m,f.c,true) then
       tc_unsupported(id,"function signature outside the current checker")
-    else let params=loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
+    else let params=loop (i=0, result=tc_known_capabilities(m,id,f.c,tc_type(n_t_unit()))) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
       next (i+1, tc_param(m,ast_list_at(m.ast,f.b,i),main,boundary)) yield result in
     if params.value.ty<=0 then params
     else if boundary && !tc_abi_signature(m,f) then
@@ -844,7 +857,9 @@ fn tc_body(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, modul
 ; on the dependency path would require an infinitely sized value layout.
 type TcRecords = { flags:Arr i64 _, result:TcResult }
 fn tc_record_field_type(borrow m:Mods, move records:TcRecords, id:i64, owner:i64) -> TcRecords
-  = let t=md_node(m,id) in if tc_scalar(t.kind) || ((t.kind==n_t_fn() || t.kind==n_t_ref()) && tc_decl_supported(m,id,false)) then records
+  = let t=md_node(m,id) in let unknown=tc_unknown_capabilities(m,id) in
+    if len(unknown)>0 then records with { result=tc_error(owner,concat("unknown function-value effect capabilities: ",unknown)) }
+    else if tc_scalar(t.kind) || ((t.kind==n_t_fn() || t.kind==n_t_ref()) && tc_decl_supported(m,id,false)) then records
     else if t.kind==n_t_arr() then
       if t.c!=0 || !tx_equal(md_str(m,t.b),"_") then records with { result=tc_error(owner,"record array fields use existential size _") }
       else tc_record_field_type(m,records,t.a,owner)

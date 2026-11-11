@@ -1,0 +1,4 @@
+; An unknown capability inside a parameter's function-value type, nested in
+; another function value's parameters, is rejected too.
+fn helper(call:Fn(Effect<fs,zap>(i64)->unit)->unit)->unit=noop()
+fn main()->i64=0

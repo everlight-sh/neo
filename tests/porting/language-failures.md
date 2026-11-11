@@ -44,14 +44,6 @@ of `tests/language.neo.toml`. Commands run from the repository root with
   the model must be updated before these modes can be checked again.
 - Ported anyway: modes 0-3 (`push-boundaries`, 308 runs through 1M elements).
 
-## 3. Function-value types accept an unknown capability
-
-- Script: `test_callbacks.py`, `test_effect_function_values`.
-- Command: `neoc check` on
-  `type Box={call:Effect<bogus>(i64)->unit} fn main()->i64=0`
-- What happened: `(ok)`, exit 0. The Python checker rejected `bogus` as an
-  unknown capability.
-
 ## 5. A postcondition is not proven after `check`
 
 - Script: `test_ambient_paths.py` (all cases built on
