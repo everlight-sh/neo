@@ -589,7 +589,10 @@ fn tc_infer(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64) -> Tc
       let inner=if n.a==10 then tc_assume(after_left,left.value.yes) else if n.a==11 then tc_assume(after_left,left.value.no) else after_left in
       let right=tc_infer(m,fns,inner,n.c) in if right.value.ty<=0 then right else
       let known=if n.a==10 || n.a==11 then left.value.known else tl_and(left.value.known,right.value.known) in
-      tc_known(tc_binary(tc_assume(env,known),id,n.a,left.value,right.value),known)
+      ; A short-circuit operand's facts hold only on the outcomes that ran it.
+      let operand=if (n.a!=10 && n.a!=11) || tl_is_true(right.value.known) then right.value else
+        right.value with { yes=tl_and(right.value.known,right.value.yes), no=tl_and(right.value.known,right.value.no) } in
+      tc_known(tc_binary(tc_assume(env,known),id,n.a,left.value,operand),known)
     else if kind==n_un() || kind==n_cast() then
       let value=tc_infer(m,fns,env,n.b) in if value.value.ty<=0 then value
       else tc_known(if kind==n_un() then tc_unary(id,n.a,value.value) else tc_cast(id,value.value,md_node(m,n.a).kind),value.value.known)
@@ -623,7 +626,10 @@ fn tc_infer(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64) -> Tc
     else if kind==n_check() then
       let condition=tc_infer(m,fns,env with { pure=true },n.a) in if condition.value.ty<=0 then condition
       else if condition.value.ty!=n_t_bool() then tc_error(n.a,"check predicate must be bool")
-      else tc_infer(m,fns,tc_assume(env,tl_and(condition.value.known,condition.value.yes)),n.b)
+      ; The check traps unless its predicate holds, so the predicate holds
+      ; wherever the value was computed (a postcondition, a caller's join).
+      else let holds=tl_and(condition.value.known,condition.value.yes) in
+      tc_known(tc_infer(m,fns,tc_assume(env,holds),n.b),holds)
     else if kind==n_call() then tc_call(m,fns,env,id,n)
     else tc_unsupported(id,"expression outside the current checker")
 

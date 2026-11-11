@@ -1104,8 +1104,9 @@ exit = 1
 diagnostic = "bounds"
 
 # test_ambient_paths.py: path conditions do not leak across calls; result and
-# length facts prove. (Postcondition-after-check cases are in
-# tests/porting/language-failures.md.)
+# length facts prove. A check's predicate holds wherever its value was
+# computed, so f's postcondition proves; a fact that must not prove is
+# rejected at the index it is about (line:col).
 [[test]]
 name = "ambient-paths-precondition-path"
 file = "fixtures/test_ambient_paths/precondition_path.neo"
@@ -1116,6 +1117,94 @@ diagnostic = "bounds"
 [[test]]
 name = "ambient-paths-clamped-result"
 file = "fixtures/test_ambient_paths/clamped_result.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-check-postcondition"
+file = "fixtures/test_ambient_paths/check_postcondition.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-check-false-branch"
+file = "fixtures/test_ambient_paths/check_false_branch.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-check-postcondition-wrong"
+file = "fixtures/test_ambient_paths/check_postcondition_wrong.neo"
+reject = true
+exit = 1
+diagnostic = "2:30 postcondition"
+
+[[test]]
+name = "ambient-paths-check-branch-postcondition"
+file = "fixtures/test_ambient_paths/check_branch_postcondition.neo"
+reject = true
+exit = 1
+diagnostic = "2:40 postcondition"
+
+[[test]]
+name = "ambient-paths-branch-fact"
+file = "fixtures/test_ambient_paths/branch_fact.neo"
+reject = true
+exit = 1
+diagnostic = "3:76 bounds"
+
+[[test]]
+name = "ambient-paths-field-branch"
+file = "fixtures/test_ambient_paths/field_branch.neo"
+reject = true
+exit = 1
+diagnostic = "4:89 bounds"
+
+[[test]]
+name = "ambient-paths-short-circuit-else"
+file = "fixtures/test_ambient_paths/short_circuit_else.neo"
+reject = true
+exit = 1
+diagnostic = "3:91 bounds"
+
+[[test]]
+name = "ambient-paths-loop-body"
+file = "fixtures/test_ambient_paths/loop_body.neo"
+reject = true
+exit = 1
+diagnostic = "3:124 bounds"
+
+[[test]]
+name = "ambient-paths-comprehension-body"
+file = "fixtures/test_ambient_paths/comprehension_body.neo"
+reject = true
+exit = 1
+diagnostic = "3:96 bounds"
+
+[[test]]
+name = "ambient-paths-unknown-condition"
+file = "fixtures/test_ambient_paths/unknown_condition.neo"
+reject = true
+exit = 1
+diagnostic = "3:79 bounds"
+
+[[test]]
+name = "ambient-paths-unknown-condition-again"
+file = "fixtures/test_ambient_paths/unknown_condition_again.neo"
+reject = true
+exit = 1
+diagnostic = "3:104 bounds"
+
+[[test]]
+name = "ambient-paths-dominated-call"
+file = "fixtures/test_ambient_paths/dominated_call.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-same-condition"
+file = "fixtures/test_ambient_paths/same_condition.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-short-circuit-operand"
+file = "fixtures/test_ambient_paths/short_circuit_operand.neo"
 check = true
 
 [[test]]

@@ -44,26 +44,6 @@ of `tests/language.neo.toml`. Commands run from the repository root with
   the model must be updated before these modes can be checked again.
 - Ported anyway: modes 0-3 (`push-boundaries`, 308 runs through 1M elements).
 
-## 5. A postcondition is not proven after `check`
-
-- Script: `test_ambient_paths.py` (all cases built on
-  `F = fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1`).
-- Command: `neoc check` on
-  `fn f(x : i64) -> i64 {result < 5} = check x < 4 in x + 1 fn main() -> i64 = 0`
-- What happened: `(unproven <file> 1:30 postcondition)`, exit 1. The fact
-  established by `check x < 4` is not available when the postcondition is
-  proven. Writing `f` as `if x < 4 then x + 1 else check false in 0` also
-  leaves the postcondition unproven. So:
-  - the script's "still proven" cases (a fact dominated by the call, the same
-    condition again, a short-circuit operand) cannot be built;
-  - its "must not prove" cases are rejected, but at `f`'s postcondition, not
-    at the out-of-bounds index they are about.
-- Ported anyway, as the `ambient-paths-*` cases:
-  - the original report (a precondition met on one branch only), rejected at
-    the index;
-  - the clamped-result postconditions;
-  - comprehension lengths that are not path conditions.
-
 ## 6. JSON writer growth is linear in requests and quadratic in bytes
 
 - Script: `json_writer_growth.py`. It requires at most 128 allocation requests

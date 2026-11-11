@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): a later test of the same bool variable does not reuse the earlier branch.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+fn g(xs:Arr i64 n,x:i64,c:bool{x >= 0,n >= 4}) -> i64 = let y = (if c then f(x) else 0) in if c then xs[x] else y
+fn main() -> i64 = 0

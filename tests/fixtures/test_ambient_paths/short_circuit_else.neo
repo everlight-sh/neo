@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): f runs only when m > 0, so its facts do not prove the else branch.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+fn g(xs:Arr i64 n,x:i64,m:i64{x >= 0,n >= 4}) -> i64 = if m > 0 && f(x) > 0 then 0 else xs[x]
+fn main() -> i64 = 0

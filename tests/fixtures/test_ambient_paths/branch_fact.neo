@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): f's result facts (x < 4) hold where f ran; they do not prove the other branch's index.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+fn g(xs:Arr i64 n,x:i64{x >= 0,n >= 4}) -> i64 = if x < 4 then f(x) else xs[x]
+fn main() -> i64 = 0
