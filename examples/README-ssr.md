@@ -19,10 +19,10 @@ The React version is [`ssr-react/page.tsx`](ssr-react/page.tsx), with `Row` and
 
 ## Run Neo
 
-From the repository root, on ARM64 macOS or Linux with Python and Clang:
+From the repository root, on ARM64 macOS or Linux with Clang:
 
 ```sh
-./neoc.sh build examples/ssr.neo -o /tmp/neo-ssr
+./neo build examples/ssr.neo -o /tmp/neo-ssr
 NEO_THREADS=1 /tmp/neo-ssr 8090
 ```
 
@@ -30,7 +30,7 @@ Open <http://localhost:8090/> or <http://localhost:8090/page/50>.
 Omit `NEO_THREADS=1` to use one HTTP worker process per configured CPU.
 Linux produces a static executable with no libc, CRT, interpreter or shared
 libraries. Mac imports no libc functions, but Apple's libSystem/dyld loader
-requirement remains. Python/LLVM are build tools, and both need the OS kernel.
+requirement remains. Clang/LLVM are build tools, and both need the OS kernel.
 
 ## Run Bun + React
 
@@ -48,25 +48,30 @@ are pinned in `package.json` and `bun.lock`.
 
 ## Verify and compare
 
-From the repository root, after installing the React example's dependencies:
+From the repository root:
 
 ```sh
-python3 tests/ssr_smoke.py --binary /tmp/neo-ssr
-python3 bench/http/compare_ssr.py --neo /tmp/neo-ssr
+./neo test tests/runtime.neo.toml
 ```
 
-The smoke test checks nine page sizes against a Python renderer, escaping,
-content lengths, valid/invalid routes, keep-alive, concurrent requests and
-129 ordered pipelined pages. On Linux, root can also run
-`--empty-root` to verify Neo in a temporary filesystem containing only its
-executable. Use a test container for this check.
+Its case `ssr-exact-pages-and-pipelining` (driver `tests/drivers/ssr_smoke.neo`)
+builds `examples/ssr.neo` and, with one and four workers, checks exact pages
+for nine sizes against frozen digests of the earlier Python renderer, escaping,
+content lengths, valid/invalid routes, keep-alive, 100 concurrent requests and
+129 ordered pipelined pages. It does not start the Bun + React server, and
+the old `--empty-root` mode is not ported for this example: the opt-in
+`NEO_TEST_ROOT_CHECKS=1` check described in the README runs
+`examples/http.neo` from an empty root instead.
 
-The benchmark uses 3, 50 and 1,000 rows, three five-second samples after a
-two-second warm-up, and 64 connections. It records throughput, latency, CPU
-per request, memory across every worker and deployment size. Measured routes
-are `/page/N`, with the count parsed from each request and no response cache.
-It saves `RESULTS-ssr-{macos,linux}-YYYY-MM-DD.md` and raw logs under
-`bench/http/results/`.
+The Bun + React comparison benchmark, `bench/http/compare_ssr.py`, is not
+ported; it is in the `v0.2.4` tag. It used 3, 50 and 1,000 rows, three
+five-second samples after a two-second warm-up, and 64 connections, and
+recorded throughput, latency, CPU per request, memory across every worker and
+deployment size. Measured routes were `/page/N`, with the count parsed from
+each request and no response cache. Its raw logs are under
+`bench/http/results/`. `./neo run --dev bench/run.neo -- servers` compares
+`examples/http.neo`, not this example, with Rust, Go and Bun servers (see the
+README's benchmark section and `bench/http/compare.neo`).
 
 Measured reports: [native Mac](../RESULTS-ssr-macos-2026-10-23.md) and
 [static Linux](../RESULTS-ssr-linux-2026-10-23.md). The older

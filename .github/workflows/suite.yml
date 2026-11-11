@@ -1,0 +1,48 @@
+name: Full native suite
+# Every native test case: the unit tests and all manifests in neo.toml
+# (integration, language, network, runtime, differential and tooling), which
+# take longer than verify.yml's per-push subset. openssl and Go are live TLS
+# and HTTP peers for the network cases. Nothing here installs or runs Python.
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain and protocol peers
+        run: sudo apt-get update && sudo apt-get install -y clang lld binutils openssl
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.1'
+          cache: false
+      - name: Install the published native seed
+        run: NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.0
+      - name: Bootstrap and run every test case with native tools
+        shell: bash
+        run: |
+          tools="$RUNNER_TEMP/neo-tools"
+          mkdir -p "$tools"
+          # The compiler, the drivers' peers and audits, and what install.sh uses.
+          for name in clang ld ld.lld as nm llvm-nm readelf gzip openssl go curl tar sh \
+              cp ln chmod chroot touch stat find id true sha256sum rm mv head cat mkdir \
+              mktemp uname readlink awk sed cut dirname; do
+            if tool=$(type -P "$name"); then ln -s "$tool" "$tools/$name"; fi
+          done
+          native() { env -i PATH="$tools" HOME="$HOME" "$@"; }
+          native ./compiler/bootstrap.sh --seed "$RUNNER_TEMP/neo-seed/bin/neo"
+          native ./compiler/bootstrap.sh
+          cp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
+          native ./compiler/bootstrap.sh
+          cmp .neo-build/bin/neoc "$RUNNER_TEMP/neoc-self"
+          native ./neo test
+      - name: Rerun the runtime cases' static binaries in an empty chroot
+        run: sudo env -i PATH="$RUNNER_TEMP/neo-tools" HOME="$HOME" NEO_TEST_ROOT_CHECKS=1 ./neo test tests/runtime.neo.toml

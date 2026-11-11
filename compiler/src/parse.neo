@@ -1,6 +1,7 @@
-; Parser: tokens to the syntax tree, as neoc/syntax.py Parser does, with its
-; error messages and positions. Errors do not unwind: P keeps the first one,
-; and every later step leaves a failed P unchanged.
+; Parser: tokens to the syntax tree, as the Python reference parsed them
+; (neoc/syntax.py Parser, v0.2.4 tag), with its error messages and positions.
+; Errors do not unwind: P keeps the first one, and every later step leaves a
+; failed P unchanged.
 import "std:strings"
 import "std:hashmap"
 import "std:option"

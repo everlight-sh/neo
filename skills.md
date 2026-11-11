@@ -157,12 +157,12 @@ effect fn main (port : i64{port > 0, port < 65536}) -> i64 = serve(port, handle)
 |---|---|
 | `neo check file.neo` | Type-check and prove; JSON on stdout |
 | `neo check --library file.neo` | The same for a file without `main` |
-| `neo build file.neo -o app` | Native binary (LLVM `-O3`; `--opt-level 0` for fast builds) |
+| `neo build file.neo -o app` | Native binary (LLVM `-O2`; `--dev` for fast builds) |
 | `neo run file.neo -- args` | Build and run |
 | `neo test` | Project tests and `tests/*_test.neo` `test_*` functions |
 | `neo fmt` | Format source files |
 | `neo init dir` | New project with `neo.toml` |
 | `neo lsp` | Language server |
-| `neo doctor` | Check that Python, Clang and a linker are installed |
+| `neo doctor` | Check that Clang and a linker work by building a small program |
 
 `install.sh` puts `neo` on your PATH; in a clone of the repository, run `./neo`.

@@ -61,10 +61,11 @@ non-GET methods 405.
 
 Generated files are in `.kernel-build/jsx-ssr/` at the repository root:
 `components.neo` is the component output; `server.neo` is the complete source;
-`server` is the native executable. `bun run build /absolute/output/path` chooses
-another binary path. The final executable never reads the TSX or JavaScript.
+`server` is the native executable, built with the repository's `./neo build`.
+`bun run build /absolute/output/path` chooses another binary path. The final
+executable never reads the TSX or JavaScript.
 
-Bun and TypeScript are build tools, and Python/LLVM remain Neo's build tools.
+Bun and TypeScript are build tools, and Clang/LLVM remain Neo's build tools.
 On ARM64 Linux the executable is static with no libc, JavaScript engine,
 interpreter, or shared libraries; it still uses kernel syscalls. On ARM64 macOS
 there are zero undefined function imports, but the OS loader still requires
@@ -103,16 +104,20 @@ while keeping the deployed Neo server native and independent of React.
 ```sh
 bun test
 cd ../..
-python3 tests/jsx_ssr_smoke.py --binary .kernel-build/jsx-ssr/server
+./neo test tests/runtime.neo.toml
 ```
 
-The smoke test compares **all 1,000 valid counts byte for byte against actual
-React rendering of the same TSX file**, then checks routing, escaping, Unicode,
-keep-alive, 100 concurrent requests and 129 ordered pipelined responses. It
-runs with one and four Neo workers, and also checks the Bun/React HTTP server.
-`nm` audits imports; on Linux, `readelf` also audits the interpreter and shared
-library lists. As root on Linux, add `--empty-root` to repeat the test in a
-chroot containing only the generated executable.
+`bun test` checks the translator. In the Neo suite, the case
+`jsx-ssr-react-identical-pages` (driver `tests/drivers/jsx_ssr_smoke.neo`)
+builds the translator output frozen in `tests/fixtures/jsx_ssr_server.neo`
+and compares **all 1,000 valid counts with frozen digests of React 19.2.8's
+`renderToStaticMarkup` output for the same TSX file**, then checks routing,
+escaping, Unicode, keep-alive, 100 concurrent requests and 129 ordered
+pipelined responses. It runs with one and four Neo workers. `nm` audits
+imports; on Linux, `readelf` also audits the interpreter and shared library
+lists. It does not check a fresh `.kernel-build/jsx-ssr/server`, start the
+Bun/React server or run in an empty chroot; those parts of the old Python
+smoke test are not ported.
 
 The earlier catalog benchmark measures the separate hand-written
 [Neo SSR example](../README-ssr.md), **not this TSX translator**; its numbers
@@ -120,11 +125,10 @@ should not be attributed to this prototype.
 
 ## Benchmark the shared TSX page
 
-From the repository root, after building the example:
-
-```sh
-python3 bench/http/compare_jsx_ssr.py --neo .kernel-build/jsx-ssr/server
-```
+The comparison driver, `bench/http/compare_jsx_ssr.py`, is not ported; it is
+in the `v0.2.4` tag. The repository's current server comparison,
+`./neo run --dev bench/run.neo -- servers` (see the README), measures
+`examples/http.neo`, not this example. What follows describes the old driver.
 
 The benchmark compares one Neo rendering worker against one Bun/React
 rendering worker in production mode. It measures the normal page at one and
@@ -146,15 +150,10 @@ The original generated source must be saved at
 include baseline/optimized comparisons alongside Bun/React. Keep the initial
 report and raw measurements when making later optimization comparisons.
 
-For rendering without HTTP, generate a binary containing both translator
-variants and run the separate checksum workload:
-
-```sh
-cd examples/jsx-ssr
-bun run build-render-bench.ts
-cd ../..
-python3 bench/http/compare_jsx_render.py
-```
+For rendering without HTTP, `bun run build-render-bench.ts` generates a binary
+containing both translator variants. The driver that ran the checksum workload
+against React, `bench/http/compare_jsx_render.py`, is not ported either; it is
+in the `v0.2.4` tag.
 
 It cycles through all 1,000 prop values and checksums every byte of every
 rendered document. Both native variants share one executable, selected by

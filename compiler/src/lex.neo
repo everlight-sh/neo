@@ -1,6 +1,7 @@
-; Lexer: Neo source bytes to tokens, as neoc/syntax.py lex() does. Columns
-; count code points; string literal tokens hold their decoded bytes, byte
-; literal tokens their decimal value.
+; Lexer: Neo source bytes to tokens, as the Python reference lexed them
+; (neoc/syntax.py lex(), v0.2.4 tag). Columns count code points; string
+; literal tokens hold their decoded bytes, byte literal tokens their decimal
+; value.
 import "std:strings"
 import "std:unicode"
 import "text.neo"

@@ -4,11 +4,12 @@
 ; commands run in a directory, and a canonical JSON form.
 ;
 ; The goldens in golden/{formatter,init,ast_dump,modules_dump,package_import,
-; package_commands,tooling}/ are outputs of the Python reference (neoc.sh and
-; neoc/) of chore/remove-python at e6881b1 (Neo 0.2.3), recorded on x86_64
-; Linux by a one-off generator that ran each *_differential.py scenario and
-; was not committed. Inputs are frozen with them where the outputs depend on
-; them, so editing examples/, stdlib/ or runtime/ does not change a golden.
+; package_commands,tooling}/ are outputs of the Python reference compiler
+; (neoc/, removed after v0.2.4) of chore/remove-python at e6881b1 (Neo 0.2.3),
+; recorded on x86_64 Linux by a one-off generator that ran each
+; *_differential.py scenario and was not committed. Inputs are frozen with
+; them where the outputs depend on them, so editing examples/, stdlib/ or
+; runtime/ does not change a golden.
 ; Placeholders: @ROOT@ a session's root, @T@ a driver's temporary base,
 ; @VERSION@ the compiler's version, @EPOCH@ the release epoch. The native
 ; compiler matched every golden when they were frozen; a case it later gets

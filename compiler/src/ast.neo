@@ -1,7 +1,8 @@
 ; The syntax tree as tables. Neo has no recursive value types, so a node
 ; refers to its children by index: into nodes for a node, into lists for a
 ; list (its length, then its items), into strs for a name or string literal.
-; Unused fields hold -1. neoc/syntax.py defines the same tree as classes.
+; Unused fields hold -1. The Python reference (neoc/syntax.py, v0.2.4 tag) had
+; the same tree as classes.
 ; Nodes are stored flat, eleven numbers each in Node's field order: push grows
 ; an array of numbers in place, but copies a whole array of records.
 import "text.neo"

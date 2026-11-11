@@ -62,34 +62,15 @@ new one. Clang's default target is remembered in the same directory.
 do `--emit-llvm`, `--seed-runtime` and `--allow-unproven`, and any build that
 cannot create the cache directory.
 
-The Python reference remains available explicitly through `./neoc.sh`.
-Its default build uses LLVM `-O3`. Its `--dev` profile uses `-O1` and leaves
-small pure helpers and calls with constant arguments as ordinary calls.
-The reference compiler still honours `inline fn` in this profile.
-[RESULTS-compile-time-x86-linux-2026-11-03.md](RESULTS-compile-time-x86-linux-2026-11-03.md)
-measures both profiles. `--opt-level 0..3` overrides the level in either
-profile. All levels and profiles retain type/refinement
-checking and checked arithmetic. Profile, optimization level,
-`NEO_INLINE_BUDGET` (default 160 nodes) and `NEO_INLINE_EXPANSION` participate
-in the build cache key.
-`--report` includes compiler phase timings (parse, check and the part of it
-spent proving, AST optimization, lowering, clang compile and link) and
-optimization settings, and `inline_budget_misses`: calls inside loops and
-comprehensions whose callee exceeded that budget and so is no longer
-force-inlined. `inline fn` forces inlining of a non-recursive internal function
-whatever its size. Policy inlining is transitive, so one function can grow by
-hundreds of thousands of IR lines and dominate clang's time;
-`NEO_INLINE_EXPANSION` (default 262144 IR lines, 0 for no limit) stops policy
-inlining into a function that would grow past it, and `--report` lists the
-callees it left as calls in `inline_expansion_cuts`.
+All levels and profiles retain type/refinement checking and checked
+arithmetic. `--report` includes compiler phase timings (parse, elaborate,
+check, lower, LLVM, clang compile and link) and the optimization settings.
 
-The reference library preparation also measures the emitted bodies. Generic managed
-records can produce thousands of ownership instructions from a small source
-helper. Heuristic library inlining is limited to 2,048 IR lines per helper and
-8,192 expanded lines (or a smaller `NEO_INLINE_EXPANSION` setting); a zero
-expansion limit disables the latter bound. Explicit `inline fn` requests remain
-forced. Application imports re-evaluate this policy rather than retaining stale
-forced-inline annotations from the cache.
+The Python reference compiler is no longer in the repository; it is in the
+`v0.2.4` tag. Its own inlining budgets (`NEO_INLINE_BUDGET`,
+`NEO_INLINE_EXPANSION`) and library inlining hints went with it.
+[RESULTS-compile-time-x86-linux-2026-11-03.md](RESULTS-compile-time-x86-linux-2026-11-03.md)
+measured that compiler.
 
 The proof engine keeps integral constraints in arbitrary-precision integers,
 clearing rational denominators by positive exact scaling during elimination.
@@ -194,8 +175,8 @@ local packages, LSP and release tooling, with their current limits.
 
 The [application guide](docs/getting-started.md) covers modules, owned data,
 structured errors, capabilities, project commands, the JSON CLI, persistent notes,
-and durable webhook delivery. Run `./neo test` for native project cases and
-`./neoc.sh test` for the Python reference verification suite.
+and durable webhook delivery. Run `./neo test` for the whole test suite,
+described below.
 
 The [JSON optimization report](RESULTS-json-optimized-linux-2026-10-24.md) compares
 the unchanged dynamic JSON workload against the preserved Neo binary, Rust/serde
@@ -223,25 +204,45 @@ runs the verification on ARM64 Ubuntu). Both use HTTP worker processes and
 event loops written in Neo over kernel epoll (Linux) or poll (macOS) syscalls. Other CPU
 architectures need their own kernel ABI backends before they can build.
 
-Run the native project cases with `./neo test`. To run the Python reference
-compiler tests and its application verification harness, use the following commands.
+`./neo test` runs the whole suite: unit tests, documentation examples, the
+cases in `neo.toml` and the manifests its `[tool.neo] integration` entry lists:
+
+- `tests/integration.neo.toml`: the examples and runtime fixtures;
+- `tests/language.neo.toml`: language, collections and JSON;
+- `tests/network.neo.toml`: crypto, TLS and HTTP;
+- `tests/runtime.neo.toml`: runtime, process and tooling;
+- `compiler/tests/differential.neo.toml`: frozen outputs of the old Python
+  reference compiler (check verdicts and the output of built programs);
+- `compiler/tests/tooling.neo.toml`: fmt, init, projects, packages, build
+  options, parse and module dumps, and a parse and fmt idempotence pass over
+  the repository's sources.
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 tests/http_smoke.py
-python3 tests/kernel_runtime_smoke.py
-python3 tests/compute_smoke.py
-python3 tests/bounded_stencil_smoke.py
-python3 tests/vector_arrays_smoke.py
+./neo test                          # everything
+./neo test tests/network.neo.toml   # one manifest
+./neo test --unit-only              # without the integration manifests
 ```
 
-The kernel runtime smoke test also audits executable imports and exercises
-allocation reuse, memory operations, direct syscalls and shared-memory workers.
-On Linux, a root-only check runs the HTTP suite inside an empty filesystem,
-with only the static executable present:
+Drivers are in `tests/drivers/` and `compiler/tests/*.neo`, frozen vectors in
+`tests/vectors/` and goldens in `compiler/tests/golden/`. The case format is
+in [docs/getting-started.md](docs/getting-started.md); [tests/porting/README.md](tests/porting/README.md)
+records how the Python tests were ported. The former smoke scripts are cases
+now: `http-smoke` in `tests/network.neo.toml`, `kernel-runtime-*` in
+`tests/runtime.neo.toml`, and `compute-*`, `bounded-stencil-smoke` and
+`vector-arrays-smoke` in `tests/language.neo.toml`. The `kernel-runtime-*`
+cases exercise allocation reuse, memory operations, direct syscalls and
+shared-memory workers; `kernel-runtime-static-audit` audits executable imports.
+
+The full suite is verified on x86_64 Linux. It needs clang, ld.lld, binutils
+(`nm`, `readelf`), openssl, go, curl, tar and gzip on `PATH`; openssl and go
+are live TLS and HTTP peers. Two parts are opt-in. `NEO_TEST_NETWORK=1` adds
+live TLS and X.509 checks against internet sites. `NEO_TEST_ROOT_CHECKS=1`,
+run as root on Linux, reruns the static binaries of the HTTP server, the
+language and crypto kernel, the agent fixtures and the map workload in an
+empty chroot:
 
 ```bash
-python3 tests/freestanding_linux_smoke.py --binary /path/to/http
+NEO_TEST_ROOT_CHECKS=1 ./neo test tests/runtime.neo.toml
 ```
 
 To rebuild and compare the current HTTP runtime with Rust (hyper/tokio), Go
@@ -262,7 +263,7 @@ byte-at-a-time delivery, POST body skipping and 300 idle connections.
 
 The older `RESULTS-http.md` and `RESULTS-http-compute.md` describe the
 removed C runtime. The macOS reports came from an earlier Python harness,
-which is still in the `v0.2.3` tag.
+which is still in the `v0.2.4` tag.
 
 The current harness includes both default-worker and single-worker
 scenarios; worker settings are not CPU affinity. CPU and memory include every
@@ -285,7 +286,7 @@ workload: the `stencil` and `stencil-small` cases of `bench/compute.neo.toml`.
 With `NEO_BENCH_COMPARE=DIR`, it also runs binaries from DIR named after the
 cases, with the same arguments, and checks that their output matches. The
 Python harness behind the report, which also covered Rust and Go across
-sizes and CPU budgets, is in the `v0.2.3` tag.
+sizes and CPU budgets, is in the `v0.2.4` tag.
 
 The current Linux epoll backend and container SSR comparison with Rust and
 Bun are documented in
@@ -493,26 +494,16 @@ available in that project.
 
 ```
 compiler/src/    native lexer, parser, module loader, checker, LLVM backend and driver
+compiler/tests/  tooling and differential manifests, drivers and goldens
 neo              native launcher
 compiler/bootstrap.sh  native compiler rebuild from a released seed
-neoc.sh          explicit Python compiler and verification reference
-neoc/syntax.py   lexer, AST, parser (the textual projection)
-neoc/graph.py    content-addressed hashing (de Bruijn variables)
-neoc/linear.py   linear integer constraints, Fourier-Motzkin, counterexamples
-neoc/check.py    type checker and obligation discharge
-neoc/llvm.py     LLVM IR backend, region outlining, ownership, SoA records
-neoc/vectorize.py cross-iteration vectorisation of scalar sums and affine array bodies
-neoc/kernel_workers.py Linux raw-clone stack switch for allocation-free regions
-neoc/fold.py     compile-time evaluation of pure calls with literal arguments
-neoc/inline.py   inlining of concat-producing calls, concat flattening
-neoc/cli.py      build / check / graph, build cache
-neoc/quick.py    unchanged rebuilds answered from a record before the compiler loads
+tests/           integration manifests, drivers, fixtures and frozen vectors
 runtime/core.neo  allocator/free lists, memory operations, formatting, fork scheduling
 runtime/http.neo multicore connection assignment, HTTP framing and response batches
 runtime/http_linux.neo persistent Linux epoll registrations and ready-event dispatch
 runtime/platform_*.neo ARM64 kernel syscall numbers/wrappers; no library declarations
 examples/         mandel.neo, stencil.neo, http.neo, sieve.neo, nbody.neo, unproven.neo
-bench/            Rust, Go, Bun and React (Bun and Node) equivalents; run.py (compute), http/run.py (wrk)
+bench/            Rust, Go, Bun and React (Bun and Node) equivalents; run.neo (compute, compile, http, maps, servers)
 experiments/      agent-loop: four agents writing Neo from the README alone
 RESULTS.md        compute benchmarks; RESULTS-http.md, RESULTS-http-compute.md,
                   RESULTS-http-ssr.md: HTTP; RESULTS-agent-loop.md: the agent experiment
@@ -525,9 +516,10 @@ Ownership is a per-scope uniqueness analysis, not full region inference; a
 variable used twice as a whole is borrowed everywhere and its buffer is copied
 by `set`. Records now hold owned arrays and nested records, and arrays may contain managed
 values. Managed-element comprehensions currently stay sequential. Safe-code
-signed arithmetic now traps on overflow; explicit wrapping operations are available. `llvm.assume` emission of proven facts is
-implemented (`NEO_ASSUME=1`) but off by default: LLVM 21 did not use them to
-vectorise and they cost 15 percent on the stencil. The prover is
+signed arithmetic now traps on overflow; explicit wrapping operations are available. The native compiler does not
+emit proven facts as `llvm.assume`: in the Python reference compiler
+(`NEO_ASSUME=1`), LLVM 21 did not use them to vectorise and they cost 15
+percent on the stencil. The prover is
 Fourier-Motzkin over linear constraints; non-linear index expressions need a
 `check`. A general effect system (tokens for I/O,
 files, time) needs finer-grained capabilities beyond the current `effect fn`
@@ -540,8 +532,10 @@ decimal conversion implementation. The standard library includes generic records
 JSON, files, collections, DNS, bounded IPv4 TCP/UDP, a kernel poll reactor,
 streaming HTTP/1.1 and experimental pure-Neo TLS with RSA/P-256 authentication.
 Optional application protocols live in a separate package workspace.
-[Prepared-library inlining budgets](docs/prepared-library-inlining.md) preserve
-small-helper optimization across large callers and cache boundaries. Escaped
+The Python reference compiler's
+[prepared-library inlining budgets](docs/prepared-library-inlining.md) kept
+small-helper optimization across large callers and cache boundaries; the
+native library cache links a prepared object without inlining hints. Escaped
 JSON strings decode into an exact-sized output buffer with plain-run copies.
 
 [Cooperative byte-result tasks and HTTP rendering](docs/async-rendering.md) preserve native

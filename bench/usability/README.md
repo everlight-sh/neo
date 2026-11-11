@@ -2,7 +2,7 @@
 
 These measurements are recorded in the dated usability reports. Their drivers
 were Python and were removed with the rest of the repository's Python. They
-are still in the `v0.2.3` tag: `bench/usability/run.py`, `compute.py` and
+are still in the `v0.2.4` tag: `bench/usability/run.py`, `compute.py` and
 `build_images.py`, and `bench/docker/build.py` and `compare.py`.
 
 Run correctness first with `./neo test`. Build tools and benchmark competitors

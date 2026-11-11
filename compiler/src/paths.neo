@@ -1,6 +1,7 @@
-; Paths as neoc's Python sees them: posixpath's join, split, normpath and
-; realpath (Python 3.12's, which keeps missing components instead of failing),
-; and the pathlib parent, name and relative_to that neoc/modules.py uses.
+; Paths as the Python reference compiler (neoc/, v0.2.4 tag) saw them:
+; posixpath's join, split, normpath and realpath (Python 3.12's, which keeps
+; missing components instead of failing), and the pathlib parent, name and
+; relative_to that its modules.py used.
 import "std:strings"
 import "std:fs"
 import "std:hashmap"

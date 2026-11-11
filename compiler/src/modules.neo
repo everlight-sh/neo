@@ -1,6 +1,7 @@
-; Module loading, as neoc/modules.py sources() does it: follow the imports of
-; the runtime files and the entry file, parse every module into one tree, give
-; each declaration its program-wide name and rewrite every reference to it.
+; Module loading, as the Python reference did it (neoc/modules.py sources(),
+; v0.2.4 tag): follow the imports of the runtime files and the entry file,
+; parse every module into one tree, give each declaration its program-wide
+; name and rewrite every reference to it.
 import "std:strings"
 import "std:io"
 import "std:fs"
@@ -94,7 +95,8 @@ fn md_builtins() -> HashMap<Arr u8 _,i64>
 fn md_word_end(borrow p:Arr u8 _, i:i64) -> i64 = loop (j=i) while j<len(p) && tx_byte(p,j)!=32 next (j+1) yield j
 fn md_is_builtin(borrow m:Mods, borrow name:Arr u8 _) -> bool = option_is_some(hashmap_get(m.builtins,name))
 
-; Select the same runtime sources and load order as neoc/cli.py.
+; Select the runtime sources and load order the Python reference used
+; (neoc/cli.py, v0.2.4 tag).
 fn md_runtime_count(borrow target:Arr u8 _) -> i64
   = if len(target)==0 then 0 else if str_find(target,"-linux").present then 11 else 9
 fn md_runtime_file(k:i64, borrow target:Arr u8 _) -> Arr u8 _

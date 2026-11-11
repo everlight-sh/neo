@@ -2,7 +2,7 @@
 
 The builder (`build.py`), load driver (`compare.py`) and syscall profiler
 (`profile_http.py`) described below were Python. They were removed with the
-rest of the repository's Python and are still in the `v0.2.3` tag; run them
+rest of the repository's Python and are still in the `v0.2.4` tag; run them
 from a checkout of that tag. This directory keeps the Dockerfiles and server
 sources they used.
 
@@ -25,7 +25,7 @@ or benchmark tools. The build manifest records exact image IDs and base digest.
 ## Build locally
 
 The existing ARM64 Linux tools container must mount the repository at `/axon`
-and contain Python (for the `v0.2.3` builder), Clang, Bun, Rust, `readelf`, `musl-tools`, and the
+and contain Python (for the `v0.2.4` builder), Clang, Bun, Rust, `readelf`, `musl-tools`, and the
 `aarch64-unknown-linux-musl` Rust target. With the workspace benchmark VM:
 
 ```sh
@@ -58,7 +58,7 @@ docker --context colima-axon-bench run --name axon-docker-ssr-run \
   axon-kernel-bench:20261023 COMMAND
 ```
 
-where COMMAND runs `bench/docker/compare.py` from the `v0.2.3` checkout
+where COMMAND runs `bench/docker/compare.py` from the `v0.2.4` checkout
 mounted at `/axon`.
 
 The VM needs eight CPUs. Servers get CPUs 0 or 0–3, a matching one/four-CPU

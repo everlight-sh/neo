@@ -3,7 +3,7 @@
 Scope: compiler, Neo runtime, standard library, packages, developer tools,
 tests and benchmarks. Do not implement application/database features or change
 examples. Linux application executables must retain no imported symbols,
-interpreter, CRT or shared-library dependencies. Python/LLVM remain build tools;
+interpreter, CRT or shared-library dependencies. Clang/LLVM remain build tools;
 macOS retains its existing mandatory loader-only libSystem caveat.
 
 ## Acceptance checklist

@@ -7,7 +7,7 @@ of this language and are outside this change.
 
 ## Build and execution boundary
 
-Python 3.11+ runs the compiler; Clang/LLVM and a linker generate machine code.
+Neo's compiler is native; Clang/LLVM and a linker generate machine code.
 The build audit also requires `nm`; Linux dependency checks use `readelf`.
 They are build tools. Linux ARM64 and x86-64 executables contain Neo code and
 direct kernel interfaces, with no CRT, ELF interpreter, imported functions or

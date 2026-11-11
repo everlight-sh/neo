@@ -5,7 +5,7 @@ FROM golang:1.25.1-bookworm AS go
 FROM oven/bun:1.3.13 AS bun
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    clang lld python3 wrk ca-certificates git build-essential curl \
+    clang lld wrk ca-certificates git build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup

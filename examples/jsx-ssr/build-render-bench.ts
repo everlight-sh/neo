@@ -30,5 +30,5 @@ effect fn main (iterations : i64{iterations > 0}, mode : i64) -> i64
 `;
 const path = resolve(out, "render-bench.neo"), binary = resolve(out, "render-bench");
 await writeFile(path, [await readFile(resolve(here, "html.neo"), "utf8"), baseline, optimized, app].join("\n"));
-const child = Bun.spawn(["python3", "-m", "neoc", "build", path, "-o", binary], { cwd: root, stdout: "inherit", stderr: "inherit" });
+const child = Bun.spawn([resolve(root, "neo"), "build", path, "-o", binary], { cwd: root, stdout: "inherit", stderr: "inherit" });
 process.exit(await child.exited);

@@ -14,16 +14,21 @@ neo doctor
 
 The installer puts the platform's native bundle in `~/.neo` and links
 `~/.neo/bin/neo`. `neo doctor` checks Clang and the linker by building and
-running a small program. From a checkout, build the compiler with the installed
-native release:
+running a small program. Neo does not need Python to install, build or run.
+
+From a checkout, build the compiler with a native release as the seed (any
+native `neo` or `neoc` works):
 
 ```sh
+sh install.sh --version 0.2.4
+./compiler/bootstrap.sh --seed ~/.neo/bin/neo
 ./compiler/bootstrap.sh
 ```
 
-The script writes `.neo-build/bin/neoc`. Pass `--seed /path/to/neoc` to select
-an existing native compiler explicitly. Python is used by the separate
-reference and differential test suite.
+The script writes `.neo-build/bin/neoc`, which `./neo` uses. Without `--seed`
+it builds with that `.neo-build/bin/neoc`, so the third line rebuilds the
+compiler with itself to reach a fixed point.
+The Python reference compiler and its test suite are in the `v0.2.4` tag.
 
 For an offline install, create an archive with `./neo release -o neo-native.tar.gz`
 and run `./install.sh --archive neo-native.tar.gz` on the matching platform.
@@ -258,7 +263,8 @@ Every program a case runs gets `NEO_TEST_COMPILER`, `NEO_TEST_ROOT`,
 `NEO_TEST_TARGET`, `NEO_TEST_PROJECT` and `NEO_TEST_SOURCE` (its own source
 file). A test driver uses them to build and run further programs with the
 compiler under test; `tests/support/driver.neo` has the helpers the
-repository's own drivers in `tests/drivers/` share.
+repository's own drivers in `tests/drivers/` share. The README lists the
+repository's manifests, the tools the full suite needs and its opt-in checks.
 
 `neo fmt [PATH...]` formats the specified files or recursively finds `.neo` and
 `.ax` sources in directories. With no paths it uses the current directory.
@@ -277,23 +283,9 @@ The object cache keys include dependency sources, generated IR and ABI, the
 target, Clang, and optimization level. The compiler verifies artifact hashes
 before linking and checks the source program on every build. `--no-cache`
 rebuilds the prepared object. Prepared libraries require fully checked code.
-
-The reference compiler separately caches checked dependency objects and
-executables. Its warm builds retain verified return-alias
-contracts, so ownership lowering agrees with a cold build. Integrity-checked
-`hints.ll` contains dependency bodies before LLVM optimization; the application
-can specialize them with Neo's small-helper and constant-argument inlining
-policy, including allocator helpers. Cold decoder paths retain `noinline`.
-The object, optimized IR, hints and proof metadata are checked before reuse;
-application bodies and application checks remain outside the library cache.
-
-An unchanged reference rebuild skips parsing. Each build records, beside its cached
-executable, a hash of every source it read, the file each import resolved to and
-the package manifest that named each module. A later `./neoc.sh build` or `./neoc.sh run`
-with the same entry, compiler, clang, flags and `NEO_*` variables publishes the
-cached executable when all of those still match, and otherwise takes the full
-path. Programs with `pkg:` imports always take the full path. `NEO_QUICK=0`
-turns the lookup off.
+The Python reference compiler also kept library inlining hints (`hints.ll`)
+and answered unchanged rebuilds from a record (`NEO_QUICK`); it is in the
+`v0.2.4` tag.
 
 Run native benchmarks from the checkout. The compute and compile modes use
 GNU `time` for child CPU and RSS measurements.
@@ -321,8 +313,13 @@ On ARM64 Linux with Clang/lld and QEMU installed:
 ```sh
 NEO_TARGET=x86_64-unknown-linux-gnu ./neo build examples/hello.neo -o hello-x86
 qemu-x86_64 ./hello-x86
-NEO_TARGET=x86_64-unknown-linux-gnu NEO_RUNNER=qemu-x86_64 python3 tests/usability_smoke.py
+NEO_TARGET=x86_64-unknown-linux-gnu NEO_RUNNER=qemu-x86_64 ./neo test tests/language.neo.toml
 ```
+
+`neo test` builds every case for `NEO_TARGET` (or `--target`) and starts each
+case's program through `NEO_RUNNER`. A driver that builds and starts further
+programs runs them directly, so those cases also need QEMU registered with
+`binfmt_misc`.
 
 Emulation establishes functional compatibility, not native x86 performance.
 The supplied CI matrix targets native ARM64 and x86-64 Linux when run in a GitHub

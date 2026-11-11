@@ -1,7 +1,12 @@
 # Prepared-library inlining budgets
 
-Neo prepares dependency objects and retains pre-optimization LLVM bodies as
-application optimization hints. Checked return-alias facts are retained across
+This describes the Python reference compiler, which is in the `v0.2.4` tag
+and no longer in the repository. The native compiler's `--library-cache`
+links a prepared object of the dependency closure; it keeps no inlining hints
+and applies none of these budgets.
+
+The reference compiler prepares dependency objects and retains
+pre-optimization LLVM bodies as application optimization hints. Checked return-alias facts are retained across
 warm builds. Application code is checked and compiled for each application;
 prepared objects contain dependency code.
 
@@ -33,8 +38,9 @@ hints also prevented useful specialization in larger application functions.
 Caller-local constraints and separate pre-budget hints avoid these interactions
 without raising the object budget or adding framework-specific compiler rules.
 
-`tests/test_inline_cost.py` checks independent callers, transitive expansion,
+`tests/test_inline_cost.py` checked independent callers, transitive expansion,
 explicit requests, metadata placement, LLVM backend behavior and the separate
-object/application budgets. `tests/native_library_cache.py` exercises actual
+object/application budgets. `tests/native_library_cache.py` exercised actual
 cold/warm compilation, deterministic binaries, optimization hints, dependency
 invalidation, ownership facts, effects, corruption repair and async callbacks.
+Both tested Python-only machinery and were dropped rather than ported.

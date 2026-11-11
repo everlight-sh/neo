@@ -92,5 +92,5 @@ run time, not by the tasks queued behind it.
 
 Native tests cover nested tasks, contended file locks, delayed HTTP/TLS/DNS,
 timeouts, repeated handle reuse, backpressure, cancellation, admission rollback,
-header handoff and graceful shutdown. See `tests/async_tasks.py`,
-`tests/async_protocols.py`, `tests/async_pressure.py` and `tests/http_async.py`.
+header handoff and graceful shutdown. See the `async-tasks`, `async-protocols`,
+`async-pressure` and `http-async` cases in `tests/network.neo.toml`.

@@ -20,7 +20,7 @@ const binary = process.argv[2] ? resolve(process.argv[2]) : resolve(out, "server
 // Publish a new inode atomically, so rebuilding a running macOS demo does not
 // invalidate its mapped code or reuse stale executable signature cache entries.
 const staging = `${binary}.building-${process.pid}`;
-const child = Bun.spawn(["python3", "-m", "neoc", "build", resolve(out, "server.neo"), "-o", staging], {
+const child = Bun.spawn([resolve(root, "neo"), "build", resolve(out, "server.neo"), "-o", staging], {
   cwd: root, stdout: "inherit", stderr: "inherit",
 });
 const status = await child.exited;

@@ -35,8 +35,8 @@ The report's Rust, Go and Zig rows, its clang `-ftime-report` breakdown, the
 run-time check and the IR snapshots came from Python drivers: `run.py`,
 `breakdown.py`, `runtime_check.py`, `noop.py`, `ir_snapshot.py` and
 `summarize.py`. They were removed with the rest of the repository's Python
-and are still in the `v0.2.3` tag, for example
-`git show v0.2.3:bench/compile/run.py`.
+and are still in the `v0.2.4` tag, for example
+`git show v0.2.4:bench/compile/run.py`.
 
 `zig/build.zig` exists because `zig build-exe` never caches its output, so an
 unchanged rebuild with it compiles everything again. `zig build NAME

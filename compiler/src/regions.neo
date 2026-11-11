@@ -1,9 +1,10 @@
 ; Parallel regions: the analyses behind the comprehensions that llvm.neo runs
 ; on worker threads or forked children (cg_par_range). They follow the
-; reference compiler (neoc/llvm.py comprehension, neoc/kernel_workers.py
-; allocation_free): only a program whose main is pure has par-mode functions,
-; and in them a sum or array comprehension becomes a region unless its range
-; is a short literal one or it fills an array with a constant.
+; Python reference compiler (v0.2.4 tag: neoc/llvm.py comprehension,
+; neoc/kernel_workers.py allocation_free): only a program whose main is pure
+; has par-mode functions, and in them a sum or array comprehension becomes a
+; region unless its range is a short literal one or it fills an array with a
+; constant.
 ;
 ; Par mode. The functions main reaches through direct calls of pure local
 ; functions (lowered in this module as @neo_fn_<id>) and that contain such a

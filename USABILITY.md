@@ -1,7 +1,7 @@
 # Usable Neo implementation and verification
 
 This tracks the complete usability roadmap requested on 2026-10-24. Runtime
-code stays Neo over kernel syscalls. Python/LLVM remain build tools. Existing
+code stays Neo over kernel syscalls. Clang/LLVM remain build tools. Existing
 benchmark reports and binaries are preserved.
 
 ## Work and acceptance criteria

@@ -133,8 +133,9 @@ ownership is still revalidated after Linux compaction. Empty legacy captures
 are retained without a new allocation on every turn.
 
 `tests/fixtures/prepared_frames.neo` verifies keys, bounded storage, value
-isolation, eviction/generation checks and fork ownership. The independent
-`tests/prepared_frames.py` peer checks retained state/slot reset, direct writes,
-a callback whose next wake passes during its own work, four backpressured
-4 MiB responses across eviction, responsive fast requests and
+isolation, eviction/generation checks and fork ownership (case
+`prepared-frame-cache`). The `prepared-frames` case in `tests/network.neo.toml`
+(driver `tests/drivers/prepared_frames.neo`) checks retained state/slot reset,
+direct writes, a callback whose next wake passes during its own work, four
+backpressured 4 MiB responses across eviction, responsive fast requests and
 disconnect/shutdown cleanup with one and two workers.

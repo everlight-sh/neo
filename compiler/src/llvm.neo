@@ -596,14 +596,14 @@ fn cg_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s
     let right=s.value in let right_block=s.block in
     cg_phi(cg_block(cg_jump(s,join),join),left,left_block,right,right_block)
 
-; Else-if chains over one scalar lower to an LLVM switch, as neoc/llvm.py
-; does: each test compares a variable or a field path of one (i64, u8 or u16)
-; with constants, joined by ||, and the chain has at least four distinct
-; values (a match on an enum's tag is such a chain). No binder sits between
-; the tests, so equal paths are the same binding, read once and without a
-; trap. A value an earlier arm tested is dead, and so is an arm without new
-; values. The chain ends at the first test of anything else, which is lowered
-; as usual in the default arm.
+; Else-if chains over one scalar lower to an LLVM switch, as the Python
+; reference did (neoc/llvm.py, v0.2.4 tag): each test compares a variable or
+; a field path of one (i64, u8 or u16) with constants, joined by ||, and the
+; chain has at least four distinct values (a match on an enum's tag is such a
+; chain). No binder sits between the tests, so equal paths are the same
+; binding, read once and without a trap. A value an earlier arm tested is
+; dead, and so is an arm without new values. The chain ends at the first test
+; of anything else, which is lowered as usual in the default arm.
 ; ifs: the chain's `if` nodes; values and arms: each case and the index of the
 ; `if` whose branch it selects; fallback: the else branch of the last `if`.
 type CgChain = { scrutinee:i64, ifs:Arr i64 _, values:Arr i64 _, arms:Arr i64 _, fallback:i64 }

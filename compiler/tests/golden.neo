@@ -2,8 +2,8 @@
 ; compiler/tests/check_differential.py and llvm_differential.py, checked
 ; against the native compiler under test. A one-off script, not part of the
 ; repository, generated the goldens on x86_64 Linux from the reference
-; (./neoc.sh) at commit e6881b1 of chore/remove-python (v0.2.3-6), whose
-; neoc/ is unchanged from the 0.2.3 release.
+; (neoc/, removed after v0.2.4) at commit e6881b1 of chore/remove-python
+; (v0.2.3-6), whose neoc/ is unchanged from the 0.2.3 release.
 ;
 ;   golden.neo check [SHARD COUNT]   golden/check/*.golden: neo check verdicts
 ;   golden.neo llvm [SHARD COUNT]    golden/llvm/*.golden: programs' output

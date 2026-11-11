@@ -1,8 +1,9 @@
 ; Native entry points whose stack changes require assembly. The Linux
-; worker ABI mirrors neoc/kernel_workers.py. After clone, the child starts
-; on the supplied stack, waits on the generation futex, and claims jobs
-; with atomic counters. Pool offsets 0, 8, 16, 24, 32, and 40 hold the
-; generation, function, context, next chunk, end, and pending count.
+; worker ABI is the one the Python reference used (neoc/kernel_workers.py,
+; v0.2.4 tag). After clone, the child starts on the supplied stack, waits on
+; the generation futex, and claims jobs with atomic counters. Pool offsets 0,
+; 8, 16, 24, 32, and 40 hold the generation, function, context, next chunk,
+; end, and pending count.
 import "std:strings"
 import "text.neo"
 
