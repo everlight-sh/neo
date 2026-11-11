@@ -1,0 +1,36 @@
+import "std:io"
+; Bounds facts on deep field paths. A check on the length of an array reached
+; through several records proves an index into the same path, whether the path
+; starts at a parameter, a let that names part of it, or a call result, as
+; zetaDB's snapshot.state.records[i] does. Each level of a path used to
+; multiply the checker's key for it by the size of the program, so a path this
+; deep got a fresh symbol at every read and its indexes were left unproven.
+type Leaf = { items:Arr i64 _, other:Arr i64 _, tag:i64 }
+type L5 = { n:i64, leaf:Leaf }
+type L4 = { down:L5, n:i64 }
+type L3 = { n:i64, down:L4 }
+type L2 = { down:L3, n:i64 }
+type Top = { n:i64, down:L2 }
+fn leaf_of(n:i64) -> Leaf = check n>=0 in Leaf { items=arr(i in 0..n) i*i+1, other=arr(i in 0..1) n, tag=n }
+fn top_of(n:i64) -> Top
+  = Top { n=5, down=L2 { down=L3 { n=3, down=L4 { down=L5 { n=1, leaf=leaf_of(n) }, n=2 } }, n=4 } }
+; A guard on the path itself.
+fn first(borrow t:Top) -> i64
+  = if len(t.down.down.down.down.leaf.items)==0 then 0 else
+    check len(t.down.down.down.down.leaf.items)>0 in t.down.down.down.down.leaf.items[0]
+; A let names the middle of the path, and the length is taken through it.
+fn middle(borrow t:Top, i:i64) -> i64
+  = let mid=t.down.down in let n=len(mid.down.down.leaf.items) in
+    if i<0 || i>=n then -1 else mid.down.down.leaf.items[i]
+; A loop over the path through a let (zetaDB's document_offsets).
+fn total(borrow t:Top) -> i64
+  = let state=t.down.down.down in let n=len(state.down.leaf.items) in
+    loop (i=0, acc=0) while i<n next (i+1, check i>=0 && i<n in wrapping_add(wrapping_mul(acc,31),state.down.leaf.items[i])) yield acc
+; The path starts at a call result.
+fn last(n:i64) -> i64
+  = if n<=0 then 0 else let t=top_of(n) in let leaf=t.down.down.down.down.leaf in
+    check len(leaf.items)==n && len(t.down.down.down.down.leaf.other)>0 in leaf.items[n-1]+t.down.down.down.down.leaf.other[0]
+effect(fs) fn main(n:i64{n>=0,n<=100000}) -> unit
+  = let t=top_of(n) in
+    let printed=print_out(concat(int_text(first(t))," ",int_text(middle(t,n/2))," ",int_text(middle(t,n))," ",
+      int_text(total(t))," ",int_text(last(n)),"\n")) in noop()

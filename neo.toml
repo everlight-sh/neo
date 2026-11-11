@@ -224,3 +224,21 @@ name="fields-taken-from-owned-records-keep-value-semantics"
 file="tests/fixtures/ownership_fields.neo"
 args=["40"]
 stdout="1382765870709673180 6640593963121351388\n"
+
+[[test]]
+name="deep-field-paths-prove-their-bounds"
+file="tests/fixtures/deep_field_bounds.neo"
+args=["40"]
+stdout="1 401 -1 -7534881051558789876 1562\n"
+
+[[test]]
+name="deep-field-path-of-another-record-is-unproven"
+file="tests/fixtures/deep_field_bounds_wrong.neo"
+reject=true
+diagnostic="bounds"
+
+[[test]]
+name="deep-field-path-sibling-is-unproven"
+file="tests/fixtures/deep_field_sibling_wrong.neo"
+reject=true
+diagnostic="bounds"

@@ -91,13 +91,19 @@ fn tc_need_effect(borrow env:TcEnv, at:i64, borrow name:Arr u8 _, required:i64) 
     if env.allowed>=0 && !env.trusted && missing!=0 then tc_error(at,concat("missing effect capabilities: ",te_names(missing)))
     else tc_type(n_t_unit())
 ; Separate symbols for opaque expressions, implicit lengths, comprehension
-; variables, and record projections. Projections use a positional encoding
-; whose digits are AST IDs plus one, with zero reserved.
+; variables, and record projections. The projection of the field at position
+; i of a record with origin o is base+o*64+i+1. base is above every AST ID, so
+; above every origin that is not itself a projection, and an origin always
+; names values of one record type, so each key names one field path of one
+; value. A digit per level keeps paths like db.snapshot.state.records within
+; 61 bits in large programs; a field at position 63 or later, or a path too
+; deep for that, gets a fresh symbol instead.
 fn tc_symbol(id:i64, role:i64) -> Arr i64 _ = tl_symbol(id*4+role)
-fn tc_projection(borrow m:Mods, origin:i64, field:i64) -> i64
-  = let base=len(m.ast.nodes)/11+1 in let digit=field+1 in
-    if origin<=0 || digit<=0 || digit>=base then -1 else
-    if origin>(2305843009213693951-digit)/base then -1 else origin*base+digit
+fn tc_projection(borrow m:Mods, origin:i64, fields:i64, field:i64) -> i64
+  = let base=len(m.ast.nodes)/11+1 in let count=ast_list_len(m.ast,fields) in
+    let digit=loop (i=0) while i<count && ast_list_at(m.ast,fields,i)!=field next (i+1) yield i+1 in
+    if origin<=0 || field<0 || digit>count || digit>=64 then -1 else
+    if origin>(2305843009213693951-base-digit)/64 then -1 else base+origin*64+digit
 
 fn tc_condition(borrow a:Arr i64 _, borrow b:Arr i64 _, op:i64) -> TcValue
   = let difference=tl_sub(a,b) in let reverse=tl_scaled(difference,-1) in
@@ -228,7 +234,7 @@ fn tc_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64,
     else let field=tc_named_node(m,md_node(m,base.value.record).b,n.b) in
       if field<0 then tc_error(id,concat(base.value.name," has no field ",md_str(m,n.b)))
       else let value=tc_fresh_result(tc_decl_type(m,md_node(m,field).b),id) in
-      let key=tc_projection(m,base.value.origin,field) in
+      let key=tc_projection(m,base.value.origin,md_node(m,base.value.record).b,field) in
       let value=if key<0 then value else if value.ty==n_t_rec() then value with { origin=key }
         else if value.ty==n_t_i64() || value.ty==n_t_arr() then value with { term=tc_symbol(key,3) } else value in
       tc_known(tc_success(value),tl_and(base.value.known,tc_domain(value)))

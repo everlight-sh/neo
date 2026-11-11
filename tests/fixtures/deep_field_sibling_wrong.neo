@@ -1,0 +1,15 @@
+; Deliberately wrong: the guard is on a sibling field, so the index into items
+; is unproven. Different fields at the same depth of a deep path must keep
+; different checker symbols (see deep_field_bounds.neo).
+type Leaf = { items:Arr i64 _, other:Arr i64 _ }
+type L5 = { n:i64, leaf:Leaf }
+type L4 = { down:L5, n:i64 }
+type L3 = { n:i64, down:L4 }
+type L2 = { down:L3, n:i64 }
+type Top = { n:i64, down:L2 }
+fn leaf_of(n:i64) -> Leaf = check n>=0 in Leaf { items=arr(i in 0..n) i, other=arr(i in 0..1) n }
+fn top_of(n:i64) -> Top
+  = Top { n=5, down=L2 { down=L3 { n=3, down=L4 { down=L5 { n=1, leaf=leaf_of(n) }, n=2 } }, n=4 } }
+fn sibling(borrow a:Top) -> i64
+  = if len(a.down.down.down.down.leaf.other)==0 then 0 else a.down.down.down.down.leaf.items[0]
+fn main(n:i64{n>=0,n<=100}) -> i64 = sibling(top_of(n))
