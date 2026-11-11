@@ -790,6 +790,20 @@ file = "fixtures/test_callbacks/independent_scalar.neo"
 stdout = "4\n"
 
 [[test]]
+name = "callbacks-constant-length"
+file = "fixtures/test_callbacks/constant_length.neo"
+reject = true
+exit = 1
+diagnostic = "array parameter sizes must be variables"
+
+[[test]]
+name = "callbacks-shadowed-function"
+file = "fixtures/test_callbacks/shadowed_function.neo"
+reject = true
+exit = 1
+diagnostic = "function requires an internal nongeneric function"
+
+[[test]]
 name = "callbacks-refined-parameter"
 file = "fixtures/test_callbacks/refined_parameter.neo"
 reject = true

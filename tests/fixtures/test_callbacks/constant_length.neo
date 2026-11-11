@@ -1,0 +1,4 @@
+; From tests/test_callbacks.py (tag v0.2.3): a constant parameter length would be erased by a function
+; value, so g("a") must not reach a[3].
+fn f(a:Arr u8 (4))->i64=a[3]
+fn main()->i64=let g=function(f) in g("a")
