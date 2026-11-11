@@ -52,18 +52,6 @@ of `tests/language.neo.toml`. Commands run from the repository root with
 - What happened: `(ok)`, exit 0. The Python checker rejected `bogus` as an
   unknown capability.
 
-## 4. A function value erases a length coupling between parameters
-
-- Script: `test_callbacks.py`, `test_function_values_reject_unsafe_contracts`.
-- Command: `neoc check` on
-  `fn f(n:i64,a:Arr u8 n)->i64=len(a) fn main()->i64=let g=function(f) in g(3,"a")`
-- What happened: `(ok)`, exit 0, and the built program prints 1. `f`
-  requires `len(a) == n`, but the value `g` accepts `g(3,"a")`. The checker does reject the related case where two
-  array parameters share a length (`function values require independent
-  lengths and no owned parameters or refinements`). A scalar length
-  parameter is not caught. This is a soundness gap: code called through `g`
-  can rely on a length that was never checked.
-
 ## 5. A postcondition is not proven after `check`
 
 - Script: `test_ambient_paths.py` (all cases built on

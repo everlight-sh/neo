@@ -772,6 +772,25 @@ exit = 1
 diagnostic = "function values require independent lengths and no owned parameters or refinements"
 
 [[test]]
+name = "callbacks-scalar-length"
+file = "fixtures/test_callbacks/scalar_length.neo"
+reject = true
+exit = 1
+diagnostic = "function values require independent lengths and no owned parameters or refinements"
+
+[[test]]
+name = "callbacks-scalar-length-after"
+file = "fixtures/test_callbacks/scalar_length_after.neo"
+reject = true
+exit = 1
+diagnostic = "function values require independent lengths and no owned parameters or refinements"
+
+[[test]]
+name = "callbacks-independent-scalar"
+file = "fixtures/test_callbacks/independent_scalar.neo"
+stdout = "4\n"
+
+[[test]]
 name = "callbacks-refined-parameter"
 file = "fixtures/test_callbacks/refined_parameter.neo"
 reject = true

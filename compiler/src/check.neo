@@ -406,10 +406,12 @@ fn tc_callback(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:
     if signature.kind!=n_t_fn() || tc_lookup(m,env,arg.a).ty>0 || tc_abi_boundary(f) || ast_list_len(m.ast,f.e)>0 then
       tc_error(at,"function requires an internal function without owned parameters or refinements")
     else if ast_flag(f,fl_effect()) && f.g<0 then tc_error(at,"effect function values require explicit capabilities")
+    ; The value's signature erases array lengths, so a length shared with
+    ; another array or named by a scalar parameter would go unchecked.
     else let valid=loop (i=0, valid=true, sizes=tx_words()) while valid && i<ast_list_len(m.ast,f.b)
       next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in let size=md_str(m,ty.b) in
         p.f==0 && ast_list_len(m.ast,p.c)==0 && (ty.kind!=n_t_arr() || (ty.c==0 &&
-          (tx_equal(size,"_") || len(tx_insert_word(sizes,size))>len(sizes)))),
+          (tx_equal(size,"_") || (len(tx_insert_word(sizes,size))>len(sizes) && tc_named_node(m,f.b,ty.b)<0)))),
         let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in
         if ty.kind==n_t_arr() then tx_insert_word(sizes,md_str(m,ty.b)) else sizes) yield valid in
     if !valid then tc_error(at,"function values require independent lengths and no owned parameters or refinements")

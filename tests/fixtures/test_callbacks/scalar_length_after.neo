@@ -1,0 +1,4 @@
+; The length coupling is erased whichever parameter comes first: a size named
+; by a later i64 parameter is rejected too.
+fn f(a:Arr u8 n,n:i64)->i64=len(a)
+fn main()->i64=let g=function(f) in g("a",3)
