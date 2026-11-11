@@ -43,7 +43,7 @@ effect(process,fs,time) fn bd_poll(process:Process, borrow previous:Arr u8 _, ca
     let wrote_errors=if errors.ok && !quiet then print_error(errors.value) else int_ok(0) in
     let data_ready=(output.ok && len(output.value)>0) || (errors.ok && len(errors.value)>0) in
     let paused=if status.running && !data_ready then sleep_ms(1) else int_ok(0) in
-    let collected=if capture && output.ok && len(previous)<128 then concat(previous,output.value) else previous in
+    let collected=if capture && output.ok && len(previous)<1048576 then concat(previous,output.value) else previous in
     BdPoll { status=status, pending=status.ok && (status.running || data_ready), output=collected }
 
 ; quiet: the tool's error output is dropped, for an attempt that is repeated
@@ -127,7 +127,9 @@ fn bd_build_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow librari
 fn md_words_append(move args:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
   = loop (i=0, all=args) while i<len(extra) next (i+1,push(all,md_word(extra,i))) yield all
 
-type BdLink = { compile_ns:i64, link_ns:i64, remarks:Arr u8 _, digest:Arr u8 _ }
+; undefined: what `nm -u` printed for the executable, when scanned (a
+; profiled build whose nm ran), as the reference compiler reports it.
+type BdLink = { compile_ns:i64, link_ns:i64, remarks:Arr u8 _, digest:Arr u8 _, undefined:Arr u8 _, scanned:bool }
 
 effect(time) fn bd_clock() -> i64 = monotonic_ns().value
 fn bd_elapsed(start:i64, finish:i64) -> i64 = if finish<start then 0 else finish-start
@@ -142,7 +144,7 @@ effect(fs) fn bd_file_digest(borrow path:Arr u8 _) -> BytesResult
     if !closed.ok && result.ok then bytes_error(closed.error.code,closed.error.message,0) else result
 
 effect(process,fs,env,time,unsafe) fn bd_link_profile(borrow config:BdConfig, borrow ir:Arr u8 _, borrow library:Arr u8 _, borrow output:Arr u8 _, profile:bool) -> BdLink
-  = let empty=BdLink { compile_ns=0,link_ns=0,remarks="",digest="" } in
+  = let empty=BdLink { compile_ns=0,link_ns=0,remarks="",digest="",undefined="",scanned=false } in
     let entropy=random_bytes(16) in if !entropy.ok then let failed=bd_error(entropy.error.message) in empty else
     let parent=pt_head(output) in let stage=pt_join(parent,concat(".neo-link-",tx_hex_bytes(tx_empty(),entropy.value))) in
     let created=fs_mkdir(stage) in if !created.ok then let failed=bd_error(concat("cannot create build directory: ",created.error.message)) in empty else
@@ -166,6 +168,7 @@ effect(process,fs,env,time,unsafe) fn bd_link_profile(borrow config:BdConfig, bo
     let finished=bd_clock() in
     let remarks=if profile && compiled==0 then fs_read(remark_file).value else "" in
     let digest=if profile && linked==0 then bd_file_digest(binary).value else "" in
+    let symbols=if profile && linked==0 then bd_undefined_symbols(config,binary) else BdScan { ok=false, output="" } in
     let published=if linked==0 then fs_rename(binary,output) else int_error(5,if compiled!=0 then "Clang could not compile the LLVM IR" else "Clang could not link the executable",0) in
     let removed_ir=fs_remove(source) in let removed_object=fs_remove(object) in
     let removed_library=if len(library)>0 then fs_remove(dependency) else int_ok(0) in
@@ -176,7 +179,18 @@ effect(process,fs,env,time,unsafe) fn bd_link_profile(borrow config:BdConfig, bo
     else if !prepared.ok then bd_error(concat("cannot stage the dependency object: ",prepared.error.message))
     else if !published.ok then bd_error(published.error.message)
     else if !removed_stage.ok then bd_error(concat("could not remove build directory: ",removed_stage.error.message)) else noop() in
-    BdLink { compile_ns=bd_elapsed(started,after_compile),link_ns=bd_elapsed(after_compile,finished),remarks=remarks,digest=digest }
+    BdLink { compile_ns=bd_elapsed(started,after_compile),link_ns=bd_elapsed(after_compile,finished),remarks=remarks,digest=digest,
+      undefined=symbols.output,scanned=symbols.ok }
+
+; What `nm -u` prints for a linked executable, run quietly: nm on the PATH,
+; else llvm-nm beside Clang or on the PATH. ok: one of them ran and succeeded.
+type BdScan = { ok:bool, output:Arr u8 _ }
+effect(process,fs,env,time,unsafe) fn bd_undefined_symbols(borrow config:BdConfig, borrow binary:Arr u8 _) -> BdScan
+  = let beside=pt_join(pt_head(config.clang),"llvm-nm") in let found=bd_find_tool("nm") in
+    let tool=if len(found)>0 then found else if fs_executable(beside) then beside else bd_find_tool("llvm-nm") in
+    if len(tool)==0 then BdScan { ok=false, output="" } else
+    let run=bd_run(tool,push(push(md_words(),"-u"),binary),true,true) in
+    BdScan { ok=bd_exit_code(run.status)==0, output=run.output }
 
 effect(process,fs,env,time,unsafe) fn bd_link(borrow config:BdConfig, borrow ir:Arr u8 _, borrow output:Arr u8 _) -> unit
   = let linked=bd_link_profile(config,ir,"",output,false) in noop()

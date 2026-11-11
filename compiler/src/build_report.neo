@@ -29,6 +29,15 @@ fn br_remarks(borrow text:Arr u8 _) -> Json
           else pk_put(out.counts,name,json_value_int(json_int(pk_get(out.counts,name)).value+1)) in
         BrRemarks { offset=end+1,passed=state && len(name)==0,counts=counts }) yield out in result.counts
 
+; The executable's undefined symbols, one per line of `nm -u` output, as the
+; reference compiler reports them; null when nm could not be run.
+fn br_undefined(borrow linked:BdLink) -> Arr u8 _
+  = if !linked.scanned then "null" else let text=linked.undefined in
+    let parts=loop (offset=0, out=md_words()) while offset<len(text)
+      next (lx_line_end(text,offset)+1,let line=str_trim(pt_slice(text,offset,lx_line_end(text,offset))) in
+        if len(line)==0 then out else push(out,concat(if len(out)==0 then "" else ",",json_quote(line)))) yield out in
+    concat("[",str_concat_parts(parts),"]")
+
 fn br_sources(borrow m:Mods) -> Arr u8 _
   = let parts=arr(i in 0..len(m.paths)) concat(if i==0 then "" else ",",json_quote(md_path(m,i)),":",
       json_quote(tx_hex_bytes(tx_empty(),sha256(md_word(m.sources,i))))) in
@@ -40,6 +49,7 @@ effect(fs,time) fn br_print(borrow m:Mods, borrow stages:BrStages, borrow linked
   = let now=bd_clock() in
     print_out(concat("{\"ok\":true,\"backend\":\"llvm-ir\",\"binary\":",json_quote(output),
       ",\"target\":",json_quote(config.target),",\"binary_sha256\":",if len(linked.digest)>0 then json_quote(linked.digest) else "null",
+      ",\"undefined_symbols\":",br_undefined(linked),
       ",\"optimization\":{\"profile\":",if dev then "\"dev\"" else "\"release\"",",\"level\":",config.level,
       ",\"llvm_passes\":",json_encode(br_remarks(linked.remarks)),"},\"allow_unproven\":",if allow_unproven then "true" else "false",
       ",\"sources\":",br_sources(m),",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),
