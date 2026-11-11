@@ -5,16 +5,22 @@ import "modules.neo"
 import "text.neo"
 import "toml.neo"
 
+; input_file and expected_file name files read when the case runs (stdin-file,
+; stdout-file), relative to the manifest. accept (the check key): the checker
+; must accept the source and nothing runs. has_exit: the manifest pinned the
+; exit code, which for a rejection must then equal the checker's.
 type NtCase = { name:Arr u8 _, file:Arr u8 _, args:Arr Arr u8 _ _, environment:Arr Arr u8 _ _, build_environment:Arr Arr u8 _ _,
                 input:Arr u8 _, expected:Arr u8 _, has_stdout:bool, binary_stdout:bool, tolerance:f64, exit_code:i64, timeout:i64,
-                reject:bool, diagnostic:Arr u8 _, generated:bool, code:Arr u8 _, valid:bool }
+                reject:bool, diagnostic:Arr u8 _, generated:bool, code:Arr u8 _, valid:bool,
+                input_file:Arr u8 _, expected_file:Arr u8 _, errors:Arr u8 _, has_stderr:bool, accept:bool, has_exit:bool }
 type NtPlan = { cases:Arr NtCase _, docs:Arr Arr u8 _ _, units:Arr Arr u8 _ _,
-                python:bool, integration:Arr u8 _, valid:bool }
+                integrations:Arr Arr u8 _ _, valid:bool }
 
 fn nt_empty_case() -> NtCase
   = NtCase { name=tx_empty(), file=tx_empty(), args=md_words(), environment=md_words(), build_environment=md_words(), expected=tx_empty(),
       input="",has_stdout=false,binary_stdout=false,tolerance=0.0,exit_code=0,timeout=30000,reject=false,diagnostic=tx_empty(),
-      generated=false, code=tx_empty(), valid=true }
+      generated=false, code=tx_empty(), valid=true,
+      input_file=tx_empty(), expected_file=tx_empty(), errors=tx_empty(), has_stderr=false, accept=false, has_exit=false }
 fn nt_cases() -> Arr NtCase _ = arr(i in 0..0) nt_empty_case()
 fn nt_case_at(borrow cases:Arr NtCase _, i:i64) -> NtCase
   = if i>=0 && i<len(cases) then cases[i] else nt_empty_case() with { valid=false }
@@ -61,7 +67,7 @@ fn nt_case_field(move c:NtCase, borrow field:TmField) -> NtCase
     else if tx_equal(key,"args") then
       let list=nt_values(raw,true) in c with { args=list.values, valid=c.valid && list.parser.ok }
     else if tx_equal(key,"exit") then
-      let code=int_parse(raw) in c with { exit_code=code.value, valid=c.valid && code.ok }
+      let code=int_parse(raw) in c with { exit_code=code.value, has_exit=true, valid=c.valid && code.ok }
     else if tx_equal(key,"timeout") then
       let time=float_parse(raw) in
       if !time.ok || !(time.value>=0.0 && time.value<=2147483.0) then c with { valid=false }
@@ -69,27 +75,34 @@ fn nt_case_field(move c:NtCase, borrow field:TmField) -> NtCase
     else if tx_equal(key,"stdout-tolerance") then
       let tolerance=float_parse(raw) in
       c with { tolerance=tolerance.value,valid=c.valid && tolerance.ok && tolerance.value>0.0 && tolerance.value<1.0 }
-    else if tx_equal(key,"reject") then
-      c with { reject=tx_equal(raw,"true"), valid=c.valid && (tx_equal(raw,"true") || tx_equal(raw,"false")) }
+    else if tx_equal(key,"reject") || tx_equal(key,"check") then
+      let on=tx_equal(raw,"true") in let ok=c.valid && (on || tx_equal(raw,"false")) in
+      if tx_equal(key,"reject") then c with { reject=on, valid=ok } else c with { accept=on, valid=ok }
     else if tx_equal(key,"stdin-hex") || tx_equal(key,"stdout-hex") then
       let text=nt_string(raw) in let bytes=nt_hex(text.word) in if !text.ok || !bytes.ok then c with { valid=false }
       else if tx_equal(key,"stdin-hex") then c with { input=bytes.value }
       else c with { expected=bytes.value,has_stdout=true,binary_stdout=true }
-    else if tx_equal(key,"name") || tx_equal(key,"file") || tx_equal(key,"stdin") || tx_equal(key,"stdout") || tx_equal(key,"diagnostic") then
+    else if tx_equal(key,"name") || tx_equal(key,"file") || tx_equal(key,"stdin") || tx_equal(key,"stdout") || tx_equal(key,"diagnostic")
+         || tx_equal(key,"stderr") || tx_equal(key,"stdin-file") || tx_equal(key,"stdout-file") then
       let text=nt_string(raw) in if !text.ok then c with { valid=false }
       else if tx_equal(key,"name") then c with { name=text.word }
       else if tx_equal(key,"file") then c with { file=text.word }
       else if tx_equal(key,"stdin") then c with { input=text.word }
       else if tx_equal(key,"stdout") then c with { expected=text.word,has_stdout=true,binary_stdout=false }
+      else if tx_equal(key,"stderr") then c with { errors=text.word,has_stderr=true }
+      else if tx_equal(key,"stdin-file") then c with { input_file=text.word, valid=c.valid && io_path_valid(text.word) }
+      else if tx_equal(key,"stdout-file") then
+        c with { expected_file=text.word,has_stdout=true,binary_stdout=true, valid=c.valid && io_path_valid(text.word) }
       else c with { diagnostic=text.word }
-    else c
+    else c with { valid=false }
 
 fn nt_read_case(borrow toml:Toml, row:i64) -> NtCase
   = let result=loop (i=0, c=nt_empty_case()) while c.valid && i<len(toml.fields)
       next (i+1,let field=nt_field_at(toml.fields,i) in
         if field.test==row && tx_equal(md_word(field.path,0),"test") then nt_case_field(c,field) else c) yield c in
     result with { valid=result.valid && len(result.name)>0 && io_path_valid(result.file) &&
-      (result.tolerance==0.0 || !result.binary_stdout) }
+      (result.tolerance==0.0 || !result.binary_stdout) && !(result.accept && result.reject) &&
+      (len(result.input_file)==0 || len(result.input)==0) && !(len(result.expected_file)>0 && len(result.expected)>0) }
 
 fn nt_tool_field(move plan:NtPlan, borrow field:TmField, borrow tool:Arr u8 _) -> NtPlan
   = let key=md_word(field.path,2) in
@@ -99,10 +112,13 @@ fn nt_tool_field(move plan:NtPlan, borrow field:TmField, borrow tool:Arr u8 _) -
       let list=nt_values(field.value,false) in
       if !list.parser.ok then plan with { valid=false } else
       if tx_equal(key,"doc-tests") then plan with { docs=list.values } else plan with { units=list.values }
-    else if tx_equal(key,"python-tests") || tx_equal(key,"integration") then
-      let value=nt_string(field.value) in if !value.ok then plan with { valid=false }
-      else if tx_equal(key,"python-tests") then plan with { python=len(value.word)>0 }
-      else plan with { integration=value.word }
+    else if tx_equal(key,"integration") then
+      ; One manifest of native cases, or a list of them.
+      if tm_at(tm_blank(tm_state(field.value,false)))==91 then
+        let list=nt_values(field.value,false) in
+        if !list.parser.ok then plan with { valid=false } else plan with { integrations=list.values }
+      else let value=nt_string(field.value) in if !value.ok then plan with { valid=false }
+      else plan with { integrations=push(md_words(),value.word) }
     else plan
 
 fn nt_plan(move source:Arr u8 _) -> NtPlan
@@ -111,6 +127,6 @@ fn nt_plan(move source:Arr u8 _) -> NtPlan
     let cases=if !toml.ok then nt_cases() else
       check toml.tests>=0 in arr(i in 0..toml.tests) nt_read_case(toml,i) in
     let tool=if toml.neo_tool then "neo" else "axon" in
-    loop (i=0, plan=NtPlan { cases=cases, docs=md_words(), units=default_globs, python=false, integration="", valid=toml.ok })
+    loop (i=0, plan=NtPlan { cases=cases, docs=md_words(), units=default_globs, integrations=md_words(), valid=toml.ok })
       while plan.valid && i<len(toml.fields)
       next (i+1,nt_tool_field(plan,nt_field_at(toml.fields,i),tool)) yield plan

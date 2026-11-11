@@ -1,0 +1,37 @@
+; Checks tests/support/driver.neo itself: builds and runs a program with the
+; compiler under test, audits the binary, checks the PRNG against the
+; published SplitMix64 sequence, and confirms that neo test fails a
+; case with an unknown key.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn ds_program(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=pt_join(dir,"hello") in
+    let built=dv_build(tools,pt_join(tools.here,"../../examples/hello.neo"),binary,md_words()) in
+    let out=dv_output(binary,md_words(),md_words(),"") in
+    let printed=dv_expect(tx_equal(out,"Hello, World!\n"),concat("hello printed ",tx_repr(out,true))) in
+    dv_audit(tools,binary)
+
+fn ds_sequence() -> bool
+  = let a=dv_next(dv_random(0)) in let b=dv_next(a) in let c=dv_next(b) in
+    a.value==-2152535657050944081 && b.value==7960286522194355700 && c.value==487617019471545679 && dv_below(c,10)==9
+
+effect fn ds_manifest(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let manifest=pt_join(dir,"bad.neo.toml") in
+    let wrote=fs_write(manifest,"[[test]]\nname = \"typo\"\nfile = \"x.neo\"\nstdout-hexx = \"00\"\n") in
+    let saved=dv_expect(wrote.ok,concat("cannot write ",manifest)) in
+    let result=nt_process(tools.compiler,push(push(md_words(),"test"),manifest),dv_environment(md_words()),60000,65536) in
+    dv_expect(result.ok && result.code!=0 && str_find(result.errors,"FAIL typo invalid test case").present,
+      concat("an unknown case key was accepted: ",nt_diagnostic(result)))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("selftest") in
+    let ran=ds_program(tools,dir) in
+    let random=dv_expect(ds_sequence(),"dv_next does not follow SplitMix64") in
+    let refused=ds_manifest(tools,dir) in
+    let cleaned=dv_clean(dir) in
+    let shown=print_out("driver OK\n") in noop()

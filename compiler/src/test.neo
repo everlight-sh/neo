@@ -115,7 +115,19 @@ effect(fs) fn nt_integration(borrow project:Arr u8 _, borrow name:Arr u8 _, move
     if !plan.valid then push(cases,nt_empty_case() with { name=name,valid=false }) else
     let parent=pt_head(file) in
     loop (i=0, out=cases) while i<len(plan.cases) next (i+1,
-      let c=nt_case_at(plan.cases,i) in push(out,c with { file=pt_join(parent,c.file) })) yield out
+      let c=nt_case_at(plan.cases,i) in
+      push(out,c with { file=pt_join(parent,c.file),
+        input_file=if len(c.input_file)==0 then c.input_file else pt_join(parent,c.input_file),
+        expected_file=if len(c.expected_file)==0 then c.expected_file else pt_join(parent,c.expected_file) })) yield out
+
+; Native cases from every integration manifest. A hook in another format (a
+; script, say) cannot run here and is reported once.
+effect fn nt_integrations(borrow project:Arr u8 _, borrow names:Arr Arr u8 _ _, move cases:Arr NtCase _) -> Arr NtCase _
+  = loop (i=0, out=cases) while i<len(names) next (i+1,
+      let name=md_word(names,i) in
+      if nt_integration_manifest(name) then nt_integration(project,name,out) else
+      let shown=print_error(concat("neo test: skipped integration hook ",name,"; only .toml manifests of native cases run\n")) in out)
+    yield out
 
 effect fn nt_test(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow target:Arr u8 _, unit_only:bool) -> unit
   = let absolute=pt_realpath(path) in let name=pt_tail(absolute) in
@@ -125,10 +137,7 @@ effect fn nt_test(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow target:Arr 
     if !manifest.ok then bd_error(concat("no neo.toml at ",absolute)) else
     let plan=nt_plan(manifest.value) in
     if !plan.valid then bd_error(concat("invalid test manifest at ",absolute)) else
-    let native=nt_integration_manifest(plan.integration) in
-    let skipped=if plan.python || (len(plan.integration)>0 && !native && !unit_only) then
-      print_error("neo test: skipped Python reference hooks; use ./neoc.sh test to run them\n") else int_ok(0) in
     let docs=nt_discover(project,plan.docs,plan.cases,true) in
     let cases=nt_discover(project,plan.units,docs,false) in
-    let cases=if native && !unit_only then nt_integration(project,plan.integration,cases) else cases in
+    let cases=if unit_only then cases else nt_integrations(project,plan.integrations,cases) in
     nt_run_suite(root,project,target,cases)

@@ -4,10 +4,8 @@ version = "0.2.4"
 entry = "examples/hello.neo"
 
 [tool.neo]
-python-tests = "tests"
 doc-tests = ["docs/getting-started.md", "docs/language-v01.md"]
-integration = "tests/integration.neo.toml"
-reference-integration = "tests/integration.py"
+integration = ["tests/integration.neo.toml"]
 
 [[test]]
 name = "language-generics-results"

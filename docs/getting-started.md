@@ -233,19 +233,32 @@ durability of newly created directory entries or arbitrary storage hardware.
 `neo test [PROJECT]` runs the project's Neo tests. It reads `[[test]]`
 cases, paired Markdown examples from `doc-tests`, and zero-argument boolean
 `test_*` functions from `test-globs` or the default `tests/*_test.neo` and
-`tests/*_test.ax` patterns. Manifest cases can check stdout, exit status,
-and compiler rejection, and set arguments, environment variables, and timeouts.
-An `integration` entry can name a TOML file of native cases, resolved relative
-to the project. `--unit-only` skips those cases. You can run that file directly
-with `neo test tests/integration.neo.toml`. Cases can set `build-env`, supply
-`stdin` or `stdin-hex`, and check binary output with `stdout-hex` or numeric
-output with `stdout-tolerance`.
+`tests/*_test.ax` patterns. A case builds `file` and runs it with `args`,
+`env.NAME` variables, `stdin` (or `stdin-hex`, or `stdin-file` for a file of
+input bytes) and a `timeout` in seconds. It then checks:
 
-`./neoc.sh test` runs Python compiler tests, native fixtures, executable documentation,
-application failure/restart tests, independent-evaluator differentials, fuzzing,
-and existing compute/HTTP/TSX regression suites. `--unit-only` skips the integration
-driver. Project `[[test]]` entries define executable files/arguments/expected output;
-`tests/*_test.neo` libraries may define zero-argument `test_*` boolean functions.
+- `exit`, the expected exit status (0 by default);
+- `stdout` exactly, `stdout-hex` or `stdout-file` byte for byte, or numeric
+  output within `stdout-tolerance`;
+- `stderr` exactly, with the program's own path written as `<program>`.
+
+`build-env.NAME` sets variables for the compiler. A case with `check = true`
+only runs the checker, which must accept the file. One with `reject = true`
+expects the checker to refuse it, optionally with `exit` (1 for an error,
+2 for an unsupported construct), a `diagnostic` substring, or the checker's
+exact `stdout`, where the file's path is written as `<file>`. Files named by
+`stdin-file` and `stdout-file` are relative to the manifest. A case with an
+unknown key fails as invalid.
+
+The `integration` entry in `[tool.neo]` names one TOML file of native cases,
+or a list of them, resolved relative to the project. `--unit-only` skips those
+cases, and `neo test tests/integration.neo.toml` runs one file directly.
+
+Every program a case runs gets `NEO_TEST_COMPILER`, `NEO_TEST_ROOT`,
+`NEO_TEST_TARGET`, `NEO_TEST_PROJECT` and `NEO_TEST_SOURCE` (its own source
+file). A test driver uses them to build and run further programs with the
+compiler under test; `tests/support/driver.neo` has the helpers the
+repository's own drivers in `tests/drivers/` share.
 
 `neo fmt [PATH...]` formats the specified files or recursively finds `.neo` and
 `.ax` sources in directories. With no paths it uses the current directory.

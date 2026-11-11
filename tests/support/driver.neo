@@ -1,0 +1,116 @@
+; Helpers for test drivers: Neo programs that `neo test` runs as ordinary
+; cases and that build and run further programs with the compiler under test.
+; neo test gives every case NEO_TEST_COMPILER (the native compiler),
+; NEO_TEST_ROOT (its standard library root), NEO_TEST_TARGET, NEO_TEST_PROJECT
+; and NEO_TEST_SOURCE (the driver's own source file).
+import "std:fs"
+import "std:io"
+import "std:random"
+import "std:strings"
+import "../../compiler/src/build.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/project_fs.neo"
+import "../../compiler/src/test_manifest.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn dv_fail(borrow message:Arr u8 _) -> unit
+  = let shown=print_error(concat("driver: ",message,"\n")) in process_exit(1)
+effect fn dv_expect(ok:bool, borrow message:Arr u8 _) -> unit = if ok then noop() else dv_fail(message)
+
+effect fn dv_env(borrow name:Arr u8 _) -> Arr u8 _
+  = let value=env_get(name) in if value.present then value.value else tx_empty()
+
+; The compiler under test, its root, target and the driver's directory.
+type DvTools = { compiler:Arr u8 _, root:Arr u8 _, target:Arr u8 _, here:Arr u8 _, project:Arr u8 _ }
+effect fn dv_tools() -> DvTools
+  = let compiler=dv_env("NEO_TEST_COMPILER") in let root=dv_env("NEO_TEST_ROOT") in
+    let checked=dv_expect(len(compiler)>0 && len(root)>0,"run this driver through neo test (NEO_TEST_COMPILER is not set)") in
+    DvTools { compiler=compiler, root=root, target=dv_env("NEO_TEST_TARGET"),
+      here=pt_head(dv_env("NEO_TEST_SOURCE")), project=dv_env("NEO_TEST_PROJECT") }
+
+fn dv_linux(borrow tools:DvTools) -> bool = str_find(tools.target,"-linux").present
+
+; A fresh directory under TMPDIR (or /tmp), removed again by dv_clean.
+effect fn dv_temp(borrow label:Arr u8 _) -> Arr u8 _
+  = let token=random_bytes(8) in let checked=dv_expect(token.ok,"no random bytes for a temporary directory") in
+    let temporary=dv_env("TMPDIR") in
+    let path=pt_abspath(pt_join(if len(temporary)>0 then temporary else "/tmp",
+      concat("neo-",label,"-",tx_hex_bytes("",if token.ok then token.value else tx_empty())))) in
+    let created=fs_mkdir(path) in let made=dv_expect(created.ok,concat("cannot create ",path)) in path
+
+effect fn dv_clean(borrow path:Arr u8 _) -> unit
+  = if pf_kind(path,false)!=4 then let removed=fs_remove(path) in noop() else
+    let entries=pf_directory(path) in
+    let done=loop (i=0) while i<len(entries)
+      next (let removed=dv_clean(pt_join(path,pf_dirent(entries,i).name)) in i+1) yield i in
+    let removed=fs_rmdir(path) in noop()
+
+; The environment programs run with: the test's own plus extra NAME=value
+; entries, with NEO_THREADS=1 unless an entry sets it.
+effect fn dv_environment(borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = nt_env(bd_environment(),extra)
+
+; Builds source into binary with extra compiler flags (--opt-level 2,
+; --emit-llvm, --library-cache DIR, ...) and NAME=value compiler environment.
+effect fn dv_build_with(borrow tools:DvTools, borrow source:Arr u8 _, borrow binary:Arr u8 _,
+                        borrow flags:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _) -> NtProcess
+  = let args=push(push(push(push(push(md_words(),"build"),tools.root),source),"-o"),binary) in
+    let args=if len(tools.target)>0 then push(push(args,"--target"),tools.target) else args in
+    nt_process(tools.compiler,nt_extend(args,flags,0),nt_env_merge(bd_environment(),environment),-1,1048576)
+
+; Builds or stops the driver with the compiler's diagnostics.
+effect fn dv_build(borrow tools:DvTools, borrow source:Arr u8 _, borrow binary:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> unit
+  = let built=dv_build_with(tools,source,binary,flags,md_words()) in
+    dv_expect(built.ok && built.code==0,concat("build of ",source," failed: ",nt_diagnostic(built)))
+
+; The checker's verdict on source: exit 0 with (ok), 1 rejected, 2 unsupported.
+effect fn dv_check(borrow tools:DvTools, borrow source:Arr u8 _) -> NtProcess
+  = let args=push(push(push(md_words(),"check"),tools.root),source) in
+    let args=if len(tools.target)>0 then push(push(args,"--target"),tools.target) else args in
+    nt_process(tools.compiler,args,bd_environment(),-1,1048576)
+
+; Runs a program with stdin and a timeout in milliseconds; output is capped at limit bytes.
+effect fn dv_run(borrow binary:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _,
+                 borrow input:Arr u8 _, timeout:i64, limit:i64) -> NtProcess
+  = nt_process_input(binary,args,dv_environment(environment),input,timeout,limit)
+
+; Runs and requires exit 0, returning stdout.
+effect fn dv_output(borrow binary:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _, borrow input:Arr u8 _) -> Arr u8 _
+  = let result=dv_run(binary,args,environment,input,60000,67108864) in
+    let checked=dv_expect(result.ok && !result.timeout && !result.overflow && result.code==0,
+      concat(binary," exited ",int_text(result.code),": ",nt_diagnostic(result))) in result.output
+
+; A static, self-contained binary: no undefined symbols, and on Linux no
+; interpreter and no shared-library dependencies.
+effect fn dv_audit(borrow tools:DvTools, borrow binary:Arr u8 _) -> unit
+  = if !dv_linux(tools) then noop() else
+    let nm=bd_find_tool("nm") in let readelf=bd_find_tool("readelf") in
+    let found=dv_expect(len(nm)>0 && len(readelf)>0,"nm and readelf are required for the binary audit") in
+    let undefined=nt_process(nm,push(push(md_words(),"-u"),binary),bd_environment(),30000,1048576) in
+    let headers=nt_process(readelf,push(push(md_words(),"-lW"),binary),bd_environment(),30000,1048576) in
+    let dynamic=nt_process(readelf,push(push(md_words(),"-dW"),binary),bd_environment(),30000,1048576) in
+    let a=dv_expect(undefined.ok && undefined.code==0 && len(str_trim(undefined.output))==0,
+      concat(binary," has undefined symbols: ",str_trim(undefined.output))) in
+    let b=dv_expect(headers.ok && headers.code==0 && !str_find(headers.output,"INTERP").present,concat(binary," has an interpreter")) in
+    dv_expect(dynamic.ok && dynamic.code==0 && !str_find(dynamic.output,"NEEDED").present,concat(binary," needs shared libraries"))
+
+effect fn dv_read(borrow path:Arr u8 _) -> Arr u8 _
+  = let read=fs_read(path) in let checked=dv_expect(read.ok,concat("cannot read ",path)) in
+    if read.ok then read.value else tx_empty()
+
+fn dv_hex(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes("",bytes)
+
+; SplitMix64, for reproducible generated cases: dv_next(r).value is the next
+; 64-bit value, and the returned state continues the sequence.
+type DvRandom = { state:i64, value:i64 }
+fn dv_random(seed:i64) -> DvRandom = DvRandom { state=seed, value=0 }
+fn dv_next(r:DvRandom) -> DvRandom
+  = let state=wrapping_add(r.state,-7046029254386353131) in
+    let z=wrapping_mul(bit_xor(state,shift_right(state,30)),-4658895280553007687) in
+    let z=wrapping_mul(bit_xor(z,shift_right(z,27)),-7723592293110705685) in
+    DvRandom { state=state, value=bit_xor(z,shift_right(z,31)) }
+; A value in 0..bound-1 (bound > 0) from the last dv_next.
+fn dv_below(r:DvRandom, bound:i64) -> i64
+  = if bound<=0 then 0 else bit_and(r.value,9223372036854775807)%bound

@@ -90,10 +90,33 @@ type NtRun = { root:Arr u8 _, project:Arr u8 _, compiler:Arr u8 _, target:Arr u8
                source:Arr u8 _, binary:Arr u8 _, runner:Arr u8 _,
                runner_args:Arr Arr u8 _ _, environment:Arr Arr u8 _ _ }
 
-fn nt_compile_args(borrow run:NtRun, borrow path:Arr u8 _, reject:bool) -> Arr Arr u8 _ _
-  = let args=push(push(push(md_words(),if reject then "check" else "build"),run.root),path) in
-    let args=if reject then args else push(push(args,"-o"),run.binary) in
+fn nt_compile_args(borrow run:NtRun, borrow path:Arr u8 _, checking:bool) -> Arr Arr u8 _ _
+  = let args=push(push(push(md_words(),if checking then "check" else "build"),run.root),path) in
+    let args=if checking then args else push(push(args,"-o"),run.binary) in
     push(push(args,"--target"),run.target)
+
+; Every occurrence of needle in text replaced by other. Expected output names
+; the case's source as <file> and the program as <program>, whatever
+; temporary paths they have on this run.
+type NtReplace = { at:i64, out:Arr u8 _, done:bool }
+fn nt_replace_step(borrow text:Arr u8 _, borrow needle:Arr u8 _, borrow other:Arr u8 _, move s:NtReplace) -> NtReplace
+  = let found=str_find(pt_slice(text,s.at,len(text)),needle) in
+    if !found.present then NtReplace { at=len(text), out=concat(s.out,pt_slice(text,s.at,len(text))), done=true }
+    else NtReplace { at=s.at+found.value+len(needle), out=concat(s.out,pt_slice(text,s.at,s.at+found.value),other), done=false }
+fn nt_replace(borrow text:Arr u8 _, borrow needle:Arr u8 _, borrow other:Arr u8 _) -> Arr u8 _
+  = if len(needle)==0 then pt_slice(text,0,len(text)) else
+    let r=loop (s=NtReplace { at=0, out=tx_empty(), done=false }) while !s.done
+      next (nt_replace_step(text,needle,other,s)) yield s in r.out
+
+fn nt_excerpt(borrow text:Arr u8 _) -> Arr u8 _ = tx_repr(pt_slice(text,0,if len(text)>512 then 512 else len(text)),true)
+fn nt_differs(borrow stream:Arr u8 _, borrow expected:Arr u8 _, borrow actual:Arr u8 _) -> Arr u8 _
+  = concat(stream," differs: expected ",nt_excerpt(expected),", got ",nt_excerpt(actual))
+
+; Variables a test driver uses to build and run programs with the compiler
+; under test. The case's own env entries still override them.
+fn nt_driver_env(borrow run:NtRun, borrow source:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(push(push(push(md_words(),concat("NEO_TEST_COMPILER=",run.compiler)),concat("NEO_TEST_ROOT=",run.root)),
+      concat("NEO_TEST_TARGET=",run.target)),concat("NEO_TEST_SOURCE=",source)),concat("NEO_TEST_PROJECT=",run.project))
 
 fn nt_diagnostic(borrow result:NtProcess) -> Arr u8 _
   = if len(result.output)==0 then str_trim(result.errors) else
@@ -107,30 +130,51 @@ fn nt_stdout_matches(borrow c:NtCase, borrow actual:Arr u8 _) -> bool
     let scale=nt_magnitude(wanted.value) in
     wanted.ok && got.ok && nt_magnitude(got.value-wanted.value)<=c.tolerance*(if scale<1.0 then 1.0 else scale)
 
-effect fn nt_program_case(borrow run:NtRun, borrow c:NtCase) -> Arr u8 _
+effect fn nt_program_case(borrow run:NtRun, borrow c:NtCase, borrow source:Arr u8 _) -> Arr u8 _
   = let args=if len(run.runner)==0 then c.args else nt_extend(push(run.runner_args,run.binary),c.args,0) in
     let executable=if len(run.runner)==0 then run.binary else run.runner in
     let cap=if len(c.expected)>8192 then 2*len(c.expected)+1 else 16384 in
-    let result=nt_process_input(executable,args,nt_env(run.environment,c.environment),c.input,c.timeout,cap) in
+    let environment=nt_env_merge(nt_env(run.environment,nt_driver_env(run,source)),c.environment) in
+    let result=nt_process_input(executable,args,environment,c.input,c.timeout,cap) in
     if result.timeout then concat("timed out after ",int_text(c.timeout)," ms")
     else if !result.ok then concat("could not run the test: ",nt_diagnostic(result))
     else if result.code!=c.exit_code then concat("exit ",int_text(result.code),", expected ",int_text(c.exit_code),": ",nt_diagnostic(result))
-    else if c.has_stdout && (result.overflow || !nt_stdout_matches(c,result.output)) then
-      concat("stdout differs: expected ",tx_repr(pt_slice(c.expected,0,if len(c.expected)>512 then 512 else len(c.expected)),true),
-        ", got ",tx_repr(pt_slice(result.output,0,if len(result.output)>512 then 512 else len(result.output)),true))
+    else if c.has_stdout && (result.overflow || !nt_stdout_matches(c,result.output)) then nt_differs("stdout",c.expected,result.output)
+    else let errors=nt_replace(tx_newlines(result.errors),run.binary,"<program>") in
+    if c.has_stderr && !tx_equal(errors,c.errors) then nt_differs("stderr",c.errors,errors)
     else tx_empty()
 
-effect fn nt_execute_case(borrow run:NtRun, borrow c:NtCase) -> Arr u8 _
-  = if !c.valid then "invalid test case or unreadable source" else
+; check and reject cases: the checker's exit status, its stdout (exactly, when
+; the case gives one, with the source as <file>) and an expected diagnostic.
+fn nt_checked_case(borrow c:NtCase, borrow built:NtProcess, borrow path:Arr u8 _) -> Arr u8 _
+  = let output=nt_replace(tx_newlines(built.output),path,"<file>") in
+    if c.accept && built.code!=0 then concat("expected the checker to accept this source: ",nt_diagnostic(built))
+    else if c.reject && built.code==0 then "expected the checker to reject this source"
+    else if c.reject && built.code!=1 && built.code!=2 then
+      concat("checker exited ",int_text(built.code),": ",nt_diagnostic(built))
+    else if c.reject && c.has_exit && built.code!=c.exit_code then
+      concat("checker exited ",int_text(built.code),", expected ",int_text(c.exit_code),": ",nt_diagnostic(built))
+    else if c.reject && len(c.diagnostic)>0 && !str_find(built.output,c.diagnostic).present then
+      concat("diagnostic ",nt_excerpt(c.diagnostic)," not reported: ",nt_diagnostic(built))
+    else if c.has_stdout && !tx_equal(output,c.expected) then nt_differs("checker output",c.expected,output)
+    else tx_empty()
+
+; stdin-file and stdout-file are read when the case runs.
+effect(fs) fn nt_with_files(borrow run:NtRun, borrow c:NtCase) -> NtCase
+  = let input=if len(c.input_file)==0 then bytes_ok(c.input) else fs_read(pt_join(run.project,c.input_file)) in
+    let expected=if len(c.expected_file)==0 then bytes_ok(c.expected) else fs_read(pt_join(run.project,c.expected_file)) in
+    if !input.ok || !expected.ok then c with { valid=false } else c with { input=input.value, expected=expected.value }
+
+effect fn nt_execute_case(borrow run:NtRun, borrow original:NtCase) -> Arr u8 _
+  = let c=nt_with_files(run,original) in
+    if !c.valid then "invalid test case or unreadable source" else
     let path=if c.generated then run.source else pt_realpath(pt_join(run.project,c.file)) in
     let saved=if c.generated then fs_write(path,c.code) else int_ok(0) in
     if !saved.ok then saved.error.message else
-    let built=nt_process(run.compiler,nt_compile_args(run,path,c.reject),
+    let checking=c.reject || c.accept in
+    let built=nt_process(run.compiler,nt_compile_args(run,path,checking),
       nt_env_merge(run.environment,c.build_environment),-1,16384) in
     if !built.ok then concat("could not run the compiler: ",nt_diagnostic(built))
-    else if c.reject then
-      if built.code==0 then "expected the checker to reject this source"
-      else if (built.code!=1 && built.code!=2) || (len(c.diagnostic)>0 && !str_find(built.output,c.diagnostic).present) then
-        concat("unexpected rejection: ",nt_diagnostic(built)) else tx_empty()
+    else if checking then nt_checked_case(c,built,path)
     else if built.code!=0 then concat("build failed: ",nt_diagnostic(built))
-    else nt_program_case(run,c)
+    else nt_program_case(run,c,path)

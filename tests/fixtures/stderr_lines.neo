@@ -1,0 +1,8 @@
+; Writes to both streams, naming itself on stderr, for the runner's exact
+; stderr check and its <program> placeholder.
+import "std:io"
+
+effect(fs,env) fn main() -> unit
+  = let name=cli_arg(0) in
+    let a=print_error(concat(name.value,": first\n")) in let b=print_out("out\n") in
+    let c=print_error("second\n") in noop()

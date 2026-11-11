@@ -62,6 +62,8 @@ name = "unproven-bounds-rejected"
 file = "../examples/unproven.neo"
 reject = true
 diagnostic = "bounds"
+exit = 1
+stdout = "(unproven <file> 5:22 bounds)\n"
 
 [[test]]
 name = "heap-class-boundaries"
@@ -109,3 +111,26 @@ stdout-hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 name = "runtime-word-byte-and-json-properties"
 file = "fixtures/runtime_properties.neo"
 stdout = "Runtime properties OK\n"
+
+[[test]]
+name = "manifest-vector-files"
+file = "fixtures/sha256_stdin.neo"
+stdin-file = "vectors/selftest/abc.in"
+stdout-file = "vectors/selftest/abc.out"
+
+[[test]]
+name = "manifest-exact-stderr"
+file = "fixtures/stderr_lines.neo"
+stdout = "out\n"
+stderr = "<program>: first\nsecond\n"
+
+[[test]]
+name = "manifest-check-only"
+file = "../examples/hello.neo"
+check = true
+
+[[test]]
+name = "driver-selftest"
+file = "drivers/driver_selftest.neo"
+stdout = "driver OK\n"
+timeout = 120
