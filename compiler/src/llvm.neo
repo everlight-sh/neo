@@ -1285,8 +1285,15 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let s=cg_par_store(s,context,pointer,3,output) in
     let s=loop (i=0, out=s) while i<len(captured)
       next (i+1,cg_par_store(out,context,pointer,4+i,cg_binding(captured,i).value)) yield out in
-    ; Forked children count references in shared pages: make counting atomic.
-    let s=if shared then s else cg_write(s,"  store i64 1, ptr @neo_threads, align 8\n") in
+    ; Forked children count references in shared pages, so counting turns
+    ; atomic before a region that forks. ax_par_for forks exactly when there
+    ; is more than one chunk; a region that runs in place leaves it plain.
+    let s=if shared then s else
+      (let r=s.serial in
+       cg_write(s with { serial=r+3 },concat("  ",cg_reg(r)," = icmp ugt i64 ",chunks,", 1\n",
+         "  ",cg_reg(r+1)," = load i64, ptr @neo_threads, align 8\n",
+         "  ",cg_reg(r+2)," = select i1 ",cg_reg(r),", i64 1, i64 ",cg_reg(r+1),"\n",
+         "  store i64 ",cg_reg(r+2),", ptr @neo_threads, align 8\n"))) in
     let s=cg_write(s,concat("  call void @",dispatcher,"(i64 ",chunks,", ptr ",symbol,", ptr ",pointer,")\n",
       "; neo-region {\"fn\":\"",rg_display(s.name),"\",\"pos\":[",int_text(n.line),",",int_text(n.col),
       "],\"kind\":\"",if totals then "sum" else "arr","\",\"dispatcher\":\"",dispatcher,"\",\"work_cost\":",
@@ -1756,14 +1763,22 @@ fn cg_slot_refs(borrow element:CgValue, retain:bool) -> Arr u8 _
 ; size class (16 << class) holds %bytes after a %header-byte element header.
 ; counting: 0 plain loads and stores, for a module that cannot start a thread;
 ; 1 atomic; 2 decided as the program runs, for an object that is linked with
-; code it cannot see: atomic once spawn_thread has set @neo_threads.
+; code it cannot see: atomic once spawn_thread has set @neo_threads; 3 per
+; object, for a program that forks but starts no thread: atomic for a block in
+; shared pages, which forked children can reach, and plain for one in private
+; pages (the 2 bit of the header's second word, set by ax_allocate). The
+; word sits beside the count, so the test costs no extra cache line.
 fn cg_count(counting:i64, add:bool) -> Arr u8 _
-  = let word=if add then "add" else "sub" in let tag=if counting==2 then ".plain" else "" in
+  = let word=if add then "add" else "sub" in let tag=if counting>=2 then ".plain" else "" in
     let locked=concat("atomicrmw ",word," ptr %address, i64 1 ",if add then "monotonic" else "acq_rel","\n") in
     let plain=concat("load i64, ptr %address, align 8\n  %next",tag," = ",word," i64 %old",tag,", 1\n",
       "  store i64 %next",tag,", ptr %address, align 8\n") in
     if counting==1 then concat("  %old = ",locked) else if counting==0 then concat("  %old = ",plain) else
-    concat("  %threads = load i64, ptr @neo_threads, align 8\n  %several = icmp ne i64 %threads, 0\n",
+    let test=if counting==3 then
+      concat("  %meta.slot = getelementptr i8, ptr %address, i64 8\n  %meta = load i64, ptr %meta.slot, align 8\n",
+        "  %private.bit = and i64 %meta, 2\n  %several = icmp eq i64 %private.bit, 0\n")
+      else "  %threads = load i64, ptr @neo_threads, align 8\n  %several = icmp ne i64 %threads, 0\n" in
+    concat(test,
       "  br i1 %several, label %count.locked, label %count.plain\ncount.locked:\n  %old.locked = ",locked,"  br label %count.done\n",
       "count.plain:\n  %old.plain = ",plain,"  br label %count.done\n",
       "count.done:\n  %old = phi i64 [ %old.locked, %count.locked ], [ %old.plain, %count.plain ]\n")
@@ -2156,11 +2171,13 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     ; linked with others tests the flag spawn_thread sets, unless it is the
     ; program itself and refers to nothing in the kept object that can start one.
     ; A forking region (cg_par_range) makes its children count references
-    ; in shared pages, so its program counts atomically too.
+    ; in shared pages. A program that forks but otherwise counts alone tests
+    ; each block's page kind (cg_count 3): with one worker every block is
+    ; private and counts stay plain.
     let forks=str_find(text,"call void @ax_par_for(").present in
-    let alone=if partition==0 then prune && !str_find(text,"call i64 @neo_spawn_thread(").present && !forks
-      else partition==1 && prune && len(m.threaded)>0 && !cg_threaded(concat(text,startup),m.threaded) && !forks in
-    let counting=if alone then 0 else if partition==0 then 1 else 2 in
+    let single=if partition==0 then prune && !str_find(text,"call i64 @neo_spawn_thread(").present
+      else partition==1 && prune && len(m.threaded)>0 && !cg_threaded(concat(text,startup),m.threaded) in
+    let counting=if single && !forks then 0 else if single then 3 else if partition==0 then 1 else 2 in
     let noted=if partition==2 && len(m.shared)>0 then concat("; neo-threads:",cg_spawners(entry),"\n") else tx_empty() in
     ; The startup presets the heap mode (runtime state 184): private pages
     ; (1) when every region runs on threads, as in the reference compiler.
