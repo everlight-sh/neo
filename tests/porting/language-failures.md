@@ -21,29 +21,6 @@ of `tests/language.neo.toml`. Commands run from the repository root with
 - Ported anyway: both fixtures' results (the `opcode-vm` and `deep-dispatch`
   cases) and the 300-arm proof. Only the lowering check is missing.
 
-## 2. push growth of nested arrays and record arrays
-
-- Script: `push_boundaries.py`, modes 4 (nested `Arr Arr u8`, 24-byte
-  elements) and 5 (records stored as structure-of-arrays planes), built with
-  `NEO_ALLOC_STATS=1`.
-- Command: `NEO_ALLOC_STATS=1 neoc build tests/fixtures/push_boundaries.neo -o pb`
-  followed by `./pb 4 1`, `./pb 4 2`, `./pb 5 1`, `./pb 5 2`.
-- What happened: the output is `checksum requests bytes`. Checksums match;
-  allocation requests or bytes do not match the script's model:
-
-  | run | native | script's model |
-  |---|---|---|
-  | `4 1` | `7 1 64` | `7 1 24` |
-  | `4 2` | `14 2 160` | `14 2 72` |
-  | `5 1` | `0 1 48` | `0 1 16` |
-  | `5 2` | `8 1 48` | `8 2 48` |
-
-  Natively, nested arrays reserve more than one element's descriptor, and
-  record planes grow geometrically where the model expected one exact
-  allocation per push. This may be an intended policy rather than a bug, but
-  the model must be updated before these modes can be checked again.
-- Ported anyway: modes 0-3 (`push-boundaries`, 308 runs through 1M elements).
-
 ## 3. Function-value types accept an unknown capability
 
 - Script: `test_callbacks.py`, `test_effect_function_values`.

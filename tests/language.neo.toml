@@ -167,13 +167,13 @@ stdout = "opcode_vm.neo: 7 runs OK\n"
 timeout = 300
 
 # push_boundaries.py: push growth equals the exact allocation model through 1M
-# elements (modes 0-3; modes 4 and 5 are in tests/porting/language-failures.md).
+# elements (modes 4 and 5 with the native aggregate layout, see the vector file).
 [[test]]
 name = "push-boundaries"
 file = "drivers/language_sweep.neo"
 args = ["fixtures/push_boundaries.neo", "NEO_ALLOC_STATS=1"]
 stdin-file = "vectors/push_boundaries/runs.in"
-stdout = "push_boundaries.neo: 308 runs OK\n"
+stdout = "push_boundaries.neo: 462 runs OK\n"
 timeout = 300
 
 # set_only_loops.py: set-only loop states, 1 and 4 workers.
