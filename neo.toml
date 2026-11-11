@@ -242,3 +242,10 @@ name="deep-field-path-sibling-is-unproven"
 file="tests/fixtures/deep_field_sibling_wrong.neo"
 reject=true
 diagnostic="bounds"
+
+[[test]]
+name="fields-replaced-by-with-update-in-place-and-keep-value-semantics"
+file="tests/fixtures/ownership_with_fields.neo"
+args=["40"]
+stdout="7465552069426175276 2954028180856024613 let:in-place if:in-place both:in-place\n"
+build-env.NEO_ALLOC_STATS="1"

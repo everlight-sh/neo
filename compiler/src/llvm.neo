@@ -321,22 +321,27 @@ fn cg_plan_loop(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64
       else cg_plan_unused() in
     loop (i=count-1, plan=inside) while i>=0
       next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.a,i)).c,name,field,true,plan)) yield plan
-; `x with { ... }` takes x after its field values (see cg_with_owned); for a
-; field plan it is a use of the whole record. A literal evaluates its values
-; in the type's field order (cg_record_fill), whatever order they are written in.
+; `x with { ... }` takes x after its field values (see cg_with_owned). For a
+; field plan it is a use of the whole record, unless it replaces that field:
+; then the old value is dropped, not read (cg_with_value and cg_record_expr
+; leave a taken field alone), so only the new field values can use it. A
+; literal evaluates its values in the type's field order (cg_record_fill),
+; whatever order they are written in.
 fn cg_plan_record(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64) -> CgPlan
   = let base=md_node(m,n.a) in
     if n.kind==n_with() && base.kind==n_var() && cg_named(m,base.a,name) then
-      (if field<0 then cg_plan_taken(n.a) else cg_plan_kept())
-    else if n.kind==n_with() then
-      let values=loop (i=ast_list_len(m.ast,n.b)-1, plan=cg_plan_unused()) while i>=0
-        next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.b,i)).b,name,field,true,plan)) yield plan in
-      cg_plan_then(m,fns,n.a,name,field,true,values)
+      (if field<0 then cg_plan_taken(n.a) else if tc_named_node(m,n.b,field)<0 then cg_plan_kept()
+       else cg_plan_values(m,fns,n.b,name,field))
+    else if n.kind==n_with() then cg_plan_then(m,fns,n.a,name,field,true,cg_plan_values(m,fns,n.b,name,field))
     else let record=tc_find_record(m,n.a) in if record<0 then cg_plan_kept() else
     let fields=md_node(m,record).b in
     loop (i=ast_list_len(m.ast,fields)-1, plan=cg_plan_unused()) while i>=0
       next (i-1,let init=tc_named_node(m,n.b,md_node(m,ast_list_at(m.ast,fields,i)).a) in
         if init<0 then cg_plan_kept() else cg_plan_then(m,fns,md_node(m,init).b,name,field,true,plan)) yield plan
+; The values of a `with`, which run in the order they are written.
+fn cg_plan_values(borrow m:Mods, borrow fns:Arr i64 _, list:i64, name:i64, field:i64) -> CgPlan
+  = loop (i=ast_list_len(m.ast,list)-1, plan=cg_plan_unused()) while i>=0
+      next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,list,i)).b,name,field,true,plan)) yield plan
 ; The plan of name (or name.field) over expression id when nothing after it
 ; uses the name. taking: the expression's value is handed to an owner.
 ; A let value is read lexically (cg_read), which shares a variable's
@@ -403,13 +408,40 @@ fn cg_parts_in(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64
         loop (k=0, triples=all) while k<len(plan.moves)
           next (k+1,push(push(push(triples,scope),i),tx_at(plan.moves,k))) yield triples) yield all
 ; The field takes of a binding whose own plan has these moves: over its whole
-; scope when nothing takes it, or else inside each branch that releases it.
+; scope when nothing takes it, inside each branch that releases it, or over
+; its whole scope when it is handed on on every path (cg_parts_dropped).
 fn cg_parts(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64, name:i64, expressions:bool, borrow moves:Arr i64 _) -> Arr i64 _
   = if value.ty!=n_t_rec() || value.record<0 || !cg_counted(m,value) then tx_ints()
-    else if len(moves)==0 then cg_parts_in(m,fns,value,id,name,expressions,-1,tx_ints()) else
+    else if len(moves)==0 then cg_parts_in(m,fns,value,id,name,expressions,-1,tx_ints())
+    else if cg_all_uses(moves) then cg_parts_dropped(m,fns,value,id,name,expressions,moves) else
     loop (k=0, out=tx_ints()) while k<len(moves)
       next (k+1,let entry=tx_at(moves,k) in
         if entry>=0 then out else cg_parts_in(m,fns,value,-1-entry,name,false,-1-entry,out)) yield out
+; Whether every entry of moves is a use, none a -1-branch entry.
+fn cg_all_uses(borrow moves:Arr i64 _) -> bool
+  = loop (i=0, ok=true) while ok && i<len(moves) next (i+1,tx_at(moves,i)>=0) yield ok
+; A binding handed on on every path, where nothing releases it. A field plan
+; that takes the field on every path before that means each hand-over is a
+; `with` replacing the field (any other use of the record would be a later use
+; of the field, see cg_plan_record), so it takes the field the same way. Each
+; such `with` then must not release the old field: the triples (-2, index,
+; base) mark them (cg_with_value), after the takes (-1, index, use).
+fn cg_parts_dropped(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64, name:i64, expressions:bool,
+                    borrow moves:Arr i64 _) -> Arr i64 _
+  = let fields=md_node(m,value.record).b in
+    loop (i=0, all=tx_ints()) while i<ast_list_len(m.ast,fields)
+      next (i+1,if !cg_counted(m,cg_field_type(m,fields,i)) then all else
+        let field=md_node(m,ast_list_at(m.ast,fields,i)).a in
+        let plan=if expressions then cg_plan_list(m,fns,id,name,field,true) else cg_plan(m,fns,id,name,field,true) in
+        if plan.state!=1 || !cg_all_uses(plan.moves) then all else
+        let taken=loop (k=0, triples=all) while k<len(plan.moves)
+          next (k+1,push(push(push(triples,-1),i),tx_at(plan.moves,k))) yield triples in
+        loop (k=0, triples=taken) while k<len(moves)
+          next (k+1,push(push(push(triples,-2),i),tx_at(moves,k))) yield triples) yield all
+; Whether parts marks the `with` on base as leaving the field at index alone.
+fn cg_part_dropped(borrow parts:Arr i64 _, index:i64, base:i64) -> bool
+  = loop (i=0, found=false) while !found && i+2<len(parts)
+      next (i+3,tx_at(parts,i)== -2 && tx_at(parts,i+1)==index && tx_at(parts,i+2)==base) yield found
 ; Whether parts lists the use (or -1-branch entry) id.
 fn cg_part_listed(borrow parts:Arr i64 _, id:i64) -> bool
   = loop (i=2, found=false) while !found && i<len(parts) next (i+3,tx_at(parts,i)==id) yield found
@@ -1156,7 +1188,9 @@ fn cg_byte_equal(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _
     let state=if right.borrowed then equal else cg_release(equal,second) in
     if left.borrowed then state else cg_release(state,first)
 
-fn cg_record_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64, literal:bool) -> CgState
+; release: the record in s.value owns the fields a `with` replaces, so their
+; old values are released.
+fn cg_record_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64, literal:bool, release:bool) -> CgState
   = let fields=md_node(m,s.value.record).b in
     let count=if literal then ast_list_len(m.ast,fields) else ast_list_len(m.ast,list) in
     loop (i=0, code=s) while code.error<0 && i<count
@@ -1167,9 +1201,17 @@ fn cg_record_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding 
         let lowered=cg_expr(m,fns,env,code,init.b) in if lowered.error>=0 then lowered else
         let lowered=cg_own_view(lowered) in
         let value=lowered.value in let previous=cg_field_type(m,fields,index) in
-        let lowered=if !literal && cg_managed(previous) then
+        let lowered=if release && !literal && cg_managed(previous) then
           let extracted=cg_field_get(lowered,initial,previous,index) in cg_release(extracted,extracted.value) else lowered in
         cg_ins_value(lowered,initial,concat("insertvalue ",cg_typed(initial),", ",cg_typed(value),", ",int_text(index)))) yield code
+; Retains the fields of the record in s.value that the `with` values in list
+; do not replace, which a copy of it then shares.
+fn cg_retain_kept(borrow m:Mods, move s:CgState, list:i64) -> CgState
+  = let record=s.value in let fields=md_node(m,record.record).b in
+    loop (i=0, out=s) while i<ast_list_len(m.ast,fields)
+      next (i+1,let field=cg_field_type(m,fields,i) in
+        if !cg_managed(field) || tc_named_node(m,list,md_node(m,ast_list_at(m.ast,fields,i)).a)>=0 then out else
+        let got=cg_field_get(out,record,field,i) in cg_retain(got,got.value) with { value=record }) yield out
 
 ; Whether expression id reads binding name other than as name.g for a field g
 ; different from spare.
@@ -1256,8 +1298,10 @@ fn cg_with_value(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _
     let lowered=cg_expr(m,fns,scope,all.state,init.b) in
     if lowered.error>=0 then all with { state=lowered } else
     let lowered=cg_own_view(lowered) in
+    ; A field taken before this `with` (cg_parts_dropped) is no longer the record's.
+    let dropped=md_node(m,n.a).kind==n_var() && cg_part_dropped(owner.parts,index,n.a) in
     CgFields { state=lowered, values=push(all.values,lowered.value), slots=push(all.slots,index),
-      stale=push(all.stale,if taken<0 && cg_managed(cg_field_type(m,fields,index)) then 1 else 0) }
+      stale=push(all.stale,if taken<0 && !dropped && cg_managed(cg_field_type(m,fields,index)) then 1 else 0) }
 fn cg_with_owned(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node, borrow owner:CgBinding) -> CgState
   = let record=s.value in let fields=md_node(m,record.record).b in
     let lowered=loop (i=0, all=CgFields { state=s, values=arr(j in 0..0) cg_unit(), slots=tx_ints(), stale=tx_ints() })
@@ -1274,16 +1318,21 @@ fn cg_with_owned(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _
 fn cg_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
   = if n.kind==n_reclit() then
       let value=cg_value(n_t_rec(),"zeroinitializer") with { record=tc_find_record(m,n.a) } in
-      cg_record_fill(m,fns,env,s with { value=value },n.b,true)
+      cg_record_fill(m,fns,env,s with { value=value },n.b,true,false)
     else let root=cg_path_root(m,n.a) in
       let owner=if root>=0 then cg_binding(env,cg_binding_index(m,env,md_node(m,root).a)) else cg_bind(-1,cg_unit()) in
       if cg_listed(owner.moves,n.a) then
         ; The base is read without a retain: a variable's plan or the field
         ; value that contains this `with` hands it over.
         let taken=cg_read(m,fns,env,s,n.a) in if taken.state.error>=0 then taken.state else
-        cg_with_owned(m,fns,env,taken.state,n,owner) else
+        cg_with_owned(m,fns,env,taken.state,n,owner)
+      else if md_node(m,n.a).kind==n_var() && len(owner.parts)>0 then
+        ; The binding may have given up a field this `with` replaces (see
+        ; cg_plan_record), so the copy retains only the fields it keeps.
+        let read=cg_read(m,fns,env,s,n.a) in if read.state.error>=0 then read.state else
+        cg_record_fill(m,fns,env,cg_retain_kept(m,read.state,n.b),n.b,false,false) else
       let base=cg_expr(m,fns,env,s,n.a) in if base.error>=0 then base else
-      cg_record_fill(m,fns,env,base,n.b,false)
+      cg_record_fill(m,fns,env,base,n.b,false,true)
 
 fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
   = let n=md_node(m,id) in let kind=n.kind in let s=s with { line=n.line } in

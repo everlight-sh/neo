@@ -1,0 +1,80 @@
+import "std:io"
+import "std:strings"
+import "std:vec"
+; Fields that a `with` on a record the function owns replaces (zetaDB's
+; compact intern table). A field read into a let before the `with`, and a field
+; handed to its own replacement through an `if`, give the record's reference
+; up, so set and vec_push update the buffer in place instead of copying it on
+; every call. Every name still read keeps its value, and a `with` whose record
+; stays in use shares only the fields it keeps. Built with NEO_ALLOC_STATS=1,
+; the last three words say whether each kind of update stayed in place.
+type Table = { ids:Arr i64 _, values:Vec<Arr u8 _>, refs:Arr u8 _, cursor:i64, bytes:i64 }
+fn mix(a:i64, b:i64) -> i64 = wrapping_add(wrapping_mul(a,1000003),b)
+fn total(borrow a:Arr i64 _) -> i64 = loop(i:i64{i>=0}=0,acc=len(a)) while i<len(a) next(i+1,mix(acc,a[i])) yield acc
+fn text_sum(borrow a:Arr u8 _) -> i64 = loop(i:i64{i>=0}=0,acc=len(a)) while i<len(a) next(i+1,mix(acc,i64(a[i]))) yield acc
+fn table_sum(borrow t:Table) -> i64
+  = let words=loop(i=0,acc=vec_len(t.values)) while i<vec_len(t.values) next(i+1,
+      mix(acc,match vec_get(t.values,i) {Some(v)=>text_sum(v),None=>-1})) yield acc in
+    mix(mix(mix(mix(total(t.ids),words),text_sum(t.refs)),t.cursor),t.bytes)
+fn table_new(slots:i64, refs:i64) -> Table
+  = check slots>=1 && refs>=0 in
+    Table { ids=arr(i in 0..slots) 0, values=vec_empty::<Arr u8 _>(), refs=arr(i in 0..refs) u8(0), cursor=0, bytes=0 }
+fn slot_of(borrow t:Table, borrow text:Arr u8 _) -> i64
+  = let slots=t.ids in let n=len(slots) in check n>0 in
+    let first=loop(i:i64{i>=0}=0,h=7) while i<len(text) next(i+1,wrapping_add(wrapping_mul(h,31),i64(text[i]))) yield h in
+    let start=bit_and(first,1048575)%n in
+    loop(i=0,at=start,found= -1) while found<0 && i<n next(i+1,(at+1)%n,
+      check at>=0 && at<n in let id=slots[at] in
+      if id==0 || (match vec_get(t.values,id-1) {None=>false,Some(v)=>str_equal(v,text)}) then at else -1) yield found
+; zetaDB's document_compact_add_value: both kinds at once.
+fn intern(move t:Table, borrow text:Arr u8 _) -> Table
+  = let slot=slot_of(t,text) in let storage=t.ids in check slot>=0 && slot<len(storage) in
+    let previous=storage[slot] in let fresh=previous==0 in let id=if fresh then vec_len(t.values) else previous-1 in
+    let at=t.cursor in check at>=0 && at+4<=len(t.refs) && id>=0 && id<=4294967295 in
+    t with {ids=if fresh then set(storage,slot,id+1) else storage,values=if fresh then vec_push(t.values,text) else t.values,
+      bytes=t.bytes+(if fresh then len(text) else 0),refs=byte_write_le(t.refs,at,id,4),cursor=at+4}
+; Only a let that takes ids before the `with` replaces them.
+fn mark(move t:Table, slot:i64) -> Table
+  = let storage=t.ids in check slot>=0 && slot<len(storage) in let fresh=storage[slot]==0 in
+    t with {ids=if fresh then set(storage,slot,t.cursor+1) else storage,cursor=t.cursor+1}
+; Only a field handed to its own replacement through an `if`.
+fn append(move t:Table, borrow text:Arr u8 _, keep:bool) -> Table
+  = t with {values=if keep then vec_push(t.values,text) else t.values,bytes=t.bytes+len(text)}
+; Both fields go through one `if` each, and a later value reads another field.
+fn both(move t:Table, slot:i64, keep:bool) -> Table
+  = let storage=t.ids in check slot>=0 && slot<len(storage) in
+    t with {values=if keep then vec_push(t.values,"b") else t.values,ids=if keep then storage else set(storage,slot,7),bytes=t.bytes+vec_len(t.values)}
+; The record is still read after the `with`, which then copies it: the copy
+; shares the fields it keeps and owns the new ids.
+fn peek(move t:Table, slot:i64) -> i64
+  = let storage=t.ids in check slot>=0 && slot<len(storage) in
+    let grown=t with {ids=set(storage,slot,storage[slot]+5)} in mix(table_sum(grown),mix(vec_len(t.values),t.cursor))
+; A field taken by a let, but the `with` reads the record as a whole first:
+; nothing is taken, and the old ids stay intact for that read.
+fn whole(move t:Table, slot:i64) -> Table
+  = let storage=t.ids in check slot>=0 && slot<len(storage) in
+    t with {cursor=table_sum(t),ids=set(storage,slot,1)}
+fn semantics(n:i64) -> i64
+  = check n>=0 in
+    let words=arr(i in 0..n) concat("w",int_text(i%7)) in
+    let t=loop(i=0,t=table_new(64,4*n+4)) while i<n next(i+1,check i>=0 && i<n in intern(t,words[i])) yield t in
+    let held=t.ids in let copy=t in let values=t.values in
+    let u=intern(t,"fresh") in let v=mark(copy,3) in let w=append(u,"tail",n%2==0) in
+    let x=both(w,n%64,n%3==0) in let y=both(x,(n+1)%64,n%3!=0) in let z=whole(y,n%64) in
+    mix(mix(mix(mix(mix(mix(mix(table_sum(t),total(held)),vec_len(values)),table_sum(v)),table_sum(w)),table_sum(z)),
+      peek(intern(table_new(16,8),"p"),n%16)),table_sum(copy))
+effect(fs,unsafe) fn main(n:i64{n>=0,n<=100000}) -> unit
+  = let checksum=loop(i=0,acc=0) while i<24 next(i+1,mix(acc,semantics(n+i))) yield acc in
+    let k=2000 in
+    let a0=load_i64(runtime_state(),80) in
+    let marked=loop(i=0,t=table_new(4096,0)) while i<k next(i+1,mark(t,(i*7)%4096)) yield t in
+    let a1=load_i64(runtime_state(),80) in
+    let appended=loop(i=0,t=table_new(1,0)) while i<k next(i+1,append(t,"v",i%3!=0)) yield t in
+    let a2=load_i64(runtime_state(),80) in
+    let interned=loop(i=0,t=table_new(8192,4*k)) while i<k next(i+1,intern(t,int_text(i%1500))) yield t in
+    let a3=load_i64(runtime_state(),80) in
+    let sums=mix(mix(table_sum(marked),table_sum(appended)),table_sum(interned)) in
+    let printed=print_out(concat(int_text(checksum)," ",int_text(sums),
+      if a1-a0<1048576 then " let:in-place" else " let:copied",
+      if a2-a1<1048576 then " if:in-place" else " if:copied",
+      if a3-a2<2097152 then " both:in-place\n" else " both:copied\n")) in noop()
