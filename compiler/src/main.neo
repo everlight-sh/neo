@@ -241,7 +241,7 @@ effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliO
     let output=pt_abspath(output) in let linked=bd_link_profile(config,ir,prepared.bytes,output,opts.report) in
     if !opts.report then noop() else
     let stages=BrStages { started=started,parsed=parsed,elaborated=elaborated,staged=staged,checked=checked,lowered=lowered } in
-    let shown=br_print(m,stages,linked,config,output,opts.dev,opts.allow_unproven,if caching then lc_report(prepared) else "") in noop()
+    let shown=br_print(m,stages,linked,config,output,opts.dev,opts.allow_unproven,if caching then lc_report(prepared) else "",ir) in noop()
 
 effect fn cli_inspect(borrow command:Arr u8 _, borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliOptions) -> unit
   = if tx_equal(command,"emit-llvm") then

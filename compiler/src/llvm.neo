@@ -592,6 +592,95 @@ fn cg_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s
     let right=s.value in let right_block=s.block in
     cg_phi(cg_block(cg_jump(s,join),join),left,left_block,right,right_block)
 
+; Else-if chains over one scalar lower to an LLVM switch, as neoc/llvm.py
+; does: each test compares a variable or a field path of one (i64, u8 or u16)
+; with constants, joined by ||, and the chain has at least four distinct
+; values (a match on an enum's tag is such a chain). No binder sits between
+; the tests, so equal paths are the same binding, read once and without a
+; trap. A value an earlier arm tested is dead, and so is an arm without new
+; values. The chain ends at the first test of anything else, which is lowered
+; as usual in the default arm.
+; ifs: the chain's `if` nodes; values and arms: each case and the index of the
+; `if` whose branch it selects; fallback: the else branch of the last `if`.
+type CgChain = { scrutinee:i64, ifs:Arr i64 _, values:Arr i64 _, arms:Arr i64 _, fallback:i64 }
+type CgCases = { scrutinee:i64, values:Arr i64 _, ok:bool }
+fn cg_no_cases() -> CgCases = CgCases { scrutinee=-1, values=tx_ints(), ok=false }
+; The integer value of an i64 or byte literal, or of a u16 cast of one.
+fn cg_case_constant(borrow m:Mods, id:i64) -> CgCases
+  = let n=md_node(m,id) in
+    if n.kind==n_num() && n.b!=1 then CgCases { scrutinee=-1, values=push(tx_ints(),n.a), ok=true }
+    else if n.kind==n_byte() then CgCases { scrutinee=-1, values=push(tx_ints(),n.a), ok=true }
+    else if n.kind==n_cast() && md_node(m,n.a).kind==n_t_u16() && md_node(m,n.b).kind==n_num() && md_node(m,n.b).b!=1 then
+      CgCases { scrutinee=-1, values=push(tx_ints(),bit_and(md_node(m,n.b).a,65535)), ok=true }
+    else cg_no_cases()
+; The type of a variable or field path read from env, or unit.
+fn cg_path_type(borrow m:Mods, borrow env:Arr CgBinding _, id:i64) -> CgValue
+  = let n=md_node(m,id) in
+    if n.kind==n_var() then cg_lookup(m,env,n.a)
+    else if n.kind!=n_field() then cg_unit() else
+    let base=cg_path_type(m,env,n.a) in if base.ty!=n_t_rec() || base.record<0 then cg_unit() else
+    let fields=md_node(m,base.record).b in let index=cg_field_index(m,fields,n.b) in
+    if index<0 then cg_unit() else cg_field_type(m,fields,index)
+fn cg_case_test(borrow m:Mods, borrow env:Arr CgBinding _, x:i64, k:i64, scrutinee:i64) -> CgCases
+  = let constant=cg_case_constant(m,k) in let ty=cg_path_type(m,env,x).ty in
+    if !constant.ok || cg_path_root(m,x)<0 || !(ty==n_t_i64() || ty==n_t_u8() || ty==n_t_u16()) then cg_no_cases()
+    else if scrutinee>=0 && !cg_same_path(m,x,scrutinee) then cg_no_cases()
+    else constant with { scrutinee=x }
+; (x, constants) when cond is x == k1 || x == k2 ... over the scrutinee (any
+; variable or field path when scrutinee is -1).
+fn cg_case_values(borrow m:Mods, borrow env:Arr CgBinding _, cond:i64, scrutinee:i64) -> CgCases
+  = let n=md_node(m,cond) in
+    if n.kind==n_bin() && n.a==11 then
+      let left=cg_case_values(m,env,n.b,scrutinee) in if !left.ok then left else
+      let right=cg_case_values(m,env,n.c,left.scrutinee) in if !right.ok then right else
+      left with { values=cg_joined(left.values,right.values) }
+    else if n.kind!=n_bin() || n.a!=6 then cg_no_cases() else
+    let direct=cg_case_test(m,env,n.b,n.c,scrutinee) in if direct.ok then direct else cg_case_test(m,env,n.c,n.b,scrutinee)
+type CgChainScan = { chain:CgChain, node:i64, done:bool }
+fn cg_switch_chain(borrow m:Mods, borrow env:Arr CgBinding _, id:i64) -> CgChain
+  = let start=CgChain { scrutinee=-1, ifs=tx_ints(), values=tx_ints(), arms=tx_ints(), fallback=-1 } in
+    let scan=loop (c=CgChainScan { chain=start, node=id, done=false }) while !c.done
+      next (let n=md_node(m,c.node) in let found=if n.kind==n_if() then cg_case_values(m,env,n.a,c.chain.scrutinee) else cg_no_cases() in
+        if !found.ok then c with { done=true } else
+        let arm=len(c.chain.ifs) in
+        let added=loop (i=0, out=c.chain) while i<len(found.values)
+          next (i+1,let value=tx_at(found.values,i) in if cg_listed(out.values,value) then out
+            else out with { values=push(out.values,value), arms=push(out.arms,arm) }) yield out in
+        CgChainScan { chain=added with { scrutinee=found.scrutinee, ifs=push(added.ifs,c.node), fallback=n.c }, node=n.c, done=false }) yield c in
+    scan.chain
+; A case value as an LLVM literal of the scrutinee's width (signed).
+fn cg_case_literal(value:i64, ty:i64) -> Arr u8 _
+  = let bits=if ty==n_t_u8() then 256 else if ty==n_t_u16() then 65536 else 0 in
+    if bits==0 then int_text(value) else
+    let low=bit_and(value,bits-1) in int_text(if low>=bits/2 then low-bits else low)
+type CgArms = { state:CgState, values:Arr CgValue _, blocks:Arr i64 _ }
+; The bindings an arm's path leaves: its own branch, then the else branch of
+; each enclosing `if` of the chain, innermost first (as nested ifs would).
+fn cg_arm_drops(borrow m:Mods, borrow env:Arr CgBinding _, move s:CgState, borrow chain:CgChain, branch:i64, depth:i64) -> CgState
+  = let s=cg_branch_drops(m,env,s,branch) in
+    loop (j=depth, code=s) while j>=1 next (j-1,cg_branch_drops(m,env,code,tx_at(chain.ifs,j))) yield code
+fn cg_switch(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node, borrow chain:CgChain) -> CgState
+  = let s=cg_expr(m,fns,env,s,chain.scrutinee) in if s.error>=0 then s else
+    let x=s.value in let count=len(chain.ifs) in let first=s.serial in let other=first+count in let join=other+1 in
+    let live=loop (k=0, arms=0) while k<count next (k+1,if cg_listed(chain.arms,k) then arms+1 else arms) yield arms in
+    let cases=loop (i=0, text=tx_empty()) while i<len(chain.values)
+      next (i+1,concat(text," ",cg_type_of(x)," ",cg_case_literal(tx_at(chain.values,i),x.ty),
+        ", label %",cg_label(first+tx_at(chain.arms,i)))) yield text in
+    let s=cg_write(s with { serial=join+1 },concat("  switch ",cg_typed(x),", label %",cg_label(other)," [",cases,
+      " ] ; neo.switch ",int_text(n.line),":",int_text(n.col)," cases ",int_text(len(chain.values))," arms ",int_text(live+1),"\n")) in
+    let arms=loop (k=0, a=CgArms { state=s, values=arr(j in 0..0) cg_unit(), blocks=tx_ints() }) while a.state.error<0 && k<=count
+      next (k+1,if k<count && !cg_listed(chain.arms,k) then a else
+        let branch=if k<count then md_node(m,tx_at(chain.ifs,k)).b else chain.fallback in
+        let lowered=cg_expr(m,fns,env,cg_block(a.state,first+k),branch) in if lowered.error>=0 then a with { state=lowered } else
+        let ended=cg_arm_drops(m,env,lowered,chain,branch,if k<count then k else count-1) in
+        CgArms { state=cg_jump(ended,join), values=push(a.values,ended.value), blocks=push(a.blocks,ended.block) }) yield a in
+    if arms.state.error>=0 then arms.state else
+    let s=cg_block(arms.state,join) in let result=cg_arg(arms.values,0) in
+    if result.ty==n_t_unit() then s with { value=cg_unit() } else
+    let incoming=loop (i=0, text=tx_empty()) while i<len(arms.values)
+      next (i+1,concat(text,if i==0 then "" else ", ","[ ",cg_arg(arms.values,i).operand,", %",cg_label(tx_at(arms.blocks,i))," ]")) yield text in
+    cg_ins_value(s,result,concat("phi ",cg_type_of(result)," ",incoming))
+
 fn cg_short_circuit(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
   = let left=s.value in let left_block=s.block in let rhs=s.serial in let join=rhs+1 in
     let s=if n.a==10 then cg_branch(s with { serial=join+1 },left.operand,rhs,join)
@@ -1366,7 +1455,8 @@ fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     else if kind==n_var() then
       let binding=cg_binding(env,cg_binding_index(m,env,n.a)) in let value=binding.value in
       if cg_listed(binding.moves,id) then s with { value=value } else cg_retain(s with { value=value },value)
-    else if kind==n_if() then cg_if(m,fns,env,s,n)
+    else if kind==n_if() then
+      let chain=cg_switch_chain(m,env,id) in if len(chain.values)>=4 then cg_switch(m,fns,env,s,n,chain) else cg_if(m,fns,env,s,n)
     else if kind==n_call() then cg_call(m,fns,env,s,id,n)
     else if kind==n_arrc() || kind==n_sum() then cg_range(m,fns,env,s,id,n)
     else if kind==n_loop() then cg_loop(m,fns,env,s,n)

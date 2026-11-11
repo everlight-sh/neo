@@ -5,22 +5,6 @@ native compiler (`neoc` of `chore/remove-python`) does not. They are left out
 of `tests/language.neo.toml`. Commands run from the repository root with
 `NEO_ROOT` set to it, on x86_64 Linux.
 
-## 1. Else-if chains are not lowered to a switch
-
-- Scripts: `opcode_vm.py` (one `switch i64` with at least 39 cases in `step`),
-  `deep_dispatch.py` (a 300-case switch in the build report),
-  `test_switch_dispatch.py` (40-arm chains, match on fields and bytes, grouped
-  arms, chains that switch on the first scalar only).
-- Command: `neoc build tests/fixtures/opcode_vm.neo --emit-llvm`, then look at
-  the function after `; fn __m…_step`.
-- What happened: `step` has 39 `icmp eq` comparisons and no `switch`. The
-  module's only `switch` is the width dispatch inside the runtime helper
-  `@neo.bytes.read`. `deep_dispatch.neo` has 341 `icmp eq` and the same single
-  runtime `switch`. `neoc build --report` has no `switches` field to check
-  against.
-- Ported anyway: both fixtures' results (the `opcode-vm` and `deep-dispatch`
-  cases) and the 300-arm proof. Only the lowering check is missing.
-
 ## 3. Function-value types accept an unknown capability
 
 - Script: `test_callbacks.py`, `test_effect_function_values`.
@@ -60,4 +44,3 @@ of `tests/language.neo.toml`. Commands run from the repository root with
     the index;
   - the clamped-result postconditions;
   - comprehension lengths that are not path conditions.
-
