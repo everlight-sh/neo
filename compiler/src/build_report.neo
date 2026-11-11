@@ -43,16 +43,17 @@ fn br_sources(borrow m:Mods) -> Arr u8 _
       json_quote(tx_hex_bytes(tx_empty(),sha256(md_word(m.sources,i))))) in
     concat("{",str_concat_parts(parts),"}")
 
+; regions: the parallel_regions JSON array (rg_report).
 effect(fs,time) fn br_print(borrow m:Mods, borrow stages:BrStages, borrow linked:BdLink,
                           borrow config:BdConfig, borrow output:Arr u8 _, dev:bool, allow_unproven:bool,
-                          borrow library:Arr u8 _) -> IntResult
+                          borrow library:Arr u8 _, borrow regions:Arr u8 _) -> IntResult
   = let now=bd_clock() in
     print_out(concat("{\"ok\":true,\"backend\":\"llvm-ir\",\"binary\":",json_quote(output),
       ",\"target\":",json_quote(config.target),",\"binary_sha256\":",if len(linked.digest)>0 then json_quote(linked.digest) else "null",
       ",\"undefined_symbols\":",br_undefined(linked),
       ",\"optimization\":{\"profile\":",if dev then "\"dev\"" else "\"release\"",",\"level\":",config.level,
       ",\"llvm_passes\":",json_encode(br_remarks(linked.remarks)),"},\"allow_unproven\":",if allow_unproven then "true" else "false",
-      ",\"sources\":",br_sources(m),",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),
+      ",\"sources\":",br_sources(m),",\"parallel_regions\":",regions,",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),
       ",\"elaborate_seconds\":",br_phase(stages.parsed,stages.elaborated),",\"check_seconds\":",br_phase(stages.staged,stages.checked),
       ",\"lower_seconds\":",br_phase(stages.checked-(stages.staged-stages.elaborated),stages.lowered),"},\"build\":{\"cache\":\"disabled\",\"compile_seconds\":",
       br_seconds(linked.compile_ns),",\"link_seconds\":",br_seconds(linked.link_ns),",\"llvm_seconds\":",

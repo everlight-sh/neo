@@ -10,13 +10,16 @@ import "check.neo"
 import "intrinsics.neo"
 import "native_asm.neo"
 import "native_crypto.neo"
+import "regions.neo"
 
 type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 ; moves: uses of the binding that take its own reference (see cg_plan).
 ; parts: fields of a kept record taken out of it (see cg_parts).
 type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, parts:Arr i64 _ }
 type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
-                 function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool }
+                 function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool,
+                 par:Arr i64 _ }
+; par: in a par clone, the program's par-mode functions (rg_par_set), else empty.
 type CgProgram = { text:Arr u8 _, report:TcReport }
 
 fn cg_type(ty:i64) -> Arr u8 _
@@ -494,6 +497,7 @@ fn cg_runtime_check(borrow m:Mods, borrow fns:Arr i64 _) -> TcReport
 ; The wrapper's own symbols always remain reserved.
 fn cg_abi_reserved(borrow name:Arr u8 _, executable:bool, runtime_export:bool) -> bool
   = str_starts(name,"neo_fn_") || str_starts(name,"neo_bytes_") || str_starts(name,"neo_failure_") ||
+    str_starts(name,"neo_par_") || str_starts(name,"neo_region_") || tx_equal(name,"neo_heap_mode") ||
     str_find(" neo_entry neo_retain neo_release neo_own_view neo_runtime_trap neo_precondition_trap ax_runtime_state ax_native_alloc_stats ",concat(" ",name," ")).present ||
     str_find(" neo_spawn_thread neo_fiber_swap neo_fiber_init ",concat(" ",name," ")).present ||
     (executable && (str_starts(name,"neo_arg_") || tx_equal(name,"_start") || tx_equal(name,"neo_process_start"))) ||
@@ -960,7 +964,8 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     let s=loop (i=0, out=args.state) while i<ast_list_len(m.ast,f.b)
       next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
         if md_resource_consumed(m,f,p) then cg_move_owner(m,env,out,ast_list_at(m.ast,n.b,i)) else out) yield out in
-    let target=if lends then cg_lent_symbol(m,callee) else cg_symbol(m,callee) in
+    let target=if tx_at(s.par,callee)==1 then concat(cg_par_symbol(callee),if lends then ".lent" else "")
+      else if lends then cg_lent_symbol(m,callee) else cg_symbol(m,callee) in
     let call=concat("call ",cg_return(result),signature," ",target,"(",cg_arg_text(args.values),")") in
     let called=if result.ty==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  ",call,"\n")) else
       cg_ins_value(s,result,call) in
@@ -1019,7 +1024,8 @@ fn cg_sum_range(borrow m:Mods, move s:CgState, move body:CgState, borrow r:CgRan
     cg_counted_tail(cg_write(head with { block=updated.block },updated.text),r) with { value=result }
 
 fn cg_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
-  = let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
+  = if cg_par_wanted(m,s,n) then cg_par_range(m,fns,env,s,id,n) else
+    let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
     let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else let hi=s.value.operand in
     let header=s.serial in let work=header+1 in let latch=work+1 in let done=latch+1 in
     let iterator=cg_reg(done+1) in let successor=cg_reg(done+2) in let accumulator=cg_reg(done+3) in
@@ -1043,6 +1049,145 @@ fn cg_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, mov
     let s=cg_ins(s,n_t_i64(),concat("sub i64 ",iterator,", ",lo)) in
     let s=cg_store_element(s,array,s.value.operand,body.value) in
     cg_counted_tail(s,range) with { value=array }
+
+; Parallel regions (regions.neo). In a par clone, a candidate comprehension
+; is outlined into @neo_region_<function>_<serial>(ptr %ctx, i64 %chunk),
+; which lowers the body sequentially over one chunk of the range. The context
+; holds lo, the iteration count, the chunk count, the output (the array, or
+; the buffer of chunk totals) and the bindings the body names. ax_chunks (or
+; ax_chunks_work with the reference's work estimate) picks the chunks, so a
+; float total depends on the worker count (as in the reference compiler) but
+; not on scheduling: chunk totals are added in chunk order.
+fn cg_par_symbol(id:i64) -> Arr u8 _ = concat("@neo_par_",int_text(id))
+fn cg_par_wanted(borrow m:Mods, borrow s:CgState, n:Node) -> bool
+  = len(s.par)>0 && str_find(s.target,"-linux").present && rg_candidate(m,n)
+fn cg_par_captures(borrow m:Mods, borrow env:Arr CgBinding _, borrow names:Arr i64 _) -> Arr CgBinding _
+  = loop (i=0, out=arr(j in 0..0) cg_bind(-1,cg_unit())) while i<len(env)
+      next (i+1,let b=cg_binding(env,i) in
+        if b.name>=0 && rg_named(m,names,b.name) then push(out,cg_bind(b.name,b.value)) else out) yield out
+fn cg_par_context(borrow captured:Arr CgBinding _, totals:bool) -> Arr u8 _
+  = let fields=loop (i=0, out=tx_empty()) while i<len(captured)
+      next (i+1,concat(out,", ",cg_type_of(cg_binding(captured,i).value))) yield out in
+    concat("{ i64, i64, i64, ",if totals then "ptr" else "%ax_arr",fields," }")
+fn cg_par_field(move s:CgState, borrow context:Arr u8 _, borrow pointer:Arr u8 _, k:i64) -> CgState
+  = cg_ins(s,n_t_ptr(),concat("getelementptr ",context,", ptr ",pointer,", i32 0, i32 ",int_text(k)))
+fn cg_par_load(move s:CgState, borrow context:Arr u8 _, k:i64, borrow value:CgValue) -> CgState
+  = let s=cg_par_field(s,context,"%ctx",k) in cg_ins_value(s,value,concat("load ",cg_type_of(value),", ptr ",s.value.operand))
+fn cg_par_store(move s:CgState, borrow context:Arr u8 _, borrow pointer:Arr u8 _, k:i64, borrow value:CgValue) -> CgState
+  = let s=cg_par_field(s,context,pointer,k) in cg_write(s,concat("  store ",cg_typed(value),", ptr ",s.value.operand,"\n"))
+
+; Worker safety (regions.neo): what lowered code may refer to on a worker
+; thread. A called function is lowered again (sequentially) and checked in
+; turn; path holds its callers, so recursion is refused.
+fn cg_par_safe(borrow m:Mods, borrow fns:Arr i64 _, borrow s:CgState, borrow code:Arr u8 _, borrow path:Arr i64 _) -> bool
+  = if rg_indirect(code) then false else let refs=rg_refs(code) in
+    loop (i=0, ok=true) while ok && i<len(refs) next (i+1,cg_par_ref(m,fns,s,md_word(refs,i),path)) yield ok
+fn cg_par_ref(borrow m:Mods, borrow fns:Arr i64 _, borrow s:CgState, borrow name:Arr u8 _, borrow path:Arr i64 _) -> bool
+  = if str_starts(name,"llvm.") || str_starts(name,"neo_failure_") || str_starts(name,"neo_bytes_") ||
+      tx_equal(name,"neo_runtime_trap") || tx_equal(name,"neo_precondition_trap") || tx_equal(name,"neo.bytes.read") then true
+    else if str_starts(name,"neo_retain_record_") || str_starts(name,"neo_release_record_") then
+      let record=rg_number(name,if str_starts(name,"neo_retain_") then 18 else 19) in
+      record>=0 && !cg_counted(m,cg_value(n_t_rec(),"") with { record=record })
+    else if !str_starts(name,"neo_fn_") then false else
+    let callee=rg_number(name,7) in let f=md_node(m,callee) in
+    if callee<0 || f.kind!=n_fn() || ast_flag(f,fl_effect()) || cg_listed(path,callee) then false else
+    let lowered=cg_function(m,fns,callee,false,s.target,s.views,false,false) in
+    let lent=len(name)>5 && bytes_match_at(name,len(name)-5,".lent") in
+    lowered.error<0 && cg_par_safe(m,fns,s,if lent then rg_first(lowered.text) else lowered.text,push(path,callee))
+
+type CgLoads = { state:CgState, env:Arr CgBinding _ }
+type CgRegion = { state:CgState, ok:bool, element:CgValue, code:Arr u8 _ }
+; The region function. This chunk's part of the count iterations starts at
+; chunk*q+min(chunk,r) for q, r = count divmod chunks: no product overflows.
+fn cg_par_region(borrow m:Mods, borrow fns:Arr i64 _, borrow captured:Arr CgBinding _, borrow s:CgState, n:Node,
+                 borrow context:Arr u8 _, borrow symbol:Arr u8 _, totals:bool) -> CgRegion
+  = let r=s with { text=tx_empty(), globals=tx_empty(), allocas=tx_empty(), block=-1, value=cg_unit(), par=tx_ints() } in
+    let r=cg_par_load(r,context,0,cg_value(n_t_i64(),"")) in let low=r.value.operand in
+    let r=cg_par_load(r,context,1,cg_value(n_t_i64(),"")) in let count=r.value.operand in
+    let r=cg_par_load(r,context,2,cg_value(n_t_i64(),"")) in let chunks=r.value.operand in
+    let r=cg_par_load(r,context,3,cg_value(if totals then n_t_ptr() else n_t_arr(),"")) in let output=r.value.operand in
+    let loads=loop (i=0, out=CgLoads { state=r, env=arr(j in 0..0) cg_bind(-1,cg_unit()) }) while i<len(captured)
+      next (i+1,let b=cg_binding(captured,i) in let loaded=cg_par_load(out.state,context,4+i,b.value) in
+        CgLoads { state=loaded, env=push(out.env,cg_bind(b.name,loaded.value)) }) yield out in
+    let r=cg_ins(loads.state,n_t_i64(),concat("udiv i64 ",count,", ",chunks)) in let q=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("urem i64 ",count,", ",chunks)) in let rest=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("mul i64 %chunk, ",q)) in let base=r.value.operand in
+    let r=cg_ins(r,n_t_bool(),concat("icmp ult i64 %chunk, ",rest)) in let longer=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("select i1 ",longer,", i64 %chunk, i64 ",rest)) in
+    let r=cg_ins(r,n_t_i64(),concat("add i64 ",base,", ",r.value.operand)) in
+    let r=cg_ins(r,n_t_i64(),concat("add i64 ",low,", ",r.value.operand)) in let first=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("zext i1 ",longer," to i64")) in
+    let r=cg_ins(r,n_t_i64(),concat("add i64 ",q,", ",r.value.operand)) in
+    let r=cg_ins(r,n_t_i64(),concat("add i64 ",first,", ",r.value.operand)) in let last=r.value.operand in
+    let header=r.serial in let work=header+1 in let latch=work+1 in let done=latch+1 in
+    let iterator=cg_reg(done+1) in let accumulator=cg_reg(done+3) in
+    let range=CgRange { header=header, work=work, latch=latch, done=done, iterator=iterator, successor=cg_reg(done+2), lo=first, hi=last } in
+    let inner=push(loads.env,cg_bind(n.a,cg_value(n_t_i64(),iterator))) in
+    let body=cg_expr(m,fns,inner,r with { text=tx_empty(), globals=tx_empty(), serial=done+4, block=work },n.d) in
+    let element=body.value with { operand=tx_empty() } in
+    if body.error>=0 || !cg_supported(body.value) || (!totals && cg_counted(m,body.value)) then
+      CgRegion { state=body, ok=false, element=element, code=tx_empty() } else
+    let r=if totals then
+        let total=cg_sum_range(m,r,body,range,accumulator) in let value=total.value in
+        let at=cg_offset(total,cg_type_of(element),output,"%chunk") in
+        cg_write(at,concat("  store ",cg_typed(value),", ptr ",at.value.operand,", align 8\n"))
+      else
+        let body=cg_own_view(body) in
+        let r=r with { serial=body.serial, globals=concat(r.globals,body.globals), allocas=body.allocas } in
+        let r=cg_write(cg_counted_head(r,range,"") with { block=body.block },body.text) in
+        let r=cg_ins(r,n_t_i64(),concat("sub i64 ",iterator,", ",low)) in
+        cg_counted_tail(cg_store_element(r,cg_array_value(element,output),r.value.operand,body.value),range) in
+    CgRegion { state=r, ok=true, element=element,
+      code=concat("define internal void ",symbol,"(ptr %ctx, i64 %chunk) {\nentry:\n",r.allocas,r.text,"  ret void\n}\n\n") }
+
+; A region whose body cannot be outlined (an unsupported or counted element)
+; is lowered sequentially, as is everything inside it.
+fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
+  = let par=s.par in let totals=n.kind==n_sum() in let start=s in
+    let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
+    let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else let hi=s.value.operand in
+    let walk=rg_walk(m,fns,rg_none(),n.d) in
+    let captured=cg_par_captures(m,env,walk.names) in
+    let context=cg_par_context(captured,totals) in
+    let symbol=concat("@neo_region_",int_text(s.function),"_",int_text(s.serial)) in
+    let region=cg_par_region(m,fns,captured,s,n,context,symbol,totals) in
+    if !region.ok then cg_range(m,fns,env,start with { par=tx_ints() },id,n) with { par=par } else
+    let shared=cg_par_safe(m,fns,s,region.code,tx_ints()) in
+    let dispatcher=if shared then "ax_par_for_shared" else "ax_par_for" in
+    let cost=if shared then walk.cost else -1 in
+    let element=region.element in
+    let s=s with { serial=region.state.serial, line=n.line, globals=concat(s.globals,region.state.globals,region.code) } in
+    ; The count is max(hi-lo, 0); the difference is checked, as the sequential array's length is.
+    let s=cg_integer_arithmetic(s,"sub",hi,lo) in let difference=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",lo)) in
+    let s=cg_ins(s,n_t_i64(),concat("select i1 ",s.value.operand,", i64 ",difference,", i64 0")) in let count=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),if cost>=0 then concat("call i64 @ax_chunks_work(i64 ",count,", i64 ",int_text(cost),")")
+      else concat("call i64 @ax_chunks(i64 ",count,")")) in let chunks=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),concat("mul i64 ",chunks,", ptrtoint (ptr getelementptr (",cg_type_of(element),", ptr null, i64 1) to i64)")) in
+    let bytes=s.value.operand in
+    let s=if totals then cg_ins(s,n_t_ptr(),concat("call ptr @ax_alloc(i64 ",bytes,")")) else cg_array_allocate(s,element,difference) in
+    let output=s.value in let pointer=cg_reg(s.serial) in
+    let s=s with { serial=s.serial+1, allocas=concat(s.allocas,"  ",pointer," = alloca ",context,", align 8\n") } in
+    let s=cg_par_store(s,context,pointer,0,cg_value(n_t_i64(),lo)) in
+    let s=cg_par_store(s,context,pointer,1,cg_value(n_t_i64(),count)) in
+    let s=cg_par_store(s,context,pointer,2,cg_value(n_t_i64(),chunks)) in
+    let s=cg_par_store(s,context,pointer,3,output) in
+    let s=loop (i=0, out=s) while i<len(captured)
+      next (i+1,cg_par_store(out,context,pointer,4+i,cg_binding(captured,i).value)) yield out in
+    ; Forked children count references in shared pages: make counting atomic.
+    let s=if shared then s else cg_write(s,"  store i64 1, ptr @neo_threads, align 8\n") in
+    let s=cg_write(s,concat("  call void @",dispatcher,"(i64 ",chunks,", ptr ",symbol,", ptr ",pointer,")\n",
+      "; neo-region {\"fn\":\"",rg_display(s.name),"\",\"pos\":[",int_text(n.line),",",int_text(n.col),
+      "],\"kind\":\"",if totals then "sum" else "arr","\",\"dispatcher\":\"",dispatcher,"\",\"work_cost\":",
+      if cost>=0 then int_text(cost) else "null","}\n")) in
+    if !totals then s with { value=output } else
+    let header=s.serial in let work=header+1 in let latch=work+1 in let done=latch+1 in
+    let range=CgRange { header=header, work=work, latch=latch, done=done, iterator=cg_reg(done+1),
+      successor=cg_reg(done+2), lo="0", hi=chunks } in
+    let at=cg_offset(s with { text=tx_empty(), globals=tx_empty(), serial=done+4, block=work },cg_type_of(element),output.operand,range.iterator) in
+    let term=cg_ins_value(at,element,concat("load ",cg_type_of(element),", ptr ",at.value.operand,", align 8")) in
+    let total=cg_sum_range(m,s,term,range,cg_reg(done+3)) in
+    cg_write(total,concat("  call void @ax_free(ptr ",output.operand,", i64 ",bytes,")\n"))
 
 fn cg_loop_initial(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64) -> CgArgs
   = loop (i=0, a=CgArgs { state=s, values=arr(j in 0..0) cg_unit() }) while a.state.error<0 && i<ast_list_len(m.ast,list)
@@ -1431,11 +1576,17 @@ fn cg_owning_wrapper(borrow m:Mods, f:Node, borrow linkage:Arr u8 _, borrow resu
       if result.ty==n_t_unit() then concat("  ",call,releases,"  ret void\n}\n\n")
       else concat("  %result = ",call,releases,"  ret ",cg_type_of(result)," %result\n}\n\n"))
 fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool, shared:bool) -> CgState
-  = let f=md_node(m,id) in let result=cg_declaration(m,f.c) in
-    let name=md_str(m,f.a) in let symbol=if entry then "@neo_entry" else cg_symbol(m,id) in
-    let diagnostic_id=if entry then len(m.ast.nodes)/11+id else id in
+  = cg_function_mode(m,fns,id,entry,target,views,source_runtime,shared,tx_ints())
+; par (rg_par_set): an entry calls main's par clone when main has one; any
+; other function given a non-empty par is lowered as its par clone.
+fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool,
+                    shared:bool, borrow par:Arr i64 _) -> CgState
+  = let f=md_node(m,id) in let result=cg_declaration(m,f.c) in let clone=!entry && len(par)>0 in
+    let name=md_str(m,f.a) in let symbol=if entry then "@neo_entry" else if clone then cg_par_symbol(id) else cg_symbol(m,id) in
+    let diagnostic_id=if entry then len(m.ast.nodes)/11+id else if clone then 2*(len(m.ast.nodes)/11)+id else id in
     let start=CgState { text=tx_empty(), globals=tx_empty(), allocas=tx_empty(), serial=0, block=-1, value=cg_unit(), error=-1,
-      function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id) } in
+      function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id),
+      par=if clone then par else tx_ints() } in
     let runtime_export=source_runtime && ast_flag(f,fl_exported()) && start.runtime in
     if tc_abi_boundary(f) && cg_abi_reserved(name,len(target)>0,runtime_export) then start with { error=id } else
     if ast_flag(f,fl_external()) then cg_write(start,concat("declare ",cg_return(result)," ",symbol,"(",cg_abi_types(m,f),")\n")) else
@@ -1461,7 +1612,7 @@ fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow t
     let ready=if entry || exported then cg_preconditions(m,fns,sizes.env,sizes.state,f.b) else sizes.state in
     if ready.error>=0 then ready else
     let body=if entry then
-      let call=concat("call ",cg_return(result)," ",cg_symbol(m,id),"(",p.text,")") in
+      let call=concat("call ",cg_return(result)," ",if tx_at(par,id)==1 then cg_par_symbol(id) else cg_symbol(m,id),"(",p.text,")") in
       if result.ty==n_t_unit() then cg_write(ready with { value=cg_unit() },concat("  ",call,"\n")) else cg_ins_value(ready,result,call)
       else let lowered=cg_expr(m,fns,sizes.env,ready,f.d) in if lowered.error>=0 then lowered else
         loop (i=len(p.env)-1, s=cg_own_view(lowered)) while i>=0
@@ -1477,9 +1628,10 @@ fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow t
     let policy=if entry || exported then "" else if ast_flag(f,fl_cold()) then " cold noinline"
       else if ast_flag(f,fl_inline()) then " alwaysinline"
       else if !ast_flag(f,fl_effect()) && cg_short(finish.text,400) then " inlinehint" else "" in
-    let header=concat("; fn ",name,"\ndefine ",linkage,cg_return(result)," ",if lends then cg_lent_symbol(m,id) else symbol,"(",p.text,")",
+    let lent=if clone then concat(symbol,".lent") else cg_lent_symbol(m,id) in
+    let header=concat("; fn ",name,"\ndefine ",linkage,cg_return(result)," ",if lends then lent else symbol,"(",p.text,")",
       if libc then " \"no-builtins\"" else "",policy," {\nentry:\n") in
-    let wrapper=if lends then cg_owning_wrapper(m,f,linkage,result,symbol,cg_lent_symbol(m,id),p) else tx_empty() in
+    let wrapper=if lends then cg_owning_wrapper(m,f,linkage,result,symbol,lent,p) else tx_empty() in
     finish with { text=concat(header,finish.allocas,finish.text,"}\n\n",wrapper) }
 
 fn cg_slot_refs(borrow element:CgValue, retain:bool) -> Arr u8 _
@@ -1737,6 +1889,12 @@ fn cg_piece_function(borrow m:Mods, move p:CgPieces, id:i64, borrow function:CgS
     let symbol=cg_symbol(m,id) in if len(symbol)<3 || tx_byte(symbol,1)!=34 then p else
     p with { names=push(p.names,pt_slice(symbol,2,len(symbol)-1)), owners=push(p.owners,index) }
 
+; A par clone (cg_function_mode): kept when its symbol @neo_par_<id> is used.
+fn cg_piece_par(move p:CgPieces, id:i64, borrow function:CgState) -> CgPieces
+  = let index=len(p.pieces) in
+    p with { pieces=push(p.pieces,concat(function.globals,function.text)), names=push(p.names,pt_slice(cg_par_symbol(id),1,len(cg_par_symbol(id)))),
+      owners=push(p.owners,index) }
+
 ; The declaration of a function that lives in another object: kept when the
 ; module refers to its symbol.
 fn cg_piece_import(borrow m:Mods, move p:CgPieces, id:i64) -> CgPieces
@@ -1863,7 +2021,16 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
             else cg_piece_function(m,out,id,function)) yield out) yield p in
     if p.report.result.value.ty<=0 then CgProgram { text="",report=p.report } else
     let module=md_entry_module(m) in let id=md_find_decl(m,fns,bk_get(m.local,module,"main")) in
-    let entry=if partition==2 then p else let code=cg_function(m,fns,id,true,target,views,source_runtime,false) in
+    ; Par clones (regions.neo) for a whole program or its part, built with
+    ; the runtime's source, for Linux: the shared dispatcher needs its threads.
+    let par=if partition==2 || !source_runtime || !str_find(target,"-linux").present then tx_ints() else rg_par_set(m,fns,id) in
+    let p=loop (k=0, out=p) while out.report.result.value.ty>0 && k<len(par)
+      next (k+1,if tx_at(par,k)!=1 then out else
+        let clone=cg_function_mode(m,fns,k,false,target,views,source_runtime,false,par) in
+        if clone.error>=0 then out with { report=TcReport { result=tc_unsupported(clone.error,"LLVM lowering outside the supported subset"), module=module } }
+        else cg_piece_par(out,k,clone)) yield out in
+    if p.report.result.value.ty<=0 then CgProgram { text="",report=p.report } else
+    let entry=if partition==2 then p else let code=cg_function_mode(m,fns,id,true,target,views,source_runtime,false,par) in
       if code.error>=0 then p with { report=TcReport { result=tc_unsupported(code.error,"LLVM lowering outside the supported subset"), module=module } }
       else cg_piece_function(m,p,-1,code) in
     if entry.report.result.value.ty<=0 then CgProgram { text="",report=entry.report } else
@@ -1876,11 +2043,18 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     ; calls it has one thread and needs no atomic reference counts. An object
     ; linked with others tests the flag spawn_thread sets, unless it is the
     ; program itself and refers to nothing in the kept object that can start one.
-    let alone=if partition==0 then prune && !str_find(text,"call i64 @neo_spawn_thread(").present
-      else partition==1 && prune && len(m.threaded)>0 && !cg_threaded(concat(text,startup),m.threaded) in
+    ; A forking region (cg_par_range) makes its children count references
+    ; in shared pages, so its program counts atomically too.
+    let forks=str_find(text,"call void @ax_par_for(").present in
+    let alone=if partition==0 then prune && !str_find(text,"call i64 @neo_spawn_thread(").present && !forks
+      else partition==1 && prune && len(m.threaded)>0 && !cg_threaded(concat(text,startup),m.threaded) && !forks in
     let counting=if alone then 0 else if partition==0 then 1 else 2 in
     let noted=if partition==2 && len(m.shared)>0 then concat("; neo-threads:",cg_spawners(entry),"\n") else tx_empty() in
-    CgProgram { text=concat(text,cg_array_helpers(text,source_runtime,counting),noted),report=entry.report }
+    ; The startup presets the heap mode (runtime state 184): private pages
+    ; (1) when every region runs on threads, as in the reference compiler.
+    let heap=if partition==2 then tx_empty() else concat("@neo_heap_mode = internal constant i64 ",
+      if str_find(text,"call void @ax_par_for_shared(").present && !forks then "1\n" else "0\n") in
+    CgProgram { text=concat(text,cg_array_helpers(text,source_runtime,counting),noted,heap),report=entry.report }
 
 fn cg_program(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool) -> CgProgram
   = cg_program_part(m,target,allocation_stats,source_runtime,tx_ints(),0,"")
