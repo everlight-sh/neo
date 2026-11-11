@@ -555,14 +555,23 @@ args = ["bitset_growth"]
 stdout = "bitset_growth: 34 runs OK\n"
 timeout = 600
 
-# json_writer_growth.py (outputs only; its allocation bounds are entry 6 of
-# tests/porting/language-failures.md)
+# json_writer_growth.py
 [[test]]
 name = "json-writer-growth"
 file = "drivers/language_allocations.neo"
 args = ["json_writer_growth"]
-stdout = "json_writer_growth: 16 runs OK\n"
+stdout = "json_writer_growth: 24 runs OK\n"
 timeout = 600
+
+# A record field appended to in branches whose other branches hand the record
+# on is taken, not copied (as the JSON writer's buffer above).
+[[test]]
+name = "branch-field-takes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/branch_field_takes.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/branch_field_takes/runs.in"
+stdout = "branch_field_takes.neo: 12 runs OK\n"
+timeout = 300
 
 # branch_ownership.py
 [[test]]

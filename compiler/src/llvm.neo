@@ -426,6 +426,12 @@ fn cg_all_uses(borrow moves:Arr i64 _) -> bool
 ; of the field, see cg_plan_record), so it takes the field the same way. Each
 ; such `with` then must not release the old field: the triples (-2, index,
 ; base) mark them (cg_with_value), after the takes (-1, index, use).
+; A branch where the field plan does not take the field (a -1-branch entry)
+; may hand the record on itself, with the field in it or replaced by a `with`
+; that releases it as usual: such a branch's hand-overs are not marked, so
+; the field is taken on the other paths, as a JSON writer appends to its
+; buffer unless it fails. A branch that ends before the hand-over would have
+; to release the field itself; then the field is not taken at all.
 fn cg_parts_dropped(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64, name:i64, expressions:bool,
                     borrow moves:Arr i64 _) -> Arr i64 _
   = let fields=md_node(m,value.record).b in
@@ -433,11 +439,27 @@ fn cg_parts_dropped(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, i
       next (i+1,if !cg_counted(m,cg_field_type(m,fields,i)) then all else
         let field=md_node(m,ast_list_at(m.ast,fields,i)).a in
         let plan=if expressions then cg_plan_list(m,fns,id,name,field,true) else cg_plan(m,fns,id,name,field,true) in
-        if plan.state!=1 || !cg_all_uses(plan.moves) then all else
+        if plan.state!=1 then all else
+        let kept=loop (k=0, out=CgFieldKept { moves=tx_ints(), handed=true }) while out.handed && k<len(plan.moves)
+          next (k+1,let entry=tx_at(plan.moves,k) in if entry>=0 then out else
+            let inner=cg_branch_moves(m,fns,-1-entry,name,moves) in
+            CgFieldKept { moves=cg_joined(out.moves,inner), handed=len(inner)>0 }) yield out in
+        if !kept.handed then all else
         let taken=loop (k=0, triples=all) while k<len(plan.moves)
-          next (k+1,push(push(push(triples,-1),i),tx_at(plan.moves,k))) yield triples in
+          next (k+1,let entry=tx_at(plan.moves,k) in
+            if entry<0 then triples else push(push(push(triples,-1),i),entry)) yield triples in
         loop (k=0, triples=taken) while k<len(moves)
-          next (k+1,push(push(push(triples,-2),i),tx_at(moves,k))) yield triples) yield all
+          next (k+1,if cg_listed(kept.moves,tx_at(moves,k)) then triples
+            else push(push(push(triples,-2),i),tx_at(moves,k))) yield triples) yield all
+; The hand-overs inside the branches that keep a field (cg_parts_dropped).
+type CgFieldKept = { moves:Arr i64 _, handed:bool }
+; The hand-overs of binding name inside branch that are among its moves, or
+; none when the binding is handed on after the branch.
+fn cg_branch_moves(borrow m:Mods, borrow fns:Arr i64 _, branch:i64, name:i64, borrow moves:Arr i64 _) -> Arr i64 _
+  = let plan=cg_plan(m,fns,branch,name,-1,true) in
+    let inside=loop (k=0, found=false) while !found && k<len(plan.moves)
+      next (k+1,tx_at(plan.moves,k)>=0 && cg_listed(moves,tx_at(plan.moves,k))) yield found in
+    if plan.state==1 && inside then plan.moves else tx_ints()
 ; Whether parts marks the `with` on base as leaving the field at index alone.
 fn cg_part_dropped(borrow parts:Arr i64 _, index:i64, base:i64) -> bool
   = loop (i=0, found=false) while !found && i+2<len(parts)

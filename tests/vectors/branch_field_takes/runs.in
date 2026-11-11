@@ -1,0 +1,15 @@
+# Runs of tests/fixtures/branch_field_takes.neo: mode and calls. The fixture checks the log against its model, that
+# modes 0-2 (appends whose other branches hand the record on) make O(log n) allocation requests, and that the
+# resident set does not grow; it prints "<mode> <count> <length> OK". Build with NEO_ALLOC_STATS=1.
+1	0 1		=0 1 2 OK\n
+1	0 100000		=0 79121 158242 OK\n
+1	1 100000		=1 39561 79122 OK\n
+1	2 100000		=2 179121 358242 OK\n
+1	3 100000		=3 5 5001 OK\n
+1	4 100000		=4 4 4001 OK\n
+4	0 1		=0 1 2 OK\n
+4	0 100000		=0 79121 158242 OK\n
+4	1 100000		=1 39561 79122 OK\n
+4	2 100000		=2 179121 358242 OK\n
+4	3 100000		=3 5 5001 OK\n
+4	4 100000		=4 4 4001 OK\n
