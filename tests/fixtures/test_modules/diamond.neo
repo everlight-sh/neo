@@ -1,0 +1,2 @@
+; A diamond: both sides import diamond_shared.neo, whose type is declared once.
+import "diamond_left.neo" import "diamond_right.neo" fn main () -> i64 = len(left().text) + right()

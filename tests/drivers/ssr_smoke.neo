@@ -1,0 +1,21 @@
+; Ported from tests/ssr_smoke.py: examples/ssr.neo is a static binary and, at
+; 1 and 4 workers, serves the exact catalog HTML of the Python reference
+; (lengths and SHA-256 digests frozen in tests/vectors/ssr_smoke/pages.out),
+; escaping, routing, 400/404/405 replies, 100 concurrent requests and 129
+; ordered pipelined pages ending in a large response and Connection: close.
+; The Bun/React comparison server and the --empty-root mode are not ported
+; (see tests/drivers/freestanding_linux_smoke.neo for empty-root serving).
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("ssr") in let binary=pt_join(dir,"ssr") in
+    let built=dv_build(tools,pt_join(tools.here,"../../examples/ssr.neo"),binary,md_words()) in
+    let audited=dv_audit(tools,binary) in
+    let pages=ru_pages(ru_vector(tools,"ssr_smoke","pages.out")) in
+    let one=ru_ssr_serve(binary,"1",pages,pages.counts) in let four=ru_ssr_serve(binary,"4",pages,pages.counts) in
+    let cleaned=dv_clean(dir) in let shown=print_out("SSR OK\n") in noop()

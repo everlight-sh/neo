@@ -1,0 +1,107 @@
+; Ported from tests/test_packages.py (Python neoc.packages) to the native
+; commands: neo pkg lock is deterministic, root edits need no relock,
+; dependency edits are refused until relocked, vendored packages build after
+; the original is removed; version mismatches, cyclic dependencies, traversal
+; and undeclared imports are rejected; malformed locks and manifests are
+; ordinary diagnostics; a generated entry outside the project uses
+; --package-root and still checks the lock; identical trees in two
+; directories build identical binaries (instead of the Python graph hash).
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn pk_neo(borrow tools:DvTools, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = nt_process(tools.compiler,args,dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),120000,1048576)
+fn pk_args(borrow a:Arr u8 _, borrow b:Arr u8 _, borrow c:Arr u8 _) -> Arr Arr u8 _ _ = push(push(push(md_words(),a),b),c)
+
+effect fn pk_ok(borrow tools:DvTools, borrow action:Arr u8 _, borrow app:Arr u8 _) -> unit
+  = let run=pk_neo(tools,pk_args("pkg",action,app)) in
+    dv_expect(run.ok && run.code==0 && ru_contains(run.output,"\"ok\": true"),concat("neo pkg ",action," failed: ",nt_diagnostic(run)))
+effect fn pk_refused(borrow tools:DvTools, borrow action:Arr u8 _, borrow app:Arr u8 _, borrow needle:Arr u8 _) -> unit
+  = let run=pk_neo(tools,pk_args("pkg",action,app)) in
+    dv_expect(run.ok && run.code==1 && ru_contains(nt_diagnostic(run),needle),
+      concat("neo pkg ",action," did not report ",needle,": exit ",int_text(run.code),", ",nt_diagnostic(run)))
+
+; Builds and runs source, which must print 42.
+effect fn pk_answer(borrow tools:DvTools, borrow source:Arr u8 _, borrow binary:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> Arr u8 _
+  = let built=dv_build(tools,source,binary,flags) in let out=dv_output(binary,md_words(),md_words(),"") in
+    let a=dv_expect(tx_equal(out,"42\n"),concat(source," printed ",tx_repr(out,true))) in ru_sha(dv_read(binary))
+
+effect fn pk_tree(borrow base:Arr u8 _) -> unit
+  = let a=pf_mkdirs(pt_join(base,"app/src")) in let b=pf_mkdirs(pt_join(base,"library/src")) in
+    let c=ru_write(pt_join(base,"library/neo.toml"),"[package]\nname=\"math\"\nversion=\"1.2.3\"\nentry=\"src/lib.neo\"\n") in
+    let d=ru_write(pt_join(base,"library/src/lib.neo"),"private fn hidden() -> i64 = 99\nfn answer() -> i64 = 42\n") in
+    let e=ru_write(pt_join(base,"app/neo.toml"),"[package]\nname=\"app\"\nversion=\"0.1.0\"\n[dependencies]\nmath={path=\"../library\",version=\"1.2.3\"}\n") in
+    ru_write(pt_join(base,"app/src/main.neo"),"import \"pkg:math\" as math\nfn main() -> i64 = math::answer()\n")
+
+effect fn pk_lock_and_vendor(borrow tools:DvTools, borrow base:Arr u8 _) -> Arr u8 _
+  = let tree=pk_tree(base) in let app=pt_join(base,"app") in let main=pt_join(app,"src/main.neo") in
+    let a=pk_ok(tools,"lock",app) in let first=dv_read(pt_join(app,"neo.lock")) in
+    let b=pk_ok(tools,"lock",app) in
+    let c=dv_expect(tx_equal(first,dv_read(pt_join(app,"neo.lock"))),"neo pkg lock is not deterministic") in
+    let d=dv_expect(ru_contains(first,"\"app@0.1.0\"") && ru_contains(first,"\"math@1.2.3\""),"the lock does not list both packages") in
+    let digest=pk_answer(tools,main,pt_join(base,"app.bin"),md_words()) in
+    let e=fs_append(main,"; root development does not require relocking\n") in
+    let f=pk_ok(tools,"verify",app) in let g=pk_answer(tools,main,pt_join(base,"app.bin"),md_words()) in
+    let lib=pt_join(base,"library/src/lib.neo") in let old=dv_read(lib) in
+    let h=fs_append(lib,"; changed\n") in let i=pk_refused(tools,"verify",app,"source changed") in
+    let refused=dv_build_with(tools,main,pt_join(base,"changed.bin"),md_words(),md_words()) in
+    let j=dv_expect(refused.ok && refused.code!=0 && ru_contains(nt_diagnostic(refused),"source changed"),"a changed dependency was built without relocking") in
+    let k=ru_write(lib,old) in let l=pk_ok(tools,"vendor",app) in
+    let m=dv_clean(pt_join(base,"library")) in
+    let n=pk_ok(tools,"verify",app) in let o=pk_answer(tools,main,pt_join(base,"vendored.bin"),md_words()) in digest
+
+effect fn pk_rejections(borrow tools:DvTools, borrow base:Arr u8 _) -> unit
+  = let tree=pk_tree(base) in let app=pt_join(base,"app") in
+    let manifest=pt_join(base,"library/neo.toml") in let old=dv_read(manifest) in
+    let a=ru_write(manifest,"[package]\nname=\"math\"\nversion=\"1.2.4\"\nentry=\"src/lib.neo\"\n") in
+    let b=pk_refused(tools,"lock",app,"version mismatch") in
+    let c=ru_write(manifest,concat(old,"[dependencies]\napp={path=\"../app\",version=\"0.1.0\"}\n")) in
+    let d=pk_refused(tools,"lock",app,"cyclic") in
+    let e=ru_write(manifest,old) in let f=pk_ok(tools,"lock",app) in
+    let names=push(push(push(push(md_words(),"pkg:math/../secret"),"pkg:unknown"),"pkg:math//a"),"pkg:math/./a") in
+    let probe=pt_join(app,"src/probe.neo") in
+    let g=loop (i=0) while i<len(names)
+      next (let written=ru_write(probe,concat("import \"",md_word(names,i),"\"\nfn main() -> i64 = 0\n")) in
+        let checked=dv_check(tools,probe) in
+        let refused=dv_expect(checked.ok && checked.code==1,concat(md_word(names,i)," was accepted")) in i+1) yield i in
+    let h=fs_remove(probe) in
+    let lock=pt_join(app,"neo.lock") in let good=dv_read(lock) in
+    let bad=push(push(push(md_words(),"[]"),"{}"),"{\"format\":1,\"root\":\"app@0.1.0\",\"packages\":{\"app@0.1.0\":{}}}") in
+    let i=loop (k=0) while k<len(bad)
+      next (let written=ru_write(lock,md_word(bad,k)) in
+        let run=pk_neo(tools,pk_args("pkg","verify",app)) in
+        let refused=dv_expect(run.ok && run.code==1 && ru_contains(run.errors,"neoc: "),concat("the malformed lock ",md_word(bad,k)," was not a diagnostic")) in k+1) yield k in
+    let j=ru_write(lock,good) in
+    let k=ru_write(manifest,"[package]\nname=7\nversion=\"1.2.3\"\n") in
+    pk_refused(tools,"lock",app,"name")
+
+effect fn pk_generated(borrow tools:DvTools, borrow base:Arr u8 _) -> unit
+  = let tree=pk_tree(base) in let app=pt_join(base,"app") in let a=pk_ok(tools,"lock",app) in
+    let page=pt_join(app,"src/page.neo") in
+    let b=ru_write(page,"import \"pkg:math\"\nfn page_value()->i64=answer()\n") in
+    let made=fs_mkdir(pt_join(base,"build")) in let generated=pt_join(base,"build/server.neo") in
+    let c=ru_write(generated,concat("import \"",page,"\"\nfn main()->i64=page_value()\n")) in
+    let outside=dv_build_with(tools,generated,pt_join(base,"server"),md_words(),md_words()) in
+    let d=dv_expect(outside.ok && outside.code!=0 && ru_contains(nt_diagnostic(outside),"ancestor neo.toml"),
+      "a generated entry outside the project resolved pkg: without --package-root") in
+    let e=pk_answer(tools,generated,pt_join(base,"server"),push(push(md_words(),"--package-root"),app)) in
+    let f=ru_write(pt_join(base,"library/src/lib.neo"),"fn answer()->i64=99\n") in
+    let changed=dv_build_with(tools,generated,pt_join(base,"server"),push(push(md_words(),"--package-root"),app),md_words()) in
+    dv_expect(changed.ok && changed.code!=0 && ru_contains(nt_diagnostic(changed),"source changed"),
+      "a generated entry built a changed locked dependency")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("packages") in
+    let one=pt_join(dir,"one") in let two=pt_join(dir,"two") in
+    let a=fs_mkdir(one) in let b=fs_mkdir(two) in
+    let first=pk_lock_and_vendor(tools,one) in let second=pk_lock_and_vendor(tools,two) in
+    let c=dv_expect(tx_equal(first,second),"identical package trees in two directories built different binaries") in
+    let three=pt_join(dir,"three") in let d=fs_mkdir(three) in let e=pk_rejections(tools,three) in
+    let four=pt_join(dir,"four") in let f=fs_mkdir(four) in let g=pk_generated(tools,four) in
+    let cleaned=dv_clean(dir) in let shown=print_out("packages OK\n") in noop()

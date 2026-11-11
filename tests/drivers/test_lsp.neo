@@ -1,0 +1,96 @@
+; Ported from tests/test_lsp.py (Python neoc.lsp) to the native neo lsp over
+; stdio: initialize advertises definitions; an open document's overlay gets
+; diagnostics, completion, hover and definition across an aliased import;
+; an edit publishes new diagnostics without touching the file on disk; a
+; first-open completion survives an unfinished expression, with positions in
+; UTF-16 code units after an astral character; shutdown and exit answer in
+; order and stdout carries only framed messages.
+import "std:io"
+import "std:json"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn lp_frame(borrow body:Arr u8 _) -> Arr u8 _ = concat("Content-Length: ",int_text(len(body)),"\r\n\r\n",body)
+fn lp_request(id:i64, borrow method:Arr u8 _, borrow params:Arr u8 _) -> Arr u8 _
+  = lp_frame(concat("{\"jsonrpc\":\"2.0\",\"id\":",int_text(id),",\"method\":\"",method,"\",\"params\":",params,"}"))
+fn lp_notice(borrow method:Arr u8 _, borrow params:Arr u8 _) -> Arr u8 _
+  = lp_frame(concat("{\"jsonrpc\":\"2.0\",\"method\":\"",method,"\",\"params\":",params,"}"))
+fn lp_open(borrow uri:Arr u8 _, borrow text:Arr u8 _) -> Arr u8 _
+  = lp_notice("textDocument/didOpen",concat("{\"textDocument\":{\"uri\":",json_quote(uri),",\"version\":1,\"text\":",json_quote(text),"}}"))
+fn lp_at(borrow uri:Arr u8 _, line:i64, character:i64) -> Arr u8 _
+  = concat("{\"textDocument\":{\"uri\":",json_quote(uri),"},\"position\":{\"line\":",int_text(line),",\"character\":",int_text(character),"}}")
+
+; The message bodies of a framed stream; "!" marks bytes that are not a frame.
+type LpSplit = { rest:Arr u8 _, out:Arr Arr u8 _ _, bad:bool }
+fn lp_next(move s:LpSplit) -> LpSplit
+  = let end=str_find(s.rest,"\r\n\r\n") in
+    let size=if end.present && str_starts(s.rest,"Content-Length: ") then int_parse(pt_slice(s.rest,16,end.value)) else int_error(22,"",0) in
+    let start=if end.present then end.value+4 else 0 in
+    if size.ok && size.value>=0 && start+size.value<=len(s.rest) then
+      LpSplit { rest=pt_slice(s.rest,start+size.value,len(s.rest)), out=push(s.out,pt_slice(s.rest,start,start+size.value)), bad=false }
+    else LpSplit { rest=tx_empty(), out=push(s.out,"!"), bad=true }
+fn lp_bodies(borrow stream:Arr u8 _) -> Arr Arr u8 _ _
+  = let done=loop (s=LpSplit { rest=pt_copy(stream), out=md_words(), bad=false }) while len(s.rest)>0 && !s.bad
+      next (lp_next(s)) yield s in done.out
+
+fn lp_field(borrow value:Json, borrow name:Arr u8 _) -> Json = json_get(value,name).value
+fn lp_id(borrow body:Arr u8 _) -> i64
+  = let parsed=json_parse(body) in if !parsed.ok then -1 else
+    let id=json_get(parsed.value,"id") in if !id.present then -1 else let n=json_int(id.value) in if n.ok then n.value else -1
+; The result of the reply with id, or a JSON null.
+fn lp_result(borrow bodies:Arr Arr u8 _ _, id:i64) -> Json
+  = let at=loop (i=0) while i<len(bodies) && lp_id(md_word(bodies,i))!=id next (i+1) yield i in
+    let parsed=json_parse(if at<len(bodies) then md_word(bodies,at) else "{}") in
+    if parsed.ok then lp_field(parsed.value,"result") else json_parse("null").value
+fn lp_labels(borrow result:Json) -> Arr Arr u8 _ _
+  = let items=json_array_values(result) in
+    loop (i=0, out=md_words()) while i<len(items)
+      next (i+1,check i>=0 && i<len(items) in let label=json_text(lp_field(items[i],"label")) in
+        if label.ok then push(out,label.value) else out) yield out
+fn lp_has(borrow words:Arr Arr u8 _ _, borrow word:Arr u8 _) -> bool
+  = loop (i=0, found=false) while i<len(words) && !found next (i+1,tx_equal(md_word(words,i),word)) yield found
+; Diagnostics counts published for uri at version, in order (-1: none published).
+fn lp_published(borrow bodies:Arr Arr u8 _ _, borrow uri:Arr u8 _, version:i64) -> i64
+  = loop (i=0, count=-1) while i<len(bodies)
+      next (i+1,let parsed=json_parse(md_word(bodies,i)) in
+        if !parsed.ok || !ru_contains(md_word(bodies,i),"\"textDocument/publishDiagnostics\"") then count else
+        let params=lp_field(parsed.value,"params") in let named=json_text(lp_field(params,"uri")) in
+        let at=json_int(lp_field(params,"version")) in
+        if named.ok && tx_equal(named.value,uri) && at.ok && at.value==version then json_array_len(lp_field(params,"diagnostics")) else count) yield count
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=pt_realpath(dv_temp("lsp")) in
+    let lib=pt_join(dir,"lib.neo") in let main_file=pt_join(dir,"main.neo") in
+    let a=ru_write(lib,"fn answer() -> i64 = 42\n") in let b=ru_write(main_file,"fn main() -> i64 = 0\n") in
+    let uri=concat("file://",main_file) in let other=concat("file://",pt_join(dir,"unfinished.neo")) in
+    let input=concat(lp_request(1,"initialize","{}"),
+      lp_open(uri,"import \"lib.neo\" as m\nfn main() -> i64 = m::answer()\n"),
+      lp_request(2,"textDocument/completion",lp_at(uri,1,25)),lp_request(3,"textDocument/hover",lp_at(uri,1,25)),
+      lp_request(4,"textDocument/definition",lp_at(uri,1,25)),
+      lp_notice("textDocument/didChange",concat("{\"textDocument\":{\"uri\":",json_quote(uri),",\"version\":2},\"contentChanges\":[{\"text\":\"fn main() -> i64 = true\"}]}")),
+      lp_open(other,"import \"lib.neo\" as m\nfn main() -> i64 = let s=\"🚀\" in m::"),
+      lp_request(5,"textDocument/completion",lp_at(other,1,36)),
+      lp_frame("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"shutdown\"}"),lp_frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}")) in
+    let run=nt_process_input(tools.compiler,push(md_words(),"lsp"),dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),input,60000,4194304) in
+    let c=dv_expect(run.ok && !run.timeout && run.code==0,concat("neo lsp exited ",int_text(run.code),": ",nt_diagnostic(run))) in
+    let bodies=lp_bodies(run.output) in
+    let d=dv_expect(!lp_has(bodies,"!"),concat("stdout carries bytes outside LSP frames: ",tx_repr(pt_slice(run.output,0,300),true))) in
+    let ids=loop (i=0, out=tx_ints()) while i<len(bodies) next (i+1,let id=lp_id(md_word(bodies,i)) in if id>=0 then push(out,id) else out) yield out in
+    let e=dv_expect(len(ids)==6 && loop (i=0, ordered=true) while i<len(ids) next (i+1,ordered && tx_at(ids,i)==i+1) yield ordered,
+      "the replies are not ids 1..6 in order") in
+    let f=dv_expect(tx_equal(lp_field(lp_field(lp_result(bodies,1),"capabilities"),"definitionProvider").raw,"true"),"initialize does not advertise definitions") in
+    let g=dv_expect(lp_published(bodies,uri,1)==0,"the opened document did not get empty diagnostics") in
+    let h=dv_expect(lp_has(lp_labels(lp_result(bodies,2)),"m::answer"),"completion does not offer m::answer") in
+    let hover=json_text(lp_field(lp_field(lp_result(bodies,3),"contents"),"value")) in
+    let i=dv_expect(hover.ok && ru_contains(hover.value,"answer"),"hover does not describe answer") in
+    let target=json_text(lp_field(lp_result(bodies,4),"uri")) in
+    let j=dv_expect(target.ok && tx_equal(target.value,concat("file://",lib)),"definition does not point to lib.neo") in
+    let k=dv_expect(lp_published(bodies,uri,2)>0,"the edit did not publish diagnostics") in
+    let l=dv_expect(tx_equal(dv_read(main_file),"fn main() -> i64 = 0\n"),"the overlay was written to disk") in
+    let m=dv_expect(lp_has(lp_labels(lp_result(bodies,5)),"m::answer"),"first-open completion after an astral character does not offer m::answer") in
+    let cleaned=dv_clean(dir) in let shown=print_out("LSP OK\n") in noop()

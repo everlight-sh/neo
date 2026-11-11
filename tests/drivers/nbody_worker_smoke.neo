@@ -1,0 +1,36 @@
+; Ported from tests/nbody_worker_smoke.py: examples/nbody.neo is a static
+; binary, and with clone failing with a genuine kernel EAGAIN (a seccomp
+; filter from tests/fixtures/runtime_exec.neo) four requested workers still
+; give the reference energy. The energies of the independent Python model at
+; 1 and 4 workers are plain cases in tests/runtime.neo.toml, frozen in
+; tests/vectors/nbody_worker_smoke/reference.out.
+import "std:io"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn nb_magnitude(x:f64) -> f64 = if x<0.0 then 0.0-x else x
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("nbody-workers") in let binary=pt_join(dir,"nbody") in
+    let built=dv_build(tools,pt_join(tools.here,"../../examples/nbody.neo"),binary,md_words()) in
+    let audited=dv_audit(tools,binary) in
+    let ran=if !dv_linux(tools) then noop() else
+      let lines=ru_split(ru_vector(tools,"nbody_worker_smoke","reference.out"),10) in
+      let fields=ru_split(md_word(lines,6),32) in
+      let ready=dv_expect(tx_equal(md_word(fields,0),"1024") && tx_equal(md_word(fields,1),"2"),"unexpected reference.out layout") in
+      let expected=float_parse(md_word(fields,2)) in
+      let wrapper=pt_join(dir,"exec") in
+      let made=dv_build(tools,pt_join(tools.here,"../fixtures/runtime_exec.neo"),wrapper,md_words()) in
+      let aarch64=ru_aarch64(tools) in
+      let args=push(push(push(push(push(push(push(md_words(),if aarch64 then "aarch64" else "x86_64"),"deny"),
+        if aarch64 then "220" else "56"),"11"),binary),"1024"),"2") in
+      let out=dv_output(wrapper,args,push(md_words(),"NEO_THREADS=4"),"") in
+      let got=float_parse(str_trim(out)) in
+      dv_expect(expected.ok && got.ok && nb_magnitude(got.value-expected.value)<=1.0e-10*nb_magnitude(expected.value)+1.0e-12,
+        concat("with clone failing the energy is ",str_trim(out),", expected ",md_word(fields,2))) in
+    let cleaned=dv_clean(dir) in let shown=print_out("N-body workers OK\n") in noop()

@@ -1,0 +1,49 @@
+; Ported from tests/elf_runtime_layout.py: an x86-64 Linux build of a
+; freestanding program has no ELF interpreter, keeps its runtime state in a
+; page-aligned BSS-only writable segment and imports nothing. On an x86-64
+; Linux host (or with NEO_TEST_CROSS_X86=1 and a compatibility runner) the
+; binary also runs the data-sync probe.
+import "std:io"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn el_u16(borrow raw:Arr u8 _, at:i64) -> i64 = if at>=0 && at+2<=len(raw) then byte_read_le(raw,at,2) else -1
+fn el_u32(borrow raw:Arr u8 _, at:i64) -> i64 = if at>=0 && at+4<=len(raw) then byte_read_le(raw,at,4) else -1
+fn el_u64(borrow raw:Arr u8 _, at:i64) -> i64 = if at>=0 && at+8<=len(raw) then byte_read_le(raw,at,8) else -1
+
+; 0: a valid layout, otherwise what is wrong.
+type ElScan = { interpreter:bool, state:i64, misaligned:i64 }
+fn el_layout(borrow raw:Arr u8 _) -> Arr u8 _
+  = if len(raw)<64 || !str_starts(raw,"\x7fELF\x02\x01") || el_u16(raw,18)!=62 then "not an x86-64 ELF64 little-endian image" else
+    let offset=el_u64(raw,32) in let size=el_u16(raw,54) in let count=el_u16(raw,56) in
+    let scan=loop (i=0, s=ElScan { interpreter=false, state=0, misaligned=0 }) while i<count
+      next (i+1,let at=offset+i*size in let tag=el_u32(raw,at) in let flags=el_u32(raw,at+4) in
+        let address=el_u64(raw,at+16) in let files=el_u64(raw,at+32) in let memory=el_u64(raw,at+40) in
+        let bss=tag==1 && bit_and(flags,2)!=0 && files==0 && memory>0 in
+        s with { interpreter=s.interpreter || tag==3, state=s.state+(if bss then 1 else 0),
+          misaligned=s.misaligned+(if bss && address%4096!=0 then 1 else 0) }) yield s in
+    if scan.interpreter then "the freestanding image has an ELF interpreter"
+    else if scan.state==0 then "no BSS-only writable runtime state segment"
+    else if scan.misaligned>0 then "the BSS-only runtime state segment is not page-aligned" else tx_empty()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in
+    if !dv_linux(tools) then let shown=print_out("ELF runtime layout: Linux only (skipped)\n") in noop() else
+    let native=str_starts(tools.target,"x86_64") in
+    if !native && len(bd_find_tool("ld.lld"))==0 then let shown=print_out("ELF runtime layout: ld.lld unavailable for the x86-64 cross build (skipped)\n") in noop() else
+    let dir=dv_temp("elf-layout") in let probe=pt_join(dir,"probe") in
+    let x86=tools with { target="x86_64-unknown-linux-gnu" } in
+    let built=dv_build(x86,pt_join(tools.here,"../fixtures/data_sync.neo"),probe,md_words()) in
+    let problem=el_layout(dv_read(probe)) in let checked=dv_expect(len(problem)==0,problem) in
+    let undefined=ru_tool_output("nm",push(push(md_words(),"-u"),probe)) in
+    let imports=dv_expect(len(str_trim(undefined))==0,concat("undefined symbols: ",undefined)) in
+    let crossed=dv_env("NEO_TEST_CROSS_X86") in
+    let ran=if !native && !tx_equal(crossed,"1") then noop() else
+      let data=pt_join(dir,"data") in let out=dv_output(probe,push(md_words(),data),md_words(),"") in
+      let a=dv_expect(tx_equal(out,"ok\n"),concat("the probe printed ",tx_repr(out,true))) in
+      dv_expect(tx_equal(dv_read(data),"FIRST-second"),"the data-sync probe wrote the wrong contents") in
+    let cleaned=dv_clean(dir) in let shown=print_out("ELF runtime layout OK\n") in noop()

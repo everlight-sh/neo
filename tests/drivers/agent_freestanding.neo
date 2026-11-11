@@ -1,0 +1,50 @@
+; Ported from tests/agent_freestanding.py: the agent fixtures (resource arena,
+; callbacks and JSON, Neo-to-Neo process I/O, Unicode and atomic persistence,
+; transport) build into audited static binaries and run from a directory that
+; holds only those executables. With NEO_TEST_ROOT_CHECKS=1 (root on Linux)
+; the same runs happen again under chroot in an otherwise empty root: no
+; libraries, shell or devices.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; A file of the root: absolute inside chroot, under root otherwise.
+fn af_path(chrooted:bool, borrow root:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = if chrooted then concat("/",name) else pt_join(root,name)
+
+effect fn af_run(chrooted:bool, borrow root:Arr u8 _, borrow name:Arr u8 _, borrow args:Arr Arr u8 _ _,
+                 borrow input:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let run=if chrooted then nt_process_input(ru_chroot(),nt_extend(push(push(md_words(),root),concat("/",name)),args,0),dv_environment(md_words()),input,20000,1048576)
+      else nt_process_input(pt_join(root,name),args,dv_environment(md_words()),input,20000,1048576) in
+    dv_expect(run.ok && !run.timeout && run.code==0 && tx_equal(run.output,expected),
+      concat(name," ",ru_joined(args),if chrooted then " (chroot)" else "",": exit ",int_text(run.code),", ",
+        tx_repr(run.output,true),", ",nt_diagnostic(run)))
+
+effect fn af_root(chrooted:bool, borrow binaries:Arr u8 _, borrow root:Arr u8 _) -> unit
+  = let copied=loop (i=0, names=ru_words("arena libraries parent child utilities")) while i<len(names)
+      next (let c=ru_copy(pt_join(binaries,md_word(names,i)),pt_join(root,md_word(names,i))) in i+1,names) yield i in
+    let a=af_run(chrooted,root,"arena",push(md_words(),af_path(chrooted,root,"arena")),"","1\n3\n2\narena OK\n") in
+    let b=af_run(chrooted,root,"libraries",md_words(),"","agent libraries OK\n") in
+    let c=af_run(chrooted,root,"parent",push(md_words(),af_path(chrooted,root,"child")),"","child process OK\n") in
+    let d=af_run(chrooted,root,"utilities",push(push(md_words(),"6"),af_path(chrooted,root,"state")),"private state","stored") in
+    let e=af_run(chrooted,root,"utilities",push(md_words(),"2"),"Stra\xc3\x9fe \xce\xa3","strasse \xcf\x83") in
+    let f=dv_expect(tx_equal(dv_read(pt_join(root,"state")),"private state"),"the stored state differs") in
+    let names=ru_joined(ru_names(root)) in
+    dv_expect(tx_equal(names,"arena child libraries parent state utilities"),concat("the root holds ",names))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("agent-freestanding") in
+    let binaries=ru_empty_root(dir,"binaries") in
+    let built=loop (i=0, pairs=ru_words("resource_arena arena agent_libraries libraries agent_process parent pure_process_child child agent_utilities utilities agent_transport transport"))
+      while i<len(pairs)
+      next (let binary=pt_join(binaries,md_word(pairs,i+1)) in
+        let b=dv_build(tools,pt_join(tools.here,concat("../fixtures/",md_word(pairs,i),".neo")),binary,md_words()) in
+        let a=dv_audit(tools,binary) in i+2,pairs) yield i in
+    let direct=af_root(false,binaries,ru_empty_root(dir,"direct")) in
+    let rooted=if ru_root_checks(tools,"agent_freestanding") then af_root(true,binaries,ru_empty_root(dir,"root")) else noop() in
+    let cleaned=dv_clean(dir) in let shown=print_out("agent freestanding OK\n") in noop()

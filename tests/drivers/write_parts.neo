@@ -1,0 +1,25 @@
+; Ported from tests/write_parts.py: multipart file writes report a real short
+; write (RLIMIT_FSIZE of 7 bytes, SIGXFSZ ignored) with the cumulative offset
+; and keep the bytes written before it. Mode 0 (complete writes) is a plain
+; case in tests/runtime.neo.toml.
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn main() -> unit
+  = let tools=dv_tools() in
+    if !dv_linux(tools) then let shown=print_out("write parts: short writes need Linux (skipped)\n") in noop() else
+    let dir=dv_temp("write-parts") in let probe=pt_join(dir,"probe") in let wrapper=pt_join(dir,"exec") in
+    let a=dv_build(tools,pt_join(tools.here,"../fixtures/write_parts.neo"),probe,md_words()) in
+    let b=dv_build(tools,pt_join(tools.here,"../fixtures/runtime_exec.neo"),wrapper,md_words()) in
+    let output=pt_join(dir,"output") in
+    let args=push(push(push(push(push(push(md_words(),if ru_aarch64(tools) then "aarch64" else "x86_64"),"fsize"),"7"),output),probe),"1") in
+    let run=dv_run(wrapper,args,md_words(),"",30000,65536) in
+    let c=dv_expect(run.ok && run.code==0 && tx_equal(run.errors,"partial 7\n"),
+      concat("the short write was not reported: exit ",int_text(run.code),", ",nt_diagnostic(run))) in
+    let d=dv_expect(tx_equal(dv_read(output),"abcdefg"),concat("the file holds ",tx_repr(dv_read(output),true))) in
+    let cleaned=dv_clean(dir) in let shown=print_out("write parts OK\n") in noop()

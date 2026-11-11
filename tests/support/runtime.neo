@@ -1,0 +1,257 @@
+; Helpers for the runtime stream's drivers (tests/drivers/*.neo ported from the
+; Python runtime, process and tooling tests): vector files, loopback HTTP
+; clients and server processes, SSR page checks, opt-in root checks and the
+; tests/fixtures/runtime_exec.neo wrapper.
+import "std:fs"
+import "std:http"
+import "std:io"
+import "std:net"
+import "std:process"
+import "std:sha256"
+import "std:socket"
+import "std:strings"
+import "std:time"
+import "driver.neo"
+import "../../compiler/src/build.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; Text and vector files.
+fn ru_field_end(borrow text:Arr u8 _, start:i64, byte:i64) -> i64
+  = loop (j=start) while j<len(text) && tx_byte(text,j)!=byte next (j+1) yield j
+; text split at every byte; a final separator adds no empty field.
+fn ru_split(borrow text:Arr u8 _, byte:i64) -> Arr Arr u8 _ _
+  = loop (at=0, out=md_words()) while at<len(text)
+      next (ru_field_end(text,at,byte)+1,push(out,pt_slice(text,at,ru_field_end(text,at,byte)))) yield out
+fn ru_hex_digit(b:i64) -> i64
+  = if b>=48 && b<=57 then b-48 else if b>=97 && b<=102 then b-87 else if b>=65 && b<=70 then b-55 else 0
+fn ru_unhex(borrow text:Arr u8 _) -> Arr u8 _
+  = let count=len(text)/2 in check count>=0 in
+    arr(i in 0..count) u8(ru_hex_digit(tx_byte(text,2*i))*16+ru_hex_digit(tx_byte(text,2*i+1)))
+fn ru_sha(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes(tx_empty(),sha256(bytes))
+fn ru_int(borrow text:Arr u8 _) -> i64 = let parsed=int_parse(text) in if parsed.ok then parsed.value else -1
+fn ru_contains(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> bool = str_find(text,needle).present
+
+; A vector file of the driver's script, tests/vectors/<script>/<name>.
+effect fn ru_vector(borrow tools:DvTools, borrow script:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = dv_read(pt_join(tools.here,concat("../vectors/",script,"/",name)))
+
+; A required tool from PATH.
+effect fn ru_tool(borrow name:Arr u8 _) -> Arr u8 _
+  = let path=bd_find_tool(name) in let found=dv_expect(len(path)>0,concat(name," is required on PATH")) in path
+
+; Runs a tool and requires exit 0, returning its stdout.
+effect fn ru_tool_output(borrow name:Arr u8 _, borrow args:Arr Arr u8 _ _) -> Arr u8 _
+  = dv_output(ru_tool(name),args,md_words(),"")
+
+effect fn ru_copy(borrow from:Arr u8 _, borrow to:Arr u8 _) -> unit
+  = let copied=ru_tool_output("cp",push(push(push(md_words(),"-p"),from),to)) in noop()
+
+effect fn ru_write(borrow path:Arr u8 _, borrow contents:Arr u8 _) -> unit
+  = let written=fs_write(path,contents) in dv_expect(written.ok,concat("cannot write ",path))
+
+fn ru_aarch64(borrow tools:DvTools) -> bool
+  = str_starts(tools.target,"aarch64") || str_starts(tools.target,"arm64")
+
+; Runs executable with args in directory and exactly the given environment,
+; through /bin/sh because process_start has no working directory.
+effect fn ru_run_in(borrow directory:Arr u8 _, borrow executable:Arr u8 _, borrow args:Arr Arr u8 _ _,
+                    borrow environment:Arr Arr u8 _ _, timeout:i64) -> NtProcess
+  = let base=push(push(push(push(push(md_words(),"-c"),"cd \"$1\" && shift && exec \"$@\""),"sh"),directory),executable) in
+    nt_process("/bin/sh",nt_extend(base,args,0),environment,timeout,4194304)
+
+; A symbolic link at path to target.
+effect fn ru_link(borrow target:Arr u8 _, borrow path:Arr u8 _) -> unit
+  = let linked=ru_tool_output("ln",push(push(push(md_words(),"-s"),target),path)) in noop()
+
+; A directory of links to the named tools that are on PATH.
+effect fn ru_tools(borrow path:Arr u8 _, borrow names:Arr Arr u8 _ _) -> Arr u8 _
+  = let made=fs_mkdir(path) in
+    let linked=loop (i=0) while i<len(names)
+      next (let found=bd_find_tool(md_word(names,i)) in
+        let shown=if len(found)>0 then ru_link(found,pt_join(path,md_word(names,i))) else noop() in i+1) yield i in path
+
+fn ru_words(borrow text:Arr u8 _) -> Arr Arr u8 _ _ = ru_split(text,32)
+
+; Root-only checks (chroot into an empty root) run only with
+; NEO_TEST_ROOT_CHECKS=1, as root on Linux. Otherwise the driver prints a
+; skip line for them.
+effect fn ru_root_checks(borrow tools:DvTools, borrow name:Arr u8 _) -> bool
+  = let wanted=env_get("NEO_TEST_ROOT_CHECKS") in
+    if !(wanted.present && tx_equal(wanted.value,"1")) then
+      let shown=print_out(concat(name,": empty-root checks skipped (set NEO_TEST_ROOT_CHECKS=1 and run as root on Linux)\n")) in false
+    else let linux=dv_expect(dv_linux(tools),"NEO_TEST_ROOT_CHECKS=1 needs a Linux target") in
+      let euid=syscall6(if ru_aarch64(tools) then 175 else 107,0,0,0,0,0,0) in
+      let root=dv_expect(euid==0,"NEO_TEST_ROOT_CHECKS=1 needs root") in true
+
+; A directory that holds only the named files, for chroot.
+effect fn ru_empty_root(borrow parent:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let path=pt_join(parent,name) in let made=fs_mkdir(path) in
+    let ok=dv_expect(made.ok,concat("cannot create ",path)) in path
+
+; The names in a directory, sorted.
+effect fn ru_names(borrow path:Arr u8 _) -> Arr Arr u8 _ _
+  = let entries=pf_directory(path) in
+    loop (i=0, out=md_words()) while i<len(entries)
+      next (i+1,let name=pf_dirent(entries,i).name in
+        if tx_equal(name,".") || tx_equal(name,"..") then out else tx_insert_word(out,name)) yield out
+fn ru_joined(borrow words:Arr Arr u8 _ _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(words) next (i+1,concat(out,if i==0 then "" else " ",md_word(words,i))) yield out
+
+; The chroot executable, for root checks.
+effect fn ru_chroot() -> Arr u8 _ = let found=bd_find_tool("chroot") in
+  if len(found)>0 then found else if fs_executable("/usr/sbin/chroot") then "/usr/sbin/chroot" else ru_tool("chroot")
+
+; Loopback HTTP. A free port: the kernel picks one for a listener that closes
+; before the server under test binds it.
+effect(net,unsafe) fn ru_port() -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,1) in
+    let status=listener_status(listener) in
+    let fd=rt_handle_fd(listener_identity(listener),3) in
+    let address=stack_alloc(32) in let size=stack_alloc(8) in let ready=store_i64(size,0,32) in
+    let named=if status.ok then rt_socket_name(fd,address,size) else -1 in
+    if named!=0 then 0 else i64(load_u8(address,2))*256+i64(load_u8(address,3))
+
+; One HTTP/1.1 response at the start of bytes: its status, header block, body
+; (by Content-Length) and the bytes after it. ok is false when the response is
+; incomplete or invalid.
+type RuFrame = { ok:bool, status:i64, head:Arr u8 _, body:Arr u8 _, rest:Arr u8 _ }
+fn ru_no_frame() -> RuFrame = RuFrame { ok=false, status=0, head=tx_empty(), body=tx_empty(), rest=tx_empty() }
+
+; A header's value (name in lowercase) in a response head, or "".
+fn ru_header(borrow head:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let at=str_find(http_lower(head),concat("\r\n",name,":")) in
+    if !at.present then tx_empty() else
+    let tail=pt_slice(head,at.value+len(name)+3,len(head)) in let end=str_find(tail,"\r\n") in
+    str_trim(pt_slice(tail,0,if end.present then end.value else len(tail)))
+
+fn ru_frame(borrow bytes:Arr u8 _) -> RuFrame
+  = let end=str_find(bytes,"\r\n\r\n") in if !end.present then ru_no_frame() else
+    let head=pt_slice(bytes,0,end.value+2) in let status=net_status(head) in
+    let length=int_parse(ru_header(head,"content-length")) in let at=end.value+4 in
+    if !status.ok || !length.ok || length.value<0 || length.value>len(bytes)-at then ru_no_frame() else
+    RuFrame { ok=true, status=status.value, head=head, body=pt_slice(bytes,at,at+length.value),
+      rest=pt_slice(bytes,at+length.value,len(bytes)) }
+
+fn ru_request(borrow method:Arr u8 _, borrow path:Arr u8 _, borrow body:Arr u8 _, close:bool) -> Arr u8 _
+  = let sized=len(body)>0 || tx_equal(method,"POST") || tx_equal(method,"PUT") in
+    concat(method," ",path," HTTP/1.1\r\nHost: 127.0.0.1\r\n",
+      if sized then concat("Content-Type: application/json\r\nContent-Length: ",int_text(len(body)),"\r\n") else "",
+      if close then "Connection: close\r\n" else "","\r\n",body)
+
+; Everything the peer sends until it closes the connection.
+effect(net,time) fn ru_receive(socket:Socket, deadline:i64) -> BytesResult
+  = loop (part=socket_read(socket,deadline), out=tx_empty()) while part.ok && len(part.value)>0 && len(out)<33554432
+      next (socket_read(socket,deadline),concat(out,part.value))
+      yield if !part.ok then part else bytes_ok(out)
+
+; Sends request bytes on a new connection and returns everything received.
+effect(net,time) fn ru_exchange(port:i64, borrow request:Arr u8 _, timeout:i64) -> BytesResult
+  = let deadline=deadline_after(timeout) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,request,deadline.value) in
+    if !sent.ok then bytes_error(sent.error.code,sent.error.message,0) else ru_receive(socket,deadline.value)
+
+; One request on its own connection (Connection: close).
+effect(net,time) fn ru_http(port:i64, borrow method:Arr u8 _, borrow path:Arr u8 _, borrow body:Arr u8 _) -> RuFrame
+  = let reply=ru_exchange(port,ru_request(method,path,body,true),15000) in
+    if !reply.ok then ru_no_frame() else ru_frame(reply.value)
+
+; Requests from index i on, each on its own connection, all sent before any
+; reply is read, so the server has them in flight at once. Raw replies in order.
+effect(net,time) fn ru_fanout(port:i64, borrow requests:Arr Arr u8 _ _, i:i64, deadline:i64) -> Arr Arr u8 _ _
+  = if i>=len(requests) then md_words() else
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline) in
+    let sent=socket_write(socket,md_word(requests,i),deadline) in
+    let later=ru_fanout(port,requests,i+1,deadline) in
+    let reply=if sent.ok then ru_receive(socket,deadline) else bytes_error(5,"send failed",0) in
+    nt_extend(push(md_words(),if reply.ok then reply.value else tx_empty()),later,0)
+
+effect(net,time) fn ru_connects(port:i64) -> bool
+  = let deadline=deadline_after(200) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in socket_status(socket).ok
+
+; Waits up to 30 s for the server to accept connections.
+effect fn ru_wait(server:Process, port:i64) -> unit
+  = let ready=loop (i=0, up=false) while i<1500 && !up && process_status(server).running
+      next (i+1,let connected=ru_connects(port) in let paused=if connected then int_ok(0) else sleep_ms(20) in connected) yield up in
+    dv_expect(ready,concat("the server on port ",int_text(port)," did not start: ",ru_drain(server)))
+
+; What the server wrote so far (stdout and stderr), for diagnostics.
+effect fn ru_drain(server:Process) -> Arr u8 _
+  = let out=process_try_read(server,1,65536) in let err=process_try_read(server,2,65536) in
+    concat(if out.ok then out.value else "",if err.ok then err.value else "")
+
+; Stops a server with SIGKILL and waits for it.
+effect fn ru_kill(server:Process) -> unit
+  = let signalled=process_signal(server,9) in
+    let stopped=loop (i=0) while i<500 && process_status(server).running next (let paused=sleep_ms(10) in i+1) yield i in
+    dv_expect(!process_status(server).running,"the server did not stop")
+
+; SSR pages: "N LENGTH SHA256" lines of the expected HTML for page N.
+type RuPages = { counts:Arr i64 _, lengths:Arr i64 _, digests:Arr Arr u8 _ _ }
+fn ru_pages(borrow text:Arr u8 _) -> RuPages
+  = let lines=ru_split(text,10) in
+    loop (i=0, p=RuPages { counts=tx_ints(), lengths=tx_ints(), digests=md_words() }) while i<len(lines)
+      next (i+1,let fields=ru_split(md_word(lines,i),32) in
+        p with { counts=push(p.counts,ru_int(md_word(fields,0))), lengths=push(p.lengths,ru_int(md_word(fields,1))),
+          digests=push(p.digests,md_word(fields,2)) }) yield p
+fn ru_page_index(borrow pages:RuPages, n:i64) -> i64
+  = loop (i=0) while i<len(pages.counts) && tx_at(pages.counts,i)!=n next (i+1) yield i
+fn ru_page_matches(borrow pages:RuPages, n:i64, borrow body:Arr u8 _) -> bool
+  = let i=ru_page_index(pages,n) in
+    i<len(pages.counts) && tx_at(pages.lengths,i)==len(body) && tx_equal(md_word(pages.digests,i),ru_sha(body))
+
+effect fn ru_expect_page(borrow pages:RuPages, n:i64, borrow frame:RuFrame, borrow label:Arr u8 _) -> unit
+  = let a=dv_expect(frame.ok && frame.status==200,concat(label," returned status ",int_text(frame.status))) in
+    let b=dv_expect(ru_page_matches(pages,n,frame.body),concat(label," differs from the reference page ",int_text(n),
+      ": ",int_text(len(frame.body))," bytes, sha256 ",ru_sha(frame.body))) in
+    let c=dv_expect(tx_equal(http_lower(ru_header(frame.head,"content-type")),"text/html; charset=utf-8"),
+      concat(label," has content type ",ru_header(frame.head,"content-type"))) in
+    dv_expect(!ru_contains(frame.body,"<script"),concat(label," contains an unescaped script tag"))
+
+effect fn ru_expect_reply(port:i64, borrow method:Arr u8 _, borrow path:Arr u8 _, borrow body:Arr u8 _,
+                          status:i64, borrow expected:Arr u8 _) -> unit
+  = let frame=ru_http(port,method,path,body) in
+    dv_expect(frame.ok && frame.status==status && tx_equal(frame.body,expected),
+      concat(method," ",path," returned ",int_text(frame.status)," ",tx_repr(pt_slice(frame.body,0,200),true)))
+
+; The checks of the Python ssr_smoke.validate/verify: exact pages for counts,
+; the home and query routes, 400/404/405 replies, 100 concurrent requests
+; and 129 ordered pipelined pages ending with Connection: close.
+effect fn ru_ssr_check(port:i64, borrow pages:RuPages, borrow counts:Arr i64 _) -> unit
+  = let each=loop (i=0) while i<len(counts)
+      next (let n=tx_at(counts,i) in let shown=ru_expect_page(pages,n,ru_http(port,"GET",concat("/page/",int_text(n)),""),
+        concat("/page/",int_text(n))) in i+1) yield i in
+    let home=ru_expect_page(pages,3,ru_http(port,"GET","/",""),"/") in
+    let view=ru_expect_page(pages,3,ru_http(port,"GET","/?view=default",""),"/?view=default") in
+    let table=ru_expect_page(pages,50,ru_http(port,"GET","/page/50?view=table",""),"/page/50?view=table") in
+    let bad=push(push(push(push(push(push(push(md_words(),"/page/0"),"/page/1001"),"/page/x"),"/page/-1"),"/page/1x"),"/page/1/"),"/page/1234567890123") in
+    let refused=loop (i=0) while i<len(bad)
+      next (let checked=ru_expect_reply(port,"GET",md_word(bad,i),"",400,"usage: /page/N, 1 <= N <= 1000") in i+1) yield i in
+    let missing=ru_expect_reply(port,"GET","/missing","",404,"Not Found") in
+    let post=ru_expect_reply(port,"POST","/","test",405,"") in
+    let concurrent=loop (batch=0) while batch<100
+      next (let requests=loop (i=batch, out=md_words()) while i<batch+16 && i<100
+          next (i+1,push(out,ru_request("GET",concat("/page/",if i%2==1 then "3" else "50"),"",true))) yield out in
+        let deadline=deadline_after(30000) in let replies=ru_fanout(port,requests,0,deadline.value) in
+        let checked=loop (j=0) while j<len(replies)
+          next (let n=if (batch+j)%2==1 then 3 else 50 in
+            let shown=ru_expect_page(pages,n,ru_frame(md_word(replies,j)),"a concurrent request") in j+1) yield j in
+        let complete=dv_expect(len(replies)==len(requests),"a concurrent request was not answered") in batch+16) yield batch in
+    let pipeline=loop (i=0, out=tx_empty()) while i<129
+      next (i+1,concat(out,ru_request("GET",concat("/page/",if i==128 then "1000" else if i%2==0 then "3" else "50"),"",i==128))) yield out in
+    let reply=ru_exchange(port,pipeline,30000) in let got=dv_expect(reply.ok,"the pipelined requests failed") in
+    let rest=loop (i=0, rest=if reply.ok then reply.value else tx_empty()) while i<129
+      next (i+1,let frame=ru_frame(rest) in
+        let shown=ru_expect_page(pages,if i==128 then 1000 else if i%2==0 then 3 else 50,frame,"a pipelined request") in frame.rest) yield rest in
+    dv_expect(len(rest)==0,"the server sent bytes after the pipelined responses")
+
+; Runs an SSR server binary with workers threads and checks it.
+effect fn ru_ssr_serve(borrow binary:Arr u8 _, borrow workers:Arr u8 _, borrow pages:RuPages, borrow counts:Arr i64 _) -> unit
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(push(md_words(),concat("NEO_THREADS=",workers)))) in
+    let ready=ru_wait(server,port) in let checked=ru_ssr_check(port,pages,counts) in
+    dv_expect(process_status(server).running,"the SSR server exited during the checks")

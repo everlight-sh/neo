@@ -1,0 +1,56 @@
+; Ported from tests/agent_utilities.py: RFC 3339 formatting and parsing
+; (years 1..9999, negative epochs, leap days, fractions, offsets, invalid
+; dates), Unicode case folding, whitespace splitting and word categories,
+; malformed UTF-8, and log1p/exp within 2e-12 relative tolerance, against
+; Python datetime/unicodedata/math expectations frozen in
+; tests/vectors/agent_utilities (cases.in: "MODE HEX-STDIN" lines; cases.out:
+; the expected stdout in hex, or "~FLOAT"). Then exclusive private atomic
+; replacement: complete contents, mode 0600 and no temporary files left.
+import "std:io"
+import "std:numbers"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn au_magnitude(x:f64) -> f64 = if x<0.0 then 0.0-x else x
+fn au_close(got:f64, expected:f64) -> bool
+  = let scale=if au_magnitude(got)>au_magnitude(expected) then au_magnitude(got) else au_magnitude(expected) in
+    let difference=au_magnitude(got-expected) in difference<=2.0e-12*scale || difference<=5.0e-324
+
+effect fn au_case(borrow binary:Arr u8 _, borrow input:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let fields=ru_split(input,32) in let mode=md_word(fields,0) in
+    let out=dv_output(binary,push(md_words(),mode),md_words(),ru_unhex(md_word(fields,1))) in
+    if str_starts(expected,"~") then
+      let wanted=float_parse(pt_slice(expected,1,len(expected))) in let got=float_parse(out) in
+      dv_expect(wanted.ok && got.ok && au_close(got.value,wanted.value),
+        concat("mode ",mode," of ",md_word(fields,1)," gave ",tx_repr(out,true),", expected ",expected))
+    else dv_expect(tx_equal(out,ru_unhex(expected)),
+      concat("mode ",mode," of ",md_word(fields,1)," gave ",dv_hex(out),", expected ",expected))
+
+fn au_payload(size:i64) -> Arr u8 _
+  = check size>=0 in arr(i in 0..size) u8(bit_and(shift_right(wrapping_mul(i+1,-7046029254386353131),40),255))
+
+effect fn au_store(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow payload:Arr u8 _) -> unit
+  = let destination=pt_join(dir,"state.json") in
+    let out=dv_output(binary,push(push(md_words(),"6"),destination),md_words(),payload) in
+    let a=dv_expect(tx_equal(out,"stored"),concat("atomic replacement printed ",tx_repr(out,true))) in
+    let b=dv_expect(tx_equal(dv_read(destination),payload),"atomic replacement stored different contents") in
+    let mode=ru_tool_output("stat",push(push(push(md_words(),"-c"),"%a"),destination)) in
+    let c=dv_expect(tx_equal(str_trim(mode),"600"),concat("the replaced file has mode ",str_trim(mode))) in
+    let names=ru_names(dir) in
+    dv_expect(len(names)==1 && tx_equal(md_word(names,0),"state.json"),concat("files left beside the state: ",ru_joined(names)))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("utilities") in let binary=pt_join(dir,"utilities") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/agent_utilities.neo"),binary,md_words()) in
+    let inputs=ru_split(ru_vector(tools,"agent_utilities","cases.in"),10) in
+    let outputs=ru_split(ru_vector(tools,"agent_utilities","cases.out"),10) in
+    let paired=dv_expect(len(inputs)==len(outputs) && len(inputs)>0,"cases.in and cases.out differ in length") in
+    let checked=loop (i=0) while i<len(inputs) next (let ran=au_case(binary,md_word(inputs,i),md_word(outputs,i)) in i+1) yield i in
+    let state=pt_join(dir,"state") in let made=fs_mkdir(state) in
+    let a=au_store(binary,state,"") in let b=au_store(binary,state,"first") in let c=au_store(binary,state,au_payload(65536)) in
+    let cleaned=dv_clean(dir) in let shown=print_out(concat("agent utilities OK (",int_text(checked)," oracle cases)\n")) in noop()

@@ -1,0 +1,53 @@
+; Ported from tests/map_freestanding.py: the measured map workload
+; (bench/maps/workload.neo) builds into an audited static binary and runs with
+; 1,000,000 entries in growing and preallocated modes from a directory that
+; holds only the executable; every stdin-acknowledged checkpoint names its
+; phase with the expected checksum and count (as bench/maps/measure.neo
+; checks). With NEO_TEST_ROOT_CHECKS=1 (root on Linux) both modes run again
+; under chroot in an otherwise empty root.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn mf_phase(i:i64) -> Arr u8 _
+  = if i==0 then "insert" else if i==1 then "lookup" else if i==2 then "steady" else if i==3 then "update"
+    else if i==4 then "lookup_updated" else if i==5 then "delete" else "lookup_remaining"
+
+fn mf_checksum(i:i64, n:i64) -> i64
+  = if i==1 || i==2 then 7*n*(n-1)/2 else if i==4 then 11*n*(n-1)/2 else if i==6 then 11*(n/2)*(n/2) else 0
+
+effect fn mf_run(chrooted:bool, borrow root:Arr u8 _, borrow mode:Arr u8 _) -> unit
+  = let n=1000000 in let args=push(push(md_words(),int_text(n)),mode) in
+    let run=if chrooted then nt_process_input(ru_chroot(),nt_extend(push(push(md_words(),root),"/map"),args,0),dv_environment(md_words()),"xxxxxxx",60000,65536)
+      else nt_process_input(pt_join(root,"map"),args,dv_environment(md_words()),"xxxxxxx",60000,65536) in
+    let label=concat("mode ",mode,if chrooted then " (chroot)" else "") in
+    let a=dv_expect(run.ok && !run.timeout && run.code==0,concat(label," exited ",int_text(run.code),": ",nt_diagnostic(run))) in
+    let lines=ru_split(run.output,10) in
+    let b=dv_expect(len(lines)==7 && tx_byte(run.output,len(run.output)-1)==10,
+      concat(label," printed ",tx_repr(run.output,true))) in
+    let checked=loop (i=0) while i<7
+      next (let fields=ru_words(md_word(lines,i)) in
+        let ok=len(fields)==4 && tx_equal(md_word(fields,0),mf_phase(i)) && ru_int(md_word(fields,1))>=0 &&
+          tx_equal(md_word(fields,2),int_text(mf_checksum(i,n))) && tx_equal(md_word(fields,3),int_text(if i>=5 then n/2 else n)) in
+        let shown=dv_expect(ok,concat(label," checkpoint ",mf_phase(i),": ",md_word(lines,i))) in i+1) yield i in
+    noop()
+
+effect fn mf_root(chrooted:bool, borrow root:Arr u8 _, borrow binary:Arr u8 _) -> unit
+  = let copied=ru_copy(binary,pt_join(root,"map")) in
+    let a=mf_run(chrooted,root,"0") in let b=mf_run(chrooted,root,"1") in
+    let names=ru_joined(ru_names(root)) in
+    dv_expect(tx_equal(names,"map"),concat("the root holds ",names))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("map-freestanding") in
+    let binary=pt_join(dir,"map") in
+    let built=dv_build(tools,pt_join(tools.root,"bench/maps/workload.neo"),binary,md_words()) in
+    let audited=dv_audit(tools,binary) in
+    let direct=mf_root(false,ru_empty_root(dir,"direct"),binary) in
+    let rooted=if ru_root_checks(tools,"map_freestanding") then mf_root(true,ru_empty_root(dir,"root"),binary) else noop() in
+    let cleaned=dv_clean(dir) in let shown=print_out("map freestanding OK\n") in noop()

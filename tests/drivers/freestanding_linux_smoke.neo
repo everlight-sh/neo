@@ -1,0 +1,54 @@
+; Ported from tests/freestanding_linux_smoke.py: examples/http.neo builds into
+; an audited static binary and serves from a directory that holds only the
+; executable, with 4 workers: the home route, a catalog page (the SSR
+; reference digest), 400/404/405 replies and 64 concurrent requests. With
+; NEO_TEST_ROOT_CHECKS=1 (root on Linux) it serves again under chroot in an
+; otherwise empty root: no /lib, /usr, /proc or runtime files. The full HTTP
+; behaviour is the network stream's http_smoke port.
+import "std:fs"
+import "std:io"
+import "std:net"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn fl_check(port:i64, borrow pages:RuPages) -> unit
+  = let a=ru_expect_reply(port,"GET","/","",200,"Hello, World!") in
+    let b=ru_expect_page(pages,7,ru_http(port,"GET","/page/7",""),"/page/7") in
+    let c=ru_expect_page(pages,1000,ru_http(port,"GET","/page/1000",""),"/page/1000") in
+    let d=ru_expect_reply(port,"GET","/page/0","",400,"usage: /page/N, 1 <= N <= 1000") in
+    let e=ru_expect_reply(port,"GET","/missing","",404,"Not Found") in
+    let f=ru_expect_reply(port,"POST","/","",405,"") in
+    let requests=loop (i=0, out=md_words()) while i<64 next (i+1,push(out,ru_request("GET","/","",true))) yield out in
+    let replies=ru_fanout(port,requests,0,deadline_after(20000).value) in
+    let good=loop (i=0, n=0) while i<len(replies)
+      next (i+1,let frame=ru_frame(md_word(replies,i)) in if frame.ok && frame.status==200 && tx_equal(frame.body,"Hello, World!") then n+1 else n) yield n in
+    dv_expect(good==64,concat(int_text(good)," of 64 concurrent requests were answered"))
+
+effect fn fl_serve(chrooted:bool, borrow root:Arr u8 _, borrow pages:RuPages) -> unit
+  = let port=ru_port() in
+    let program=if chrooted then ru_chroot() else pt_join(root,"http") in
+    let args=if chrooted then push(push(push(md_words(),root),"/http"),int_text(port)) else push(md_words(),int_text(port)) in
+    using server=process_start(program,args,dv_environment(push(md_words(),"NEO_THREADS=4"))) in
+    let ready=ru_wait(server,port) in let checked=fl_check(port,pages) in
+    let running=dv_expect(process_status(server).running,concat("the HTTP server exited during the checks: ",ru_drain(server))) in
+    let stopped=ru_kill(server) in
+    let names=ru_joined(ru_names(root)) in
+    dv_expect(tx_equal(names,"http"),concat("the root holds ",names))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("freestanding-http") in
+    let binary=pt_join(dir,"http") in
+    let built=dv_build(tools,pt_join(tools.root,"examples/http.neo"),binary,md_words()) in
+    let audited=dv_audit(tools,binary) in
+    let pages=ru_pages(ru_vector(tools,"ssr_smoke","pages.out")) in
+    let direct=ru_empty_root(dir,"direct") in let a=ru_copy(binary,pt_join(direct,"http")) in
+    let b=fl_serve(false,direct,pages) in
+    let c=if ru_root_checks(tools,"freestanding_linux_smoke") then
+      let root=ru_empty_root(dir,"root") in let copied=ru_copy(binary,pt_join(root,"http")) in fl_serve(true,root,pages) else noop() in
+    let cleaned=dv_clean(dir) in let shown=print_out("freestanding HTTP OK\n") in noop()

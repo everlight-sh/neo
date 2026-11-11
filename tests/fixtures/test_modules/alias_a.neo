@@ -1,0 +1,3 @@
+private fn secret() -> i64 = 1
+enum Maybe<T> { Nothing, Something(T) }
+fn value() -> Maybe<i64> = Something::<i64>(17)

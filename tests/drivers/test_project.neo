@@ -1,0 +1,44 @@
+; Ported from tests/test_project.py (Python neoc.project) to the native
+; commands: neo fmt keeps tokens, comments and literal spelling, normalizes
+; generic scopes, operators and trailing whitespace, is idempotent and leaves
+; a file with a multi-line string literal alone; neo init creates a project
+; whose manifest names src/main.neo and refuses a directory that is not empty.
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn tp_neo(borrow tools:DvTools, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = nt_process(tools.compiler,args,dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),60000,1048576)
+
+; The formatted text of source, after checking that formatting it again changes nothing.
+effect fn tp_format(borrow tools:DvTools, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow source:Arr u8 _) -> Arr u8 _
+  = let path=pt_join(dir,name) in let a=ru_write(path,source) in
+    let first=tp_neo(tools,push(push(md_words(),"fmt"),path)) in
+    let b=dv_expect(first.ok && first.code==0,concat("neo fmt failed: ",nt_diagnostic(first))) in
+    let result=dv_read(path) in
+    let again=tp_neo(tools,push(push(push(md_words(),"fmt"),"--check"),path)) in
+    let c=dv_expect(again.ok && again.code==0 && tx_equal(dv_read(path),result),concat("neo fmt is not idempotent on ",tx_repr(result,true))) in
+    result
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("project") in
+    let plain=tp_format(tools,dir,"plain.neo","; comment  \nfn main () -> Arr u8 _ = \"a  b\\n\"   \n\n\n\n") in
+    let a=dv_expect(ru_contains(plain,"\"a  b\\n\"") && !ru_contains(plain,"\n\n") && !ru_contains(plain," \n"),
+      concat("neo fmt changed a literal or kept trailing space: ",tx_repr(plain,true))) in
+    let generic=tp_format(tools,dir,"generic.neo","fn id<T>(x:T)->T=x ; keep this\nfn main()->i64=let x=id::<i64>(-7) in x+9\n") in
+    let b=dv_expect(ru_contains(generic,"id<T>(x: T) -> T = x  ; keep this") && ru_contains(generic,"x + 9"),
+      concat("neo fmt output: ",tx_repr(generic,true))) in
+    let literal=tp_format(tools,dir,"literal.neo","fn main()->Arr u8 _=\"a\nb\"\n") in
+    let c=dv_expect(tx_equal(literal,"fn main()->Arr u8 _=\"a\nb\"\n"),concat("neo fmt changed a multi-line literal file: ",tx_repr(literal,true))) in
+    let sample=pt_join(dir,"sample") in
+    let created=tp_neo(tools,push(push(md_words(),"init"),sample)) in
+    let d=dv_expect(created.ok && created.code==0,concat("neo init failed: ",nt_diagnostic(created))) in
+    let e=dv_expect(ru_contains(dv_read(pt_join(sample,"neo.toml")),"entry = \"src/main.neo\""),"the new manifest does not name src/main.neo") in
+    let f=dv_expect(pf_kind(pt_join(sample,"src/main.neo"),false)==8,"neo init did not create src/main.neo") in
+    let again=tp_neo(tools,push(push(md_words(),"init"),sample)) in
+    let g=dv_expect(again.ok && again.code!=0,"neo init accepted a directory that is not empty") in
+    let cleaned=dv_clean(dir) in let shown=print_out("project tooling OK\n") in noop()

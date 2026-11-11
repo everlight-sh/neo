@@ -1,0 +1,25 @@
+; Ported from tests/test_runtime_layout.py: the freestanding runtime state is
+; page-aligned on x86-64 Linux and 16-byte aligned on ARM64 Linux and macOS,
+; in the LLVM IR of each target.
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn rl_target(borrow tools:DvTools, borrow source:Arr u8 _, borrow triple:Arr u8 _, borrow alignment:Arr u8 _) -> unit
+  = let args=push(push(push(push(push(push(md_words(),"build"),tools.root),source),"--emit-llvm"),"--target"),triple) in
+    let ir=nt_process(tools.compiler,args,dv_environment(md_words()),60000,67108864) in
+    let a=dv_expect(ir.ok && ir.code==0,concat("--emit-llvm for ",triple," failed: ",nt_diagnostic(ir))) in
+    dv_expect(ru_contains(ir.output,concat("@ax_runtime_state = internal global [256 x i64] zeroinitializer, align ",alignment,"\n")),
+      concat("the runtime state of ",triple," is not aligned to ",alignment))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("runtime-layout") in let source=pt_join(dir,"zero.neo") in
+    let written=ru_write(source,"fn main()->i64=0\n") in
+    let a=rl_target(tools,source,"x86_64-unknown-linux-gnu","4096") in
+    let b=rl_target(tools,source,"aarch64-unknown-linux-gnu","16") in
+    let c=rl_target(tools,source,"arm64-apple-darwin","16") in
+    let cleaned=dv_clean(dir) in let shown=print_out("runtime layout OK\n") in noop()

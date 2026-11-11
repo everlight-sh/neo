@@ -1,0 +1,62 @@
+; Ported from tests/tooling_smoke.py, without the Python build cache (warm
+; hits, cache keys, tamper detection) that only the reference compiler had:
+; a program follows edits to an imported module, two concurrent builds to one
+; output publish a complete binary, a syntax error is a structured --report
+; diagnostic, and on Linux identical projects in different directories build
+; identical binaries.
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/build.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn ts_answer(borrow tools:DvTools, borrow root:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let app=pt_join(root,"app") in let built=dv_build(tools,pt_join(root,"main.neo"),app,md_words()) in
+    let out=dv_output(app,md_words(),md_words(),"") in
+    dv_expect(tx_equal(out,concat(expected,"\n")),concat("the program printed ",tx_repr(out,true),", expected ",expected))
+
+fn ts_build_args(borrow tools:DvTools, borrow source:Arr u8 _, borrow output:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(push(push(push(md_words(),"build"),tools.root),source),"-o"),output)
+
+; Two builds of the same source to the same output, at the same time.
+effect fn ts_concurrent(borrow tools:DvTools, borrow root:Arr u8 _) -> unit
+  = let args=ts_build_args(tools,pt_join(root,"main.neo"),pt_join(root,"app")) in
+    let environment=bd_environment() in
+    using first=process_start(tools.compiler,args,environment) in
+    using second=process_start(tools.compiler,args,environment) in
+    let waited=loop (i=0) while i<12000 && (process_status(first).running || process_status(second).running)
+      next (let a=process_try_read(first,1,65536) in let b=process_try_read(first,2,65536) in
+        let c=process_try_read(second,1,65536) in let d=process_try_read(second,2,65536) in
+        let paused=sleep_ms(10) in i+1) yield i in
+    let a=process_status(first) in let b=process_status(second) in
+    dv_expect(!a.running && !b.running && a.exit_code==0 && b.exit_code==0 && a.signal==0 && b.signal==0,"a concurrent build failed")
+
+effect fn ts_reproducible(borrow tools:DvTools, borrow root:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let project=pt_join(root,name) in let made=fs_mkdir(project) in
+    let a=ru_write(pt_join(project,"neo.toml"),"[package]\nname=\"reproducible\"\nversion=\"0.1.0\"\n") in
+    let b=ru_write(pt_join(project,"main.neo"),"fn identity<T>(value:T) -> T = value fn main(x:i64) -> i64 = identity(x)") in
+    let app=pt_join(project,"app") in let built=dv_build(tools,pt_join(project,"main.neo"),app,md_words()) in ru_sha(dv_read(app))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let root=dv_temp("tooling") in
+    let source=pt_join(root,"main.neo") in let lib=pt_join(root,"lib.neo") in
+    let a=ru_write(source,"import \"lib.neo\" fn main () -> i64 = answer()\n") in
+    let b=ru_write(lib,"fn answer () -> i64 = 1\n") in let c=ts_answer(tools,root,"1") in
+    let d=ru_write(lib,"fn answer () -> i64 = 2\n") in let e=ts_answer(tools,root,"2") in
+    let f=ru_write(lib,"fn answer () -> i64 = 3\n") in let g=ts_concurrent(tools,root) in
+    let out=dv_output(pt_join(root,"app"),md_words(),md_words(),"") in
+    let h=dv_expect(tx_equal(out,"3\n"),concat("after concurrent builds the program printed ",tx_repr(out,true))) in
+    let i=ru_write(source,"fn main () -> i64 = missing(\n") in
+    let failed=dv_build_with(tools,source,pt_join(root,"broken"),push(md_words(),"--report"),md_words()) in
+    let j=dv_expect(failed.ok && failed.code==1 && str_starts(failed.output,"{\"ok\":false,") && ru_contains(failed.output,"\"errors\":[{"),
+      concat("a syntax error was not a structured diagnostic: exit ",int_text(failed.code),", ",nt_diagnostic(failed))) in
+    let k=if !dv_linux(tools) then noop() else
+      dv_expect(tx_equal(ts_reproducible(tools,root,"relocated-a"),ts_reproducible(tools,root,"relocated-b")),
+        "the same project built different binaries in two directories") in
+    let cleaned=dv_clean(root) in let shown=print_out("tooling OK\n") in noop()

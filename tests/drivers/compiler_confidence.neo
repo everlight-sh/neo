@@ -1,0 +1,81 @@
+; Ported from tests/compiler_confidence.py: checked integer arithmetic,
+; explicit wrapping, division, reduction, SIMD masks, folding and float-cast
+; boundaries (tests/fixtures/integers.neo, at 1 and 4 workers for traps);
+; 80 generated programs x 5 inputs at --opt-level 0 and 2 against the Python
+; reference evaluator's values (frozen in tests/vectors/compiler_confidence);
+; and 2000 deterministic malformed sources the parser must answer without
+; crashing (neo parse instead of the Python parser).
+import "std:fs"
+import "std:io"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn cc_args(a:i64, b:i64, c:i64) -> Arr Arr u8 _ _ = push(push(push(md_words(),int_text(a)),int_text(b)),int_text(c))
+
+effect fn cc_success(borrow binary:Arr u8 _, a:i64, b:i64, c:i64, expected:i64) -> unit
+  = let out=dv_output(binary,cc_args(a,b,c),md_words(),"") in
+    dv_expect(tx_equal(str_trim(out),int_text(expected)),
+      concat("integers ",int_text(a)," ",int_text(b)," ",int_text(c)," printed ",tx_repr(out,true),", expected ",int_text(expected)))
+
+effect fn cc_trap(borrow binary:Arr u8 _, a:i64, b:i64, c:i64, borrow threads:Arr u8 _) -> unit
+  = let run=dv_run(binary,cc_args(a,b,c),push(md_words(),concat("NEO_THREADS=",threads)),"",30000,65536) in
+    dv_expect(run.ok && !run.timeout && run.code!=0 && (ru_contains(run.errors,"overflow") || ru_contains(run.errors,"out of range")),
+      concat("integers ",int_text(a)," ",int_text(b)," ",int_text(c)," did not trap: exit ",int_text(run.code),", ",nt_diagnostic(run)))
+
+effect fn cc_boundaries(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=pt_join(dir,"integers") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/integers.neo"),binary,md_words()) in
+    let maximum=9223372036854775807 in let minimum=0-maximum-1 in
+    let a=cc_success(binary,0,maximum,-1,maximum-1) in let b=cc_success(binary,1,minimum,-1,minimum+1) in
+    let c=cc_success(binary,2,-7,3,-21) in let d=cc_success(binary,3,-7,3,-2) in let e=cc_success(binary,4,-7,3,-1) in
+    let f=cc_success(binary,3,minimum,1,minimum) in let g=cc_success(binary,5,maximum,1,minimum) in
+    let h=cc_success(binary,8,maximum,0,2) in let i=cc_success(binary,12,maximum,0,2) in let j=cc_success(binary,13,maximum,0,2) in
+    let k=cc_success(binary,14,0,0,2) in let l=cc_success(binary,15,0,0,2) in let m=cc_success(binary,16,0,0,528) in
+    loop (t=0) while t<2 next (let threads=if t==0 then "1" else "4" in
+      let a=cc_trap(binary,0,maximum,1,threads) in let b=cc_trap(binary,1,minimum,1,threads) in
+      let c=cc_trap(binary,2,maximum,2,threads) in let d=cc_trap(binary,3,minimum,-1,threads) in
+      let e=cc_trap(binary,4,minimum,-1,threads) in let f=cc_trap(binary,6,maximum,0,threads) in
+      let g=cc_trap(binary,7,maximum,0,threads) in let h=cc_trap(binary,9,0,0,threads) in
+      let i=cc_trap(binary,10,minimum,0,threads) in let j=cc_trap(binary,11,maximum,0,threads) in
+      let k=cc_trap(binary,17,maximum,0,threads) in let l=cc_trap(binary,18,0,0,threads) in t+1) yield noop()
+
+effect fn cc_generated(borrow tools:DvTools, borrow dir:Arr u8 _, borrow level:Arr u8 _) -> i64
+  = let binary=pt_join(dir,concat("generated-",level)) in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/compiler_confidence_generated.neo"),binary,
+      push(push(md_words(),"--opt-level"),level)) in
+    let lines=ru_split(ru_vector(tools,"compiler_confidence","generated.out"),10) in
+    loop (i=0) while i<len(lines)
+      next (let fields=ru_split(md_word(lines,i),32) in
+        let out=dv_output(binary,push(push(md_words(),md_word(fields,0)),md_word(fields,1)),md_words(),"") in
+        let same=dv_expect(tx_equal(str_trim(out),md_word(fields,2)),
+          concat("--opt-level ",level,": case ",md_word(fields,0)," of ",md_word(fields,1)," printed ",str_trim(out),", expected ",md_word(fields,2))) in
+        i+1) yield i
+
+fn cc_alphabet() -> Arr u8 _ = "fn main () -> i64 = 0123456789{}[]:+-*/\";\nabcdefghijklmnopqrstuvwxyz"
+
+; A malformed source of 1..199 bytes from the alphabet.
+fn cc_source(r:DvRandom) -> Arr u8 _
+  = let sized=dv_next(r) in let size=1+dv_below(sized,199) in
+    let built=loop (i=0, s=sized, out=tx_empty()) while i<size
+      next (i+1,dv_next(s),let pick=dv_next(s) in push(out,u8(tx_byte(cc_alphabet(),dv_below(pick,len(cc_alphabet())))))) yield out in built
+
+effect fn cc_fuzz(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let path=pt_join(dir,"fuzz.neo") in
+    loop (i=0, r=dv_random(840024)) while i<2000
+      next (i+1,let source=cc_source(r) in let saved=ru_write(path,source) in
+        let parsed=nt_process(tools.compiler,push(push(md_words(),"parse"),path),dv_environment(md_words()),30000,1048576) in
+        let checked=dv_expect(parsed.ok && !parsed.timeout && parsed.code==0,
+          concat("neo parse crashed on ",tx_repr(source,true),": exit ",int_text(parsed.code),", ",nt_diagnostic(parsed))) in
+        dv_next(dv_next(r))) yield noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("confidence") in
+    let a=cc_boundaries(tools,dir) in
+    let b=cc_generated(tools,dir,"0") in let c=cc_generated(tools,dir,"2") in
+    let d=cc_fuzz(tools,dir) in
+    let cleaned=dv_clean(dir) in let shown=print_out("compiler confidence OK\n") in noop()

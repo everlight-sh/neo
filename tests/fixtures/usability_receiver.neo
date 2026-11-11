@@ -1,0 +1,34 @@
+; Webhook receiver for tests/drivers/usability_smoke.neo (from the Python
+; Receiver in tests/usability_smoke.py). Every POST appends its Idempotency-Key
+; to $NEO_RECEIVER_DIR/attempts. Key "timeout" answers after 250 ms; "dead"
+; always fails, "retry" fails its first two attempts and "resume" its first;
+; other deliveries succeed and append "KEY BODY" to $NEO_RECEIVER_DIR/effects.
+import "std:http"
+import "std:io"
+import "std:strings"
+import "std:time"
+
+effect(env) fn rc_log(name:Arr u8 n) -> Arr u8 _
+  = let dir=env_get("NEO_RECEIVER_DIR") in concat(if dir.present then dir.value else ".","/",name)
+
+fn rc_key(request:Arr u8 n) -> Arr u8 _
+  = let at=str_find(http_lower(request),"\r\nidempotency-key:") in if !at.present then "" else
+    let tail=str_slice(request,at.value+18,n) in let end=str_find(tail,"\r\n") in
+    str_trim(str_slice(tail,0,if end.present then end.value else len(tail)))
+
+fn rc_count(log:Arr u8 n, key:Arr u8 m) -> i64
+  = let line=concat(key,"\n") in
+    loop (at=0, count=0) while at<n
+      next (let rest=str_slice(log,at,n) in let end=str_find(rest,"\n") in if end.present then at+end.value+1 else n,
+        let rest=str_slice(log,at,n) in if str_starts(rest,line) then count+1 else count) yield count
+
+effect(fs,env,time) fn rc_handle(request:Arr u8 n) -> Arr u8 _
+  = let key=rc_key(request) in let previous=fs_read(rc_log("attempts")) in
+    let number=1+rc_count(if previous.ok then previous.value else "",key) in
+    let logged=fs_append(rc_log("attempts"),concat(key,"\n")) in
+    let waited=if str_equal(key,"timeout") then sleep_ms(250) else int_ok(0) in
+    let failed=(str_equal(key,"retry") && number<3) || str_equal(key,"dead") || (str_equal(key,"resume") && number==1) in
+    let stored=if failed then int_ok(0) else fs_append(rc_log("effects"),concat(key," ",http_body(request),"\n")) in
+    http_response(if failed then 500 else 200,"ok","text/plain")
+
+effect(fs,env,net,time) fn main(port:i64{port>0, port<65536}) -> i64 = serve_effect(port,rc_handle)

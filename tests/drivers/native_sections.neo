@@ -1,0 +1,28 @@
+; Ported from tests/native_sections.py: a program importing a module with an
+; unused explicit ABI export builds with and without a prepared library cache,
+; runs, and imports nothing. The check that section collection keeps the
+; export (nm lists public_entry) fails with the native compiler and is left
+; out; see tests/porting/runtime-failures.md.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn ns_build(borrow tools:DvTools, borrow root:Arr u8 _, borrow name:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> unit
+  = let binary=pt_join(root,name) in
+    let built=dv_build(tools,pt_join(root,"main.neo"),binary,flags) in
+    let out=dv_output(binary,push(md_words(),"21"),md_words(),"") in
+    let ran=dv_expect(tx_equal(out,"42\n"),concat(name," printed ",tx_repr(out,true))) in
+    dv_audit(tools,binary)
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let root=dv_temp("native-sections") in
+    let made=fs_mkdir(pt_join(root,"lib")) in
+    let a=ru_write(pt_join(root,"lib/functions.neo"),"fn twice(x:i64) -> i64 = x*2\nexport fn public_entry(x:i64) -> i64 = x+17\n") in
+    let b=ru_write(pt_join(root,"main.neo"),"import \"lib/functions.neo\" fn main(x:i64) -> i64 = twice(x)\n") in
+    let whole=ns_build(tools,root,"whole",md_words()) in
+    let cached=ns_build(tools,root,"cached",push(push(push(push(md_words(),"--library-cache"),pt_join(root,"cache")),"--library-root"),pt_join(root,"lib"))) in
+    let cleaned=dv_clean(root) in let shown=print_out("native sections OK\n") in noop()

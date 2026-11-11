@@ -1,0 +1,78 @@
+; Ported from tests/test_release.py (Python neoc.release.bundle) to the native
+; neo release: two archives of the same tree are byte-identical; every member
+; is a root-owned regular file or directory without ".." or links; MANIFEST.json
+; lists the SHA-256 of every other file; there are no examples or Python
+; sources, skills.md is included, neo and bin/neoc are executable, and the
+; manifest names the platform the command reports.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn rs_release(borrow tools:DvTools, borrow archive:Arr u8 _) -> Arr u8 _
+  = let args=push(push(push(push(push(md_words(),"release"),"-o"),archive),"--native"),tools.compiler) in
+    let run=nt_process(tools.compiler,args,dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),300000,1048576) in
+    let a=dv_expect(run.ok && run.code==0 && ru_contains(run.output,"\"ok\": true"),concat("neo release failed: ",nt_diagnostic(run))) in
+    run.output
+
+; The member name after the top directory.
+fn rs_inner(borrow name:Arr u8 _) -> Arr u8 _
+  = let slash=str_find(name,"/") in if slash.present then pt_slice(name,slash.value+1,len(name)) else tx_empty()
+
+type RsListing = { names:Arr Arr u8 _ _, problems:Arr u8 _ }
+; tar -tvz --numeric-owner lines: "MODE UID/GID SIZE DATE TIME NAME".
+fn rs_listing(borrow text:Arr u8 _) -> RsListing
+  = let lines=ru_split(text,10) in
+    loop (i=0, r=RsListing { names=md_words(), problems=tx_empty() }) while i<len(lines)
+      next (i+1,let fields=loop (k=0, out=md_words(), words=ru_words(md_word(lines,i))) while k<len(words)
+          next (k+1,if len(md_word(words,k))>0 then push(out,md_word(words,k)) else out,words) yield out in
+        let mode=md_word(fields,0) in let name=md_word(fields,len(fields)-1) in let inner=rs_inner(name) in
+        let problem=if len(fields)<6 then concat("unreadable listing line ",md_word(lines,i))
+          else if ru_contains(concat("/",name,"/"),"/../") then concat(name," escapes the archive")
+          else if !str_starts(mode,"-") && !str_starts(mode,"d") then concat(name," is not a regular file or directory")
+          else if !str_starts(md_word(fields,1),"0/") then concat(name," is not owned by root")
+          else if str_starts(inner,"examples/") then concat(name," is an example")
+          else if str_ends_with(name,".py") then concat(name," is a Python source")
+          else if (tx_equal(inner,"neo") || tx_equal(inner,"bin/neoc")) && !tx_equal(mode,"-rwxr-xr-x") then concat(name," has mode ",mode)
+          else tx_empty() in
+        r with { names=if str_starts(mode,"-") then push(r.names,inner) else r.names,
+          problems=if len(problem)>0 then concat(r.problems,problem,"\n") else r.problems }) yield r
+
+fn str_ends_with(borrow text:Arr u8 _, borrow suffix:Arr u8 _) -> bool
+  = len(text)>=len(suffix) && tx_equal(pt_slice(text,len(text)-len(suffix),len(text)),suffix)
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("release") in
+    let a_path=pt_join(dir,"a.tar.gz") in let b_path=pt_join(dir,"b.tar.gz") in
+    let report=rs_release(tools,a_path) in let again=rs_release(tools,b_path) in
+    let a=dv_expect(tx_equal(dv_read(a_path),dv_read(b_path)),"two releases of the same tree differ") in
+    let listing=rs_listing(ru_tool_output("tar",push(push(push(md_words(),"-tvzf"),a_path),"--numeric-owner"))) in
+    let b=dv_expect(len(listing.problems)==0,listing.problems) in
+    let c=dv_expect(lp_contains(listing.names,"skills.md") && lp_contains(listing.names,"MANIFEST.json"),"skills.md or MANIFEST.json is missing") in
+    let unpack=pt_join(dir,"unpack") in let made=fs_mkdir(unpack) in
+    let unpacked=ru_tool_output("tar",push(push(push(push(md_words(),"-xzf"),a_path),"-C"),unpack)) in
+    let top=md_word(ru_names(unpack),0) in let base=pt_join(unpack,top) in
+    let parsed=json_parse(dv_read(pt_join(base,"MANIFEST.json"))) in
+    let d=dv_expect(parsed.ok,"MANIFEST.json is not JSON") in
+    let files=json_get(parsed.value,"files").value in
+    let listed=json_object_keys(files) in
+    let e=dv_expect(len(listed)==len(listing.names)-1,concat("MANIFEST.json lists ",int_text(len(listed))," files, the archive holds ",int_text(len(listing.names)-1))) in
+    let checked=loop (i=0) while i<len(listing.names)
+      next (let name=md_word(listing.names,i) in
+        let shown=if tx_equal(name,"MANIFEST.json") then noop() else
+          let digest=json_text(json_get(files,name).value) in
+          dv_expect(digest.ok && tx_equal(digest.value,ru_sha(dv_read(pt_join(base,name)))),concat("MANIFEST.json has the wrong digest for ",name)) in i+1) yield i in
+    let platform=json_text(json_get(parsed.value,"platform").value) in
+    let reported=json_parse(report) in
+    let named=if reported.ok then json_text(json_get(reported.value,"platform").value) else bytes_error(22,"",0) in
+    let f=dv_expect(platform.ok && named.ok && tx_equal(platform.value,named.value),"the manifest and the report name different platforms") in
+    let cleaned=dv_clean(dir) in let shown=print_out("release OK\n") in noop()
+
+fn lp_contains(borrow words:Arr Arr u8 _ _, borrow word:Arr u8 _) -> bool
+  = loop (i=0, found=false) while i<len(words) && !found next (i+1,tx_equal(md_word(words,i),word)) yield found

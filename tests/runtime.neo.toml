@@ -1,3 +1,426 @@
 # Native cases ported from the Python runtime tests (see tests/porting/README.md).
 [tool.neo]
 test-globs = []
+
+# kernel_runtime_smoke.py: freestanding runtime primitives at 1 and 4 workers
+# (n=8192), and a static-binary audit of the three fixtures.
+[[test]]
+name = "kernel-runtime-1-worker"
+file = "fixtures/kernel_runtime.neo"
+args = ["8192"]
+env.NEO_THREADS = "1"
+stdout = "1017485\n"
+timeout = 15
+
+[[test]]
+name = "kernel-runtime-4-workers"
+file = "fixtures/kernel_runtime.neo"
+args = ["8192"]
+env.NEO_THREADS = "4"
+stdout = "1017485\n"
+timeout = 15
+
+[[test]]
+name = "parallel-runtime-1-worker"
+file = "fixtures/parallel_runtime.neo"
+args = ["8192"]
+env.NEO_THREADS = "1"
+stdout = "100659200\n"
+timeout = 15
+
+[[test]]
+name = "parallel-runtime-4-workers"
+file = "fixtures/parallel_runtime.neo"
+args = ["8192"]
+env.NEO_THREADS = "4"
+stdout = "100659200\n"
+timeout = 15
+
+[[test]]
+name = "memory-blocks-1-worker"
+file = "fixtures/memory_blocks.neo"
+args = ["8192"]
+env.NEO_THREADS = "1"
+stdout = "0\n"
+timeout = 15
+
+[[test]]
+name = "memory-blocks-4-workers"
+file = "fixtures/memory_blocks.neo"
+args = ["8192"]
+env.NEO_THREADS = "4"
+stdout = "0\n"
+timeout = 15
+
+[[test]]
+name = "kernel-runtime-static-audit"
+file = "drivers/kernel_runtime_smoke.neo"
+stdout = "kernel runtime audit OK\n"
+timeout = 120
+
+# write_parts.py: complete multipart writes; the short write needs a driver.
+[[test]]
+name = "write-parts-complete"
+file = "fixtures/write_parts.neo"
+args = ["0"]
+stdout = "abcdefghij"
+timeout = 30
+
+[[test]]
+name = "write-parts-short-write"
+file = "drivers/write_parts.neo"
+stdout = "write parts OK\n"
+timeout = 120
+
+# data_sync.py
+[[test]]
+name = "data-sync-barriers-and-eio"
+file = "drivers/data_sync.neo"
+stdout = "data sync OK\n"
+timeout = 120
+
+# elf_runtime_layout.py
+[[test]]
+name = "elf-runtime-layout"
+file = "drivers/elf_runtime_layout.neo"
+stdout = "ELF runtime layout OK\n"
+timeout = 120
+
+# native_sections.py (the kept-export check is a native failure)
+[[test]]
+name = "native-sections-library-cache"
+file = "drivers/native_sections.neo"
+stdout = "native sections OK\n"
+timeout = 120
+
+# nbody_worker_smoke.py: energies of the independent Python model
+# (tests/vectors/nbody_worker_smoke/reference.out) at 1 and 4 workers.
+[[test]]
+name = "nbody-1-body"
+file = "../examples/nbody.neo"
+args = ["1", "0"]
+env.NEO_THREADS = "1"
+stdout = "0.0\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1-body-4-workers"
+file = "../examples/nbody.neo"
+args = ["1", "0"]
+env.NEO_THREADS = "4"
+stdout = "0.0\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-2-bodies"
+file = "../examples/nbody.neo"
+args = ["2", "3"]
+env.NEO_THREADS = "1"
+stdout = "-0.15962191206750614\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-2-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["2", "3"]
+env.NEO_THREADS = "4"
+stdout = "-0.15962191206750614\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-7-bodies"
+file = "../examples/nbody.neo"
+args = ["7", "0"]
+env.NEO_THREADS = "1"
+stdout = "-0.9028328253132472\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-7-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["7", "0"]
+env.NEO_THREADS = "4"
+stdout = "-0.9028328253132472\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-31-bodies"
+file = "../examples/nbody.neo"
+args = ["31", "3"]
+env.NEO_THREADS = "1"
+stdout = "-0.9271033537846779\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-31-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["31", "3"]
+env.NEO_THREADS = "4"
+stdout = "-0.9271033537846779\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-257-bodies"
+file = "../examples/nbody.neo"
+args = ["257", "2"]
+env.NEO_THREADS = "1"
+stdout = "-0.8761620019282901\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-257-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["257", "2"]
+env.NEO_THREADS = "4"
+stdout = "-0.8761620019282901\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1023-bodies"
+file = "../examples/nbody.neo"
+args = ["1023", "0"]
+env.NEO_THREADS = "1"
+stdout = "-0.8889696156330772\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1023-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["1023", "0"]
+env.NEO_THREADS = "4"
+stdout = "-0.8889696156330772\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1024-bodies"
+file = "../examples/nbody.neo"
+args = ["1024", "2"]
+env.NEO_THREADS = "1"
+stdout = "-0.8886632030712451\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1024-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["1024", "2"]
+env.NEO_THREADS = "4"
+stdout = "-0.8886632030712451\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1025-bodies"
+file = "../examples/nbody.neo"
+args = ["1025", "1"]
+env.NEO_THREADS = "1"
+stdout = "-0.8883391979876768\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-1025-bodies-4-workers"
+file = "../examples/nbody.neo"
+args = ["1025", "1"]
+env.NEO_THREADS = "4"
+stdout = "-0.8883391979876768\n"
+stdout-tolerance = 1e-10
+timeout = 20
+
+[[test]]
+name = "nbody-static-and-clone-eagain-fallback"
+file = "drivers/nbody_worker_smoke.neo"
+stdout = "N-body workers OK\n"
+timeout = 120
+
+# agent_utilities.py
+[[test]]
+name = "agent-utilities-oracles-and-atomic-replace"
+file = "drivers/agent_utilities.neo"
+stdout = "agent utilities OK (276 oracle cases)\n"
+timeout = 300
+
+# compiler_confidence.py
+[[test]]
+name = "compiler-confidence"
+file = "drivers/compiler_confidence.neo"
+stdout = "compiler confidence OK\n"
+timeout = 600
+
+# usability_smoke.py: the JSON differential corpus against Python's json
+# verdicts (the replies were checked against Python once and frozen), and the
+# example applications.
+[[test]]
+name = "usability-json-differential"
+file = "fixtures/json_probe.neo"
+stdin-file = "vectors/usability_smoke/json_probe.in"
+stdout-file = "vectors/usability_smoke/json_probe.out"
+timeout = 90
+
+[[test]]
+name = "usability-applications"
+file = "drivers/usability_smoke.neo"
+stdout = "PASS JSON CLI: schema, stable sort/filter, Unicode, malformed data and recoverable file errors\nPASS file append/read/errors, environment/argv, embedded-NUL rejection, clocks and sleep\nPASS notes: CRUD, escaped SSR, 30 concurrent writes, SIGKILL/restart, torn-tail repair, corruption and storage failure\nPASS webhook: durable enqueue, concurrent deduplication, retries, deadlines, failure limits and restart recovery\nusability OK\n"
+timeout = 300
+
+# test_modules.py (Python neoc.modules) as native module fixtures.
+[[test]]
+name = "modules-aliases-and-imported-generics"
+file = "fixtures/test_modules/aliases.neo"
+stdout = "42\n"
+
+[[test]]
+name = "modules-private-declarations"
+file = "fixtures/test_modules/private.neo"
+reject = true
+exit = 1
+diagnostic = "private function a::secret"
+
+[[test]]
+name = "modules-ambiguous-imports"
+file = "fixtures/test_modules/ambiguous.neo"
+reject = true
+exit = 1
+diagnostic = "ambiguous import value"
+
+[[test]]
+name = "modules-sealed-record-use"
+file = "fixtures/test_modules/sealed_use.neo"
+stdout = "7\n"
+
+[[test]]
+name = "modules-sealed-record-construction"
+file = "fixtures/test_modules/sealed_construct.neo"
+reject = true
+exit = 1
+diagnostic = "sealed type Valid can only be constructed in its declaring module"
+
+[[test]]
+name = "modules-sealed-record-update"
+file = "fixtures/test_modules/sealed_update.neo"
+reject = true
+exit = 1
+diagnostic = "sealed type Valid can only be updated in its declaring module"
+
+[[test]]
+name = "modules-transitive-diamond"
+file = "fixtures/test_modules/diamond.neo"
+stdout = "4\n"
+
+[[test]]
+name = "modules-missing-import"
+file = "fixtures/test_modules/missing_import.neo"
+reject = true
+exit = 1
+diagnostic = "cannot read"
+
+[[test]]
+name = "modules-cyclic-import"
+file = "fixtures/test_modules/cycle.neo"
+reject = true
+exit = 1
+diagnostic = "cyclic import"
+
+[[test]]
+name = "modules-imported-main"
+file = "fixtures/test_modules/main_import.neo"
+reject = true
+exit = 1
+diagnostic = "imported modules cannot declare main"
+
+[[test]]
+name = "modules-recursive-value-type"
+file = "fixtures/test_modules/recursive_type.neo"
+reject = true
+exit = 1
+diagnostic = "is not finite"
+
+# test_project.py, test_packages.py, test_runtime_layout.py and
+# tooling_smoke.py: the native project, package and build commands.
+[[test]]
+name = "project-fmt-and-init"
+file = "drivers/test_project.neo"
+stdout = "project tooling OK\n"
+timeout = 120
+
+[[test]]
+name = "packages-lock-verify-vendor"
+file = "drivers/test_packages.neo"
+stdout = "packages OK\n"
+timeout = 300
+
+[[test]]
+name = "runtime-state-alignment-by-target"
+file = "drivers/test_runtime_layout.neo"
+stdout = "runtime layout OK\n"
+timeout = 120
+
+[[test]]
+name = "tooling-imports-concurrency-diagnostics-relocation"
+file = "drivers/tooling_smoke.neo"
+stdout = "tooling OK\n"
+timeout = 300
+
+# test_lsp.py: neo lsp over stdin/stdout (Content-Length frames, UTF-16
+# positions, unsaved buffers never written).
+[[test]]
+name = "lsp-session"
+file = "drivers/test_lsp.neo"
+stdout = "LSP OK\n"
+timeout = 120
+
+# test_release.py, test_driver.py and test_install.py: neo release archives,
+# the POSIX launcher and install.sh with a minimal PATH.
+[[test]]
+name = "release-reproducible-archive"
+file = "drivers/test_release.neo"
+stdout = "release OK\n"
+timeout = 300
+
+[[test]]
+name = "launcher-symlinks-project-doctor"
+file = "drivers/test_driver.neo"
+stdout = "launcher OK\n"
+timeout = 300
+
+[[test]]
+name = "install-archive-download-checksum"
+file = "drivers/test_install.neo"
+stdout = "install OK\n"
+timeout = 600
+
+# agent_freestanding.py, freestanding_linux_smoke.py, language_freestanding.py
+# and map_freestanding.py: audited static binaries run from a directory that
+# holds only them; the chroot runs are opt-in (NEO_TEST_ROOT_CHECKS=1, root on
+# Linux), so these cases print a skip line by default and check only exit 0.
+[[test]]
+name = "agent-fixtures-from-an-empty-root"
+file = "drivers/agent_freestanding.neo"
+timeout = 600
+
+[[test]]
+name = "http-from-an-empty-root"
+file = "drivers/freestanding_linux_smoke.neo"
+timeout = 300
+
+[[test]]
+name = "language-kernel-and-sha256-from-an-empty-root"
+file = "drivers/language_freestanding.neo"
+timeout = 300
+
+[[test]]
+name = "measured-map-from-an-empty-root"
+file = "drivers/map_freestanding.neo"
+timeout = 300

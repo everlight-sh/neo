@@ -1,0 +1,69 @@
+; Ported from tests/test_driver.py: the POSIX neo launcher. Without a native
+; compiler it says so and never starts Python; a chain of relative symlinks
+; reaches the native compiler; in a project directory whose path has spaces,
+; neo build and neo run --dev use the manifest's entry and the runtime
+; sources (NEO_RUNTIME points at a missing object); neo doctor reports a
+; missing Clang (the native doctor's wording: "clang ... not found on PATH").
+; Every command runs with only the listed PATH entries.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn td_version(borrow tools:DvTools) -> Arr u8 _
+  = let run=nt_process(tools.compiler,push(md_words(),"version"),dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),30000,65536) in
+    let a=dv_expect(run.ok && run.code==0,"neo version failed") in str_trim(run.output)
+
+effect fn td_missing(borrow root:Arr u8 _, borrow launcher:Arr u8 _) -> unit
+  = let copy=pt_join(root,"neo") in let a=ru_copy(launcher,copy) in
+    let python=pt_join(root,"python3") in
+    let b=ru_write(python,"#!/bin/sh\n: > python-started\n") in
+    let c=ru_tool_output("chmod",push(push(md_words(),"755"),python)) in
+    let run=ru_run_in(root,copy,push(md_words(),"version"),push(md_words(),concat("PATH=",root)),60000) in
+    let d=dv_expect(run.ok && run.code==1 && ru_contains(run.errors,"native neoc executable missing"),
+      concat("a missing native compiler was not reported: exit ",int_text(run.code),", ",nt_diagnostic(run))) in
+    dv_expect(pf_kind(pt_join(root,"python-started"),false)<0,"the launcher started Python")
+
+effect fn td_symlinks(borrow tools:DvTools, borrow root:Arr u8 _, borrow launcher:Arr u8 _, borrow version:Arr u8 _) -> unit
+  = let a=fs_mkdir(pt_join(root,"bin")) in let b=fs_mkdir(pt_join(root,"lib")) in
+    let c=ru_link(launcher,pt_join(root,"lib/neo")) in let d=ru_link("../lib/neo",pt_join(root,"bin/neo")) in
+    let path=ru_tools(pt_join(root,"tools"),push(md_words(),"readlink")) in
+    let run=ru_run_in(root,pt_join(root,"bin/neo"),push(md_words(),"version"),
+      push(push(md_words(),concat("PATH=",path)),concat("NEOC=",tools.compiler)),60000) in
+    dv_expect(run.ok && run.code==0 && tx_equal(str_trim(run.output),version),
+      concat("the symlinked launcher printed ",tx_repr(run.output,true),": ",nt_diagnostic(run)))
+
+effect fn td_project(borrow tools:DvTools, borrow root:Arr u8 _, borrow launcher:Arr u8 _) -> unit
+  = let project=pt_join(root,"project with spaces") in let a=fs_mkdir(project) in
+    let path=ru_tools(pt_join(root,"project-tools"),push(push(push(push(md_words(),"clang"),"ld"),"as"),"ld.lld")) in
+    let b=ru_write(pt_join(project,"neo.toml"),"[package]\nentry = \"chosen.neo\"\n") in
+    let c=ru_write(pt_join(project,"chosen.neo"),"fn main(n:i64) -> i64 = n+1\n") in
+    let environment=push(push(push(md_words(),concat("PATH=",path)),concat("NEOC=",tools.compiler)),
+      concat("NEO_RUNTIME=",pt_join(project,"missing.o"))) in
+    let built=ru_run_in(project,launcher,push(md_words(),"build"),environment,300000) in
+    let d=dv_expect(built.ok && built.code==0,concat("neo build in the project failed: ",nt_diagnostic(built))) in
+    let ran=ru_run_in(project,pt_join(project,"chosen"),push(md_words(),"41"),environment,30000) in
+    let e=dv_expect(ran.ok && ran.code==0 && tx_equal(ran.output,"42\n"),concat("the project binary printed ",tx_repr(ran.output,true))) in
+    let dev=ru_run_in(project,launcher,push(push(push(push(md_words(),"run"),"--dev"),"--"),"41"),environment,300000) in
+    dv_expect(dev.ok && dev.code==0 && tx_equal(dev.output,"42\n"),concat("neo run --dev printed ",tx_repr(dev.output,true),": ",nt_diagnostic(dev)))
+
+effect fn td_doctor(borrow tools:DvTools, borrow root:Arr u8 _, borrow launcher:Arr u8 _) -> unit
+  = let empty=pt_join(root,"empty") in let a=fs_mkdir(empty) in
+    let run=ru_run_in(empty,launcher,push(md_words(),"doctor"),push(push(md_words(),concat("PATH=",empty)),concat("NEOC=",tools.compiler)),60000) in
+    let report=concat(run.output,run.errors) in
+    dv_expect(run.ok && run.code==1 && ru_contains(report,"clang") && ru_contains(report,"not found on PATH"),
+      concat("neo doctor did not report the missing Clang: exit ",int_text(run.code),", ",nt_diagnostic(run)))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let root=pt_realpath(dv_temp("launcher")) in
+    let launcher=pt_realpath(pt_join(tools.here,"../../neo")) in let version=td_version(tools) in
+    let made=fs_mkdir(pt_join(root,"missing")) in let linked=fs_mkdir(pt_join(root,"links")) in
+    let a=td_missing(pt_join(root,"missing"),launcher) in
+    let b=td_symlinks(tools,pt_join(root,"links"),launcher,version) in
+    let c=td_project(tools,root,launcher) in
+    let d=td_doctor(tools,root,launcher) in
+    let cleaned=dv_clean(root) in let shown=print_out("launcher OK\n") in noop()

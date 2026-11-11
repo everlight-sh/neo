@@ -1,0 +1,19 @@
+; Ported from tests/kernel_runtime_smoke.py: the freestanding runtime fixtures
+; build into static binaries without undefined symbols, an interpreter or
+; shared libraries. Their outputs at 1 and 4 workers are plain cases in
+; tests/runtime.neo.toml.
+import "std:io"
+import "../support/driver.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+
+effect fn kr_audit(borrow tools:DvTools, borrow dir:Arr u8 _, borrow name:Arr u8 _) -> unit
+  = let binary=pt_join(dir,name) in
+    let built=dv_build(tools,pt_join(tools.here,concat("../fixtures/",name,".neo")),binary,md_words()) in
+    dv_audit(tools,binary)
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("kernel-runtime") in
+    let a=kr_audit(tools,dir,"kernel_runtime") in let b=kr_audit(tools,dir,"parallel_runtime") in
+    let c=kr_audit(tools,dir,"memory_blocks") in
+    let cleaned=dv_clean(dir) in let shown=print_out("kernel runtime audit OK\n") in noop()

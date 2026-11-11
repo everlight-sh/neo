@@ -1,0 +1,42 @@
+; Ported from tests/language_freestanding.py: the language kernel (RNG, futex,
+; live-resource accounting) and the crypto fixture build into audited static
+; binaries and run from a directory that holds only the executable: the
+; kernel prints its line, the crypto fixture's SHA-256 of 17 copies of bytes
+; 0..255 matches std:sha256. With NEO_TEST_ROOT_CHECKS=1 (root on Linux) both
+; run again under chroot in otherwise empty roots. The TLS part (a Python TLS
+; peer and generated certificates) is not ported; TLS is the network stream's.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn lf_run(chrooted:bool, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow binary:Arr u8 _,
+                 borrow args:Arr Arr u8 _ _, borrow input:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let root=ru_empty_root(dir,concat(name,if chrooted then "-root" else "-direct")) in
+    let copied=ru_copy(binary,pt_join(root,"run")) in
+    let run=if chrooted then nt_process_input(ru_chroot(),nt_extend(push(push(md_words(),root),"/run"),args,0),dv_environment(md_words()),input,10000,1048576)
+      else nt_process_input(pt_join(root,"run"),args,dv_environment(md_words()),input,10000,1048576) in
+    let a=dv_expect(run.ok && !run.timeout && run.code==0 && tx_equal(run.output,expected),
+      concat(name,if chrooted then " (chroot)" else "",": exit ",int_text(run.code),", ",tx_repr(run.output,true),", ",nt_diagnostic(run))) in
+    let names=ru_joined(ru_names(root)) in
+    dv_expect(tx_equal(names,"run"),concat("the ",name," root holds ",names))
+
+effect fn lf_all(chrooted:bool, borrow dir:Arr u8 _, borrow kernel:Arr u8 _, borrow crypto:Arr u8 _, borrow data:Arr u8 _) -> unit
+  = let a=lf_run(chrooted,dir,"kernel",kernel,md_words(),"","language kernel OK\n") in
+    lf_run(chrooted,dir,"crypto",crypto,push(md_words(),"0"),data,sha256(data))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("language-freestanding") in
+    let kernel=pt_join(dir,"kernel") in let crypto=pt_join(dir,"crypto") in
+    let a=dv_build(tools,pt_join(tools.here,"../fixtures/language_kernel.neo"),kernel,md_words()) in
+    let b=dv_build(tools,pt_join(tools.here,"../fixtures/language_crypto.neo"),crypto,md_words()) in
+    let c=dv_audit(tools,kernel) in let d=dv_audit(tools,crypto) in
+    let block=arr(i in 0..256) u8(i) in
+    let data=loop (i=0, out=tx_empty()) while i<17 next (i+1,concat(out,block)) yield out in
+    let direct=lf_all(false,dir,kernel,crypto,data) in
+    let rooted=if ru_root_checks(tools,"language_freestanding") then lf_all(true,dir,kernel,crypto,data) else noop() in
+    let cleaned=dv_clean(dir) in let shown=print_out("language freestanding OK\n") in noop()

@@ -1,0 +1,22 @@
+; Ported from tests/jsx_ssr_smoke.py: the TSX->Neo SSR server (frozen in
+; tests/fixtures/jsx_ssr_server.neo) is a static binary and, at 1 and 4
+; workers, serves exactly React's renderToStaticMarkup output for all 1000
+; pages (lengths and SHA-256 digests frozen in
+; tests/vectors/jsx_ssr_smoke/react.out), with the ssr_smoke routing,
+; concurrency and pipelining checks. Pages 2 and 13 carry the escaping and
+; Unicode cases. The live Bun/React server and --empty-root are not ported.
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("jsx-ssr") in let binary=pt_join(dir,"server") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/jsx_ssr_server.neo"),binary,md_words()) in
+    let audited=dv_audit(tools,binary) in
+    let pages=ru_pages(ru_vector(tools,"jsx_ssr_smoke","react.out")) in
+    let complete=dv_expect(len(pages.counts)==1000,"react.out must list pages 1..1000") in
+    let one=ru_ssr_serve(binary,"1",pages,pages.counts) in let four=ru_ssr_serve(binary,"4",pages,pages.counts) in
+    let cleaned=dv_clean(dir) in let shown=print_out("JSX SSR OK\n") in noop()

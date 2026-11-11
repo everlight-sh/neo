@@ -1,0 +1,104 @@
+; Ported from tests/test_install.py: install.sh against a release that the
+; native neo release builds. A local archive installs, runs neo doctor, builds
+; and runs a program, and reinstalls in place; a download (curl from a file://
+; NEO_DOWNLOAD_URL rather than a local HTTP server) is checked against the
+; release's SHA256SUMS, and a wrong checksum installs nothing; a requested
+; version must match the archive. install.sh runs under /bin/sh with only the
+; listed tools on PATH.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+type IsSetup = { root:Arr u8 _, path:Arr u8 _, releases:Arr u8 _, archive:Arr u8 _, version:Arr u8 _ }
+
+effect fn is_version(borrow tools:DvTools) -> Arr u8 _
+  = let run=nt_process(tools.compiler,push(md_words(),"version"),dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),30000,65536) in
+    let text=str_trim(run.output) in
+    let a=dv_expect(run.ok && run.code==0 && str_starts(text,"Neo "),concat("neo version printed ",tx_repr(run.output,true))) in
+    pt_slice(text,4,len(text))
+
+; neo release into releases/vVERSION with its SHA256SUMS, and a v9.9.9 copy
+; whose SHA256SUMS holds a zero checksum.
+effect fn is_setup(borrow tools:DvTools, borrow root:Arr u8 _) -> IsSetup
+  = let version=is_version(tools) in let built=pt_join(root,"release.tar.gz") in
+    let args=push(push(push(push(push(md_words(),"release"),"-o"),built),"--native"),tools.compiler) in
+    let run=nt_process(tools.compiler,args,dv_environment(push(md_words(),concat("NEO_ROOT=",tools.root))),300000,1048576) in
+    let report=json_parse(run.output) in
+    let platform=if report.ok then json_text(json_get(report.value,"platform").value) else bytes_error(22,"",0) in
+    let a=dv_expect(run.ok && run.code==0 && platform.ok,concat("neo release failed: ",nt_diagnostic(run))) in
+    let releases=pt_join(root,"releases") in let made=fs_mkdir(releases) in
+    let good=pt_join(releases,concat("v",version)) in let b=fs_mkdir(good) in
+    let name=concat("neo-",version,"-",platform.value,".tar.gz") in let archive=pt_join(good,name) in
+    let c=ru_copy(built,archive) in
+    let d=ru_write(pt_join(good,"SHA256SUMS"),concat(ru_sha(dv_read(archive)),"  ",name,"\n")) in
+    let bad=pt_join(releases,"v9.9.9") in let e=fs_mkdir(bad) in
+    let bad_name=concat("neo-9.9.9-",platform.value,".tar.gz") in let f=ru_copy(built,pt_join(bad,bad_name)) in
+    let zero=loop (i=0, text=tx_empty()) while i<64 next (i+1,concat(text,"0")) yield text in
+    let g=ru_write(pt_join(bad,"SHA256SUMS"),concat(zero,"  ",bad_name,"\n")) in
+    let names=push(push(push(push(push(push(push(push(push(push(md_words(),"readlink"),"dirname"),"uname"),"mktemp"),"tar"),"gzip"),"cat"),"mkdir"),"rm"),"mv") in
+    let names=push(push(push(push(push(push(push(push(push(push(names,"ln"),"sha256sum"),"shasum"),"cut"),"awk"),"curl"),"wget"),"clang"),"ld"),"sed") in
+    let path=ru_tools(pt_join(root,"tools"),push(names,"head")) in
+    IsSetup { root=root, path=path, releases=releases, archive=archive, version=version }
+
+effect fn is_install(borrow setup:IsSetup, borrow home:Arr u8 _, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = let environment=push(push(push(md_words(),concat("PATH=",setup.path)),concat("NEO_HOME=",home)),
+      concat("NEO_DOWNLOAD_URL=file://",setup.releases)) in
+    ru_run_in(setup.root,"/bin/sh",nt_extend(push(md_words(),pt_join(dv_tools().root,"install.sh")),args,0),environment,600000)
+
+effect fn is_installed(borrow setup:IsSetup, borrow home:Arr u8 _) -> unit
+  = let run=ru_run_in(home,pt_join(home,"bin/neo"),push(md_words(),"version"),push(md_words(),concat("PATH=",setup.path)),60000) in
+    dv_expect(run.ok && run.code==0 && tx_equal(str_trim(run.output),concat("Neo ",setup.version)),
+      concat("the installed neo printed ",tx_repr(run.output,true),": ",nt_diagnostic(run)))
+
+effect fn is_archive(borrow setup:IsSetup, borrow tmp:Arr u8 _) -> unit
+  = let home=pt_join(tmp,"neo") in let args=push(push(md_words(),"--archive"),setup.archive) in
+    let first=is_install(setup,home,args) in
+    let a=dv_expect(first.ok && first.code==0,concat("installing the archive failed: ",nt_diagnostic(first))) in
+    let b=dv_expect(ru_contains(first.output,concat("Installed Neo ",setup.version)) && ru_contains(first.output," clang "),
+      concat("install.sh did not report the install and neo doctor: ",first.output)) in
+    let c=is_installed(setup,home) in
+    let source=pt_join(tmp,"hello.neo") in let d=ru_write(source,"fn main() -> i64 = 42\n") in
+    let built=ru_run_in(tmp,pt_join(home,"bin/neo"),push(push(push(push(md_words(),"build"),source),"-o"),pt_join(home,"hello")),
+      push(push(md_words(),concat("PATH=",setup.path)),concat("NEO_RUNTIME=",pt_join(home,"missing.o"))),300000) in
+    let e=dv_expect(built.ok && built.code==0,concat("the installed neo cannot build: ",nt_diagnostic(built))) in
+    let ran=nt_process(pt_join(home,"hello"),md_words(),md_words(),30000,65536) in
+    let f=dv_expect(ran.ok && ran.code==0 && tx_equal(ran.output,"42\n"),concat("the built program printed ",tx_repr(ran.output,true))) in
+    let again=is_install(setup,home,args) in
+    let g=dv_expect(again.ok && again.code==0,concat("reinstalling failed: ",nt_diagnostic(again))) in
+    let versions=ru_names(pt_join(home,"versions")) in
+    let h=dv_expect(len(versions)==1 && tx_equal(md_word(versions,0),setup.version),concat("versions holds ",ru_joined(versions))) in
+    is_installed(setup,home)
+
+effect fn is_download(borrow setup:IsSetup, borrow tmp:Arr u8 _) -> unit
+  = let home=pt_join(tmp,"neo") in let run=is_install(setup,home,push(push(md_words(),"--version"),setup.version)) in
+    let a=dv_expect(run.ok && run.code==0,concat("the download did not install: ",nt_diagnostic(run))) in
+    is_installed(setup,home)
+
+effect fn is_mismatch(borrow setup:IsSetup, borrow tmp:Arr u8 _) -> unit
+  = let home=pt_join(tmp,"neo") in let run=is_install(setup,home,push(push(md_words(),"--version"),"9.9.9")) in
+    let a=dv_expect(run.ok && run.code==1 && ru_contains(run.errors,"checksum mismatch"),
+      concat("a wrong checksum was not refused: exit ",int_text(run.code),", ",nt_diagnostic(run))) in
+    dv_expect(pf_kind(home,false)<0,"a refused download left NEO_HOME behind")
+
+effect fn is_wrong_version(borrow setup:IsSetup, borrow tmp:Arr u8 _) -> unit
+  = let run=is_install(setup,pt_join(tmp,"neo"),push(push(push(push(md_words(),"--archive"),setup.archive),"--version"),"9.9.9")) in
+    dv_expect(run.ok && run.code==1 && ru_contains(run.errors,concat("holds Neo ",setup.version,", not 9.9.9")),
+      concat("a version mismatch was not refused: exit ",int_text(run.code),", ",nt_diagnostic(run)))
+
+effect fn is_case(borrow root:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let path=pt_join(root,name) in let made=fs_mkdir(path) in path
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let root=pt_realpath(dv_temp("install")) in
+    let setup=is_setup(tools,root) in
+    let a=is_archive(setup,is_case(root,"archive")) in
+    let b=is_download(setup,is_case(root,"download")) in
+    let c=is_mismatch(setup,is_case(root,"mismatch")) in
+    let d=is_wrong_version(setup,is_case(root,"wrong-version")) in
+    let cleaned=dv_clean(root) in let shown=print_out("install OK\n") in noop()

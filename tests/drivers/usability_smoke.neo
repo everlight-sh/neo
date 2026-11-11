@@ -1,0 +1,241 @@
+; Ported from tests/usability_smoke.py: the real example applications.
+; json-cli: schema, stable sort and filter, Unicode, malformed data and
+; recoverable file errors (input and expected output frozen in
+; tests/vectors/usability_smoke). io: file append/read/errors, environment,
+; argv, embedded NUL rejection, clocks and sleep (tests/fixtures/io.neo).
+; notes: CRUD, escaped SSR, 30 concurrent writes, SIGKILL and restart, torn
+; tail repair, corruption and storage failure. webhook: durable enqueue,
+; concurrent deduplication, retries, deadlines, failure limits and restart
+; recovery against tests/fixtures/usability_receiver.neo. The JSON
+; differential corpus is a plain case in tests/runtime.neo.toml.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:process"
+import "std:strings"
+import "std:time"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn us_build(borrow tools:DvTools, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow source:Arr u8 _) -> Arr u8 _
+  = let binary=pt_join(dir,name) in
+    let built=dv_build(tools,pt_join(tools.here,source),binary,md_words()) in let audited=dv_audit(tools,binary) in binary
+
+; json-cli
+effect fn us_cli_fails(borrow binary:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow needle:Arr u8 _, borrow label:Arr u8 _) -> unit
+  = let run=dv_run(binary,args,md_words(),"",20000,65536) in
+    dv_expect(run.ok && run.code==2 && ru_contains(run.errors,needle),
+      concat("json-cli ",label,": exit ",int_text(run.code),", ",nt_diagnostic(run)))
+
+effect fn us_cli_malformed(borrow binary:Arr u8 _, borrow source:Arr u8 _, borrow output:Arr u8 _, borrow contents:Arr u8 _) -> unit
+  = let a=ru_write(source,contents) in let b=ru_write(output,"unchanged") in
+    let c=us_cli_fails(binary,push(push(md_words(),source),output),"neo-json:",contents) in
+    dv_expect(tx_equal(dv_read(output),"unchanged"),concat("json-cli replaced the output for ",contents))
+
+effect fn us_json_cli(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=us_build(tools,dir,"json-cli","../../examples/json-cli/main.neo") in
+    let source=pt_join(dir,"input.json") in let output=pt_join(dir,"output.json") in
+    let a=ru_write(source,ru_vector(tools,"usability_smoke","json_cli.in")) in
+    let run=dv_run(binary,push(push(push(md_words(),source),output),"10"),md_words(),"",20000,65536) in
+    let b=dv_expect(run.ok && run.code==0 && len(run.output)==0,concat("json-cli failed: ",nt_diagnostic(run))) in
+    let c=dv_expect(tx_equal(dv_read(output),ru_vector(tools,"usability_smoke","json_cli.out")),"json-cli wrote different records") in
+    let d=us_cli_malformed(binary,source,output,"[1,]") in let e=us_cli_malformed(binary,source,output,"{}") in
+    let f=us_cli_malformed(binary,source,output,"[{\"id\":1,\"name\":2,\"score\":3}]") in
+    let g=us_cli_malformed(binary,source,output,"[{\"id\":9223372036854775808,\"name\":\"x\",\"score\":3}]") in
+    let h=us_cli_fails(binary,push(push(md_words(),pt_join(dir,"missing")),output),"open failed","a missing input") in
+    let i=ru_write(source,"[]") in
+    let run=dv_run(binary,push(push(md_words(),source),pt_join(dir,"missing/out")),md_words(),"",20000,65536) in
+    let j=dv_expect(run.ok && run.code==2,concat("json-cli wrote into a missing directory: exit ",int_text(run.code))) in
+    let shown=print_out("PASS JSON CLI: schema, stable sort/filter, Unicode, malformed data and recoverable file errors\n") in noop()
+
+effect fn us_io(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=us_build(tools,dir,"io","../fixtures/io.neo") in
+    let run=dv_run(binary,push(md_words(),pt_join(dir,"io-data")),md_words(),"",15000,65536) in
+    let a=dv_expect(run.ok && run.code==0 && len(run.output)==0,concat("io: exit ",int_text(run.code),", ",nt_diagnostic(run))) in
+    let shown=print_out("PASS file append/read/errors, environment/argv, embedded-NUL rejection, clocks and sleep\n") in noop()
+
+; HTTP helpers for the applications.
+fn us_int_field(borrow body:Arr u8 _, borrow name:Arr u8 _) -> i64
+  = let parsed=json_parse(body) in if !parsed.ok then -1 else
+    let field=json_get(parsed.value,name) in if !field.present then -1 else
+    let value=json_int(field.value) in if value.ok then value.value else -1
+fn us_true_field(borrow body:Arr u8 _, borrow name:Arr u8 _) -> bool
+  = let parsed=json_parse(body) in parsed.ok && let field=json_get(parsed.value,name) in field.present && tx_equal(field.value.raw,"true")
+
+effect fn us_status(borrow frame:RuFrame, status:i64, borrow label:Arr u8 _) -> unit
+  = dv_expect(frame.ok && frame.status==status,
+      concat(label,": status ",int_text(frame.status),", expected ",int_text(status)," ",tx_repr(pt_slice(frame.body,0,200),true)))
+
+; notes
+effect fn us_notes_env(borrow path:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(md_words(),concat("NEO_NOTES_FILE=",path)),"NEO_THREADS=4")
+
+effect fn us_notes_first(borrow binary:Arr u8 _, borrow path:Arr u8 _) -> Arr u8 _
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(us_notes_env(path))) in
+    let ready=ru_wait(server,port) in
+    let empty=ru_http(port,"GET","/api/notes","") in
+    let a=dv_expect(empty.ok && empty.status==200 && tx_equal(empty.body,"[]"),"notes did not start empty") in
+    let created=ru_http(port,"POST","/api/notes","{\"title\":\"café 🚀 <script>alert(\\\"x\\\")</script>\"}") in
+    let b=us_status(created,201,"creating a note") in
+    let c=dv_expect(us_int_field(created.body,"id")==1,"the first note is not id 1") in
+    let page=ru_http(port,"GET","/","") in let d=us_status(page,200,"the notes page") in
+    let e=dv_expect(ru_contains(page.body,"&lt;script&gt;") && !ru_contains(page.body,"<script>"),"the notes page does not escape titles") in
+    let f=us_status(ru_http(port,"POST","/api/notes","{bad"),400,"a malformed note") in
+    let requests=loop (i=0, out=md_words()) while i<30
+      next (i+1,push(out,ru_request("POST","/api/notes",concat("{\"title\":\"parallel ",int_text(i),"\"}"),true))) yield out in
+    let deadline=deadline_after(30000) in let replies=ru_fanout(port,requests,0,deadline.value) in
+    let ids=loop (i=0, mask=0) while i<len(replies)
+      next (i+1,let frame=ru_frame(md_word(replies,i)) in let shown=us_status(frame,201,"a concurrent note") in
+        let id=us_int_field(frame.body,"id") in if id>=0 && id<62 then bit_or(mask,shift_left(1,id)) else -1) yield mask in
+    let g=dv_expect(len(replies)==30 && ids==4294967292,"30 concurrent notes did not get ids 2..31") in
+    let h=us_status(ru_http(port,"PUT","/api/notes/1","{\"title\":\"updated 🚀\"}"),200,"updating a note") in
+    let i=us_status(ru_http(port,"DELETE","/api/notes/2",""),200,"deleting a note") in
+    let listed=ru_http(port,"GET","/api/notes","") in let j=us_status(listed,200,"listing notes") in
+    let parsed=json_parse(listed.body) in
+    let k=dv_expect(parsed.ok && json_array_len(parsed.value)==30,"the notes list does not hold 30 notes") in
+    let killed=ru_kill(server) in listed.body
+
+effect fn us_notes_restart(borrow binary:Arr u8 _, borrow path:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(us_notes_env(path))) in
+    let ready=ru_wait(server,port) in
+    let listed=ru_http(port,"GET","/api/notes","") in
+    let a=dv_expect(listed.ok && tx_equal(listed.body,expected),"the notes changed across SIGKILL and restart") in
+    let created=ru_http(port,"POST","/api/notes","{\"title\":\"after recovery\"}") in
+    let b=us_status(created,201,"creating a note after recovery") in
+    let c=dv_expect(us_int_field(created.body,"id")==32,"the note after recovery is not id 32") in
+    us_status(ru_http(port,"GET","/api/notes/999",""),404,"the torn note")
+
+effect fn us_notes_unavailable(borrow binary:Arr u8 _, borrow path:Arr u8 _, borrow label:Arr u8 _) -> unit
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(us_notes_env(path))) in
+    let ready=ru_wait(server,port) in us_status(ru_http(port,"GET","/api/notes",""),503,label)
+
+effect fn us_notes(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=us_build(tools,dir,"notes","../../examples/notes/main.neo") in
+    let path=pt_join(dir,"notes.log") in
+    let expected=us_notes_first(binary,path) in
+    let torn=fs_append(path,"{\"op\":\"put\",\"id\":999,\"title\":\"torn") in
+    let restarted=us_notes_restart(binary,path,expected) in
+    let log=dv_read(path) in
+    let a=dv_expect(tx_byte(log,len(log)-1)==10 && !ru_contains(log,"torn"),"the torn tail was not repaired") in
+    let corrupt=fs_append(path,"not-json\n") in
+    let b=us_notes_unavailable(binary,path,"a corrupt journal") in
+    let c=us_notes_unavailable(binary,pt_join(dir,"missing/notes"),"missing storage") in
+    let shown=print_out("PASS notes: CRUD, escaped SSR, 30 concurrent writes, SIGKILL/restart, torn-tail repair, corruption and storage failure\n") in noop()
+
+; webhook
+fn us_lines_with(borrow log:Arr u8 _, borrow key:Arr u8 _) -> i64
+  = let lines=ru_split(log,10) in
+    loop (i=0, count=0) while i<len(lines) next (i+1,if tx_equal(md_word(lines,i),key) then count+1 else count) yield count
+effect fn us_log(borrow path:Arr u8 _) -> Arr u8 _ = let read=fs_read(path) in if read.ok then read.value else tx_empty()
+effect fn us_attempts(borrow dir:Arr u8 _, borrow key:Arr u8 _) -> i64 = us_lines_with(us_log(pt_join(dir,"attempts")),key)
+; The first delivered body for key, or "" when there is none.
+effect fn us_effect(borrow dir:Arr u8 _, borrow key:Arr u8 _) -> Arr u8 _
+  = let lines=ru_split(us_log(pt_join(dir,"effects")),10) in let prefix=concat(key," ") in
+    loop (i=0, found=tx_empty()) while i<len(lines) && len(found)==0
+      next (i+1,let line=md_word(lines,i) in if str_starts(line,prefix) then pt_slice(line,len(prefix),len(line)) else found) yield found
+
+type UsJob = { present:bool, status:Arr u8 _, attempts:i64, raw:Arr u8 _ }
+fn us_job(borrow body:Arr u8 _, borrow id:Arr u8 _) -> UsJob
+  = let none=UsJob { present=false, status=tx_empty(), attempts=0, raw=tx_empty() } in
+    let parsed=json_parse(body) in if !parsed.ok then none else
+    let jobs=json_array_values(parsed.value) in
+    loop (i=0, found=none) while i<len(jobs) && !found.present
+      next (i+1,check i>=0 && i<len(jobs) in let job=jobs[i] in let name=json_text(json_get(job,"id").value) in
+        if !name.ok || !tx_equal(name.value,id) then found else
+        let status=json_text(json_get(job,"status").value) in let attempts=json_int(json_get(job,"attempts").value) in
+        UsJob { present=true, status=if status.ok then status.value else tx_empty(),
+          attempts=if attempts.ok then attempts.value else -1, raw=pt_copy(job.raw) }) yield found
+fn us_finished(borrow body:Arr u8 _, borrow id:Arr u8 _) -> bool
+  = let job=us_job(body,id) in job.present && (tx_equal(job.status,"done") || tx_equal(job.status,"failed"))
+fn us_job_count(borrow body:Arr u8 _) -> i64 = let parsed=json_parse(body) in if parsed.ok then json_array_len(parsed.value) else -1
+
+fn us_event(borrow id:Arr u8 _, borrow payload:Arr u8 _) -> Arr u8 _ = concat("{\"id\":\"",id,"\",\"payload\":",payload,"}")
+fn us_named(borrow key:Arr u8 _) -> Arr u8 _ = concat("{\"name\":\"café 🚀\",\"key\":\"",key,"\"}")
+
+effect fn us_hook_env(borrow dir:Arr u8 _, receiver:i64) -> Arr Arr u8 _ _
+  = push(push(push(push(push(push(md_words(),concat("NEO_WEBHOOK_FILE=",pt_join(dir,"queue.log"))),
+      concat("NEO_WEBHOOK_PORT=",int_text(receiver))),"NEO_WEBHOOK_TIMEOUT_MS=80"),"NEO_WEBHOOK_RETRY_MS=200"),
+      "NEO_WEBHOOK_MAX_ATTEMPTS=3"),"NEO_THREADS=4")
+
+effect fn us_jobs(port:i64) -> Arr u8 _ = let listed=ru_http(port,"GET","/jobs","") in if listed.ok && listed.status==200 then listed.body else tx_empty()
+
+; The four finished jobs' JSON, in order, after the first run.
+effect fn us_hook_first(borrow binary:Arr u8 _, borrow dir:Arr u8 _, receiver:i64) -> Arr u8 _
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(us_hook_env(dir,receiver))) in
+    let ready=ru_wait(server,port) in
+    let keys=push(push(push(push(md_words(),"ok"),"retry"),"dead"),"timeout") in
+    let queued=loop (i=0) while i<4
+      next (let key=md_word(keys,i) in let shown=us_status(ru_http(port,"POST","/events",us_event(key,us_named(key))),202,concat("enqueueing ",key)) in i+1) yield i in
+    let requests=loop (i=0, out=md_words()) while i<12
+      next (i+1,push(out,ru_request("POST","/events",us_event("ok","{\"changed\":true}"),true))) yield out in
+    let deadline=deadline_after(30000) in let replies=ru_fanout(port,requests,0,deadline.value) in
+    let duplicates=loop (i=0, all=len(replies)==12) while i<len(replies)
+      next (i+1,let frame=ru_frame(md_word(replies,i)) in all && frame.ok && frame.status==202 && us_true_field(frame.body,"duplicate")) yield all in
+    let a=dv_expect(duplicates,"concurrent duplicate events were not all answered as duplicates") in
+    let settled=loop (i=0, done=false) while i<800 && !done
+      next (i+1,let body=us_jobs(port) in
+        let finished=us_job_count(body)==4 && loop (k=0, all=true) while k<4 next (k+1,all && us_finished(body,md_word(keys,k))) yield all in
+        let paused=if finished then int_ok(0) else sleep_ms(30) in finished) yield done in
+    let b=dv_expect(settled,concat("the jobs did not finish: ",us_jobs(port))) in
+    let body=us_jobs(port) in
+    let ok=us_job(body,"ok") in let retry=us_job(body,"retry") in let dead=us_job(body,"dead") in let late=us_job(body,"timeout") in
+    let c=dv_expect(tx_equal(ok.status,"done") && tx_equal(retry.status,"done") && retry.attempts==3 &&
+      tx_equal(dead.status,"failed") && tx_equal(late.status,"failed"),concat("unexpected job states: ",body)) in
+    let d=dv_expect(us_attempts(dir,"ok")==1 && us_attempts(dir,"retry")==3 && us_attempts(dir,"dead")==3,
+      concat("unexpected delivery attempts: ",us_log(pt_join(dir,"attempts")))) in
+    let e=dv_expect(tx_equal(us_effect(dir,"ok"),us_named("ok")),concat("the ok delivery carried ",us_effect(dir,"ok"))) in
+    let expected=concat(ok.raw,"\n",retry.raw,"\n",dead.raw,"\n",late.raw) in
+    let f=us_status(ru_http(port,"POST","/events",us_event("resume","{\"pending\":true}")),202,"enqueueing resume") in
+    let pending=loop (i=0, seen=false) while i<2000 && !seen
+      next (i+1,let job=us_job(us_jobs(port),"resume") in
+        let now=job.present && job.attempts==1 && tx_equal(job.status,"pending") && us_attempts(dir,"resume")==1 in
+        let paused=if now then int_ok(0) else sleep_ms(5) in now) yield seen in
+    let g=dv_expect(pending,"no pending retry to crash") in
+    let killed=ru_kill(server) in expected
+
+effect fn us_hook_restart(borrow binary:Arr u8 _, borrow dir:Arr u8 _, receiver:i64, borrow expected:Arr u8 _) -> unit
+  = let port=ru_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(us_hook_env(dir,receiver))) in
+    let ready=ru_wait(server,port) in
+    let body=us_jobs(port) in
+    let restored=concat(us_job(body,"ok").raw,"\n",us_job(body,"retry").raw,"\n",us_job(body,"dead").raw,"\n",us_job(body,"timeout").raw) in
+    let a=dv_expect(tx_equal(restored,expected),concat("the jobs changed across SIGKILL and restart: ",body)) in
+    let again=ru_http(port,"POST","/events",us_event("retry","null")) in
+    let b=dv_expect(again.ok && again.status==202 && us_true_field(again.body,"duplicate"),"a recovered job was not a duplicate") in
+    let c=us_status(ru_http(port,"POST","/events","{\"id\":\"bad\\r\\nkey\",\"payload\":{}}"),400,"an invalid key") in
+    let d=us_status(ru_http(port,"POST","/events",us_event("after","{\"recover\":true}")),202,"enqueueing after") in
+    let delivered=loop (i=0, seen=false) while i<500 && !seen
+      next (i+1,let now=len(us_effect(dir,"after"))>0 && len(us_effect(dir,"resume"))>0 in
+        let paused=if now then int_ok(0) else sleep_ms(20) in now) yield seen in
+    let e=dv_expect(delivered,"pending/new delivery after restart failed") in
+    dv_expect(us_attempts(dir,"resume")==2,concat("resume was attempted ",int_text(us_attempts(dir,"resume"))," times"))
+
+effect fn us_webhook(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=us_build(tools,dir,"webhook","../../examples/webhook/main.neo") in
+    let receiver_binary=us_build(tools,dir,"receiver","../fixtures/usability_receiver.neo") in
+    let hooks=pt_join(dir,"hooks") in let made=fs_mkdir(hooks) in
+    let receiver=ru_port() in
+    using peer=process_start(receiver_binary,push(md_words(),int_text(receiver)),
+      dv_environment(push(push(md_words(),concat("NEO_RECEIVER_DIR=",hooks)),"NEO_THREADS=4"))) in
+    let ready=ru_wait(peer,receiver) in
+    let expected=us_hook_first(binary,hooks,receiver) in
+    let partial=fs_append(pt_join(hooks,"queue.log"),"{\"op\":\"partial") in
+    let restarted=us_hook_restart(binary,hooks,receiver,expected) in
+    let shown=print_out("PASS webhook: durable enqueue, concurrent deduplication, retries, deadlines, failure limits and restart recovery\n") in noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("usability") in
+    let only=dv_env("NEO_USABILITY_ONLY") in let all=len(only)==0 in
+    let a=if all || tx_equal(only,"cli") then let shown=us_json_cli(tools,dir) in noop() else noop() in
+    let b=if all || tx_equal(only,"io") then let shown=us_io(tools,dir) in noop() else noop() in
+    let c=if all || tx_equal(only,"notes") then let shown=us_notes(tools,dir) in noop() else noop() in
+    let d=if all || tx_equal(only,"webhook") then let shown=us_webhook(tools,dir) in noop() else noop() in
+    let cleaned=dv_clean(dir) in let shown=print_out("usability OK\n") in noop()

@@ -1,0 +1,30 @@
+; Ported from tests/data_sync.py: data persistence barriers keep new, grown
+; and overwritten contents and report EBADF (the fixture checks both), the
+; binary is static, and on Linux a genuine kernel EIO from fdatasync, injected
+; with a seccomp filter by tests/fixtures/runtime_exec.neo, fails the program.
+import "std:io"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("data-sync") in let probe=pt_join(dir,"probe") in
+    let a=dv_build(tools,pt_join(tools.here,"../fixtures/data_sync.neo"),probe,md_words()) in
+    let data=pt_join(dir,"data") in
+    let out=dv_output(probe,push(md_words(),data),md_words(),"") in
+    let b=dv_expect(tx_equal(out,"ok\n"),concat("the probe printed ",tx_repr(out,true))) in
+    let c=dv_expect(tx_equal(dv_read(data),"FIRST-second"),concat("the file holds ",tx_repr(dv_read(data),true))) in
+    let d=dv_audit(tools,probe) in
+    let e=if !dv_linux(tools) then noop() else
+      let wrapper=pt_join(dir,"exec") in
+      let built=dv_build(tools,pt_join(tools.here,"../fixtures/runtime_exec.neo"),wrapper,md_words()) in
+      let aarch64=ru_aarch64(tools) in
+      let args=push(push(push(push(push(push(md_words(),if aarch64 then "aarch64" else "x86_64"),"deny"),
+        if aarch64 then "83" else "75"),"5"),probe),pt_join(dir,"fault")) in
+      let run=dv_run(wrapper,args,md_words(),"",30000,65536) in
+      dv_expect(run.ok && !run.timeout && run.code!=0 && run.code!=126 && run.code!=127 && !tx_equal(run.output,"ok\n"),
+        concat("an fdatasync EIO was not reported: exit ",int_text(run.code),", ",nt_diagnostic(run))) in
+    let cleaned=dv_clean(dir) in let shown=print_out("data sync OK\n") in noop()
