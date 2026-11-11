@@ -1,0 +1,6 @@
+; An if whose branches are function values of one signature is that function
+; value, callable afterwards. Prints 42.
+fn add(a:i64,b:i64)->i64=a+b
+fn sub(a:i64,b:i64)->i64=a-b
+fn pick(plus:bool)->Fn(i64,i64)->i64=if plus then function(add) else function(sub)
+fn main()->i64=let p=pick(true) in let s=pick(false) in let g=if p(1,1)>s(1,1) then p else s in g(40,2)

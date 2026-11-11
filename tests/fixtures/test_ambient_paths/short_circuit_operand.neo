@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): a short-circuit operand proves the code it guards.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+fn g(xs:Arr i64 n,x:i64{n >= 4}) -> i64 = check x >= 0 && f(x) < 5 in xs[x]
+fn main() -> i64 = 0

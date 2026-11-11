@@ -1,0 +1,4 @@
+; From tests/test_callbacks.py (tag v0.2.3): f requires len(a) == n, which a function value would erase,
+; so g(3,"a") must not build.
+fn f(n:i64,a:Arr u8 n)->i64=len(a)
+fn main()->i64=let g=function(f) in g(3,"a")

@@ -1,0 +1,4 @@
+; A scalar parameter beside an array with its own length is independent, so
+; the function value builds and runs. Prints 4.
+fn f(n:i64,a:Arr u8 m)->i64=len(a)+n
+fn main()->i64=let g=function(f) in g(3,"a")

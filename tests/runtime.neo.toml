@@ -275,6 +275,51 @@ file = "drivers/usability_smoke.neo"
 stdout = "PASS JSON CLI: schema, stable sort/filter, Unicode, malformed data and recoverable file errors\nPASS file append/read/errors, environment/argv, embedded-NUL rejection, clocks and sleep\nPASS notes: CRUD, escaped SSR, 30 concurrent writes, SIGKILL/restart, torn-tail repair, corruption and storage failure\nPASS webhook: durable enqueue, concurrent deduplication, retries, deadlines, failure limits and restart recovery\nusability OK\n"
 timeout = 300
 
+# ssr_smoke.py: examples/ssr.neo serves exact pages, routes, rejects bad
+# requests and pipelines; its escape proves buf[k] in bounds from the sum of
+# esc_width (at most 6 per byte).
+[[test]]
+name = "ssr-exact-pages-and-pipelining"
+file = "drivers/ssr_smoke.neo"
+stdout = "SSR OK\n"
+timeout = 300
+
+# jsx_ssr_smoke.py: the TSX->Neo server's pages equal React's
+# renderToStaticMarkup (frozen digests) at 1 and 4 workers.
+[[test]]
+name = "jsx-ssr-react-identical-pages"
+file = "drivers/jsx_ssr_smoke.neo"
+stdout = "JSX SSR OK\n"
+timeout = 600
+
+# Sum bounds: a sum of span terms, each between c and d, lies between c*span
+# and d*span when span >= 0.
+[[test]]
+name = "sum-bounds-escape-width"
+file = "fixtures/sum_bounds/escape_width.neo"
+check = true
+
+[[test]]
+name = "sum-bounds-too-tight"
+file = "fixtures/sum_bounds/too_tight.neo"
+reject = true
+exit = 1
+diagnostic = "postcondition"
+
+[[test]]
+name = "sum-bounds-lower-too-tight"
+file = "fixtures/sum_bounds/lower_too_tight.neo"
+reject = true
+exit = 1
+diagnostic = "postcondition"
+
+[[test]]
+name = "sum-bounds-unknown-span"
+file = "fixtures/sum_bounds/unknown_span.neo"
+reject = true
+exit = 1
+diagnostic = "postcondition"
+
 # test_modules.py (Python neoc.modules) as native module fixtures.
 [[test]]
 name = "modules-aliases-and-imported-generics"

@@ -1,0 +1,4 @@
+; A branch that ends in check false never returns, so the other branch alone
+; must establish the postcondition.
+fn f(x : i64) -> i64 {result < 5} = if x < 4 then x + 1 else check false in 0
+fn main() -> i64 = 0

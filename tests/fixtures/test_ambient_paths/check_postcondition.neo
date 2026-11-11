@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): f returns only when x < 4 (the check traps
+; otherwise), so the check's fact proves its postcondition.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+fn main() -> i64 = 0

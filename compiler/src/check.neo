@@ -83,6 +83,11 @@ fn tc_domain(borrow value:TcValue) -> TlFormula
 fn tc_bind(move env:TcEnv, name:i64, value:TcValue) -> TcEnv
   = let domain=tc_domain(value) in tc_assume(env with { bindings=push(env.bindings,TcBinding { name=name, value=value }) },domain)
 fn tc_assume(move env:TcEnv, borrow facts:TlFormula) -> TcEnv = env with { facts=tl_and(env.facts,facts) }
+; Facts carried past the expression that established them (a check's
+; predicate, a short-circuit operand's facts). A disjunction would multiply
+; the branches of every formula it joins, so only one complete conjunction
+; (or false) is carried; dropping facts is always sound.
+fn tc_carried(borrow facts:TlFormula) -> TlFormula = if facts.complete && len(facts.branches)<=1 then facts else tl_true()
 fn tc_known(move result:TcResult, borrow facts:TlFormula) -> TcResult
   = if result.value.ty<=0 then result else result with { value=result.value with { known=tl_and(facts,result.value.known) } }
 fn tc_need_effect(borrow env:TcEnv, at:i64, borrow name:Arr u8 _, required:i64) -> TcResult
@@ -183,6 +188,18 @@ fn tc_decl_supported(borrow m:Mods, id:i64, outer:bool) -> bool
       loop (i=0, ok=true) while ok && i<ast_list_len(m.ast,t.a)
         next (i+1,tc_decl_supported(m,ast_list_at(m.ast,t.a,i),false)) yield ok
     else t.kind==n_t_arr() && (outer || (t.c==0 && tx_equal(md_str(m,t.b),"_"))) && tc_decl_supported(m,t.a,false)
+
+; Capabilities named in the function-value types of a declared type that
+; are not effect capabilities, in sorted order.
+fn tc_unknown_capabilities(borrow m:Mods, id:i64) -> Arr u8 _
+  = let t=md_node(m,id) in
+    if t.kind==n_t_arr() then tc_unknown_capabilities(m,t.a) else if t.kind!=n_t_fn() then tx_empty() else
+    let count=ast_list_len(m.ast,t.a) in
+    loop (i=0, names=te_unknown(m,t with { g=t.c })) while len(names)==0 && i<=count
+      next (i+1,tc_unknown_capabilities(m,if i<count then ast_list_at(m.ast,t.a,i) else t.b)) yield names
+fn tc_known_capabilities(borrow m:Mods, at:i64, id:i64, good:TcResult) -> TcResult
+  = let unknown=tc_unknown_capabilities(m,id) in
+    if len(unknown)==0 then good else tc_error(at,concat("unknown function-value effect capabilities: ",unknown))
 
 fn tc_named_node(borrow m:Mods, list:i64, name:i64) -> i64
   = let text=md_str(m,name) in
@@ -406,10 +423,12 @@ fn tc_callback(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:
     if signature.kind!=n_t_fn() || tc_lookup(m,env,arg.a).ty>0 || tc_abi_boundary(f) || ast_list_len(m.ast,f.e)>0 then
       tc_error(at,"function requires an internal function without owned parameters or refinements")
     else if ast_flag(f,fl_effect()) && f.g<0 then tc_error(at,"effect function values require explicit capabilities")
+    ; The value's signature erases array lengths, so a length shared with
+    ; another array or named by a scalar parameter would go unchecked.
     else let valid=loop (i=0, valid=true, sizes=tx_words()) while valid && i<ast_list_len(m.ast,f.b)
       next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in let size=md_str(m,ty.b) in
         p.f==0 && ast_list_len(m.ast,p.c)==0 && (ty.kind!=n_t_arr() || (ty.c==0 &&
-          (tx_equal(size,"_") || len(tx_insert_word(sizes,size))>len(sizes)))),
+          (tx_equal(size,"_") || (len(tx_insert_word(sizes,size))>len(sizes) && tc_named_node(m,f.b,ty.b)<0)))),
         let p=md_node(m,ast_list_at(m.ast,f.b,i)) in let ty=md_node(m,p.b) in
         if ty.kind==n_t_arr() then tx_insert_word(sizes,md_str(m,ty.b)) else sizes) yield valid in
     if !valid then tc_error(at,"function values require independent lengths and no owned parameters or refinements")
@@ -514,7 +533,11 @@ fn tc_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) 
       let size=if tl_equal(env.facts,yes.value.term,no.value.term)==1 then yes.value.term else tc_symbol(id,0) in
       tc_success(tc_array(yes.value.elem,size) with { inner=joined.lengths, record=yes.value.record, name=yes.value.name })
     else if yes.value.ty==n_t_i64() then tc_success(tc_integer(tc_symbol(id,0)))
-    else if yes.value.ty==n_t_rec() then tc_success(tc_fresh_result(tc_record_value(m,yes.value.record),id)) else tc_type(yes.value.ty) in
+    else if yes.value.ty==n_t_rec() then tc_success(tc_fresh_result(tc_record_value(m,yes.value.record),id))
+    ; Both branches have the same shape: the resource of a Ref, the signature of a function value.
+    else if yes.value.ty==n_t_ref() || yes.value.ty==n_t_fn() then
+      tc_success(tc_value(yes.value.ty) with { record=yes.value.record, name=yes.value.name })
+    else tc_type(yes.value.ty) in
     let then_facts=tl_and(condition.value.yes,yes.value.known) in
     let else_facts=tl_and(condition.value.no,no.value.known) in
     let branches=if result.value.ty!=n_t_i64() then
@@ -535,6 +558,25 @@ fn tc_uniform_size(borrow env:TcEnv, borrow term:Arr i64 _) -> Arr i64 _
       next (tl_end(term,i+1),tc_environment_has_symbol(env,tx_at(term,i))) yield ok in
     if visible then term else tx_ints()
 
+; The bound constants the reference checker tried for a sum's body.
+fn tc_sum_constant(i:i64) -> i64
+  = if i<7 then i else if i==7 then 8 else if i==8 then 10 else if i==9 then 16 else if i==10 then 100 else 1000
+; A sum of span terms, each between low and high, lies between low*span and
+; high*span when span >= 0 (sums trap on overflow). A sum of nonnegative
+; terms is nonnegative even over an empty range.
+fn tc_sum_bounds(borrow outer:TlFormula, borrow body:TlFormula, borrow term:Arr i64 _, borrow result:Arr i64 _, borrow span:Arr i64 _) -> TlFormula
+  = if len(term)==0 || len(result)==0 then tl_true() else
+    let low=loop (i=0, low=-1) while i<10 && tl_entails(body,tl_sub(tl_constant(tc_sum_constant(i)),term))==1
+      next (i+1,tc_sum_constant(i)) yield low in
+    ; A body that is not at most 1000 is not at most any smaller constant.
+    let high=if tl_entails(body,tl_sub(term,tl_constant(1000)))!=1 then -1 else
+      loop (i=0) while i<11 && tl_entails(body,tl_sub(term,tl_constant(tc_sum_constant(i))))!=1 next (i+1) yield tc_sum_constant(i) in
+    let sign=if low>=0 then tc_condition(result,tl_constant(0),9).yes else tl_true() in
+    if (low<=0 && high<0) || tl_entails(outer,tl_scaled(span,-1))!=1 then sign else
+    let lower=if low>0 then tl_atom(tl_sub(tl_scaled(span,low),result)) else tl_true() in
+    let upper=if high>=0 then tl_atom(tl_sub(result,tl_scaled(span,high))) else tl_true() in
+    tl_and(sign,tl_and(lower,upper))
+
 fn tc_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) -> TcResult
   = let lo=tc_infer(m,fns,env,n.b) in if lo.value.ty<=0 then lo else
     let hi=tc_infer(m,fns,tc_assume(env,lo.value.known),n.c) in if hi.value.ty<=0 then hi else
@@ -547,10 +589,9 @@ fn tc_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Nod
     if n.kind==n_sum() then
       if tc_numeric(value.value.ty) || tc_numeric_record(m,value.value) then
         let result=tc_fresh_result(value.value,id) in
-        let sign=if value.value.ty==n_t_i64() &&
-          tl_entails(tl_and(inner.facts,value.value.known),tl_scaled(value.value.term,-1))==1 then
-          tc_condition(result.term,tl_constant(0),9).yes else tl_true() in
-        tc_known(tc_success(result),tl_and(known,sign))
+        let bounds=if value.value.ty!=n_t_i64() then tl_true() else
+          tc_sum_bounds(env.facts,tl_and(inner.facts,value.value.known),value.value.term,result.term,span) in
+        tc_known(tc_success(result),tl_and(known,bounds))
       else tc_error(n.d,concat("sum body must be numeric or a numeric record, got ",tc_show(value.value)))
     else
       ; Each iteration can produce a different nested length. Retain only
@@ -575,7 +616,11 @@ fn tc_infer(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64) -> Tc
       let inner=if n.a==10 then tc_assume(after_left,left.value.yes) else if n.a==11 then tc_assume(after_left,left.value.no) else after_left in
       let right=tc_infer(m,fns,inner,n.c) in if right.value.ty<=0 then right else
       let known=if n.a==10 || n.a==11 then left.value.known else tl_and(left.value.known,right.value.known) in
-      tc_known(tc_binary(tc_assume(env,known),id,n.a,left.value,right.value),known)
+      ; A short-circuit operand's facts hold only on the outcomes that ran it.
+      let carried=tc_carried(right.value.known) in
+      let operand=if (n.a!=10 && n.a!=11) || tl_is_true(carried) then right.value else
+        right.value with { yes=tl_and(carried,right.value.yes), no=tl_and(carried,right.value.no) } in
+      tc_known(tc_binary(tc_assume(env,known),id,n.a,left.value,operand),known)
     else if kind==n_un() || kind==n_cast() then
       let value=tc_infer(m,fns,env,n.b) in if value.value.ty<=0 then value
       else tc_known(if kind==n_un() then tc_unary(id,n.a,value.value) else tc_cast(id,value.value,md_node(m,n.a).kind),value.value.known)
@@ -609,7 +654,10 @@ fn tc_infer(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64) -> Tc
     else if kind==n_check() then
       let condition=tc_infer(m,fns,env with { pure=true },n.a) in if condition.value.ty<=0 then condition
       else if condition.value.ty!=n_t_bool() then tc_error(n.a,"check predicate must be bool")
-      else tc_infer(m,fns,tc_assume(env,tl_and(condition.value.known,condition.value.yes)),n.b)
+      ; The check traps unless its predicate holds, so the predicate holds
+      ; wherever the value was computed (a postcondition, a caller's join).
+      else let holds=tl_and(condition.value.known,condition.value.yes) in
+      tc_known(tc_infer(m,fns,tc_assume(env,holds),n.b),tc_carried(holds))
     else if kind==n_call() then tc_call(m,fns,env,id,n)
     else tc_unsupported(id,"expression outside the current checker")
 
@@ -677,6 +725,7 @@ fn tc_loop_inits(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, 
             let declared=tc_decl_type(m,ann.a) in
             let result=if value.value.ty<=0 || s.b<0 then value
               else if !tc_decl_supported(m,ann.a,false) then tc_unsupported(s.b,"loop state annotation outside the current checker")
+              else if len(tc_unknown_capabilities(m,ann.a))>0 then tc_known_capabilities(m,s.b,ann.a,value)
               else if !tc_shape_equal(value.value,declared) then tc_error(id,concat("loop state ",md_str(m,s.a),
                 " initialised with ",tc_show(value.value),", declared ",tc_show(declared))) else value in
             TcArgs { values=push(a.values,result.value), result=result, known=tl_and(a.known,result.value.known) }) yield a
@@ -690,7 +739,7 @@ fn tc_loop_bind(borrow m:Mods, move env:TcEnv, states:i64, borrow values:Arr TcV
             if !symbolic then tc_bind(env,s.a,v)
             else if v.ty==n_t_i64() then tc_bind(env,s.a,tc_integer(tc_symbol(id,0)))
             else if v.ty==n_t_rec() then tc_bind(env,s.a,tc_fresh_result(tc_record_value(m,v.record),id))
-            else if v.ty!=n_t_arr() then tc_bind(env,s.a,tc_value(v.ty))
+            else if v.ty!=n_t_arr() then tc_bind(env,s.a,tc_value(v.ty) with { record=v.record, name=v.name })
             else let term=if tx_at(widen,i)!=0 || len(v.term)==0 then tc_symbol(id,1) else v.term in
               tc_bind(env,s.a,v with { term=term, known=tl_true() })) yield env
 
@@ -755,7 +804,7 @@ fn tc_param(borrow m:Mods, id:i64, main:bool, boundary:bool) -> TcResult
     else if array && md_node(m,p.b).c!=0 then tc_error(id,"array parameter sizes must be variables")
     else if p.f==2 && (boundary || (!array && value.ty!=n_t_rec())) then tc_error(id,"borrow parameters require an internal array or record type")
     else if main && value.ty!=n_t_i64() then tc_error(id,"main parameters must be i64 (parsed from argv)")
-    else tc_success(value)
+    else tc_known_capabilities(m,id,p.b,tc_success(value))
 
 fn tc_bind_parameter_array(borrow m:Mods, move context:TcContext, id:i64) -> TcContext
   = let p=md_node(m,id) in let t=md_node(m,p.b) in if t.kind!=n_t_arr() then context else
@@ -790,7 +839,7 @@ fn tc_signature(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> TcResult
     else if boundary && tc_abi_duplicate(m,fns,id) then tc_error(id,concat("duplicate function ",md_str(m,f.a)))
     else if ast_list_len(m.ast,f.h)>0 || !tc_decl_supported(m,f.c,true) then
       tc_unsupported(id,"function signature outside the current checker")
-    else let params=loop (i=0, result=tc_type(n_t_unit())) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
+    else let params=loop (i=0, result=tc_known_capabilities(m,id,f.c,tc_type(n_t_unit()))) while result.value.ty>0 && i<ast_list_len(m.ast,f.b)
       next (i+1, tc_param(m,ast_list_at(m.ast,f.b,i),main,boundary)) yield result in
     if params.value.ty<=0 then params
     else if boundary && !tc_abi_signature(m,f) then
@@ -842,7 +891,9 @@ fn tc_body(borrow m:Mods, borrow fns:Arr i64 _, borrow required:Arr i64 _, modul
 ; on the dependency path would require an infinitely sized value layout.
 type TcRecords = { flags:Arr i64 _, result:TcResult }
 fn tc_record_field_type(borrow m:Mods, move records:TcRecords, id:i64, owner:i64) -> TcRecords
-  = let t=md_node(m,id) in if tc_scalar(t.kind) || ((t.kind==n_t_fn() || t.kind==n_t_ref()) && tc_decl_supported(m,id,false)) then records
+  = let t=md_node(m,id) in let unknown=tc_unknown_capabilities(m,id) in
+    if len(unknown)>0 then records with { result=tc_error(owner,concat("unknown function-value effect capabilities: ",unknown)) }
+    else if tc_scalar(t.kind) || ((t.kind==n_t_fn() || t.kind==n_t_ref()) && tc_decl_supported(m,id,false)) then records
     else if t.kind==n_t_arr() then
       if t.c!=0 || !tx_equal(md_str(m,t.b),"_") then records with { result=tc_error(owner,"record array fields use existential size _") }
       else tc_record_field_type(m,records,t.a,owner)

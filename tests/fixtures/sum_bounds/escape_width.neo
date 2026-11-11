@@ -1,0 +1,10 @@
+; The escaped length of s (examples/ssr.neo's escape) is between n and 6*n,
+; so its bytes index a 6*n buffer.
+fn esc_width (c : u8) -> i64 {result >= 1, result <= 6}
+  = if c == '&' then 5 else if c == '<' || c == '>' then 4 else if c == '"' || c == '\'' then 6 else 1
+fn escaped_length (s : Arr u8 n) -> i64 {result >= n, result <= 6 * n} = sum(i in 0..n) esc_width(s[i])
+fn pick (s : Arr u8 n) -> Arr u8 _
+  = let total = sum(i in 0..n) esc_width(s[i]) in
+    let buf = arr(k in 0..6 * n) u8(32) in
+    arr(k in 0..total) buf[k]
+fn main () -> i64 = 0

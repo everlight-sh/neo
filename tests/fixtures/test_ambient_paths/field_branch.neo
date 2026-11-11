@@ -1,0 +1,5 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): field reads do not carry branch facts to the other branch.
+fn f(x : i64) -> i64 {result > x, result < 5} = check x < 4 in x + 1
+type R = { pos : i64 }
+fn g(xs:Arr i64 n,r:R{n >= 4}) -> i64 = if r.pos >= 0 && r.pos < 4 then f(r.pos) else xs[r.pos]
+fn main() -> i64 = 0

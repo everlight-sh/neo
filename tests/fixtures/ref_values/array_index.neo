@@ -1,0 +1,13 @@
+; Indexing an Arr Ref<Handle> _ under an if gives a Ref<Handle> (it gave an empty type:
+; "body has type , declared Ref<Handle>"). Prints 142.
+import "std:arena"
+resource type Handle={value:i64} drop release
+effect(fs) fn release(handle:Handle)->unit=noop()
+effect(process) fn create(v:i64)->Handle=Handle { value=v }
+effect(process) fn value(r:Ref<Handle>)->i64=borrow_ref(r).value
+fn pick(borrow refs:Arr Ref<Handle> _, i:i64, none:Ref<Handle>) -> Ref<Handle>
+  = if i>=0 && i<len(refs) then refs[i] else none
+effect(fs,net,process) fn main()->i64=using arena=new_arena(8) in using a=create(40) in using b=create(2) in using c=create(100) in
+  let ra=adopt(a,arena) in let rb=adopt(b,arena) in let rc=adopt(c,arena) in
+  let refs=arr(i in 0..2) if i==0 then ra else rb in
+  value(pick(refs,0,rc))+value(pick(refs,1,rc))+value(pick(refs,5,rc))
