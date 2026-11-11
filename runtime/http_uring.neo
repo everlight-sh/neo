@@ -116,17 +116,40 @@ effect fn rt_uring_complete (d : ptr, state : ptr, handler : ptr, index : i64, s
       else rt_drop(state)
     else if result == 0 then rt_drop(state)
     else if sending then
+      let progress = store_i64(state, 72, rt_http_now()) in
       let sent = load_i64(state, 40) + result in
       if sent < load_i64(state, 32) then let saved = store_i64(state, 40, sent) in rt_uring_send(d, state, index)
       else let reset = store_i64(state, 32, 0) in let rewound = store_i64(state, 40, 0) in
-        if load_i64(state, 48) == 1 then rt_drop(state) else rt_uring_continue(d, state, handler, index)
-    else let received = store_i64(state, 16, load_i64(state, 16) + result) in
+        let close = load_i64(state, 48) in
+        if close == 1 then rt_drop(state)
+        else if close == 3 then let lingering = rt_http_linger(state) in rt_uring_recv(d, state, index)
+        else rt_uring_continue(d, state, handler, index)
+    else if load_i64(state, 48) == 4 then
+      ; Lingering after a refused request: discard what arrives, up to 1 MiB.
+      let total = load_i64(state, 120) + result in
+      if total > 1048576 then rt_drop(state) else let counted = store_i64(state, 120, total) in rt_uring_recv(d, state, index)
+    else let before = load_i64(state, 16) in let received = store_i64(state, 16, before + result) in
+      let stamped = rt_http_received(state, before) in
       rt_uring_continue(d, state, handler, index)
 
-; First dropped state below the count, else the count (rt_accept_at refuses 1024).
+; Timeouts: a connection always has an operation in flight, so an expired one
+; is shut down, and that operation's completion closes it.
+effect fn rt_uring_sweep (states : ptr, n : i64, control : ptr, parent : i64) -> unit
+  = let orphaned = if load_i64(runtime_state(), 2024) != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+    let now = rt_http_now() in
+    let swept = loop (i = 0) while i < n
+      next (let state = ptr_add(states, i * 128) in let action = rt_http_expiry(state, now, control) in
+        let expired = if action == 0 then noop() else
+          let answered = if action == 2 then rt_http_refuse_now(load_i64(state, 0), 408) else noop() in
+          let marked = store_i64(state, 112, bit_or(load_i64(state, 112), 4)) in
+          let shut = rt_shutdown_both(load_i64(state, 0)) in noop() in i + 1)
+      yield i in noop()
+
+; First dropped state below the count, else the count (rt_accept_at refuses
+; slots at the connection limit).
 effect fn rt_uring_slot (states : ptr, n : i64) -> i64
   = loop (i = 0, found = -1) while found < 0 && i < n
-      next (i + 1, if load_i64(states, i * 64) < 0 then i else -1)
+      next (i + 1, if load_i64(states, i * 128) < 0 then i else -1)
       yield if found < 0 then n else found
 
 effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, listener : i64, control : ptr,
@@ -140,7 +163,7 @@ effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, lis
       let drained = loop (more = true) while more
         next (let slot = rt_accept_at(listener, states, rt_uring_slot(states, load_i64(local, 0)), true,
                 local, control, worker, workers) in
-              if slot < 0 then false else let queued = rt_uring_recv(d, ptr_add(states, slot * 64), slot) in true)
+              if slot < 0 then false else let queued = rt_uring_recv(d, ptr_add(states, slot * 128), slot) in true)
         yield more in noop()
     else if user == 1 then
       let notify = load_i64(control, 256 + worker * 16) in
@@ -148,7 +171,7 @@ effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, lis
       rt_uring_push(d, 6, notify, 0, 0, 1, 1)
     else let index = (user - 2) / 2 in
       if index < 0 || index >= load_i64(local, 0) then ax_trap(data("invalid io_uring completion\0")) else
-        let state = ptr_add(states, index * 64) in
+        let state = ptr_add(states, index * 128) in
         if load_i64(state, 0) < 0 then ax_trap(data("io_uring completion for a closed connection\0"))
         else rt_uring_complete(d, state, handler, index, user % 2 == 1, result)
 
@@ -167,7 +190,7 @@ effect fn rt_uring_reap (d : ptr, states : ptr, local : ptr, handler : ptr, list
 
 effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control : ptr, worker : i64,
                               workers : i64{workers >= 1}, parent : i64) -> i64
-  = let states = ax_alloc(1024 * 64) in
+  = let states = ax_alloc(rt_http_limit(control) * 128) in
     ; local: connection count@0, listener polled@8.
     let local = stack_alloc(16) in let cleared = memset(local, i32(0), 16) in
     let scratch = stack_alloc(64) in
@@ -186,11 +209,12 @@ effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control 
     let waiting = stack_alloc(24) in let zeroed = memset(waiting, i32(0), 24) in
     let limit = store_i64(waiting, 16, ptr_to_i64(timeout)) in
     loop (running = true) while running
-      next (let alive = if worker != 0 && rt_getppid() != parent then ax_exit(0) else noop() in
+      next (let swept = if rt_http_sweep_due() then rt_uring_sweep(states, load_i64(local, 0), control, parent) else noop() in
             let listening = if load_i64(control, 0) == worker && load_i64(local, 8) == 0 then
               let polled = rt_uring_push(d, 6, target, 0, 0, 1, 0) in store_i64(local, 8, 1) else noop() in
             let entered = rt_uring_submit(d, waiting) in
             let error = if entered < 0 then i64(load_i32(rt_errno(), 0)) else 0 in
+            let tick = rt_http_tick() in
             ; ETIME, EINTR, EAGAIN and EBUSY leave the ring usable.
             if error != 0 && error != 62 && error != 4 && error != 11 && error != 16 then
               let failed = ax_trap(data("io_uring_enter syscall failed\0")) in false

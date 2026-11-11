@@ -361,9 +361,19 @@ The accept/read/write loop, HTTP framing, partial writes, keep-alive,
 pipelining and connection cleanup are Neo code. `handler : Arr u8 n ->
 Arr u8 _` remains a pure function from request bytes to response bytes.
 The implementation starts one worker process per configured CPU, with
-`NEO_THREADS=N` selecting a worker count. Each owns a dense vector of up to
-1,024 connections, with a 64 KiB input limit per connection. A shared accept
-turn and inherited notification socketpairs assign connections round-robin.
+`NEO_THREADS=N` selecting a worker count. With more than one worker the parent
+process only supervises: a worker that exits while the server is not shutting
+down is replaced (a second later if it lived less than one). Each worker owns a
+dense vector of up to 1,024 connections (`NEO_HTTP_CONNECTIONS=N` changes the
+limit; a full worker answers 503), with an input buffer that starts at 64 KiB.
+A shared accept turn and inherited notification socketpairs assign connections
+round-robin; the turn skips a worker that is being replaced.
+Idle and slow connections are closed: headers must be complete 10 s after a
+request's first byte (answered 408), a body must make progress every 30 s, a
+response must make progress every 30 s, and a keep-alive connection may stay
+idle for 60 s. `NEO_HTTP_HEADER_TIMEOUT_MS`, `NEO_HTTP_BODY_TIMEOUT_MS`,
+`NEO_HTTP_WRITE_TIMEOUT_MS` and `NEO_HTTP_IDLE_TIMEOUT_MS` change them (0
+disables one); every backend checks them once a second.
 Each event can batch up to 64 responses, with a 256 KiB flush threshold. Retained
 output buffers handle partial writes and backpressure; buffered complete
 requests keep progressing even when no new input bytes arrive.
@@ -379,8 +389,17 @@ entire ready batch has been handled. `NEO_HTTP_URING=0` selects epoll,
 `NEO_HTTP_POLL=1` selects the previous Linux ppoll backend for diagnostics.
 All backends use direct kernel syscalls and the same HTTP framing, batching and
 worker assignment.
-It supports Content-Length bodies; duplicate/invalid Content-Length and
-Transfer-Encoding are rejected by closing the connection. The previous
+It supports Content-Length and chunked bodies. Requests it refuses are answered
+with `Connection: close` (400 for invalid or ambiguous framing, 413 for a body
+over 16 MiB, 431 for headers over 16 KiB); the connection then reads and
+discards up to 1 MiB for up to 2 s before closing, so a client that is still
+uploading sees the reply instead of a reset. `Expect: 100-continue` is answered
+with `100 Continue` once the headers are in, or with 413 at once when the
+declared body is over the limit. In handlers, `web_peer(request)` is the
+connected client's address, and `web_client_ip(request)` and
+`web_client_proto(request)` also read `X-Forwarded-For` and
+`X-Forwarded-Proto`, but only through proxies listed in `NEO_TRUSTED_PROXIES`
+(addresses or CIDR ranges, separated by commas or spaces). The previous
 `NEO_SERVE=threads` mode has been removed. Compute comprehensions dispatch
 with shared-address clone/wait workers for allocation-free numeric regions on
 Linux and isolated fork/wait workers elsewhere, outside request handlers. Worker

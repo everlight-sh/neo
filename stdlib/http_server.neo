@@ -15,29 +15,64 @@ fn web_document(move body: WebHtml) -> WebResponse
 fn web_json(body: Arr u8 n) -> WebResponse
   = WebResponse { status=200,body=body,content_type="application/json; charset=utf-8",immutable=false,headers="" }
 
+; RFC 9110 reason phrases, split by class so 200 stays the first test.
 fn web_reason(status:i64) -> Arr u8 _
-  = if status==200 then "OK" else if status==201 then "Created" else if status==202 then "Accepted" else if status==204 then "No Content"
-    else if status==301 then "Moved Permanently" else if status==302 then "Found" else if status==303 then "See Other" else if status==304 then "Not Modified"
-    else if status==307 then "Temporary Redirect" else if status==308 then "Permanent Redirect" else if status==400 then "Bad Request" else if status==401 then "Unauthorized"
-    else if status==403 then "Forbidden" else if status==404 then "Not Found" else if status==405 then "Method Not Allowed" else if status==409 then "Conflict"
-    else if status==413 then "Content Too Large" else if status==415 then "Unsupported Media Type" else if status==422 then "Unprocessable Content" else if status==429 then "Too Many Requests" else if status==503 then "Service Unavailable" else "Internal Server Error"
+  = if status<300 then
+      if status==200 then "OK" else if status==201 then "Created" else if status==202 then "Accepted" else if status==203 then "Non-Authoritative Information"
+      else if status==204 then "No Content" else if status==205 then "Reset Content" else if status==206 then "Partial Content" else "Internal Server Error"
+    else if status<400 then
+      if status==301 then "Moved Permanently" else if status==302 then "Found" else if status==303 then "See Other" else if status==304 then "Not Modified"
+      else if status==307 then "Temporary Redirect" else if status==308 then "Permanent Redirect" else "Internal Server Error"
+    else if status<500 then
+      if status==400 then "Bad Request" else if status==401 then "Unauthorized" else if status==403 then "Forbidden" else if status==404 then "Not Found"
+      else if status==405 then "Method Not Allowed" else if status==406 then "Not Acceptable" else if status==408 then "Request Timeout" else if status==409 then "Conflict"
+      else if status==410 then "Gone" else if status==411 then "Length Required" else if status==412 then "Precondition Failed" else if status==413 then "Content Too Large"
+      else if status==414 then "URI Too Long" else if status==415 then "Unsupported Media Type" else if status==416 then "Range Not Satisfiable" else if status==417 then "Expectation Failed"
+      else if status==421 then "Misdirected Request" else if status==422 then "Unprocessable Content" else if status==426 then "Upgrade Required" else if status==428 then "Precondition Required"
+      else if status==429 then "Too Many Requests" else if status==431 then "Request Header Fields Too Large" else if status==451 then "Unavailable For Legal Reasons" else "Internal Server Error"
+    else if status==501 then "Not Implemented" else if status==502 then "Bad Gateway" else if status==503 then "Service Unavailable" else if status==504 then "Gateway Timeout"
+    else if status==505 then "HTTP Version Not Supported" else "Internal Server Error"
 fn web_header_safe(value:Arr u8 n) -> bool
   = http_field_value(value)
+; URLs allow no control byte at all, TAB included: browsers delete TAB, CR and LF
+; from a URL before parsing it, so "/\t/evil.example" would load //evil.example.
+fn web_url_bytes(borrow value:Arr u8 n) -> bool
+  = loop(i:i64{i>=0}=0,valid=true) while valid && i<n next(i+1,let byte=value[i] in byte>=' ' && byte!=u8(127)) yield valid
 fn web_with_header(response:WebResponse,name:Arr u8 n,value:Arr u8 m) -> WebResponse
   = if !http_token(name) || !web_header_safe(value) || str_equal(http_lower(name),"content-length") || str_equal(http_lower(name),"transfer-encoding") || str_equal(http_lower(name),"connection") || str_equal(http_lower(name),"content-type")
     then web_reply(500,"Invalid response header","text/plain; charset=utf-8") else response with { headers=concat(response.headers,name,": ",value,"\r\n") }
 fn web_status(response:WebResponse,status:i64) -> WebResponse
   = response with { status=if status>=200 && status<=599 then status else 500 }
 fn web_redirect(location:Arr u8 n,status:i64) -> WebResponse
-  = if !web_header_safe(location) || !str_starts(location,"/") || str_starts(location,"//") || str_find(location,"\\").present then web_reply(400,"Invalid redirect","text/plain") else
+  = if !web_url_bytes(location) || !str_starts(location,"/") || str_starts(location,"//") || str_find(location,"\\").present then web_reply(400,"Invalid redirect","text/plain") else
     web_with_header(web_status(web_reply(200,"","text/plain"),if status==301 || status==302 || status==303 || status==307 || status==308 then status else 303),"Location",location)
-fn web_encode_connection(response:WebResponse,head:bool,close:bool) -> Arr u8 _
+; The response's own Cache-Control, Content-Security-Policy and Date replace the
+; defaults; names match at the start of a header line, in any case.
+private fn web_has_header(borrow lowered:Arr u8 n, borrow name:Arr u8 m, borrow line:Arr u8 k) -> bool
+  = n>0 && (str_starts(lowered,name) || str_find(lowered,line).present)
+private fn web_encode_wire(response:WebResponse,head:bool,close:bool,stamp:i64) -> Arr u8 _
   = let empty=response.status==204 || response.status==304 in
+    let lowered=if len(response.headers)>0 then http_lower(response.headers) else "" in
     concat("HTTP/1.1 ",int_text(response.status)," ",web_reason(response.status),"\r\n",if empty then "" else concat("Content-Length: ",int_text(len(response.body)),"\r\n"),
       "Content-Type: ",if web_header_safe(response.content_type) then response.content_type else "application/octet-stream","\r\n",
-      if len(response.headers)>0 && str_find(http_lower(response.headers),"cache-control:").present then "" else concat("Cache-Control: ",if response.immutable then "public, max-age=31536000, immutable" else "no-store","\r\n"),
-      "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
+      if web_has_header(lowered,"cache-control:","\ncache-control:") then "" else concat("Cache-Control: ",if response.immutable then "public, max-age=31536000, immutable" else "no-store","\r\n"),
+      if stamp<0 || web_has_header(lowered,"date:","\ndate:") then "" else concat("Date: ",web_http_date(stamp),"\r\n"),
+      "X-Content-Type-Options: nosniff\r\n",
+      if web_has_header(lowered,"content-security-policy:","\ncontent-security-policy:") then ""
+        else "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
       response.headers,if close then "Connection: close\r\n\r\n" else "Connection: keep-alive\r\n\r\n",if head || empty then "" else response.body)
+fn web_encode_connection(response:WebResponse,head:bool,close:bool) -> Arr u8 _ = web_encode_wire(response,head,close,-1)
+private fn web_two(value:i64) -> Arr u8 _ = if value<10 then concat("0",int_text(value)) else int_text(value)
+; IMF-fixdate for Unix milliseconds, e.g. "Sun, 06 Nov 1994 08:49:37 GMT". The
+; civil date comes from days since 1970-01-01 (Howard Hinnant's civil_from_days).
+fn web_http_date(ms:i64) -> Arr u8 _
+  = let seconds=if ms<0 then 0 else ms/1000 in let days=seconds/86400 in let rest=seconds%86400 in
+    let z=days+719468 in let era=z/146097 in let doe=z-era*146097 in
+    let yoe=(doe-doe/1460+doe/36524-doe/146096)/365 in let doy=doe-(365*yoe+yoe/4-yoe/100) in
+    let mp=(5*doy+2)/153 in let day=doy-(153*mp+2)/5+1 in let month=if mp<10 then mp+3 else mp-9 in
+    let year=yoe+era*400+(if month<=2 then 1 else 0) in let weekday=(days+4)%7 in
+    concat(str_slice("SunMonTueWedThuFriSat",weekday*3,weekday*3+3),", ",web_two(day)," ",str_slice("JanFebMarAprMayJunJulAugSepOctNovDec",(month-1)*3,month*3)," ",
+      int_text(year)," ",web_two(rest/3600),":",web_two(rest/60%60),":",web_two(rest%60)," GMT")
 
 private type WebTarget = { method_end:i64, end:i64, query:i64 }
 private fn web_target(borrow request:Arr u8 n) -> WebTarget
@@ -76,18 +111,23 @@ fn web_header(raw: Arr u8 n, name: Arr u8 m) -> Arr u8 _
         if colon.present && str_equal(http_lower(str_slice(line,0,colon.value)),name) then str_trim(str_slice(line,colon.value+1,len(line))) else value,
         let end=http_line_end(raw,at) in end<=at) yield value
 
-; Text without % or + decodes to itself; only the validity checks remain.
-fn web_decode(text: Arr u8 n) -> OptionBytes
-  = let plain=loop(i=0) while i<n && str_byte(text,i)!=37 && str_byte(text,i)!=43 next(i+1) yield i in
+; Text without % (or +, when plus means space) decodes to itself; only the
+; validity checks remain.
+private fn web_decode_bytes(text: Arr u8 n, plus: bool) -> OptionBytes
+  = let plain=loop(i=0) while i<n && str_byte(text,i)!=37 && (!plus || str_byte(text,i)!=43) next(i+1) yield i in
     if plain==n then (if utf8_valid(text) && !str_find(text,"\0").present then some_bytes(text) else none_bytes()) else
     loop(i=0,out="",valid=true) while valid && i<n
       next(i+(if str_byte(text,i)==37 then 3 else 1),
         let byte=str_byte(text,i) in if byte==37 then
           let hi=http_hex(str_byte(text,i+1)) in let lo=http_hex(str_byte(text,i+2)) in
           if i+2<n && hi>=0 && lo>=0 then let value=hi*16+lo in check value>=0 && value<=255 in concat(out,arr(k in 0..1) u8(value)) else out
-        else concat(out,if byte==43 then " " else str_slice(text,i,i+1)),
+        else concat(out,if plus && byte==43 then " " else str_slice(text,i,i+1)),
         if str_byte(text,i)==37 then i+2<n && http_hex(str_byte(text,i+1))>=0 && http_hex(str_byte(text,i+2))>=0 else true)
       yield if valid && utf8_valid(out) && !str_find(out,"\0").present then some_bytes(out) else none_bytes()
+; Query strings and form bodies: + is a space.
+fn web_decode(text: Arr u8 n) -> OptionBytes = web_decode_bytes(text,true)
+; Path segments: only %XX is decoded, and + stays a plus.
+fn web_path_decode(text: Arr u8 n) -> OptionBytes = web_decode_bytes(text,false)
 type WebQueryScan = { at: i64, value: OptionBytes, done: bool }
 ; A key without % or + is its own decoding, so it is compared raw; the decoder's
 ; validity checks then only matter for a key that matches.
@@ -105,7 +145,7 @@ fn web_query_get(query: Arr u8 n, name: Arr u8 m) -> OptionBytes
       next(web_query_step(query,name,scan.at)) yield scan.value
 fn web_segment(path: Arr u8 n, prefix: Arr u8 m) -> OptionBytes
   = if !str_starts(path,prefix) || n<=m then none_bytes() else
-    let rest=str_slice(path,m,n) in let value=web_decode(rest) in
+    let rest=str_slice(path,m,n) in let value=web_path_decode(rest) in
     if str_find(rest,"/").present || !value.present || str_find(value.value,"/").present || str_find(value.value,"\\").present || str_equal(value.value,".") || str_equal(value.value,"..") then none_bytes() else value
 
 ; Named route parameters, including terminal catch-all and optional catch-all.
@@ -128,7 +168,7 @@ fn web_param(request:WebRequest,name:Arr u8 n) -> OptionBytes
     loop(p=1,q=1,value=none_bytes(),done=false) while !done && p<=len(request.route)
       next(web_route_end(request.route,p)+1,web_route_end(request.path,q)+1,
         let segment=str_slice(request.route,p,web_route_end(request.route,p)) in
-        if str_equal(web_route_name(segment),name) then web_decode(str_slice(request.path,q,if str_starts(segment,"[...") || str_starts(segment,"[[...") then len(request.path) else web_route_end(request.path,q))) else value,
+        if str_equal(web_route_name(segment),name) then web_path_decode(str_slice(request.path,q,if str_starts(segment,"[...") || str_starts(segment,"[[...") then len(request.path) else web_route_end(request.path,q))) else value,
         let segment=str_slice(request.route,p,web_route_end(request.route,p)) in str_equal(web_route_name(segment),name) || str_starts(segment,"[...") || str_starts(segment,"[[...")) yield value
 fn web_routed(request:WebRequest,pattern:Arr u8 n) -> WebRequest
   = let routed=request with { route=pattern } in let first=loop(p=1,name="") while len(name)==0 && p<=n
@@ -165,7 +205,139 @@ fn web_method_not_allowed(allowed:Arr u8 n) -> WebResponse
 
 sealed type WebURL = { value:Arr u8 _ }
 fn web_url(value:Arr u8 n) -> WebURL
-  = WebURL { value=if n>0 && n<=4096 && str_starts(value,"/") && !str_starts(value,"//") && !str_find(value,"\\").present && web_header_safe(value) then value else "#" }
+  = WebURL { value=if n>0 && n<=4096 && str_starts(value,"/") && !str_starts(value,"//") && !str_find(value,"\\").present && web_url_bytes(value) then value else "#" }
+
+; Client addresses. web_peer is the connected socket's address. web_client_ip
+; and web_client_proto believe X-Forwarded-For and X-Forwarded-Proto only from
+; proxies listed in NEO_TRUSTED_PROXIES: addresses or CIDR ranges, IPv4 or
+; IPv6, separated by commas or spaces. Statically rendered requests have none.
+private fn web_octet(borrow part:Arr u8 n) -> i64
+  = if n<1 || n>3 || n>1 && str_byte(part,0)==48 then -1 else
+    loop(i=0,value=0,ok=true) while ok && i<n next(i+1,value*10+str_byte(part,i)-48,str_byte(part,i)>=48 && str_byte(part,i)<=57)
+      yield if ok && value<=255 then value else -1
+private fn web_ip4(text:Arr u8 n) -> Arr u8 _
+  = let a=str_find(text,".") in if !a.present then "" else
+    let rest=str_slice(text,a.value+1,n) in let b=str_find(rest,".") in if !b.present then "" else
+    let tail=str_slice(rest,b.value+1,len(rest)) in let c=str_find(tail,".") in if !c.present then "" else
+    let o1=web_octet(str_slice(text,0,a.value)) in let o2=web_octet(str_slice(rest,0,b.value)) in
+    let o3=web_octet(str_slice(tail,0,c.value)) in let o4=web_octet(str_slice(tail,c.value+1,len(tail))) in
+    if o1<0 || o2<0 || o3<0 || o4<0 then "" else arr(i in 0..4) u8(if i==0 then o1 else if i==1 then o2 else if i==2 then o3 else o4)
+private fn web_hex_group(borrow part:Arr u8 n) -> i64
+  = if n<1 || n>4 then -1 else
+    loop(i=0,value=0,ok=true) while ok && i<n next(i+1,value*16+http_hex(str_byte(part,i)),http_hex(str_byte(part,i))>=0) yield if ok then value else -1
+; The 16-bit groups on one side of "::"; a -1 marks an invalid group. Only the
+; last group may be dotted IPv4, and it counts as two.
+private fn web_ip6_side(text:Arr u8 n, groups:Arr i64 m) -> Arr i64 _
+  = if n==0 then groups else
+    let colon=str_find(text,":") in let part=if colon.present then str_slice(text,0,colon.value) else text in
+    if !colon.present && str_find(part,".").present then
+      let v4=web_ip4(part) in if len(v4)!=4 then push(groups,-1) else
+      push(push(groups,str_byte(v4,0)*256+str_byte(v4,1)),str_byte(v4,2)*256+str_byte(v4,3))
+    else let value=web_hex_group(part) in
+      if value<0 || m>=8 then push(groups,-1)
+      else if !colon.present then push(groups,value)
+      else if colon.value+1>=n then push(groups,-1)
+      else web_ip6_side(str_slice(text,colon.value+1,n),push(groups,value))
+private fn web_group_at(borrow groups:Arr i64 n, i:i64) -> i64 = if i>=0 && i<n then (check i>=0 && i<n in groups[i]) else 0
+private fn web_groups_valid(borrow groups:Arr i64 n) -> bool
+  = loop(i:i64{i>=0}=0,ok=true) while ok && i<n next(i+1,groups[i]>=0) yield ok
+private fn web_ip6(text:Arr u8 n) -> Arr u8 _
+  = let gap=str_find(text,"::") in
+    let left=if gap.present then str_slice(text,0,gap.value) else text in
+    let right=if gap.present then str_slice(text,gap.value+2,n) else "" in
+    let a=web_ip6_side(left,arr(i in 0..0) 0) in let b=web_ip6_side(right,arr(i in 0..0) 0) in
+    let count=len(a)+len(b) in
+    if n<2 || !web_groups_valid(a) || !web_groups_valid(b) || gap.present && (count>7 || str_find(right,"::").present || str_find(left,".").present) || !gap.present && count!=8 then "" else
+    let zeros=8-count in
+    arr(i in 0..16) let g=i/2 in
+      let value=if g<len(a) then web_group_at(a,g) else if g<len(a)+zeros then 0 else web_group_at(b,g-len(a)-zeros) in
+      u8(if i%2==0 then value/256 else value%256)
+private fn web_ip_mapped(borrow b:Arr u8 n) -> bool
+  = n==16 && loop(i=0,ok=true) while ok && i<10 next(i+1,str_byte(b,i)==0) yield ok && str_byte(b,10)==255 && str_byte(b,11)==255
+; An address as 4 bytes (IPv4, also for IPv4-mapped IPv6) or 16, or "" when invalid.
+fn web_ip_parse(text:Arr u8 n) -> Arr u8 _
+  = let bytes=if str_find(text,":").present then web_ip6(text) else web_ip4(text) in
+    if web_ip_mapped(bytes) then str_slice(bytes,12,16) else bytes
+private fn web_hex(value:i64) -> Arr u8 _
+  = let digits="0123456789abcdef" in if value<16 then str_slice(digits,value,value+1) else concat(web_hex(value/16),str_slice(digits,value%16,value%16+1))
+private fn web_ip6_group(borrow b:Arr u8 n, g:i64) -> i64 = str_byte(b,g*2)*256+str_byte(b,g*2+1)
+private fn web_zeros_at(borrow b:Arr u8 n, s:i64) -> i64
+  = loop(g=s) while g<8 && web_ip6_group(b,g)==0 next(g+1) yield g-s
+; RFC 5952 text: lowercase hex without leading zeros, and the first longest run
+; of two or more zero groups written as "::".
+fn web_ip_text(b:Arr u8 n) -> Arr u8 _
+  = if n==4 then concat(int_text(str_byte(b,0)),".",int_text(str_byte(b,1)),".",int_text(str_byte(b,2)),".",int_text(str_byte(b,3)))
+    else if n!=16 then "" else if web_ip_mapped(b) then web_ip_text(str_slice(b,12,16)) else
+    let gap=loop(s=0,best= -1,length=1) while s<8 next(s+1,if web_zeros_at(b,s)>length then s else best,if web_zeros_at(b,s)>length then web_zeros_at(b,s) else length)
+      yield if best<0 then -1 else best*16+length in
+    let start=if gap<0 then 8 else gap/16 in let stop=if gap<0 then 8 else gap/16+gap%16 in
+    let head=loop(g=0,out="") while g<start next(g+1,concat(out,if g>0 then ":" else "",web_hex(web_ip6_group(b,g)))) yield out in
+    let tail=loop(g=stop,out="") while g<8 next(g+1,concat(out,if g>stop then ":" else "",web_hex(web_ip6_group(b,g)))) yield out in
+    if gap<0 then head else concat(head,"::",tail)
+; True when the parsed address lies in `range`, an address or address/prefix.
+fn web_ip_in(address:Arr u8 n, range:Arr u8 m) -> bool
+  = let slash=str_find(range,"/") in
+    let base=web_ip_parse(if slash.present then str_slice(range,0,slash.value) else range) in
+    let digits=if slash.present then str_slice(range,slash.value+1,m) else "" in
+    let bits=if slash.present then (if len(digits)>0 && len(digits)<=3 && web_octet(digits)>=0 then web_octet(digits) else -1) else len(base)*8 in
+    n>0 && len(base)==n && bits>=0 && bits<=n*8 &&
+      loop(i=0,ok=true) while ok && i<n next(i+1,let keep=bits-i*8 in
+        if keep<=0 then true else if keep>=8 then str_byte(address,i)==str_byte(base,i)
+        else let mask=256-shift_left(1,8-keep) in bit_and(str_byte(address,i),mask)==bit_and(str_byte(base,i),mask)) yield ok
+private fn web_item_end(borrow text:Arr u8 n, at:i64) -> i64
+  = loop(i=at) while i<n && str_byte(text,i)!=44 && str_byte(text,i)!=32 next(i+1) yield i
+fn web_ip_trusted(address:Arr u8 n, proxies:Arr u8 m) -> bool
+  = n>0 && loop(at=0,found=false) while !found && at<m
+      next(web_item_end(proxies,at)+1,web_ip_in(address,str_slice(proxies,at,web_item_end(proxies,at)))) yield found
+
+effect(net) fn web_peer_address(request:WebRequest) -> Arr u8 _ = if request.server then rt_http_peer() else ""
+; The connected peer's address as text, or "" when there is none.
+effect(net) fn web_peer(request:WebRequest) -> Arr u8 _ = web_ip_text(web_peer_address(request))
+
+; Every value of a header, in order, joined by commas.
+private fn web_header_all(raw:Arr u8 n, name:Arr u8 m) -> Arr u8 _
+  = let first=http_line_end(raw,0) in
+    loop(at=if first<0 then n else first+2,value="",done=false) while !done && at<n
+      next(let end=http_line_end(raw,at) in if end<0 then n else end+2,
+        let end=http_line_end(raw,at) in let line=str_slice(raw,at,end) in let colon=str_find(line,":") in
+        if colon.present && str_equal(http_lower(str_slice(line,0,colon.value)),name) then
+          let item=str_trim(str_slice(line,colon.value+1,len(line))) in if len(value)==0 then item else concat(value,",",item) else value,
+        let end=http_line_end(raw,at) in end<=at) yield value
+; One X-Forwarded-For entry: an address, "[IPv6]" with an optional port, or IPv4 with a port.
+private fn web_hop_address(entry:Arr u8 n) -> Arr u8 _
+  = let text=str_trim(entry) in let k=len(text) in
+    if str_starts(text,"[") then let close=str_find(text,"]") in if close.present then web_ip_parse(str_slice(text,1,close.value)) else ""
+    else let colon=str_find(text,":") in
+      if colon.present && str_find(text,".").present && !str_find(str_slice(text,colon.value+1,k),":").present then web_ip_parse(str_slice(text,0,colon.value))
+      else web_ip_parse(text)
+type WebHops = { address:Arr u8 _, hops:i64, end:i64, done:bool }
+private fn web_comma_before(borrow list:Arr u8 n, end:i64) -> i64 = loop(i=end-1) while i>=0 && str_byte(list,i)!=44 next(i-1) yield i
+; Walks X-Forwarded-For from the right past trusted proxies (at most 32): the
+; first untrusted entry is the client. An unreadable entry stops the walk at
+; the hop to its right; when every entry is trusted, the left-most is the client.
+private fn web_hop_step(borrow list:Arr u8 n, borrow proxies:Arr u8 m, scan:WebHops) -> WebHops
+  = let comma=web_comma_before(list,scan.end) in
+    let entry=web_hop_address(str_slice(list,comma+1,scan.end)) in
+    if len(entry)==0 then scan with { done=true }
+    else WebHops { address=entry, hops=scan.hops+1, end=comma, done=comma<0 || !web_ip_trusted(entry,proxies) || scan.hops>=31 }
+effect(net,env) fn web_forwarded(request:WebRequest) -> WebHops
+  = let peer=web_peer_address(request) in let proxies=env_get("NEO_TRUSTED_PROXIES") in
+    if len(peer)==0 || !proxies.present || !web_ip_trusted(peer,proxies.value) then WebHops { address=peer, hops= -1, end=0, done=true } else
+    let list=web_header_all(request.raw,"x-forwarded-for") in
+    loop(scan=WebHops { address=peer, hops=0, end=len(list), done=len(list)==0 }) while !scan.done next(web_hop_step(list,proxies.value,scan)) yield scan
+; The client's address as text: the peer, or behind trusted proxies the
+; forwarded client; "" for a statically rendered request.
+effect(net,env) fn web_client_ip(request:WebRequest) -> Arr u8 _ = web_ip_text(web_forwarded(request).address)
+; "https" or "http": behind trusted proxies, X-Forwarded-Proto's entry for the
+; same hop as web_client_ip (its left-most entry when it has fewer); otherwise "http".
+effect(net,env) fn web_client_proto(request:WebRequest) -> Arr u8 _
+  = let scan=web_forwarded(request) in if scan.hops<0 then "http" else
+    let list=web_header_all(request.raw,"x-forwarded-proto") in
+    let wanted=if scan.hops<1 then 1 else scan.hops in
+    let found=loop(end=len(list),k=1) while k<wanted && end>0 next(web_comma_before(list,end),k+1) yield end in
+    let stop=if found>0 then found else let first=str_find(list,",") in if first.present then first.value else len(list) in
+    let value=http_lower(str_trim(str_slice(list,web_comma_before(list,stop)+1,stop))) in
+    if str_equal(value,"https") then "https" else "http"
 
 ; Middleware uses status zero to continue dispatch without a response.
 fn web_continue() -> WebResponse = web_reply(200,"","text/plain") with { status=0 }
@@ -188,3 +360,6 @@ fn web_accepts_gzip(value:Arr u8 n) -> bool
 
 fn web_encode(response:WebResponse,head:bool)->Arr u8 _ = web_encode_connection(response,head,false)
 fn web_encode_close(response:WebResponse,head:bool)->Arr u8 _ = web_encode_connection(response,head,true)
+; The same, with a Date header for the request's stamp (Unix milliseconds).
+fn web_encode_at(response:WebResponse,head:bool,stamp:i64)->Arr u8 _ = web_encode_wire(response,head,false,if stamp<0 then 0 else stamp)
+fn web_encode_close_at(response:WebResponse,head:bool,stamp:i64)->Arr u8 _ = web_encode_wire(response,head,true,if stamp<0 then 0 else stamp)

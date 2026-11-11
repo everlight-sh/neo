@@ -31,6 +31,10 @@ effect fn rt_setsockopt (fd : i64, level : i64, option : i64, value : ptr, n : i
 effect fn rt_bind (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(49, fd, ptr_to_i64(p), n, 0, 0, 0))
 effect fn rt_listen (fd : i64, backlog : i64) -> i64 = rt_result(syscall6(50, fd, backlog, 0, 0, 0, 0))
 effect fn rt_accept_fd (fd : i64) -> i64 = rt_cloexec(rt_result(syscall6(43, fd, 0, 0, 0, 0, 0)))
+; accept with the peer's sockaddr in `address`, its capacity at `size` (socklen_t).
+effect fn rt_accept_peer (fd : i64, address : ptr, size : ptr) -> i64 = rt_cloexec(rt_result(syscall6(43, fd, ptr_to_i64(address), ptr_to_i64(size), 0, 0, 0)))
+; 4 for AF_INET, 6 for AF_INET6, else 0.
+effect fn rt_sockaddr_family (address : ptr) -> i64 = let family=i64(load_u8(address,0))+i64(load_u8(address,1))*256 in if family==2 then 4 else if family==10 then 6 else 0
 effect fn rt_fcntl (fd : i64, command : i64, arg : i64) -> i64 = rt_result(syscall6(72, fd, command, arg, 0, 0, 0))
 effect fn rt_send (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(44, fd, ptr_to_i64(p), n, 16384, 0, 0))
 ; Like rt_send, but never blocks (MSG_DONTWAIT): returns what the kernel takes now.
@@ -202,6 +206,7 @@ fn rt_open_exclusive() -> i64 = 194
 effect fn rt_poll_timeout(fds:ptr,count:i64,milliseconds:i64) -> i64
   = rt_result(syscall6(7,ptr_to_i64(fds),count,milliseconds,0,0,0))
 effect fn rt_shutdown_write(fd:i64) -> i64 = rt_result(syscall6(48,fd,1,0,0,0,0))
+effect fn rt_shutdown_both(fd:i64) -> i64 = rt_result(syscall6(48,fd,2,0,0,0,0))
 
 ; Scoped UDP transport primitives (IPv4 sockaddr lengths supplied explicitly).
 effect fn rt_recvfrom(fd:i64,p:ptr,n:i64,address:ptr,length:ptr) -> i64 = rt_result(syscall6(45,fd,ptr_to_i64(p),n,0,ptr_to_i64(address),ptr_to_i64(length)))

@@ -255,11 +255,15 @@ def verify(binary, workers=4, backend=None):
                 stream.close()
             print('Backpressure drains 80 large responses, resumes buffered work and closes: PASS', flush=True)
 
-            # Unsupported/ambiguous framing is rejected by closing the connection.
-            for headers in (b'Content-Length: -1', b'Content-Length: 1\r\nContent-Length: 1', b'Transfer-Encoding: gzip', b'Content-Length: 0\r\nTransfer-Encoding: chunked', b'Content-Length: 16777217', b'Content-Length: 9999999999999999999999999'):
+            # Unsupported/ambiguous framing is answered 400 (413 over the size
+            # limit) with Connection: close, and the connection is closed.
+            for headers, status in ((b'Content-Length: -1', 400), (b'Content-Length: 1\r\nContent-Length: 1', 400), (b'Transfer-Encoding: gzip', 400),
+                                    (b'Content-Length: 0\r\nTransfer-Encoding: chunked', 400), (b'Content-Length: 16777217', 413), (b'Content-Length: 9999999999999999999999999', 413)):
                 with socket.create_connection(('127.0.0.1', port), timeout=3) as s:
                     s.sendall(b'POST / HTTP/1.1\r\nHost: x\r\n' + headers + b'\r\n\r\n')
-                    assert s.recv(1) == b''
+                    wire = b''
+                    while chunk := s.recv(4096): wire += chunk
+                    assert wire.startswith(b'HTTP/1.1 %d ' % status) and wire.endswith(b'Connection: close\r\n\r\n'), (headers, wire)
             print('Invalid, duplicate, overflowing and unsupported body framing: PASS', flush=True)
             with socket.create_connection(('127.0.0.1',port),timeout=5) as s:
                 s.sendall(b'POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhe')
@@ -271,9 +275,12 @@ def verify(binary, workers=4, backend=None):
             print('Fragmented chunked request preserves the next pipelined response: PASS',flush=True)
             subprocess.run(['python3', str(ROOT / 'bench/http/protocol_test.py'), str(port)], check=True, timeout=20)
             assert process.poll() is None
-            # Worker 0 has served by now, so its ring exists exactly when io_uring is in use.
+            # Every worker has served by now, so a ring exists exactly when io_uring
+            # is in use. With several workers the parent only supervises them.
             if sys.platform.startswith('linux') and not os.environ.get('NEO_RUNNER'):
-                ring = 'anon_inode:[io_uring]' in descriptors(process.pid)
+                children = Path(f'/proc/{process.pid}/task/{process.pid}/children').read_text().split()
+                assert len(children) == (0 if workers == 1 else workers), children
+                ring = any('anon_inode:[io_uring]' in descriptors(pid) for pid in [process.pid, *children])
                 assert ring == (serving == 'io_uring'), f'expected the {serving} backend, io_uring ring open: {ring}'
         finally:
             os.killpg(process.pid, signal.SIGTERM)

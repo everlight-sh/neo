@@ -25,6 +25,10 @@ effect fn rt_setsockopt (fd : i64, level : i64, option : i64, value : ptr, n : i
 effect fn rt_bind (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(104, fd, ptr_to_i64(p), n, 0, 0, 0))
 effect fn rt_listen (fd : i64, backlog : i64) -> i64 = rt_result(syscall6(106, fd, backlog, 0, 0, 0, 0))
 effect fn rt_accept_fd (fd : i64) -> i64 = rt_cloexec(rt_result(syscall6(30, fd, 0, 0, 0, 0, 0)))
+; accept with the peer's sockaddr in `address`, its capacity at `size` (socklen_t).
+effect fn rt_accept_peer (fd : i64, address : ptr, size : ptr) -> i64 = rt_cloexec(rt_result(syscall6(30, fd, ptr_to_i64(address), ptr_to_i64(size), 0, 0, 0)))
+; 4 for AF_INET, 6 for AF_INET6, else 0 (Darwin: sa_len@0, sa_family@1).
+effect fn rt_sockaddr_family (address : ptr) -> i64 = let family=i64(load_u8(address,1)) in if family==2 then 4 else if family==30 then 6 else 0
 effect fn rt_fcntl (fd : i64, command : i64, arg : i64) -> i64 = rt_result(syscall6(92, fd, command, arg, 0, 0, 0))
 effect fn rt_send (fd : i64, p : ptr, n : i64) -> i64 = rt_result(syscall6(133, fd, ptr_to_i64(p), n, 524288, 0, 0))
 ; Like rt_send, but never blocks (MSG_DONTWAIT): returns what the kernel takes now.
@@ -152,6 +156,7 @@ fn rt_open_exclusive() -> i64 = 2562
 effect fn rt_poll_timeout(fds:ptr,count:i64,milliseconds:i64) -> i64
   = rt_result(syscall6(230,ptr_to_i64(fds),count,milliseconds,0,0,0))
 effect fn rt_shutdown_write(fd:i64) -> i64 = rt_result(syscall6(134,fd,1,0,0,0,0))
+effect fn rt_shutdown_both(fd:i64) -> i64 = rt_result(syscall6(134,fd,2,0,0,0,0))
 
 ; Scoped UDP transport primitives (IPv4 sockaddr lengths supplied explicitly).
 effect fn rt_recvfrom(fd:i64,p:ptr,n:i64,address:ptr,length:ptr) -> i64 = rt_result(syscall6(29,fd,ptr_to_i64(p),n,0,ptr_to_i64(address),ptr_to_i64(length)))
@@ -169,7 +174,7 @@ effect fn rt_sync_data(fd:i64) -> i64 = rt_sync_full(fd)
 ; epoll backend. Slots are reused through a free list and never move, so a
 ; filter's udata (slot + 3) holds for the connection's whole life; closing a
 ; descriptor removes its filters and its queued events.
-; udata: listener=0, reserved=1, parent exit=2, slot i=i+3.
+; udata: listener=0, reserved=1, parent exit=2, slot i=rt_http_token(i).
 ; struct kevent: ident@0, filter@8 (i16), flags@10 (u16), fflags@12, data@16, udata@24.
 effect fn rt_kevent_set (change : ptr, ident : i64, filter : i64, flags : i64, fflags : i64, udata : i64) -> unit
   = let a = store_i64(change, 0, ident) in
@@ -186,14 +191,13 @@ effect fn rt_kqueue_sync (kq : i64, state : ptr, interests : ptr, slot : i64, ch
   = let wanted = if load_i64(state,48)==2 then (if load_i64(state,32)>0 then 5 else 1) else if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1 in
     if wanted == load_i64(interests, slot * 8) then noop() else
       let fd = load_i64(state, 0) in
-      let r = rt_kevent_set(changes, fd, -1, if wanted == 1 || wanted==5 then 4 else 8, 0, slot + 3) in
-      let w = rt_kevent_set(ptr_add(changes, 32), fd, -2, if wanted == 4 || wanted==5 then 4 else 8, 0, slot + 3) in
+      let r = rt_kevent_set(changes, fd, -1, if wanted == 1 || wanted==5 then 4 else 8, 0, rt_http_token(slot)) in
+      let w = rt_kevent_set(ptr_add(changes, 32), fd, -2, if wanted == 4 || wanted==5 then 4 else 8, 0, rt_http_token(slot)) in
       let applied = rt_kevent_change(kq, changes, 2) in
       store_i64(interests, slot * 8, wanted)
 
-; local: slots in use@0, free slots@16, pending connections@32,
-; queued changes@48, set TCP_NODELAY
-; on each connection@56.
+; local: slots in use@0, connection limit@8, free slots@16, pending
+; connections@32, queued changes@48, set TCP_NODELAY on each connection@56.
 ; Registrations of new connections and the listener are queued and
 ; submitted with the next wait: nothing queued can be closed before it.
 effect fn rt_kqueue_queue (kq : i64, queue : ptr, local : ptr, ident : i64, filter : i64, flags : i64, udata : i64) -> unit
@@ -205,36 +209,46 @@ effect fn rt_kqueue_queue (kq : i64, queue : ptr, local : ptr, ident : i64, filt
 ; Takes an accepted connection into a free slot, read filter
 ; added enabled (EV_ADD|EV_ENABLE) and write filter added disabled. Accepted
 ; sockets inherit O_NONBLOCK and TCP_NODELAY from the listener on Darwin.
-effect fn rt_kqueue_adopt (kq : i64, fd : i64, states : ptr, interests : ptr, free : ptr, local : ptr, queue : ptr) -> unit
+effect fn rt_kqueue_adopt (kq : i64, fd : i64, states : ptr, interests : ptr, free : ptr, local : ptr, queue : ptr, address : ptr) -> unit
   = let spare = load_i64(local, 16) in
     let slot = if spare > 0 then load_i64(free, (spare - 1) * 8) else load_i64(local, 0) in
-    if slot >= 1024 then let closed = rt_close(fd) in noop() else
+    if slot >= load_i64(local, 8) then let refused = rt_http_refuse_now(fd, 503) in let closed = rt_close(fd) in noop() else
       let taken = if spare > 0 then store_i64(local, 16, spare - 1) else store_i64(local, 0, slot + 1) in
-      let state = ptr_add(states, slot * 64) in
-      let cleared = memset(state, i32(0), 64) in
+      let state = ptr_add(states, slot * 128) in
+      let cleared = memset(state, i32(0), 128) in
+      let peer = rt_http_peer_save(state, address) in
+      let active = store_i64(state, 72, rt_http_now()) in
       let nodelay = if load_i64(local, 56) == 0 then 0 else
         let one = stack_alloc(8) in let value = store_i32(one, 0, i32(1)) in rt_setsockopt(fd, 6, 1, one, 4) in
       let input = store_ptr(state, 8, ax_alloc(65536)) in
       let output = store_ptr(state, 24, ax_alloc(4096)) in
       let descriptor = store_i64(state, 0, fd) in
       let interest = store_i64(interests, slot * 8, 1) in
-      let r = rt_kqueue_queue(kq, queue, local, fd, -1, 5, slot + 3) in
-      rt_kqueue_queue(kq, queue, local, fd, -2, 9, slot + 3)
+      let r = rt_kqueue_queue(kq, queue, local, fd, -1, 5, rt_http_token(slot)) in
+      rt_kqueue_queue(kq, queue, local, fd, -2, 9, rt_http_token(slot))
 
 ; Workers accept directly into their own kqueue. No accepted descriptor crosses
 ; a notification stream. Bounded batches let other workers drain a shared
 ; listener while preserving one owner for the full connection lifetime.
 effect fn rt_kqueue_take(kq:i64,listener:i64,states:ptr,interests:ptr,free:ptr,local:ptr,queue:ptr,limit:i64)->unit
-  = let taken=loop(k=0) while k>=0 && k<limit next(
-      let fd=rt_accept_fd(listener) in if fd<0 then -1 else
-      let adopted=rt_kqueue_adopt(kq,fd,states,interests,free,local,queue) in k+1) yield k in noop()
+  = let address=stack_alloc(128) in let size=stack_alloc(8) in
+    let taken=loop(k=0) while k>=0 && k<limit next(
+      let sized=store_i64(size,0,128) in
+      let fd=rt_accept_peer(listener,address,size) in if fd<0 then -1 else
+      let adopted=rt_kqueue_adopt(kq,fd,states,interests,free,local,queue,address) in k+1) yield k in noop()
+
+; Slots of connections closed outside an event go back on the free list.
+effect fn rt_kqueue_reclaim(states:ptr,interests:ptr,free:ptr,local:ptr)->unit
+  = let reclaimed=loop(i=0) while i<load_i64(local,0) next(
+      let back=if load_i64(states,i*128)>=0 || load_i64(interests,i*8)== -1 then noop() else
+        let spare=load_i64(local,16) in let pushed=store_i64(free,spare*8,i) in let marked=store_i64(interests,i*8,-1) in store_i64(local,16,spare+1) in i+1) yield i in noop()
 
 ; One readiness event for slot `slot`: EV_EOF (0x8000) maps to hang-up and
 ; EV_ERROR (0x4000) to error, as poll reports them to rt_step.
 effect fn rt_kqueue_event (kq : i64, states : ptr, interests : ptr, free : ptr, local : ptr, event : ptr,
                            slot : i64, handler : ptr, changes : ptr) -> unit
   = if slot < 0 || slot >= load_i64(local, 0) then ax_trap(data("invalid kevent udata\0")) else
-    let state = ptr_add(states, slot * 64) in
+    let state = ptr_add(states, slot * 128) in
     if load_i64(state, 0) < 0 then noop() else
       let high = i64(load_u8(event, 11)) in
       let mask = (if load_u8(event, 8) == u8(255) then 1 else 4) + (if high >= 128 then 16 else 0) + (if high / 64 % 2 == 1 then 8 else 0) in
@@ -251,18 +265,19 @@ effect fn rt_http_kqueue_worker (listener : i64, handler : ptr, control:ptr, wor
   = let kq = rt_cloexec(rt_result(syscall6(362, 0, 0, 0, 0, 0, 0))) in
     let valid = if kq < 0 then ax_trap(data("kqueue syscall failed\0")) else noop() in
     let backend=store_i64(runtime_state(),1768,kq+1) in
-    let states = ax_alloc(1024 * 64) in
-    let interests = ax_alloc(1024 * 8) in
-    let free = ax_alloc(1024 * 8) in
+    let states = ax_alloc(rt_http_limit(control) * 128) in
+    let interests = ax_alloc(rt_http_limit(control) * 8) in
+    let free = ax_alloc(rt_http_limit(control) * 8) in
     let events = ax_alloc(32 * 32) in
     let queue = ax_alloc(2056 * 32) in
     let changes = stack_alloc(64) in
     let local = stack_alloc(64) in let cleared = memset(local, i32(0), 64) in
+    let limit = store_i64(local, 8, rt_http_limit(control)) in
     let one = stack_alloc(8) in let value = store_i32(one, 0, i32(1)) in
     let inherited = store_i64(local, 56, if rt_setsockopt(listener, 6, 1, one, 4) < 0 then 1 else 0) in
-    ; Other workers end with the parent: EVFILT_PROC (-5) NOTE_EXIT, not a getppid per
-    ; wait, so a wait needs no timeout.
-    let watched = if worker == 0 then noop() else
+    ; Supervised workers end with the parent: EVFILT_PROC (-5) NOTE_EXIT, not a
+    ; getppid per wait.
+    let watched = if load_i64(runtime_state(), 2024) == 0 then noop() else
       let exit = rt_kevent_set(changes, parent, -5, 1, 2147483648, 2) in
       if rt_getppid() != parent || rt_result(syscall6(363, kq, ptr_to_i64(changes), 1, 0, 0, 0)) < 0 then ax_exit(0) else noop() in
     let listening=rt_kqueue_queue(kq,queue,local,listener,-1,5,0) in
@@ -274,16 +289,20 @@ effect fn rt_http_kqueue_worker (listener : i64, handler : ptr, control:ptr, wor
     loop (running = true) while running
       next (let pending=load_i64(runtime_state(),1640)>0 || load_i64(runtime_state(),1784)>0 in let ticks=rt_async_tick(states,load_i64(local,0)) in
             let synced=if !pending then noop() else
-              let changed=loop(i=0) while i<load_i64(local,0) next(let state=ptr_add(states,i*64) in
+              let changed=loop(i=0) while i<load_i64(local,0) next(let state=ptr_add(states,i*128) in
                 let sync=if load_i64(state,0)>=0 then rt_kqueue_sync(kq,state,interests,i,changes) else
                   if load_i64(interests,i*8)== -1 then noop() else
                   let spare=load_i64(local,16) in let pushed=store_i64(free,spare*8,i) in let marked=store_i64(interests,i*8,-1) in store_i64(local,16,spare+1) in i+1) yield i in noop() in
             let draining=if signal<0 then false else rt_http_draining(control,states,load_i64(local,0),listener) in
             if draining then false else
-            let timeout=stack_alloc(16) in let delay=rt_async_timeout(if signal<0 then -1 else 100) in
+            let swept=if rt_http_sweep_due() then rt_http_sweep(states,load_i64(local,0),control,parent) else 0 in
+            let reclaimed=if swept>0 then rt_kqueue_reclaim(states,interests,free,local) else noop() in
+            ; Waits end within a second so timeouts are checked.
+            let timeout=stack_alloc(16) in let delay=rt_async_timeout(if signal<0 then 1000 else 100) in
             let seconds=store_i64(timeout,0,if delay<0 then 0 else delay/1000) in let nanos=store_i64(timeout,8,if delay<0 then 0 else delay%1000*1000000) in
             let ready = rt_result(syscall6(363, kq, ptr_to_i64(queue), load_i64(local, 48), ptr_to_i64(events), 32, if delay<0 then 0 else ptr_to_i64(timeout))) in
             let submitted = store_i64(local, 48, 0) in
+            let tick = rt_http_tick() in
             if ready < 0 then if load_i32(rt_errno(), 0) == i32(4) then true
               else let failed = ax_trap(data("kevent syscall failed\0")) in false
             else let reset = store_i64(local, 32, 0) in
@@ -295,7 +314,7 @@ effect fn rt_http_kqueue_worker (listener : i64, handler : ptr, control:ptr, wor
                         else if bit_and(token,4095)>=2048 then rt_fiber_notify(token)
                         else if token==1027 then rt_http_shutdown_signal(control,signal)
                         else if token == 2 then ax_exit(0)
-                        else rt_kqueue_event(kq, states, interests, free, local, event, token - 3, handler, changes) in i + 1)
+                        else rt_kqueue_event(kq, states, interests, free, local, event, rt_http_token_index(token), handler, changes) in i + 1)
                 yield i in
               let accepted=if atomic_load_i64(control,8)==0 && load_i64(local,32)>0 then rt_kqueue_take(kq,listener,states,interests,free,local,queue,
                 if workers>1 then 8 else 1048576) else noop() in true)

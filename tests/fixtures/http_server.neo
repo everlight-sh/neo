@@ -1,5 +1,5 @@
 import "std:http_server"
-effect(fs) fn main() -> unit
+effect(fs,net,env) fn main() -> unit
   = let request=web_routed(web_request("POST /org/acme/items/42 HTTP/1.1\r\nCookie: session=a; other=b\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=caf%C3%A9&count=42",1000),"/org/[org]/items/[id]") in
     check str_equal(web_param(request,"org").value,"acme") && str_equal(web_param(request,"id").value,"42") in
     check str_equal(web_cookie(request,"session").value,"a") && str_equal(web_form(request,"name").value,"caf\xc3\xa9") && web_form_int(request,"count",1,100).value==42 in
@@ -11,4 +11,41 @@ effect(fs) fn main() -> unit
     check web_with_header(web_reply(200,"ok","text/plain"),"X-Name","x\r\nInjected: y").status==500 in
     check web_redirect("//evil.example",302).status==400 in
     let empty=web_encode(web_status(web_reply(200,"hidden","text/plain"),204),false) in check !str_find(empty,"hidden").present in
+    ; Control bytes in a redirect or URL, TAB included, are refused.
+    check web_redirect("/\t/evil.example",303).status==400 && web_redirect("/a\x7fb",303).status==400 && web_redirect("/ok?q=1",302).status==302 in
+    check str_equal(web_url("/\t/x").value,"#") && str_equal(web_url("/\r\n/x").value,"#") && str_equal(web_url("/a b?c=d").value,"/a b?c=d") in
+    ; Paths keep +; queries and forms still read it as a space.
+    let plus=web_routed(web_request("GET /tag/c%2B%2B+x HTTP/1.1\r\n\r\n",0),"/tag/[name]") in check str_equal(plus.param,"c+++x") in
+    check str_equal(web_segment("/f/a+b%20c","/f/").value,"a+b c") && str_equal(web_decode("a+b%20c").value,"a b c") in
+    check str_equal(web_query_get("q=a+b","q").value,"a b") && !web_segment("/f/a%2Fb","/f/").present in
+    ; The app's CSP and Cache-Control replace the defaults; otherwise the defaults stay.
+    let plain=web_encode(web_reply(200,"x","text/plain"),false) in
+    check str_find(plain,"Content-Security-Policy: default-src 'self';").present && str_find(plain,"Cache-Control: no-store\r\n").present && !str_find(plain,"Date:").present in
+    let own=web_encode(web_with_header(web_with_header(web_reply(200,"x","text/plain"),"content-security-policy","default-src 'none'"),"Cache-Control","max-age=60"),false) in
+    check !str_find(own,"default-src 'self'").present && str_find(own,"content-security-policy: default-src 'none'").present && !str_find(own,"no-store").present in
+    let report=web_encode(web_with_header(web_reply(200,"x","text/plain"),"Content-Security-Policy-Report-Only","default-src 'none'"),false) in
+    check str_find(report,"Content-Security-Policy: default-src 'self';").present in
+    let mention=web_encode(web_with_header(web_reply(200,"x","text/plain"),"X-Note","cache-control: no"),false) in check str_find(mention,"Cache-Control: no-store").present in
+    ; Dates.
+    check str_equal(web_http_date(784111777000),"Sun, 06 Nov 1994 08:49:37 GMT") && str_equal(web_http_date(0),"Thu, 01 Jan 1970 00:00:00 GMT") in
+    check str_equal(web_http_date(951782400000),"Tue, 29 Feb 2000 00:00:00 GMT") && str_equal(web_http_date(4102444799999),"Thu, 31 Dec 2099 23:59:59 GMT") in
+    let dated=web_encode_at(web_reply(200,"x","text/plain"),false,784111777000) in check str_find(dated,"\r\nDate: Sun, 06 Nov 1994 08:49:37 GMT\r\n").present in
+    let own_date=web_encode_close_at(web_with_header(web_reply(200,"x","text/plain"),"Date","Mon, 07 Nov 1994 00:00:00 GMT"),false,784111777000) in
+    check !str_find(own_date,"1994 08:49").present && str_find(own_date,"Connection: close").present in
+    ; Reason phrases.
+    check str_equal(web_reason(206),"Partial Content") && str_equal(web_reason(431),"Request Header Fields Too Large") && str_equal(web_reason(451),"Unavailable For Legal Reasons") in
+    check str_equal(web_reason(505),"HTTP Version Not Supported") && str_equal(web_reason(500),"Internal Server Error") && str_equal(web_reason(308),"Permanent Redirect") in
+    check str_equal(web_reason(200),"OK") && str_equal(web_reason(429),"Too Many Requests") && str_equal(web_reason(599),"Internal Server Error") in
+    ; Addresses.
+    check str_equal(web_ip_text(web_ip_parse("192.0.2.1")),"192.0.2.1") && len(web_ip_parse("192.0.2.256"))==0 && len(web_ip_parse("01.2.3.4"))==0 && len(web_ip_parse("1.2.3"))==0 in
+    check str_equal(web_ip_text(web_ip_parse("2001:DB8:0:0:1:0:0:1")),"2001:db8::1:0:0:1") && str_equal(web_ip_text(web_ip_parse("::")),"::") in
+    check str_equal(web_ip_text(web_ip_parse("::1")),"::1") && str_equal(web_ip_text(web_ip_parse("fe80::")),"fe80::") && str_equal(web_ip_text(web_ip_parse("1:0:2:0:3:0:4:0")),"1:0:2:0:3:0:4:0") in
+    check str_equal(web_ip_text(web_ip_parse("::ffff:10.0.0.1")),"10.0.0.1") && len(web_ip_parse("::ffff:10.0.0.1"))==4 && str_equal(web_ip_text(web_ip_parse("64:ff9b::192.0.2.33")),"64:ff9b::c000:221") in
+    check len(web_ip_parse("1::2::3"))==0 && len(web_ip_parse("1:2:3:4:5:6:7:8:9"))==0 && len(web_ip_parse("12345::"))==0 && len(web_ip_parse("1:2:3:4:5:6:7"))==0 && len(web_ip_parse(":1::"))==0 in
+    check web_ip_in(web_ip_parse("10.20.30.40"),"10.0.0.0/8") && !web_ip_in(web_ip_parse("11.0.0.1"),"10.0.0.0/8") && web_ip_in(web_ip_parse("172.31.255.1"),"172.16.0.0/12") in
+    check !web_ip_in(web_ip_parse("172.32.0.1"),"172.16.0.0/12") && web_ip_in(web_ip_parse("fd12::1"),"fd00::/8") && !web_ip_in(web_ip_parse("10.0.0.1"),"fd00::/8") in
+    check web_ip_in(web_ip_parse("1.2.3.4"),"0.0.0.0/0") && !web_ip_in(web_ip_parse("1.2.3.4"),"1.2.3.4/33") && web_ip_trusted(web_ip_parse("::1"),"127.0.0.1 ::1,10.0.0.0/8") in
+    check !web_ip_trusted(web_ip_parse("127.0.0.2"),"127.0.0.1,,") && !web_ip_trusted("","0.0.0.0/0") in
+    let static_peer=web_peer(web_static_request("/")) in let unserved_peer=web_peer(request) in
+    check str_equal(static_peer,"") && str_equal(unserved_peer,"") in
     let printed=print_out("HTTP server primitives OK\n") in noop()

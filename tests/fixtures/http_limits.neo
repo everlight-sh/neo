@@ -1,0 +1,12 @@
+import "std:http_server"
+; Runtime limits, refusals, timeouts, worker restarts and client addresses,
+; exercised over sockets by tests/http_limits.py.
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/peer") then
+      web_encode(web_reply(200,concat(web_peer(request)," ",web_client_ip(request)," ",web_client_proto(request)),"text/plain"),false)
+    else if str_equal(request.path,"/echo") then web_encode(web_reply(200,int_text(len(request.body)),"text/plain"),false)
+    ; A failed check ends the worker process, as a handler bug would.
+    else if str_equal(request.path,"/crash") then check !str_find(raw,"X-Crash: yes").present in web_encode(web_reply(200,"alive","text/plain"),false)
+    else web_encode(web_reply(200,"Hello, World!","text/plain"),false)
+effect fn main(port:i64)->i64 = serve_effect(port,handler)

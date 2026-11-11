@@ -57,7 +57,7 @@ effect fn rt_async_queue(state:ptr,bytes:ptr,n:i64)->unit
       let copied=memcpy(bigger,old,length) in let freed=ax_release(old) in store_ptr(state,24,bigger) else noop() in
     let copied=memcpy(ptr_add(load_ptr(state,24),length),bytes,n) in store_i64(state,32,length+n)
 effect fn rt_async_state(states:ptr,n:i64,fd:i64)->ptr
-  = let index=loop(i=0) while i<n && load_i64(states,i*64)!=fd next(i+1) yield i in if index==n then null() else ptr_add(states,index*64)
+  = let index=loop(i=0) while i<n && load_i64(states,i*128)!=fd next(i+1) yield i in if index==n then null() else ptr_add(states,index*128)
 effect fn rt_async_notified()->unit = store_i64(runtime_state(),1872,1)
 effect fn rt_async_current_job()->ptr
   = let current=load_ptr(runtime_state(),1864) in if current!=null() then current else
@@ -87,7 +87,7 @@ effect fn rt_async_process(job:ptr,states:ptr,n:i64,now:i64,notified:bool)->unit
       if fd<0 || (load_i64(job,32)>now && load_i64(job,40)>now && load_i64(job,72)==0 && !dirty) then noop() else
         let cached=load_ptr(job,48) in
         let offset=ptr_to_i64(cached)-ptr_to_i64(states) in
-        let state=if cached!=null() && offset>=0 && offset<n*64 && offset%64==0 && load_i64(cached,0)==fd then cached else rt_async_state(states,n,fd) in
+        let state=if cached!=null() && offset>=0 && offset<n*128 && offset%128==0 && load_i64(cached,0)==fd then cached else rt_async_state(states,n,fd) in
         if state==null() then rt_async_remove(job) else
         let owner=store_ptr(job,48,state) in
         if now>=load_i64(job,40) then rt_drop(state) else
@@ -137,7 +137,7 @@ effect fn rt_async_timeout_legacy(maximum:i64)->i64
       let job=load_ptr(active,i*8) in
       let state=load_ptr(job,48) in let states=load_ptr(runtime_state(),1800) in let n=load_i64(runtime_state(),1808) in
       let offset=ptr_to_i64(state)-ptr_to_i64(states) in
-      let blocked=state!=null() && offset>=0 && offset<n*64 && load_i64(state,0)==load_i64(job,0) && load_i64(state,32)>0 in
+      let blocked=state!=null() && offset>=0 && offset<n*128 && load_i64(state,0)==load_i64(job,0) && load_i64(state,32)>0 in
       let due=if load_i64(job,72)!=0 then now else load_i64(job,32) in
       let following=if blocked then load_i64(job,40) else if due<load_i64(job,40) then due else load_i64(job,40) in
       if following<nearest then following else nearest) yield nearest-now in
@@ -155,7 +155,7 @@ effect fn rt_http_draining(control:ptr,states:ptr,n:i64,listener:i64)->bool
     let closed=if load_i64(runtime_state(),1704)==0 then let closed=rt_close(listener) in store_i64(runtime_state(),1704,1) else noop() in
     let expired=rt_clock_ns()/1000000>=deadline in
     let active=loop(i=0,active=0) while i<n next(i+1,
-      let state=ptr_add(states,i*64) in if load_i64(state,0)<0 then active else
+      let state=ptr_add(states,i*128) in if load_i64(state,0)<0 then active else
       if expired || load_i64(state,32)==0 && load_i64(state,48)!=2 then let dropped=rt_drop(state) in active else
       let close=if load_i64(state,48)==2 then noop() else store_i64(state,48,1) in active+1) yield active in active==0 && load_i64(runtime_state(),1784)==0
 effect fn rt_http_worker_signals(control:ptr)->i64
@@ -164,14 +164,6 @@ effect fn rt_http_worker_signals(control:ptr)->i64
     let old=stack_alloc(8) in let cleared=store_i64(old,0,0) in let fd=rt_signal_monitor_open(old) in
     if fd<0 then let failed=ax_trap(data("HTTP signal monitor failed\0")) in -1 else
     let saved=store_i64(runtime_state(),1696,fd+1) in fd
-effect fn rt_http_reap(control:ptr,workers:i64)->unit
-  = let reaped=loop(i=1) while i<workers next(
-      let pid=load_i64(control,8192+i*8) in let status=stack_alloc(8) in
-      let waited=if pid<=0 then 0 else loop(done=false) while !done next(
-        let result=rt_wait_status(pid,status,1) in if result!=0 then true else
-        if rt_clock_ns()/1000000>=atomic_load_i64(control,8) then let killed=rt_kill(pid,9) in let waited=rt_wait(pid) in true else
-        let pause=rt_wait_ready(-1,0,10) in false) yield 0 in i+1) yield i in noop()
-
 inline effect fn rt_async_timeout(maximum:i64)->i64
   = if load_i64(runtime_state(),1640)==0 && load_i64(runtime_state(),1784)==0 && load_i64(runtime_state(),1904)==0 then maximum else
     rt_timer_timeout(rt_fiber_timeout(rt_async_timeout_legacy(maximum)))
