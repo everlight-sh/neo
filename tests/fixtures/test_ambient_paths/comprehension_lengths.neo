@@ -1,0 +1,4 @@
+; From tests/test_ambient_paths.py (tag v0.2.3): a comprehension's length, not a path condition, proves
+; its indexes.
+fn g(n:i64{n >= 2}) -> i64 {result >= 0} = let marks = arr(k in 0..n + 1) k >= 2 in sum(k in 0..n + 1) if marks[k] then 1 else 0
+fn main() -> i64 = 0

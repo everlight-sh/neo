@@ -1,0 +1,38 @@
+; Runs one fixture over a whole input file and checks its output byte for byte.
+; Arguments: the fixture and the expected output file, both relative to
+; tests/, NEO_THREADS for the run, then NAME=value compiler environment
+; entries. The input is the driver's stdin (the case's stdin-file). Either
+; file may be gzip-compressed (see tests/support/language.neo); the line-based
+; vectors of the language stream are, which keeps them small in the
+; repository. Prints "<fixture>: N lines OK".
+import "std:io"
+import "../support/driver.neo"
+import "../support/language.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn ll_environment() -> Arr Arr u8 _ _
+  = loop (i=4, out=md_words()) while cli_arg(i).present next (i+1,push(out,cli_arg(i).value)) yield out
+
+; The first line where got and wanted differ, as "line N: expected ..., got ...".
+fn ll_difference(borrow wanted:Arr u8 _, borrow got:Arr u8 _) -> Arr u8 _
+  = let a=lg_split(wanted,10) in let b=lg_split(got,10) in
+    let at=loop (i=0) while i<len(a) && i<len(b) && tx_equal(md_word(a,i),md_word(b,i)) next (i+1) yield i in
+    concat("line ",int_text(at+1)," of ",int_text(len(a)),": expected ",tx_repr(lg_clip(md_word(a,at),300),true),
+      ", got ",tx_repr(lg_clip(md_word(b,at),300),true)," (",int_text(len(b))," lines)")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let fixture=cli_arg(1) in let expected=cli_arg(2) in let threads=cli_arg(3) in
+    let named=dv_expect(fixture.present && expected.present && threads.present,
+      "usage: language_lines FIXTURE EXPECTED THREADS [NAME=value...] < INPUT") in
+    let input=lg_stdin() in let wanted=lg_vector(tools,expected.value) in
+    let dir=dv_temp("lines") in let binary=pt_join(dir,"probe") in
+    let built=lg_build(tools,fixture.value,binary,ll_environment()) in
+    let result=dv_run(binary,md_words(),lg_threads(threads.value),input,300000,268435456) in
+    let ran=dv_expect(result.ok && !result.timeout && !result.overflow && result.code==0,
+      concat(fixture.value," exited ",int_text(result.code),": ",nt_diagnostic(result))) in
+    let same=dv_expect(tx_equal(result.output,wanted),concat(fixture.value," output differs at ",ll_difference(wanted,result.output))) in
+    let cleaned=dv_clean(dir) in
+    let shown=print_out(concat(pt_tail(fixture.value),": ",int_text(len(lg_split(wanted,10)))," lines OK\n")) in noop()

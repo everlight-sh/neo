@@ -1,0 +1,4 @@
+; From tests/test_systems.py (tag v0.2.3): a postcondition declared later in the file proves a
+; divisor. Prints 5 for 10.
+fn main (n : i64) -> i64 = n / positive()
+fn positive () -> i64 {result > 0} = 2

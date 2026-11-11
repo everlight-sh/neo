@@ -1,0 +1,31 @@
+; From tests/test_language_types.py (tag v0.2.3): specializations of one generic at two types,
+; error binding with a different success type, inferred array shapes that do
+; not capture caller lengths, and unit payloads. Prints 42 4 -3 5 42.
+import "std:io"
+import "std:strings"
+enum Option<T> { None, Some(T) }
+enum Result<T,E> { Ok(T), Err(E) }
+type Box<T> = { value: T }
+fn identity<T>(x: T) -> T = x
+fn unwrap<T>(x: Option<T>, fallback: T) -> T
+  = match x { Some(value) => value, None => fallback }
+fn specializations() -> i64
+  = let a = Box::<Arr u8 _> { value = identity::<Arr u8 _>("hello") } in
+    let b = unwrap::<i64>(Some::<i64>(identity::<i64>(37)),0) in len(a.value) + b
+fn number(n:i64) -> Result<i64,Arr u8 _>
+  = if n > 0 then Ok::<i64,Arr u8 _>(n) else Err::<i64,Arr u8 _>("bad")
+fn convert(n:i64) -> Result<Arr u8 _,Arr u8 _>
+  = let value = number(n)? in
+    check value > 0 in Ok::<Arr u8 _,Arr u8 _>("done")
+fn converted(n:i64) -> i64 = match convert(n) { Ok(text) => len(text), Err(text) => 0 - len(text) }
+fn choose<T>(a:T,b:T) -> T = a
+fn box<T>(value:T) -> Box<T> = Box::<T> { value=value }
+fn sizes(a:Arr u8 n,b:Arr u8 m) -> i64 = len(box(choose(a,b)).value)
+fn status() -> Result<unit,unit> = Ok::<unit,unit>(noop())
+fn changed() -> Result<i64,unit> = let done=status()? in Ok::<i64,unit>(42)
+fn unit_payloads() -> i64
+  = let held=Box::<unit> { value=noop() } in let ignored=held.value in
+    match changed() { Ok(value) => value, Err(error) => 0 }
+effect fn main(n:i64) -> unit
+  = let shown=print_out(concat(int_text(specializations())," ",int_text(converted(n))," ",int_text(converted(n-3))," ",
+      int_text(sizes("hello","different"))," ",int_text(unit_payloads()),"\n")) in noop()

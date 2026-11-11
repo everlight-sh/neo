@@ -1,0 +1,2 @@
+; From tests/test_systems.py (tag v0.2.3): a[len(a)] is out of bounds.
+fn main(n:i64) -> i64 = loop(i=0,a=arr(j in 0..1) j) while i<n next(i+1,if len(a)>0 then push(a,a[len(a)]) else push(a,0)) yield len(a)

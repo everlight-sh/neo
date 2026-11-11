@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): a payload of the wrong type is rejected.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = match Some::<i64>("bad") { None => 0, Some(x) => x }

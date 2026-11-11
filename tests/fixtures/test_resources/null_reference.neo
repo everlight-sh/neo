@@ -1,0 +1,8 @@
+; From tests/test_resources.py (tag v0.2.3): (references, with std:arena in place of the test's own arena prelude) ref_null is
+; compiler-internal.
+import "std:arena"
+resource type Handle={value:i64} drop release
+effect(fs) fn release(handle:Handle)->unit=noop()
+effect(process) fn create()->Handle=Handle { value=42 }
+fn inspect(handle:Handle)->i64=handle.value
+effect(fs,net,process) fn main()->i64=ref_null()

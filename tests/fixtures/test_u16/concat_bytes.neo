@@ -1,0 +1,2 @@
+; From tests/test_u16.py (tag v0.2.3): byte and u16 arrays do not concatenate.
+fn main() -> i64 = len(concat("ab", arr(i in 0..2) u16(i)))

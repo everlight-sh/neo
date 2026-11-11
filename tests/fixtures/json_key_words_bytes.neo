@@ -1,0 +1,29 @@
+; The binary-key part of tests/json_key_words.py (tag v0.2.3) in one process:
+; for every key size and every byte value, a key of 'x' bytes with that byte
+; at index byte % size, quoted at offset byte % 16 of a document. As
+; json_key_words.neo's mode 1 does, json_key_equal compares the raw key: it
+; matches unless the key holds a backslash (an escape), and a key with its
+; last byte flipped never matches. The argument is the number of byte values
+; (256), so nothing folds at compile time. Prints the number of comparisons.
+import "std:json"
+import "std:io"
+fn kwb_sizes() -> Arr i64 _
+  = arr(i in 0..26) if i<18 then i else if i==18 then 31 else if i==19 then 32 else if i==20 then 33
+      else if i==21 then 63 else if i==22 then 64 else if i==23 then 65 else if i==24 then 127 else 256
+fn kwb_key(size:i64, byte:i64) -> Arr u8 _
+  = check size>=0 in arr(i in 0..size) if i==byte%size then u8(byte) else u8(120)
+fn kwb_document(borrow key:Arr u8 _, offset:i64) -> Arr u8 _
+  = check offset>=0 in concat(arr(i in 0..offset) u8(112),"\"",key,"\"")
+fn kwb_escaped(borrow key:Arr u8 n) -> bool = let count=sum(i in 0..n) if key[i]==u8(92) then 1 else 0 in count>0
+; 1 or 2 comparisons that behaved, or -1.
+fn kwb_case(size:i64, byte:i64) -> i64
+  = let key=kwb_key(size,byte) in let offset=byte%16 in let document=kwb_document(key,offset) in
+    let equal=json_key_equal(document,offset,len(document),key) in
+    if equal==kwb_escaped(key) then -1 else if size==0 then 1 else
+    let changed=check len(key)>0 in set(key,len(key)-1,u8(bit_xor(i64(key[len(key)-1]),1))) in
+    if json_key_equal(document,offset,len(document),changed) then -1 else 2
+effect(fs) fn main(bytes:i64{bytes>=1 && bytes<=256}) -> unit
+  = let sizes=kwb_sizes() in
+    let total=loop (i=0, count=0) while i<len(sizes)*bytes && count>=0
+      next (i+1,let k=i/bytes in let size=if k>=0 && k<len(sizes) then sizes[k] else 0 in let got=kwb_case(size,i%bytes) in if got<0 then -1 else count+got) yield count in
+    check total>0 in let shown=print_out(concat("json key words OK ",int_text(total),"\n")) in noop()

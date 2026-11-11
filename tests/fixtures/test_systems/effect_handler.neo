@@ -1,0 +1,3 @@
+; From tests/test_systems.py (tag v0.2.3): serve takes a pure handler.
+effect fn handler (bytes : Arr u8 n) -> Arr u8 _ = bytes
+effect fn main () -> i64 = serve(8080, handler)

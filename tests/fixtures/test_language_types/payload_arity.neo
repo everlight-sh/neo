@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): a pattern binds as many payloads as the variant has.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = match Some::<i64>(1) { Some(a,b) => a, None => 0 }

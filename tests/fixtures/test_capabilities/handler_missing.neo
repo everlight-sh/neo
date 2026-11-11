@@ -1,0 +1,3 @@
+; From tests/test_capabilities.py (tag v0.2.3): a server lacking its handler's capability is rejected.
+effect(fs) fn page (r: Arr u8 n) -> Arr u8 _ = "ok"
+effect(net) fn main () -> i64 = serve_effect(8080,page)

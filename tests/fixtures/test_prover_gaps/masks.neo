@@ -1,0 +1,6 @@
+; From tests/test_prover_gaps.py (tag v0.2.3): a low mask below a known length proves an index.
+fn a(xs:Arr i64 n,h:i64{n >= 16}) -> i64 = xs[bit_and(h,15)]
+fn b(xs:Arr i64 n,h:i64{n >= 64}) -> i64 = xs[bit_and(63,h)]
+fn c(xs:Arr i64 n,h:i64{n >= 8}) -> i64 = xs[bit_and(bit_and(h,255),7)]
+fn d(xs:Arr u8 n,h:i64) -> i64 = if n > 255 then i64(xs[bit_and(shift_right(h,8),255)]) else 0
+fn main() -> i64 = 0

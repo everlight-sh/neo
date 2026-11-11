@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): a match must cover every variant.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = match Some::<i64>(1) { None => 0 }

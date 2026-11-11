@@ -1,0 +1,3 @@
+; From tests/test_systems.py (tag v0.2.3): pure functions cannot call effect functions.
+effect fn action () -> i64 = 7
+fn main () -> i64 = action()

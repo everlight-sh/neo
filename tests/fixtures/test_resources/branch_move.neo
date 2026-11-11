@@ -1,0 +1,7 @@
+; From tests/test_resources.py (tag v0.2.3): a resource may move in one branch.
+resource type Handle = { number:i64 } drop release
+effect fn release(h:Handle) -> unit = noop()
+effect fn create() -> Handle = Handle { number = 1 }
+fn inspect(h:Handle) -> i64 = h.number
+effect fn consume(move h:Handle) -> unit = noop()
+effect fn main() -> unit = using h = create() in if true then consume(h) else noop()

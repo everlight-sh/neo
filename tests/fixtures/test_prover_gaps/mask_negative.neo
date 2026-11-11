@@ -1,0 +1,3 @@
+; From tests/test_prover_gaps.py (tag v0.2.3): -1 masks nothing.
+fn get(xs:Arr i64 n,h:i64,m:i64{n == 16}) -> i64 = xs[bit_and(h,-1)]
+fn main() -> i64 = 0

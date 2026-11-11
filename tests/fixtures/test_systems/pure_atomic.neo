@@ -1,0 +1,2 @@
+; From tests/test_systems.py (tag v0.2.3): atomics need unsafe.
+fn main () -> i64 = i64(atomic_load_i32(null(), 0))

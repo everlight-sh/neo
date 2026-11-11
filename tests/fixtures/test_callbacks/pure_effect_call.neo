@@ -1,0 +1,3 @@
+; From tests/test_callbacks.py (tag v0.2.3): a pure function cannot call an effect function value.
+effect(fs) fn emit(x:i64)->unit=noop()
+fn main()->unit=let call=function(emit) in call(1)

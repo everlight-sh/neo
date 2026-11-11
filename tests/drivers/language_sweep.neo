@@ -1,0 +1,24 @@
+; Builds one fixture with the compiler under test and checks every run of the
+; vector file on stdin (format in tests/support/language.neo).
+; Arguments: the fixture, relative to tests/, then NAME=value compiler
+; environment entries such as NEO_ALLOC_STATS=1.
+; Prints "<fixture>: N runs OK".
+import "std:io"
+import "../support/driver.neo"
+import "../support/language.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn ls_environment() -> Arr Arr u8 _ _
+  = loop (i=2, out=md_words()) while cli_arg(i).present next (i+1,push(out,cli_arg(i).value)) yield out
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let fixture=cli_arg(1) in
+    let named=dv_expect(fixture.present && len(fixture.value)>0,"usage: language_sweep FIXTURE [NAME=value...] < VECTORS") in
+    let vectors=lg_stdin() in
+    let dir=dv_temp("sweep") in let binary=pt_join(dir,"probe") in
+    let built=lg_build(tools,fixture.value,binary,ls_environment()) in
+    let runs=lg_sweep(binary,pt_tail(fixture.value),vectors) in
+    let cleaned=dv_clean(dir) in
+    let shown=print_out(concat(pt_tail(fixture.value),": ",int_text(runs)," runs OK\n")) in noop()

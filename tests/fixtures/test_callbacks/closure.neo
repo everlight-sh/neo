@@ -1,0 +1,5 @@
+; From tests/test_callbacks.py (tag v0.2.3): a record of a function value and a capture. Prints 42.
+type Closure={callback:Fn(i64,i64)->i64,capture:i64}
+fn add(a:i64,b:i64)->i64=a+b
+fn apply(c:Closure,x:i64)->i64=let invoke=c.callback in invoke(c.capture,x)
+fn main()->i64=apply(Closure { callback=function(add),capture=35 },7)

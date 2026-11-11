@@ -1,0 +1,4 @@
+; From tests/test_capabilities.py (tag v0.2.3): capabilities pass through an unrestricted effect wrapper.
+effect(fs) fn read () -> i64 = 2
+effect fn wrapper () -> i64 = read()
+effect(net) fn main () -> i64 = wrapper()

@@ -1,0 +1,6 @@
+; From tests/test_inline_budget.py (tag v0.2.3): inline and cold are contextual words, and private inline
+; functions build.
+private inline fn g() -> i64 = 1
+private cold fn rare(x:i64) -> i64 = x*3
+fn f(inline:i64) -> i64 = let cold = inline in cold + 1
+effect fn main() -> i64 = g()+rare(2)+f(4)

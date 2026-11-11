@@ -1,0 +1,8 @@
+; From tests/test_resources.py (tag v0.2.3): a factory cannot return an alias of a scoped owner.
+resource type Handle = { number:i64 } drop release
+effect fn release(h:Handle) -> unit = noop()
+effect fn create() -> Handle = Handle { number = 1 }
+fn inspect(h:Handle) -> i64 = h.number
+effect fn consume(move h:Handle) -> unit = noop()
+effect fn factory()->Handle=using temporary=create() in let alias=temporary in alias
+fn main()->i64=0

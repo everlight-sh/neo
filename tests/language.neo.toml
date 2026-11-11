@@ -1,3 +1,1311 @@
 # Native cases ported from the Python language tests (see tests/porting/README.md).
 [tool.neo]
 test-globs = []
+
+# Sweeps: drivers/language_sweep.neo builds one fixture (and audits the
+# binary) and checks every run of a vector file; see tests/support/language.neo
+# for the format. Vector files carry their provenance in # comment lines.
+
+# bit_counts.py: count_trailing_zeros of zero, sign bits, every power of two
+# and random words, 1 and 4 workers.
+[[test]]
+name = "bit-counts"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/bit_counts.neo"]
+stdin-file = "vectors/bit_counts/runs.in"
+stdout = "bit_counts.neo: 422 runs OK\n"
+timeout = 300
+
+# bitwise_smoke.py: bit operations, byte_swap64 and mul_high on high-bit, negative
+# and random patterns.
+[[test]]
+name = "bitwise-smoke"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/bitwise.neo"]
+stdin-file = "vectors/bitwise_smoke/runs.in"
+stdout = "bitwise.neo: 600 runs OK\n"
+timeout = 300
+
+# bounded_stencil_smoke.py: bounded remainders against a wrapping-i64 oracle.
+[[test]]
+name = "bounded-stencil-smoke"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/bounded_stencil.neo"]
+stdin-file = "vectors/bounded_stencil_smoke/runs.in"
+stdout = "bounded_stencil.neo: 1040 runs OK\n"
+timeout = 300
+
+# byte_reads.py: invalid byte_read_le offsets and widths trap.
+[[test]]
+name = "byte-reads-traps"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/byte_reads_bounds.neo"]
+stdin-file = "vectors/byte_reads/traps.in"
+stdout = "byte_reads_bounds.neo: 16 runs OK\n"
+timeout = 300
+
+# byte_writes.py: shared, static, sliced and overlapping buffers; exact allocation
+# counters.
+[[test]]
+name = "byte-writes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/byte_writes.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/byte_writes/runs.in"
+stdout = "byte_writes.neo: 14 runs OK\n"
+timeout = 300
+
+# byte_writes.py: invalid byte_write_le offsets and widths trap.
+[[test]]
+name = "byte-writes-traps"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/byte_writes_bounds.neo"]
+stdin-file = "vectors/byte_writes/traps.in"
+stdout = "byte_writes_bounds.neo: 7 runs OK\n"
+timeout = 300
+
+# deep_dispatch.py: a 300-arm else-if dispatch proves every arm and computes the
+# script's model. (Its switch-lowering check is in tests/porting/language-failures.md.)
+[[test]]
+name = "deep-dispatch"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/deep_dispatch.neo"]
+stdin-file = "vectors/deep_dispatch/runs.in"
+stdout = "deep_dispatch.neo: 4 runs OK\n"
+timeout = 300
+
+# heap_headers.py: heap class boundaries and pool isolation, 1 and 4 workers.
+[[test]]
+name = "heap-headers"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/heap_headers.neo"]
+stdin-file = "vectors/heap_headers/runs.in"
+stdout = "heap_headers.neo: 2 runs OK\n"
+timeout = 300
+
+# index_lifetimes.py: indexed loads keep their parents alive, 1 and 4 workers.
+[[test]]
+name = "index-lifetimes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/index_lifetimes.neo"]
+stdin-file = "vectors/index_lifetimes/runs.in"
+stdout = "index_lifetimes.neo: 140 runs OK\n"
+timeout = 300
+
+# int_parse_vectors.py: the one-input-per-process parse fixture on the fixed
+# vectors (int-parse-lines has every vector).
+[[test]]
+name = "int-parse-vectors"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/int_parse_vectors.neo"]
+stdin-file = "vectors/int_parse_vectors/direct.in"
+stdout = "int_parse_vectors.neo: 13 runs OK\n"
+timeout = 300
+
+# int_parse_vectors.py: int_text on signed and power-of-ten boundaries.
+[[test]]
+name = "int-text-vectors"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/int_text_vectors.neo"]
+stdin-file = "vectors/int_parse_vectors/direct_format.in"
+stdout = "int_text_vectors.neo: 119 runs OK\n"
+timeout = 300
+
+# json_key_words.py: json_get on escaped, Unicode, duplicate and missing keys.
+[[test]]
+name = "json-key-words"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/json_key_words.neo"]
+stdin-file = "vectors/json_key_words/keys.in"
+stdout = "json_key_words.neo: 151 runs OK\n"
+timeout = 300
+
+# language_smoke.py: native collections against the script's map model.
+[[test]]
+name = "language-smoke-collections"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/language_collections.neo"]
+stdin-file = "vectors/language_smoke/collections.in"
+stdout = "language_collections.neo: 11 runs OK\n"
+timeout = 300
+
+# language_smoke.py: the 64 SipHash-2-4 reference vectors.
+[[test]]
+name = "language-smoke-hash"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/language_hash.neo"]
+stdin-file = "vectors/language_smoke/hash.in"
+stdout = "language_hash.neo: 64 runs OK\n"
+timeout = 300
+
+# language_smoke.py: scoped cleanup, cancellation, deadlines and channels.
+[[test]]
+name = "language-smoke-resources"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/language_resources.neo"]
+stdin-file = "vectors/language_smoke/resources.in"
+stdout = "language_resources.neo: 5 runs OK\n"
+timeout = 300
+
+# observer_lifetimes.py: fresh observer arguments and escaped references,
+# 1 and 4 workers.
+[[test]]
+name = "observer-lifetimes-workers"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/observer_lifetimes.neo"]
+stdin-file = "vectors/observer_lifetimes/runs.in"
+stdout = "observer_lifetimes.neo: 2 runs OK\n"
+timeout = 300
+
+# opcode_vm.py: the 40-opcode VM against the script's Python model. (Its
+# switch-lowering check is in tests/porting/language-failures.md.)
+[[test]]
+name = "opcode-vm"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/opcode_vm.neo"]
+stdin-file = "vectors/opcode_vm/runs.in"
+stdout = "opcode_vm.neo: 7 runs OK\n"
+timeout = 300
+
+# push_boundaries.py: push growth equals the exact allocation model through 1M
+# elements (modes 0-3; modes 4 and 5 are in tests/porting/language-failures.md).
+[[test]]
+name = "push-boundaries"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/push_boundaries.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/push_boundaries/runs.in"
+stdout = "push_boundaries.neo: 308 runs OK\n"
+timeout = 300
+
+# set_only_loops.py: set-only loop states, 1 and 4 workers.
+[[test]]
+name = "set-only-loops"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/set_only_loops.neo"]
+stdin-file = "vectors/set_only_loops/runs.in"
+stdout = "set_only_loops.neo: 2 runs OK\n"
+timeout = 300
+
+# shared_arrays.py: sharing and copy-on-write at 1/1000/10000, 1 and 4 workers.
+[[test]]
+name = "shared-arrays-sizes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/shared_arrays.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/shared_arrays/runs.in"
+stdout = "shared_arrays.neo: 6 runs OK\n"
+timeout = 300
+
+# borrow_parameters.py: effect borrows without copies at 1/1000/10000.
+[[test]]
+name = "borrow-parameters"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/borrow_parameters.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/borrow_parameters/runs.in"
+stdout = "borrow_parameters.neo: 3 runs OK\n"
+timeout = 300
+
+# unique_flags.py: UNIQUE ownership flags, 1 and 4 workers.
+[[test]]
+name = "unique-flags"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/unique_flags.neo"]
+stdin-file = "vectors/unique_flags/runs.in"
+stdout = "unique_flags.neo: 2 runs OK\n"
+timeout = 300
+
+# vector_arrays_smoke.py: affine loads, masked overflow traps and near-limit
+# induction, 1 and 4 workers.
+[[test]]
+name = "vector-arrays-smoke"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/vector_arrays.neo"]
+stdin-file = "vectors/vector_arrays_smoke/runs.in"
+stdout = "vector_arrays.neo: 287 runs OK\n"
+timeout = 300
+
+# vector_arrays_smoke.py: the shared worker ABI fixture, 20 runs with 4 workers.
+[[test]]
+name = "shared-worker-abi"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/shared_worker_abi.neo"]
+stdin-file = "vectors/vector_arrays_smoke/worker_abi.in"
+stdout = "shared_worker_abi.neo: 20 runs OK\n"
+timeout = 300
+
+# vector_sort_cases.py: complete sorted results and preserved input aliases.
+[[test]]
+name = "vector-sort-cases"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/vector_sort_probe.neo"]
+stdin-file = "vectors/vector_sort_cases/runs.in.gz"
+stdout = "vector_sort_probe.neo: 88 runs OK\n"
+timeout = 300
+
+# word_bytes.py: owned little-endian word bytes for short, large and signed words.
+[[test]]
+name = "word-bytes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/word_bytes.neo"]
+stdin-file = "vectors/word_bytes/runs.in"
+stdout = "word_bytes.neo: 598 runs OK\n"
+timeout = 300
+
+# write_only_loops.py: write-only loop states, 1 and 4 workers.
+[[test]]
+name = "write-only-loops"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/write_only_loops.neo"]
+stdin-file = "vectors/write_only_loops/runs.in"
+stdout = "write_only_loops.neo: 2 runs OK\n"
+timeout = 300
+
+# Whole-file oracles: drivers/language_lines.neo runs a fixture once over every
+# input line (the stdin-file) and compares its output with the frozen expected
+# file. Files over 64 KiB are gzip-compressed. Arguments: fixture, expected
+# output, NEO_THREADS.
+
+# bitset.py: ordered membership after 550 random inserts and removals.
+[[test]]
+name = "bitset-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/bitset.neo", "vectors/bitset/cases.out.gz", "1"]
+stdin-file = "vectors/bitset/cases.in"
+stdout = "bitset.neo: 1 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "bitset-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/bitset.neo", "vectors/bitset/cases.out.gz", "4"]
+stdin-file = "vectors/bitset/cases.in"
+stdout = "bitset.neo: 1 lines OK\n"
+timeout = 120
+
+# byte_equal.py: byte_equal against Python bytes equality.
+[[test]]
+name = "byte-equal-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/byte_equal.neo", "vectors/byte_equal/cases.out", "1"]
+stdin-file = "vectors/byte_equal/cases.in.gz"
+stdout = "byte_equal.neo: 1075 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "byte-equal-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/byte_equal.neo", "vectors/byte_equal/cases.out", "4"]
+stdin-file = "vectors/byte_equal/cases.in.gz"
+stdout = "byte_equal.neo: 1075 lines OK\n"
+timeout = 120
+
+# byte_reads.py: byte_read_le on every offset and width of random slices.
+[[test]]
+name = "byte-reads-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/byte_reads.neo", "vectors/byte_reads/cases.out", "1"]
+stdin-file = "vectors/byte_reads/cases.in.gz"
+stdout = "byte_reads.neo: 871 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "byte-reads-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/byte_reads.neo", "vectors/byte_reads/cases.out", "4"]
+stdin-file = "vectors/byte_reads/cases.in.gz"
+stdout = "byte_reads.neo: 871 lines OK\n"
+timeout = 120
+
+# hashmap_entry.py: 1,400 map-entry, overwrite and delete results against the
+# script's model (the growth half is the hashmap-entry case below).
+[[test]]
+name = "hashmap-entry-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/hashmap_entry.neo", "vectors/hashmap_entry/cases.out.gz", "1"]
+stdin-file = "vectors/hashmap_entry/cases.in.gz"
+stdout = "hashmap_entry.neo: 1 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "hashmap-entry-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/hashmap_entry.neo", "vectors/hashmap_entry/cases.out.gz", "4"]
+stdin-file = "vectors/hashmap_entry/cases.in.gz"
+stdout = "hashmap_entry.neo: 1 lines OK\n"
+timeout = 120
+
+# int_parse_vectors.py: every parse vector in one process.
+[[test]]
+name = "int-parse-lines"
+file = "drivers/language_lines.neo"
+args = ["fixtures/int_parse_lines.neo", "vectors/int_parse_vectors/parse.out.gz", "1"]
+stdin-file = "vectors/int_parse_vectors/parse.in.gz"
+stdout = "int_parse_lines.neo: 12433 lines OK\n"
+timeout = 120
+
+# json_accessors.py: typed accessors against Python's json module.
+[[test]]
+name = "json-accessors"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_access_probe.neo", "vectors/json_accessors/cases.out.gz", "1"]
+stdin-file = "vectors/json_accessors/cases.in.gz"
+stdout = "json_access_probe.neo: 745 lines OK\n"
+timeout = 120
+
+# json_field_decoder.py: decoded string fields equal Python's.
+[[test]]
+name = "json-field-decoder"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_field_decoder.neo", "vectors/json_field_decoder/cases.out", "1"]
+stdin-file = "vectors/json_field_decoder/cases.in.gz"
+stdout = "json_field_decoder.neo: 1212 lines OK\n"
+timeout = 120
+
+# json_object_encoder.py: encoded objects round-trip through Python's json.
+[[test]]
+name = "json-object-encoder-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_object_encoder.neo", "vectors/json_object_encoder/cases.out.gz", "1"]
+stdin-file = "vectors/json_object_encoder/cases.in.gz"
+stdout = "json_object_encoder.neo: 737 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "json-object-encoder-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_object_encoder.neo", "vectors/json_object_encoder/cases.out.gz", "4"]
+stdin-file = "vectors/json_object_encoder/cases.in.gz"
+stdout = "json_object_encoder.neo: 737 lines OK\n"
+timeout = 120
+
+# json_scan_utf8.py: UTF-8 validity of scanned documents against Python.
+[[test]]
+name = "json-scan-utf8-parse"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_scan_words.neo", "vectors/json_scan_utf8/parse.out.gz", "1"]
+stdin-file = "vectors/json_scan_utf8/parse.in.gz"
+stdout = "json_scan_words.neo: 10800 lines OK\n"
+timeout = 120
+
+# json_scan_utf8.py: decoded UTF-8 fields against Python.
+[[test]]
+name = "json-scan-utf8-fields"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_field_decoder.neo", "vectors/json_scan_utf8/fields.out", "1"]
+stdin-file = "vectors/json_scan_utf8/fields.in.gz"
+stdout = "json_field_decoder.neo: 9733 lines OK\n"
+timeout = 120
+
+# json_scan_words.py: word-at-a-time scanning against Python's json.
+[[test]]
+name = "json-scan-words"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_scan_words.neo", "vectors/json_scan_words/cases.out.gz", "1"]
+stdin-file = "vectors/json_scan_words/cases.in.gz"
+stdout = "json_scan_words.neo: 6644 lines OK\n"
+timeout = 120
+
+# json_serialization.py: constructed values serialize as Python's json does.
+[[test]]
+name = "json-serialization"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_construct_probe.neo", "vectors/json_serialization/cases.out.gz", "1"]
+stdin-file = "vectors/json_serialization/cases.in.gz"
+stdout = "json_construct_probe.neo: 428 lines OK\n"
+timeout = 120
+
+# json_tokens.py: token streams of valid and invalid documents.
+[[test]]
+name = "json-tokens-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_tokens.neo", "vectors/json_tokens/cases.out.gz", "1"]
+stdin-file = "vectors/json_tokens/cases.in.gz"
+stdout = "json_tokens.neo: 431 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "json-tokens-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_tokens.neo", "vectors/json_tokens/cases.out.gz", "4"]
+stdin-file = "vectors/json_tokens/cases.in.gz"
+stdout = "json_tokens.neo: 431 lines OK\n"
+timeout = 120
+
+# json_views.py: parsed views of valid and invalid documents.
+[[test]]
+name = "json-views-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_views.neo", "vectors/json_views/cases.out.gz", "1"]
+stdin-file = "vectors/json_views/cases.in.gz"
+stdout = "json_views.neo: 576 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "json-views-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_views.neo", "vectors/json_views/cases.out.gz", "4"]
+stdin-file = "vectors/json_views/cases.in.gz"
+stdout = "json_views.neo: 576 lines OK\n"
+timeout = 120
+
+# json_writer.py: written documents parse back to the same values.
+[[test]]
+name = "json-writer-1"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_writer_probe.neo", "vectors/json_writer/cases.out.gz", "1"]
+stdin-file = "vectors/json_writer/cases.in.gz"
+stdout = "json_writer_probe.neo: 1002 lines OK\n"
+timeout = 120
+
+[[test]]
+name = "json-writer-4"
+file = "drivers/language_lines.neo"
+args = ["fixtures/json_writer_probe.neo", "vectors/json_writer/cases.out.gz", "4"]
+stdin-file = "vectors/json_writer/cases.in.gz"
+stdout = "json_writer_probe.neo: 1002 lines OK\n"
+timeout = 120
+
+# utf8_ranges.py: utf8_valid_range against Python's decoder.
+[[test]]
+name = "utf8-ranges"
+file = "drivers/language_lines.neo"
+args = ["fixtures/utf8_ranges.neo", "vectors/utf8_ranges/cases.out", "1"]
+stdin-file = "vectors/utf8_ranges/cases.in.gz"
+stdout = "utf8_ranges.neo: 7985 lines OK\n"
+timeout = 120
+
+# Direct runs.
+
+# int_parse_vectors.py: int_text of every boundary number in one process (the
+# output equals the input).
+[[test]]
+name = "int-text-lines"
+file = "fixtures/int_text_lines.neo"
+stdin-file = "vectors/int_parse_vectors/format.in"
+stdout-file = "vectors/int_parse_vectors/format.in"
+
+# json_key_words.py: binary keys of 26 sizes, every byte value at the key end.
+[[test]]
+name = "json-key-words-bytes"
+file = "fixtures/json_key_words_bytes.neo"
+args = ["256"]
+stdout = "json key words OK 13056\n"
+
+# compute_smoke.py: the examples with the worker counts tests/integration.neo.toml
+# does not use (argument errors are its argv-* cases).
+[[test]]
+name = "compute-hello-workers"
+file = "../examples/hello.neo"
+stdout = "Hello, World!\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "compute-greet"
+file = "../examples/greet.neo"
+args = ["7"]
+stdout = "Hello, 7!\n"
+
+[[test]]
+name = "compute-greet-workers"
+file = "../examples/greet.neo"
+args = ["7"]
+stdout = "Hello, 7!\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "compute-mandelbrot-one-worker"
+file = "../examples/mandel.neo"
+args = ["200", "200", "100"]
+stdout = "842053\n"
+
+[[test]]
+name = "compute-stencil-one-worker"
+file = "../examples/stencil.neo"
+args = ["1000", "3"]
+stdout = "499223042\n"
+
+[[test]]
+name = "compute-sieve-workers"
+file = "../examples/sieve.neo"
+args = ["10000"]
+stdout = "1229\n"
+env.NEO_THREADS = "4"
+
+[[test]]
+name = "compute-nbody-one-worker"
+file = "../examples/nbody.neo"
+args = ["100", "10"]
+stdout = "-0.88644769431012838\n"
+stdout-tolerance = 1e-09
+
+# Models and allocation bounds the scripts checked in Python, now checked by
+# drivers/language_allocations.neo (one case per script).
+
+# json_token_growth.py
+[[test]]
+name = "json-token-growth"
+file = "drivers/language_allocations.neo"
+args = ["json_token_growth"]
+stdout = "json_token_growth: 10 runs OK\n"
+timeout = 600
+
+# bitset_growth.py
+[[test]]
+name = "bitset-growth"
+file = "drivers/language_allocations.neo"
+args = ["bitset_growth"]
+stdout = "bitset_growth: 34 runs OK\n"
+timeout = 600
+
+# json_writer_growth.py (outputs only; its allocation bounds are entry 6 of
+# tests/porting/language-failures.md)
+[[test]]
+name = "json-writer-growth"
+file = "drivers/language_allocations.neo"
+args = ["json_writer_growth"]
+stdout = "json_writer_growth: 16 runs OK\n"
+timeout = 600
+
+# branch_ownership.py
+[[test]]
+name = "branch-ownership"
+file = "drivers/language_allocations.neo"
+args = ["branch_ownership"]
+stdout = "branch_ownership: 3 runs OK\n"
+timeout = 600
+
+# loop_record_fields.py
+[[test]]
+name = "loop-record-fields"
+file = "drivers/language_allocations.neo"
+args = ["loop_record_fields"]
+stdout = "loop_record_fields: 160 runs OK\n"
+timeout = 600
+
+# map_optimizations.py
+[[test]]
+name = "map-optimizations"
+file = "drivers/language_allocations.neo"
+args = ["map_optimizations"]
+stdout = "map_optimizations: 21 runs OK\n"
+timeout = 600
+
+# bytesmap_smoke.py
+[[test]]
+name = "bytesmap-smoke"
+file = "drivers/language_allocations.neo"
+args = ["bytesmap_smoke"]
+stdout = "bytesmap_smoke: 14 runs OK\n"
+timeout = 600
+
+# language_perf_checks.py
+[[test]]
+name = "language-perf-checks"
+file = "drivers/language_allocations.neo"
+args = ["language_perf_checks"]
+stdout = "language_perf_checks: 9 runs OK\n"
+timeout = 600
+
+# hashmap_entry.py (growth half)
+[[test]]
+name = "hashmap-entry"
+file = "drivers/language_allocations.neo"
+args = ["hashmap_entry"]
+stdout = "hashmap_entry: 6 runs OK\n"
+timeout = 600
+
+# Reference unit tests (test_*.py) tested the Python compiler; these fixtures
+# keep the behaviours worth keeping as native check, reject and run cases.
+
+# test_language_types.py: generics, error binding, shapes and unit payloads run;
+# match exhaustiveness, arity, duplicates, privacy, payload types and recursive
+# types are rejected.
+[[test]]
+name = "language-types-values"
+file = "fixtures/test_language_types/values.neo"
+args = ["3"]
+stdout = "42 4 -3 5 42\n"
+
+[[test]]
+name = "language-types-non-exhaustive"
+file = "fixtures/test_language_types/non_exhaustive.neo"
+reject = true
+exit = 1
+diagnostic = "non-exhaustive match"
+
+[[test]]
+name = "language-types-payload-arity"
+file = "fixtures/test_language_types/payload_arity.neo"
+reject = true
+exit = 1
+diagnostic = "match payload arity mismatch"
+
+[[test]]
+name = "language-types-duplicate-arm"
+file = "fixtures/test_language_types/duplicate_arm.neo"
+reject = true
+exit = 1
+diagnostic = "duplicate match arm"
+
+[[test]]
+name = "language-types-unreachable-arm"
+file = "fixtures/test_language_types/unreachable_arm.neo"
+reject = true
+exit = 1
+diagnostic = "unreachable arm after wildcard"
+
+[[test]]
+name = "language-types-private-tag"
+file = "fixtures/test_language_types/private_tag.neo"
+reject = true
+exit = 1
+diagnostic = "enum storage is private; use exhaustive match"
+
+[[test]]
+name = "language-types-payload-type"
+file = "fixtures/test_language_types/payload_type.neo"
+reject = true
+exit = 1
+diagnostic = "has type Arr u8"
+
+[[test]]
+name = "language-types-recursive-type"
+file = "fixtures/test_language_types/recursive_type.neo"
+reject = true
+exit = 1
+diagnostic = "recursive value type"
+
+# test_capabilities.py: declared, transitive capabilities; unsafe for pointers
+# and foreign calls; handler capabilities.
+[[test]]
+name = "capabilities-transitive"
+file = "fixtures/test_capabilities/transitive.neo"
+check = true
+
+[[test]]
+name = "capabilities-transitive-missing"
+file = "fixtures/test_capabilities/transitive_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: fs"
+
+[[test]]
+name = "capabilities-wrapper-missing"
+file = "fixtures/test_capabilities/wrapper_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: fs"
+
+[[test]]
+name = "capabilities-pointer-unsafe"
+file = "fixtures/test_capabilities/pointer_unsafe.neo"
+check = true
+
+[[test]]
+name = "capabilities-pointer-missing"
+file = "fixtures/test_capabilities/pointer_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: unsafe"
+
+[[test]]
+name = "capabilities-extern-unsafe"
+file = "fixtures/test_capabilities/extern_unsafe.neo"
+check = true
+
+[[test]]
+name = "capabilities-extern-missing"
+file = "fixtures/test_capabilities/extern_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: unsafe"
+
+[[test]]
+name = "capabilities-handler-effects"
+file = "fixtures/test_capabilities/handler_effects.neo"
+check = true
+
+[[test]]
+name = "capabilities-handler-missing"
+file = "fixtures/test_capabilities/handler_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: fs"
+
+# test_callbacks.py: function values in records run; effect, length, refinement,
+# capability, type and arity rules are enforced. (Two gaps are in
+# tests/porting/language-failures.md.)
+[[test]]
+name = "callbacks-closure"
+file = "fixtures/test_callbacks/closure.neo"
+stdout = "42\n"
+
+[[test]]
+name = "callbacks-float-bits"
+file = "fixtures/test_callbacks/float_bits.neo"
+stdout = "-9223372036854775808\n"
+
+[[test]]
+name = "callbacks-pure-effect-call"
+file = "fixtures/test_callbacks/pure_effect_call.neo"
+reject = true
+exit = 1
+diagnostic = "call requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "callbacks-effect-value-missing"
+file = "fixtures/test_callbacks/effect_value_missing.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: fs"
+
+[[test]]
+name = "callbacks-pure-effect-parameter"
+file = "fixtures/test_callbacks/pure_effect_parameter.neo"
+reject = true
+exit = 1
+diagnostic = "call requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "callbacks-shared-lengths"
+file = "fixtures/test_callbacks/shared_lengths.neo"
+reject = true
+exit = 1
+diagnostic = "function values require independent lengths and no owned parameters or refinements"
+
+[[test]]
+name = "callbacks-refined-parameter"
+file = "fixtures/test_callbacks/refined_parameter.neo"
+reject = true
+exit = 1
+diagnostic = "function values require independent lengths and no owned parameters or refinements"
+
+[[test]]
+name = "callbacks-implicit-capabilities"
+file = "fixtures/test_callbacks/implicit_capabilities.neo"
+reject = true
+exit = 1
+diagnostic = "effect function values require explicit capabilities"
+
+[[test]]
+name = "callbacks-argument-type"
+file = "fixtures/test_callbacks/argument_type.neo"
+reject = true
+exit = 1
+diagnostic = "function-value argument type mismatch"
+
+[[test]]
+name = "callbacks-argument-arity"
+file = "fixtures/test_callbacks/argument_arity.neo"
+reject = true
+exit = 1
+diagnostic = "function-value argument arity mismatch"
+
+[[test]]
+name = "callbacks-null-function"
+file = "fixtures/test_callbacks/null_function.neo"
+reject = true
+exit = 1
+diagnostic = "function_null is compiler-internal inactive storage"
+
+# test_resources.py: scoped owners, moves and factories; arena references via
+# std:arena.
+[[test]]
+name = "resources-scoped"
+file = "fixtures/test_resources/scoped.neo"
+check = true
+
+[[test]]
+name = "resources-branch-move"
+file = "fixtures/test_resources/branch_move.neo"
+check = true
+
+[[test]]
+name = "resources-factories"
+file = "fixtures/test_resources/factories.neo"
+check = true
+
+[[test]]
+name = "resources-factory-escape"
+file = "fixtures/test_resources/factory_escape.neo"
+reject = true
+exit = 1
+diagnostic = "a resource factory must construct a new owner"
+
+[[test]]
+name = "resources-factory-alias"
+file = "fixtures/test_resources/factory_alias.neo"
+reject = true
+exit = 1
+diagnostic = "bind resource owners with using"
+
+[[test]]
+name = "resources-use-after-move"
+file = "fixtures/test_resources/use_after_move.neo"
+reject = true
+exit = 1
+diagnostic = "resource h used after move or outside its scope"
+
+[[test]]
+name = "resources-branch-use-after-move"
+file = "fixtures/test_resources/branch_use_after_move.neo"
+reject = true
+exit = 1
+diagnostic = "resource h used after move or outside its scope"
+
+[[test]]
+name = "resources-unscoped-owner"
+file = "fixtures/test_resources/unscoped_owner.neo"
+reject = true
+exit = 1
+diagnostic = "bind resource owners with using"
+
+[[test]]
+name = "resources-borrowed-move"
+file = "fixtures/test_resources/borrowed_move.neo"
+reject = true
+exit = 1
+diagnostic = "cannot move borrowed resource h"
+
+[[test]]
+name = "resources-loop-move"
+file = "fixtures/test_resources/loop_move.neo"
+reject = true
+exit = 1
+diagnostic = "cannot move an outer resource from a repeating region"
+
+[[test]]
+name = "resources-stored-resource"
+file = "fixtures/test_resources/stored_resource.neo"
+reject = true
+exit = 1
+diagnostic = "resources cannot be stored in value records, enums or arrays"
+
+[[test]]
+name = "resources-arena-reference"
+file = "fixtures/test_resources/arena_reference.neo"
+stdout = "42\n"
+
+[[test]]
+name = "resources-adopted-use"
+file = "fixtures/test_resources/adopted_use.neo"
+reject = true
+exit = 1
+diagnostic = "resource value used after move or outside its scope"
+
+[[test]]
+name = "resources-stored-borrow"
+file = "fixtures/test_resources/stored_borrow.neo"
+reject = true
+exit = 1
+diagnostic = "borrow_ref may only supply a scoped borrow"
+
+[[test]]
+name = "resources-null-reference"
+file = "fixtures/test_resources/null_reference.neo"
+reject = true
+exit = 1
+diagnostic = "ref_null is compiler-internal inactive storage"
+
+# test_u16.py: u16 values wrap; mixed-type operations and unproven indexes are
+# rejected.
+[[test]]
+name = "u16-values"
+file = "fixtures/test_u16/values.neo"
+stdout = "655350446465382\n"
+
+[[test]]
+name = "u16-add"
+file = "fixtures/test_u16/add.neo"
+reject = true
+exit = 1
+diagnostic = "operator + on u16 and u16"
+
+[[test]]
+name = "u16-float-cast"
+file = "fixtures/test_u16/float_cast.neo"
+reject = true
+exit = 1
+diagnostic = "cannot cast f64 to u16"
+
+[[test]]
+name = "u16-compare-u8"
+file = "fixtures/test_u16/compare_u8.neo"
+reject = true
+exit = 1
+diagnostic = "comparison < on u16 and u8"
+
+[[test]]
+name = "u16-equal-i64"
+file = "fixtures/test_u16/equal_i64.neo"
+reject = true
+exit = 1
+diagnostic = "equality on u16 and i64"
+
+[[test]]
+name = "u16-concat-bytes"
+file = "fixtures/test_u16/concat_bytes.neo"
+reject = true
+exit = 1
+diagnostic = "concat: argument must be Arr u8"
+
+[[test]]
+name = "u16-set-u8"
+file = "fixtures/test_u16/set_u8.neo"
+reject = true
+exit = 1
+diagnostic = "set: value has type u8, expected u16"
+
+[[test]]
+name = "u16-push-i64"
+file = "fixtures/test_u16/push_i64.neo"
+reject = true
+exit = 1
+diagnostic = "push value does not match array element type"
+
+[[test]]
+name = "u16-byte-write"
+file = "fixtures/test_u16/byte_write.neo"
+reject = true
+exit = 1
+diagnostic = "invalid arguments to byte_write_le"
+
+[[test]]
+name = "u16-unproven-index"
+file = "fixtures/test_u16/unproven_index.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+# test_prover_gaps.py: masks and record-field guards prove indexes; near
+# misses do not.
+[[test]]
+name = "prover-gaps-masks"
+file = "fixtures/test_prover_gaps/masks.neo"
+check = true
+
+[[test]]
+name = "prover-gaps-mask-too-wide"
+file = "fixtures/test_prover_gaps/mask_too_wide.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-mask-negative"
+file = "fixtures/test_prover_gaps/mask_negative.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-mask-unknown"
+file = "fixtures/test_prover_gaps/mask_unknown.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-mask-or"
+file = "fixtures/test_prover_gaps/mask_or.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-mask-offset"
+file = "fixtures/test_prover_gaps/mask_offset.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-fields"
+file = "fixtures/test_prover_gaps/fields.neo"
+check = true
+
+[[test]]
+name = "prover-gaps-field-other-record"
+file = "fixtures/test_prover_gaps/field_other_record.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-field-other-field"
+file = "fixtures/test_prover_gaps/field_other_field.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-field-shadowed"
+file = "fixtures/test_prover_gaps/field_shadowed.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-field-updated"
+file = "fixtures/test_prover_gaps/field_updated.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-field-offset"
+file = "fixtures/test_prover_gaps/field_offset.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "prover-gaps-loop-field-offset"
+file = "fixtures/test_prover_gaps/loop_field_offset.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+# test_ambient_paths.py: path conditions do not leak across calls; result and
+# length facts prove. (Postcondition-after-check cases are in
+# tests/porting/language-failures.md.)
+[[test]]
+name = "ambient-paths-precondition-path"
+file = "fixtures/test_ambient_paths/precondition_path.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "ambient-paths-clamped-result"
+file = "fixtures/test_ambient_paths/clamped_result.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-comprehension-lengths"
+file = "fixtures/test_ambient_paths/comprehension_lengths.neo"
+check = true
+
+# test_systems.py: atomics, uninitialized buffers, forward refinements and
+# loop widening run; effect, unsafe, size, foreign-signature and entry-point
+# rules are enforced.
+[[test]]
+name = "systems-atomics"
+file = "fixtures/test_systems/atomics.neo"
+stdout = "7\n"
+
+[[test]]
+name = "systems-uninitialized"
+file = "fixtures/test_systems/uninitialized.neo"
+stdout = "71\n"
+
+[[test]]
+name = "systems-forward-refinement"
+file = "fixtures/test_systems/forward_refinement.neo"
+args = ["10"]
+stdout = "5\n"
+
+[[test]]
+name = "systems-widening"
+file = "fixtures/test_systems/widening.neo"
+args = ["3"]
+stdout = "4\n"
+
+[[test]]
+name = "systems-widening-initial"
+file = "fixtures/test_systems/widening_initial.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "systems-widening-next"
+file = "fixtures/test_systems/widening_next.neo"
+reject = true
+exit = 1
+diagnostic = "bounds"
+
+[[test]]
+name = "systems-bit-arity"
+file = "fixtures/test_systems/bit_arity.neo"
+reject = true
+exit = 1
+diagnostic = "bit_and requires two i64 arguments"
+
+[[test]]
+name = "systems-pure-ffi"
+file = "fixtures/test_systems/pure_ffi.neo"
+reject = true
+exit = 1
+diagnostic = "getpid requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "systems-pure-effect-call"
+file = "fixtures/test_systems/pure_effect_call.neo"
+reject = true
+exit = 1
+diagnostic = "requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "systems-effect-refinement"
+file = "fixtures/test_systems/effect_refinement.neo"
+reject = true
+exit = 2
+diagnostic = "refinement outside the affine subset"
+
+[[test]]
+name = "systems-pure-pointer"
+file = "fixtures/test_systems/pure_pointer.neo"
+reject = true
+exit = 1
+diagnostic = "load_i64 requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "systems-pure-atomic"
+file = "fixtures/test_systems/pure_atomic.neo"
+reject = true
+exit = 1
+diagnostic = "atomic_load_i32 requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "systems-aes-without-unsafe"
+file = "fixtures/test_systems/aes_without_unsafe.neo"
+reject = true
+exit = 1
+diagnostic = "missing effect capabilities: unsafe"
+
+[[test]]
+name = "systems-unsized-uninit"
+file = "fixtures/test_systems/unsized_uninit.neo"
+reject = true
+exit = 1
+diagnostic = "size"
+
+[[test]]
+name = "systems-pure-syscall"
+file = "fixtures/test_systems/pure_syscall.neo"
+reject = true
+exit = 1
+diagnostic = "syscall6 requires an effect function and cannot run in a refinement or comprehension"
+
+[[test]]
+name = "systems-effect-handler"
+file = "fixtures/test_systems/effect_handler.neo"
+reject = true
+exit = 1
+diagnostic = "serve: handler must take a byte array and return a byte array without refinements"
+
+[[test]]
+name = "systems-foreign-array"
+file = "fixtures/test_systems/foreign_array.neo"
+reject = true
+exit = 1
+diagnostic = "extern signatures support unrefined i64, i32, f64, ptr and unit returns"
+
+[[test]]
+name = "systems-duplicate-main"
+file = "fixtures/test_systems/duplicate_main.neo"
+reject = true
+exit = 1
+diagnostic = "duplicate declaration main"
+
+[[test]]
+name = "systems-extern-main"
+file = "fixtures/test_systems/extern_main.neo"
+reject = true
+exit = 1
+diagnostic = "main must be a Neo entry point without extern/export"
+
+[[test]]
+name = "systems-data-temporary"
+file = "fixtures/test_systems/data_temporary.neo"
+reject = true
+exit = 1
+diagnostic = "data takes a byte array; its pointer borrows the array's storage"
+
+# test_bit_counts.py, test_byte_equal.py, test_byte_reads.py: builtin
+# signatures are checked (their values are the bit-counts, byte-equal and
+# byte-reads sweeps above).
+[[test]]
+name = "bit-counts-arity"
+file = "fixtures/test_bit_counts/arity.neo"
+reject = true
+exit = 1
+diagnostic = "count_trailing_zeros requires one i64 argument"
+
+[[test]]
+name = "bit-counts-argument-type"
+file = "fixtures/test_bit_counts/argument_type.neo"
+reject = true
+exit = 1
+diagnostic = "count_trailing_zeros requires one i64 argument"
+
+[[test]]
+name = "byte-equal-arity"
+file = "fixtures/test_byte_equal/arity.neo"
+reject = true
+exit = 1
+diagnostic = "byte_equal has the wrong number of arguments"
+
+[[test]]
+name = "byte-equal-argument-type"
+file = "fixtures/test_byte_equal/argument_type.neo"
+reject = true
+exit = 1
+diagnostic = "invalid arguments to byte_equal"
+
+[[test]]
+name = "byte-reads-arity"
+file = "fixtures/test_byte_reads/arity.neo"
+reject = true
+exit = 1
+diagnostic = "byte_read_le has the wrong number of arguments"
+
+[[test]]
+name = "byte-reads-word-array"
+file = "fixtures/test_byte_reads/word_array.neo"
+reject = true
+exit = 1
+diagnostic = "invalid arguments to byte_read_le"
+
+# test_borrow_parameters.py: explicit borrows run; scalar and move+borrow
+# parameters are rejected.
+[[test]]
+name = "borrow-parameters-effect-borrows"
+file = "fixtures/test_borrow_parameters/effect_borrows.neo"
+stdout = "10\n"
+
+[[test]]
+name = "borrow-parameters-scalar-borrow"
+file = "fixtures/test_borrow_parameters/scalar_borrow.neo"
+reject = true
+exit = 1
+diagnostic = "borrow parameters require an internal array or record type"
+
+[[test]]
+name = "borrow-parameters-move-and-borrow"
+file = "fixtures/test_borrow_parameters/move_and_borrow.neo"
+reject = true
+exit = 1
+diagnostic = "parameter cannot be both move and borrow"
+
+# test_inline_budget.py: inline and cold are contextual modifiers that cannot
+# be combined.
+[[test]]
+name = "inline-budget-modifiers"
+file = "fixtures/test_inline_budget/modifiers.neo"
+stdout = "12\n"
+
+[[test]]
+name = "inline-budget-cold-inline"
+file = "fixtures/test_inline_budget/cold_inline.neo"
+reject = true
+exit = 1
+diagnostic = "a function cannot be both cold and inline"
+
+# test_reference.py: overflow traps, wrapping and narrowing, value semantics.
+[[test]]
+name = "reference-semantics"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/test_reference/semantics.neo"]
+stdin-file = "vectors/test_reference/runs.in"
+stdout = "semantics.neo: 6 runs OK\n"
+timeout = 120

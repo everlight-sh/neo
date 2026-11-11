@@ -1,0 +1,9 @@
+; From tests/test_resources.py (tag v0.2.3): factories construct new owners while scoped temporaries close.
+resource type Handle = { number:i64 } drop release
+effect fn release(h:Handle) -> unit = noop()
+effect fn create() -> Handle = Handle { number = 1 }
+fn inspect(h:Handle) -> i64 = h.number
+effect fn consume(move h:Handle) -> unit = noop()
+effect fn factory()->Handle=using temporary=create() in Handle {number=inspect(temporary)+1}
+effect fn choice(flag:bool)->Handle=using outer=create() in using inner=create() in if flag then Handle {number=1} else Handle {number=2}
+effect fn main()->i64=using owner=factory() in using other=choice(true) in inspect(owner)+inspect(other)

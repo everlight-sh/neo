@@ -1,0 +1,3 @@
+; From tests/test_callbacks.py (tag v0.2.3): function values erase length coupling, so parameters must have independent lengths.
+fn f(a:Arr u8 n,b:Arr u8 n)->i64=len(a)
+fn main()->i64=let g=function(f) in g("a","bb")

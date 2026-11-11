@@ -1,0 +1,3 @@
+; From tests/test_capabilities.py (tag v0.2.3): calling a foreign function without unsafe is rejected.
+extern fn identity () -> i64
+effect(fs) fn main () -> i64 = identity()

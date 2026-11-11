@@ -1,0 +1,4 @@
+; From tests/test_capabilities.py (tag v0.2.3): effect capabilities are declared, and a caller declares
+; the ones its callees need.
+effect(fs) fn read () -> i64 = 2
+effect(fs) fn main () -> i64 = read()

@@ -1,0 +1,3 @@
+; From tests/test_u16.py (tag v0.2.3): u16 indexing must be proven in bounds.
+fn get(a:Arr u16 n,i:i64) -> i64 = i64(a[i])
+fn main() -> i64 = get(arr(k in 0..3) u16(k),1)

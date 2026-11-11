@@ -1,0 +1,11 @@
+; From tests/test_prover_gaps.py (tag v0.2.3): guards on record fields, nested fields, local records and
+; loop-state fields prove indexes.
+type R = { pos : i64, size : i64, inner : Q }
+type Q = { at : i64 }
+fn a(r:R,xs:Arr i64 n) -> i64 = if r.pos >= 0 && r.pos < n then xs[r.pos] else 0
+fn b(r:R,xs:Arr i64 n) -> i64 = if r.inner.at >= 0 && r.inner.at < n then xs[r.inner.at] else 0
+fn c(xs:Arr i64 n,k:i64) -> i64 = let r = R { pos = k, size = 0, inner = Q { at = 0 } } in if r.pos >= 0 && r.pos < n then xs[r.pos] else 0
+fn walk(xs:Arr i64 n) -> i64
+  = loop(r = R { pos = 0, size = 0, inner = Q { at = 0 } }, t = 0) while r.pos >= 0 && r.pos < n
+      next(r with { pos = r.pos + 1 }, t + xs[r.pos]) yield t
+fn main() -> i64 = 0

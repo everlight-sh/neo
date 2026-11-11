@@ -1,0 +1,2 @@
+; From tests/test_systems.py (tag v0.2.3): the initial length does not survive a loop that shrinks the array.
+fn main(n:i64) -> i64 = loop(i=0,a=arr(j in 0..1) j) while i<n next(i+1,let v=a[0] in arr(j in 0..0) v) yield len(a)

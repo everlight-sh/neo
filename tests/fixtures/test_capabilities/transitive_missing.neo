@@ -1,0 +1,3 @@
+; From tests/test_capabilities.py (tag v0.2.3): a caller without the callee's capability is rejected.
+effect(fs) fn read () -> i64 = 2
+effect(net) fn main () -> i64 = read()

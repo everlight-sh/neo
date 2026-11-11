@@ -1,0 +1,2 @@
+; From tests/test_systems.py (tag v0.2.3): AES rounds need unsafe.
+effect(time) fn main () -> i64 = aes_round_low(1, 2, 3, 4)

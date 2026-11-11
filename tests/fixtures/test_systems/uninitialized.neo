@@ -1,0 +1,3 @@
+; From tests/test_systems.py (tag v0.2.3): byte_uninit with a proven size. Prints 71.
+effect fn make (n:i64) -> Arr u8 _ = check n >= 8 in let b = byte_uninit(n) in let s = store_i64(data(b), 0, 7) in b
+effect fn main () -> i64 = let b = make(64) in byte_read_le(b, 0, 8) + len(b)

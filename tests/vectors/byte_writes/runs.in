@@ -1,0 +1,16 @@
+# Frozen from tests/byte_writes.py (tag v0.2.3): inputs as that script generated them, outputs checked once against its Python oracle.
+# Shared, static, sliced and overlapping buffers, source-field lifetime, signed little endian and empty spans, 1 and 4 workers. Build with NEO_ALLOC_STATS=1.
+1	8		=byte writes OK\n
+1	9		=byte writes OK\n
+1	127		=byte writes OK\n
+1	128		=byte writes OK\n
+1	255		=byte writes OK\n
+1	256		=byte writes OK\n
+1	4096		=byte writes OK\n
+4	8		=byte writes OK\n
+4	9		=byte writes OK\n
+4	127		=byte writes OK\n
+4	128		=byte writes OK\n
+4	255		=byte writes OK\n
+4	256		=byte writes OK\n
+4	4096		=byte writes OK\n

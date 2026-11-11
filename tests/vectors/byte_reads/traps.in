@@ -1,0 +1,18 @@
+# Frozen from tests/byte_reads.py (tag v0.2.3): inputs as that script generated them, outputs checked once against its Python oracle.
+# Invalid offsets and widths of byte_read_le on a slice trap (tests/fixtures/byte_reads_bounds.neo).
+1	-1 1		!
+1	8 1		!
+1	1 8		!
+1	7 2		!
+1	5 4		!
+1	0 -1		!
+1	0 0		!
+1	0 3		!
+1	0 5		!
+1	0 6		!
+1	0 7		!
+1	0 9		!
+1	-9223372036854775808 1		!
+1	9223372036854775807 1		!
+1	0 -9223372036854775808		!
+1	0 9223372036854775807		!

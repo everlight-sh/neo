@@ -1,0 +1,5 @@
+; From tests/test_prover_gaps.py (tag v0.2.3): pos + 1 can reach n.
+type R = { pos : i64, size : i64, inner : Q }
+type Q = { at : i64 }
+fn get(r:R,s:R,xs:Arr i64 n) -> i64 = if r.pos >= 0 && r.pos < n then xs[r.pos + 1] else 0
+fn main() -> i64 = 0

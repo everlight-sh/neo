@@ -1,0 +1,3 @@
+; From tests/test_systems.py (tag v0.2.3): byte_uninit needs a proven size.
+effect fn make (n:i64) -> i64 = len(byte_uninit(n))
+effect fn main () -> i64 = make(3)

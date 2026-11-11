@@ -1,0 +1,4 @@
+; tests/byte_reads.py (tag v0.2.3): invalid offsets and widths of byte_read_le
+; on a slice must trap in generated code.
+import "std:io"
+effect(fs) fn main(at:i64,width:i64)->unit=let data=byte_slice("ABCDEFGHIJKLMNOP",4,12) in let value=byte_read_le(data,at,width) in let shown=print_out(int_text(value)) in noop()

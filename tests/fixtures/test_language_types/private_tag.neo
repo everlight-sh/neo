@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): enum storage is private.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = Some::<i64>(1).__tag

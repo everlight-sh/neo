@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): no arm may follow a wildcard.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = match Some::<i64>(1) { _ => 0, Some(a) => a }

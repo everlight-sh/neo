@@ -1,0 +1,9 @@
+# Frozen from tests/byte_writes.py (tag v0.2.3): inputs as that script generated them, outputs checked once against its Python oracle.
+# Negative or oversized offsets and widths of byte_write_le trap (tests/fixtures/byte_writes_bounds.neo).
+1	-1 1		!
+1	9 0		!
+1	1 8		!
+1	0 -1		!
+1	0 9		!
+1	9223372036854775807 1		!
+1	-9223372036854775808 1		!

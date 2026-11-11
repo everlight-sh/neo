@@ -1,0 +1,6 @@
+; From tests/test_borrow_parameters.py (tag v0.2.3): explicit borrows in effect functions; borrow stays an
+; ordinary identifier elsewhere; a borrow may overlap a move.
+effect(fs) fn size(borrow a:Arr i64 n)->i64=n
+fn identity(borrow:i64)->i64=borrow
+effect(fs) fn use(borrow a:Arr i64 _,move b:Arr i64 _)->i64=len(a)+len(b)
+effect(fs) fn main()->i64=let a=arr(i in 0..2) i in let borrow=4 in size(a)+identity(borrow)+use(a,a)

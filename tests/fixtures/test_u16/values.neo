@@ -1,0 +1,8 @@
+; From tests/test_u16.py (tag v0.2.3): u16 arrays wrap on conversion, set, push and concat:
+; 65377 + 4464*100000 + 65535*10000000000 + 5.
+fn units(t:Arr u8 n) -> Arr u16 n = arr(i in 0..n) u16(i64(t[i]) + 65280)
+fn at(s:Arr u16 n,i:i64) -> i64 = if i>=0 && i<n then i64(s[i]) else -1
+fn bigger(a:u16,b:u16) -> u16 = if a > b then a else b
+fn main() -> i64
+  = let s = units("ab") in let s2 = push(set(s,0,u16(70000)),u16(-1)) in let j = concat(s,s2) in
+    at(j,0) + at(j,2) * 100000 + at(j,4) * 10000000000 + i64(bigger(u16(65535),u16(1))) * 0 + len(j)

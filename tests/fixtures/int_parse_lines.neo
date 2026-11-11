@@ -1,0 +1,17 @@
+; Batch form of int_parse_vectors.neo for the vectors of tests/int_parse_vectors.py
+; (tag v0.2.3): each stdin line is one input in hex, and the program prints
+; what int_parse_vectors prints for that input ("ok VALUE" or "error
+; POSITION"), one line per input. One process instead of 12,433.
+import "std:io"
+import "std:strings"
+fn ipl_hex(c:i64) -> i64 = if c>=48 && c<=57 then c-48 else if c>=97 && c<=102 then c-87 else 0
+fn ipl_decode(borrow line:Arr u8 n) -> Arr u8 _
+  = let size=n/2 in check size>=0 in arr(i in 0..size) u8(16*ipl_hex(str_byte(line,2*i))+ipl_hex(str_byte(line,2*i+1)))
+fn ipl_result(borrow text:Arr u8 _) -> Arr u8 _
+  = let result=int_parse(text) in
+    if result.ok then concat("ok ",int_text(result.value),"\n") else concat("error ",int_text(result.error.position),"\n")
+fn ipl_end(borrow text:Arr u8 n, start:i64) -> i64 = loop (i=start) while i<n && str_byte(text,i)!=10 next (i+1) yield i
+effect(fs) fn main() -> unit
+  = let input=file_read(0,16777216) in check input.ok in let text=input.value in
+    let done=loop (at=0) while at<len(text) next (
+      let end=ipl_end(text,at) in let printed=print_out(ipl_result(ipl_decode(str_slice(text,at,end)))) in end+1) yield at in noop()

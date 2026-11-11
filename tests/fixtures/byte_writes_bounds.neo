@@ -1,0 +1,4 @@
+; tests/byte_writes.py (tag v0.2.3): dynamic negative or oversized offsets and
+; widths of byte_write_le must trap in generated code.
+import "std:io"
+effect fn main(at:i64,width:i64) -> unit = let out=byte_write_le("12345678",at,42,width) in let printed=print_out(out) in noop()

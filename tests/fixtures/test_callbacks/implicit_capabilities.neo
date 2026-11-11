@@ -1,0 +1,3 @@
+; From tests/test_callbacks.py (tag v0.2.3): an effect function value needs explicit capabilities.
+effect fn f(x:i64)->unit=noop()
+effect fn main()->unit=let g=function(f) in g(1)

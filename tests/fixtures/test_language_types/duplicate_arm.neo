@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): an arm may not repeat a variant.
+enum Option<T> { None, Some(T) }
+fn main () -> i64 = match Some::<i64>(1) { Some(a) => a, Some(b) => b, None => 0 }

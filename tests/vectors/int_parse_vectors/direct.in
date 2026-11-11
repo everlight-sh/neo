@@ -1,0 +1,16 @@
+# Frozen from tests/int_parse_vectors.py (tag v0.2.3): inputs as that script generated them, outputs checked once against its Python oracle.
+# The original one-input-per-process fixtures on the fixed parse vectors and the formatting boundaries;
+# parse.in/parse.out and format.in hold every vector for the batch fixtures int_parse_lines.neo and int_text_lines.neo.
+1			=error 0
+1		+	=error 1
+1		-	=error 1
+1		0	=ok 0
+1		00000000	=ok 0
+1		99999999	=ok 99999999
+1		00000000000000000000000000000000000001	=ok 1
+1		-9223372036854775809	=error 20
+1		-9223372036854775808	=ok -9223372036854775808
+1		-9223372036854775807	=ok -9223372036854775807
+1		9223372036854775806	=ok 9223372036854775806
+1		9223372036854775807	=ok 9223372036854775807
+1		9223372036854775808	=error 19

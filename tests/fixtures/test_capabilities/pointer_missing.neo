@@ -1,0 +1,2 @@
+; From tests/test_capabilities.py (tag v0.2.3): raw pointer access without unsafe is rejected.
+effect(fs) fn main () -> i64 = load_i64(null(),0)

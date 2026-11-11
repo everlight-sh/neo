@@ -1,0 +1,2 @@
+; From tests/test_systems.py (tag v0.2.3): atomics on stack memory in an effect function. Prints 7.
+effect fn main () -> i64 = let p = stack_alloc(8) in let s = atomic_store_i32(p, 4, i32(7)) in i64(atomic_load_i32(p, 4))

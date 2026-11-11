@@ -1,0 +1,11 @@
+; Batch form of int_text_vectors.neo for the numbers of tests/int_parse_vectors.py
+; (tag v0.2.3): each stdin line is a decimal i64, and the program prints its
+; int_text, one line per number.
+import "std:io"
+import "std:strings"
+fn itl_end(borrow text:Arr u8 n, start:i64) -> i64 = loop (i=start) while i<n && str_byte(text,i)!=10 next (i+1) yield i
+effect(fs) fn main() -> unit
+  = let input=file_read(0,16777216) in check input.ok in let text=input.value in
+    let done=loop (at=0) while at<len(text) next (
+      let end=itl_end(text,at) in let number=int_parse(str_slice(text,at,end)) in check number.ok in
+      let printed=print_out(concat(int_text(number.value),"\n")) in end+1) yield at in noop()

@@ -1,0 +1,12 @@
+; From tests/test_reference.py (tag v0.2.3): checked arithmetic traps on overflow (mode 0: a call,
+; 1: a loop state, 3: a sum), i32 narrowing wraps (2), wrapping_add wraps (4) and
+; set copies a shared array (5). See vectors/test_reference/runs.in.
+fn value (x:i64) -> i64 = x + 1
+fn looped (x:i64{x == 0}) -> i64 = loop (x = 9223372036854775807) while x > 0 next (x + 1) yield x
+fn narrow (x:i64) -> i64 = i64(i32(x))
+fn total (n:i64{n >= 0}) -> i64 = sum(i in 0..n) 9223372036854775807
+fn copied () -> i64 = let a = arr(i in 0..3) i in let b = set(a,0,8) in a[0] + b[0]
+fn main (mode:i64) -> i64
+  = if mode == 0 then value(9223372036854775807) else if mode == 1 then looped(0)
+    else if mode == 2 then narrow(2147483648) else if mode == 3 then total(2)
+    else if mode == 4 then wrapping_add(9223372036854775807,1) else copied()

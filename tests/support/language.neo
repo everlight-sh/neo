@@ -1,0 +1,146 @@
+; Helpers for the language stream's drivers (tests/drivers/language_*.neo and
+; the drivers named after the scripts they replace): vector files of runs, a
+; sweep that checks each run of one built fixture, and number parsing for
+; drivers that check allocation bounds themselves.
+;
+; A vector file has one run per line and four TAB-separated fields:
+;   threads   NEO_THREADS for the run
+;   args      the program's arguments, separated by spaces (may be empty)
+;   stdin     the program's input, escaped (may be empty)
+;   expected  =STDOUT: exit 0 and exactly this output, escaped;
+;             !TEXT: a non-zero exit (a trap) with TEXT, if any, in stderr.
+; Escapes are \\, \n, \t and \xHH; every other byte stands for itself. Blank
+; lines and lines starting with # are comments.
+;
+; Vector files over 64 KiB are stored gzip-compressed (.gz); lg_gunzip
+; expands them, and leaves other bytes alone.
+import "std:deflate"
+import "std:io"
+import "std:strings"
+import "driver.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn lg_find_byte(borrow text:Arr u8 _, start:i64, byte:i64) -> i64
+  = loop (i=start) while i<len(text) && tx_byte(text,i)!=byte next (i+1) yield i
+
+type LgSplit = { at:i64, parts:Arr Arr u8 _ _ }
+fn lg_split_step(borrow text:Arr u8 _, separator:i64, move s:LgSplit) -> LgSplit
+  = let end=lg_find_byte(text,s.at,separator) in LgSplit { at=end+1, parts=push(s.parts,pt_slice(text,s.at,end)) }
+; The parts of text between separators; a trailing separator adds no empty part.
+fn lg_split(borrow text:Arr u8 _, separator:i64) -> Arr Arr u8 _ _
+  = let r=loop (s=LgSplit { at=0, parts=md_words() }) while s.at<len(text)
+      next (lg_split_step(text,separator,s)) yield s in r.parts
+
+; Words separated by runs of spaces.
+fn lg_words(borrow text:Arr u8 _) -> Arr Arr u8 _ _
+  = let parts=lg_split(text,32) in
+    loop (i=0, out=md_words()) while i<len(parts)
+      next (i+1,let part=md_word(parts,i) in if len(part)==0 then out else push(out,part)) yield out
+
+fn lg_hex(c:i64) -> i64
+  = if c>=48 && c<=57 then c-48 else if c>=97 && c<=102 then c-87 else if c>=65 && c<=70 then c-55 else 0
+
+type LgDecode = { at:i64, out:Arr u8 _ }
+fn lg_unescape_step(borrow text:Arr u8 _, move s:LgDecode) -> LgDecode
+  = let c=tx_byte(text,s.at) in
+    if c!=92 then LgDecode { at=s.at+1, out=push(s.out,u8(c)) } else
+    let e=tx_byte(text,s.at+1) in
+    if e==110 then LgDecode { at=s.at+2, out=push(s.out,u8(10)) }
+    else if e==116 then LgDecode { at=s.at+2, out=push(s.out,u8(9)) }
+    else if e==120 then
+      LgDecode { at=s.at+4, out=push(s.out,u8(16*lg_hex(tx_byte(text,s.at+2))+lg_hex(tx_byte(text,s.at+3)))) }
+    else LgDecode { at=s.at+2, out=push(s.out,u8(e)) }
+fn lg_unescape(borrow text:Arr u8 _) -> Arr u8 _
+  = let r=loop (s=LgDecode { at=0, out=tx_empty() }) while s.at<len(text)
+      next (lg_unescape_step(text,s)) yield s in r.out
+
+; The integers of a line of output separated by spaces or newlines; a word
+; that is not an integer becomes 0 and makes lg_ints_ok false.
+fn lg_int_word(borrow word:Arr u8 _) -> i64 = let parsed=int_parse(word) in if parsed.ok then parsed.value else 0
+fn lg_ints(borrow text:Arr u8 _) -> Arr i64 _
+  = let words=lg_words(str_trim(text)) in
+    loop (i=0, out=tx_ints()) while i<len(words) next (i+1,push(out,lg_int_word(md_word(words,i)))) yield out
+fn lg_ints_ok(borrow text:Arr u8 _, count:i64) -> bool
+  = let words=lg_words(str_trim(text)) in
+    len(words)==count && loop (i=0, ok=true) while ok && i<len(words) next (i+1,int_parse(md_word(words,i)).ok) yield ok
+
+; At most limit leading bytes of text, for messages.
+fn lg_clip(borrow text:Arr u8 _, limit:i64) -> Arr u8 _ = pt_slice(text,0,if len(text)<limit then len(text) else limit)
+
+fn lg_threads(borrow threads:Arr u8 _) -> Arr Arr u8 _ _ = push(md_words(),concat("NEO_THREADS=",threads))
+
+; One run of a vector line: "" when it matched, otherwise what went wrong.
+effect fn lg_run_line(borrow binary:Arr u8 _, borrow line:Arr u8 _) -> Arr u8 _
+  = let fields=lg_split(line,9) in
+    if len(fields)!=4 then "malformed vector line" else
+    let expect=md_word(fields,3) in let kind=tx_byte(expect,0) in
+    if kind!=61 && kind!=33 then "malformed expectation" else
+    let result=dv_run(binary,lg_words(md_word(fields,1)),lg_threads(md_word(fields,0)),lg_unescape(md_word(fields,2)),60000,67108864) in
+    let wanted=lg_unescape(pt_slice(expect,1,len(expect))) in
+    if result.timeout then "timed out"
+    else if !result.ok then concat("could not run: ",nt_diagnostic(result))
+    else if result.overflow then "too much output"
+    else if kind==61 && result.code!=0 then concat("exit ",int_text(result.code),": ",nt_diagnostic(result))
+    else if kind==61 && !tx_equal(result.output,wanted) then
+      concat("expected ",tx_repr(lg_clip(wanted,200),true),", got ",tx_repr(lg_clip(result.output,200),true))
+    else if kind==33 && result.code==0 then concat("expected a failure, got exit 0: ",tx_repr(lg_clip(result.output,200),true))
+    else if kind==33 && len(wanted)>0 && !str_find(result.errors,wanted).present then
+      concat("stderr lacks ",tx_repr(wanted,true),": ",tx_repr(lg_clip(result.errors,200),true))
+    else tx_empty()
+
+type LgTally = { runs:i64, failed:i64 }
+effect fn lg_sweep_step(borrow binary:Arr u8 _, borrow label:Arr u8 _, borrow line:Arr u8 _, number:i64, move t:LgTally) -> LgTally
+  = if len(line)==0 || tx_byte(line,0)==35 then t else
+    let problem=lg_run_line(binary,line) in
+    if len(problem)==0 then t with { runs=t.runs+1 } else
+    let shown=if t.failed<8 then print_error(concat(label," line ",int_text(number),": ",problem,"\n")) else int_ok(0) in
+    LgTally { runs=t.runs+1, failed=t.failed+1 }
+
+; Runs every line of a vector file against binary and stops the driver on a
+; mismatch; returns the number of runs.
+effect fn lg_sweep(borrow binary:Arr u8 _, borrow label:Arr u8 _, borrow vectors:Arr u8 _) -> i64
+  = let lines=lg_split(vectors,10) in
+    let tally=loop (i=0, t=LgTally { runs=0, failed=0 }) while i<len(lines)
+      next (i+1,lg_sweep_step(binary,label,md_word(lines,i),i+1,t)) yield t in
+    let checked=dv_expect(tally.failed==0,concat(label,": ",int_text(tally.failed)," of ",int_text(tally.runs)," runs failed")) in
+    tally.runs
+
+fn lg_gzipped(borrow bytes:Arr u8 _) -> bool = tx_byte(bytes,0)==31 && tx_byte(bytes,1)==139
+effect fn lg_gunzip(borrow bytes:Arr u8 _) -> Arr u8 _
+  = if !lg_gzipped(bytes) then pt_slice(bytes,0,len(bytes)) else
+    let expanded=gzip_decode(bytes,268435456) in let ok=dv_expect(expanded.ok,"cannot expand a gzip vector file") in
+    if expanded.ok then expanded.value else tx_empty()
+
+; The driver's stdin: its vector file (the case's stdin-file), expanded.
+effect fn lg_stdin() -> Arr u8 _
+  = let input=file_read(0,67108864) in let read=dv_expect(input.ok,"cannot read the vector file on stdin") in
+    lg_gunzip(if input.ok then input.value else tx_empty())
+
+; A vector file under tests/, expanded.
+effect fn lg_vector(borrow tools:DvTools, borrow relative:Arr u8 _) -> Arr u8 _
+  = lg_gunzip(dv_read(pt_join(tools.here,concat("../",relative))))
+
+; A fixture under tests/, relative to the drivers' directory.
+fn lg_fixture(borrow tools:DvTools, borrow relative:Arr u8 _) -> Arr u8 _ = pt_join(tools.here,concat("../",relative))
+
+; Builds a fixture with NAME=value compiler environment entries and audits
+; the binary (static and self-contained, no undefined symbols; see dv_audit).
+effect fn lg_build(borrow tools:DvTools, borrow relative:Arr u8 _, borrow binary:Arr u8 _, borrow environment:Arr Arr u8 _ _) -> unit
+  = let source=lg_fixture(tools,relative) in
+    let built=dv_build_with(tools,source,binary,md_words(),environment) in
+    let ok=dv_expect(built.ok && built.code==0,concat("build of ",source," failed: ",nt_diagnostic(built))) in
+    dv_audit(tools,binary)
+
+fn lg_alloc_stats() -> Arr Arr u8 _ _ = push(md_words(),"NEO_ALLOC_STATS=1")
+
+; Runs binary with args and NEO_THREADS=threads, requires exit 0 and returns
+; its stdout.
+effect fn lg_output(borrow binary:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow threads:Arr u8 _, borrow input:Arr u8 _) -> Arr u8 _
+  = dv_output(binary,args,lg_threads(threads),input)
+
+fn lg_args1(borrow a:Arr u8 _) -> Arr Arr u8 _ _ = push(md_words(),a)
+fn lg_args2(borrow a:Arr u8 _, borrow b:Arr u8 _) -> Arr Arr u8 _ _ = push(push(md_words(),a),b)
+fn lg_at(borrow values:Arr i64 _, i:i64) -> i64 = tx_at(values,i)

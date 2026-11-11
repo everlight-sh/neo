@@ -1,0 +1,8 @@
+# From tests/test_reference.py (tag v0.2.3): overflow traps where the reference interpreter faulted,
+# i32 narrowing and wrapping_add wrap, and set copies a shared array (tests/fixtures/test_reference/semantics.neo).
+1	0		!integer overflow
+1	1		!integer overflow
+1	2		=-2147483648\n
+1	3		!integer overflow
+1	4		=-9223372036854775808\n
+1	5		=8\n

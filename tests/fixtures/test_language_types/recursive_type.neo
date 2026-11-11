@@ -1,0 +1,3 @@
+; From tests/test_language_types.py (tag v0.2.3): a value type cannot contain itself.
+type Infinite<T> = { child: Infinite<T> }
+fn main () -> Infinite<i64> = Infinite::<i64> { child = 0 }

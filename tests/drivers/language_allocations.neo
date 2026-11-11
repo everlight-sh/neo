@@ -1,0 +1,257 @@
+; Model and allocation-bound checks that tests/<script>.py did in Python, for
+; json_token_growth, bitset_growth, json_writer_growth, branch_ownership,
+; loop_record_fields, map_optimizations, bytesmap_smoke, language_perf_checks
+; and the growth half of hashmap_entry. Each fixture is built with
+; NEO_ALLOC_STATS=1 (map_vectors without, as before) and audited, run over the
+; script's grid of sizes, modes and worker counts, and its results and
+; allocation counters are compared here with the script's models and bounds.
+; Argument: the script name. Prints "<script>: N runs OK".
+import "std:io"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/language.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn la_build(borrow tools:DvTools, borrow dir:Arr u8 _, borrow name:Arr u8 _, stats:bool) -> Arr u8 _
+  = let binary=pt_join(dir,name) in
+    let built=lg_build(tools,concat("fixtures/",name,".neo"),binary,if stats then lg_alloc_stats() else md_words()) in binary
+
+fn la_pair(a:i64, b:i64) -> Arr i64 _ = push(push(tx_ints(),a),b)
+fn la_one(a:i64) -> Arr i64 _ = push(tx_ints(),a)
+
+fn la_label(borrow name:Arr u8 _, borrow args:Arr i64 _, workers:i64) -> Arr u8 _
+  = let parts=loop (i=0, out=push(md_words(),name)) while i<len(args)
+      next (i+1,push(push(out," "),int_text(tx_at(args,i)))) yield out in
+    str_concat_parts(push(push(parts,", NEO_THREADS="),int_text(workers)))
+
+; Runs binary with integer arguments, NEO_THREADS=workers and input; requires
+; exit 0 and returns stdout.
+effect fn la_run(borrow binary:Arr u8 _, borrow args:Arr i64 _, workers:i64, borrow input:Arr u8 _) -> Arr u8 _
+  = let words=loop (i=0, out=md_words()) while i<len(args) next (i+1,push(out,int_text(tx_at(args,i)))) yield out in
+    lg_output(binary,words,int_text(workers),input)
+
+effect fn la_expect(ok:bool, borrow label:Arr u8 _, borrow output:Arr u8 _, borrow what:Arr u8 _) -> unit
+  = dv_expect(ok,concat(label,": ",what,"; output ",tx_repr(lg_clip(output,300),true)))
+
+; The first line of output and what follows it.
+fn la_line(borrow text:Arr u8 _) -> Arr u8 _ = pt_slice(text,0,lg_find_byte(text,0,10))
+fn la_payload(borrow text:Arr u8 _) -> Arr u8 _ = let end=lg_find_byte(text,0,10) in pt_slice(text,end+1,len(text))
+
+; True when text is exactly "[" items "]\n", with count items written as
+; prefix VALUE suffix and separated by commas, the k-th value first+step*k.
+; Checked in place, without building the expected text.
+type LaScan = { at:i64, k:i64, ok:bool }
+fn la_digits_end(borrow text:Arr u8 _, start:i64) -> i64
+  = loop (i=start) while i<len(text) && (tx_byte(text,i)==45 || (tx_byte(text,i)>=48 && tx_byte(text,i)<=57)) next (i+1) yield i
+fn la_item(borrow text:Arr u8 _, borrow prefix:Arr u8 _, borrow suffix:Arr u8 _, value:i64, s:LaScan) -> LaScan
+  = let p=if s.k==0 then s.at else if tx_byte(text,s.at)==44 then s.at+1 else -1 in
+    if p<0 || !bytes_match_at(text,p,prefix) then s with { ok=false } else
+    let d=p+len(prefix) in let digits=int_text(value) in
+    if !bytes_match_at(text,d,digits) || la_digits_end(text,d)!=d+len(digits) || !bytes_match_at(text,d+len(digits),suffix)
+    then s with { ok=false } else LaScan { at=d+len(digits)+len(suffix), k=s.k+1, ok=true }
+fn la_items(borrow text:Arr u8 _, borrow prefix:Arr u8 _, borrow suffix:Arr u8 _, count:i64, first:i64, step:i64) -> bool
+  = if tx_byte(text,0)!=91 then false else
+    let s=loop (s=LaScan { at=1, k=0, ok=true }) while s.ok && s.k<count
+      next (la_item(text,prefix,suffix,first+step*s.k,s)) yield s in
+    s.ok && tx_byte(text,s.at)==93 && tx_byte(text,s.at+1)==10 && s.at+2==len(text)
+
+; json_token_growth.py: token, integer and key totals of an n-object document
+; and at most 4 allocations / 128 bytes, at 0..100k objects, 1 and 4 workers.
+fn la_token_document(n:i64) -> Arr u8 _
+  = let parts=loop (i=0, out=push(md_words(),"[")) while i<n
+      next (i+1,push(out,concat(if i==0 then "" else ",","{\"n\":",int_text(i),",\"text\":\"item\"}"))) yield out in
+    str_concat_parts(push(parts,"]"))
+effect fn la_token_run(borrow binary:Arr u8 _, n:i64, workers:i64) -> i64
+  = let output=la_run(binary,tx_ints(),workers,la_token_document(n)) in
+    let label=la_label("json_token_growth",la_one(n),workers) in let v=lg_ints(output) in
+    let shape=la_expect(lg_ints_ok(output,5),label,output,"expected five integers") in
+    let exact=la_expect(lg_at(v,0)==6*n+2 && lg_at(v,1)==n*(n-1)/2 && lg_at(v,2)==n,label,output,
+      "tokens, integer total and keys are not 6n+2, n(n-1)/2 and n") in
+    let bounded=la_expect(lg_at(v,3)<=4 && lg_at(v,4)<=128,label,output,"more than 4 allocations or 128 bytes") in 1
+effect fn la_json_token_growth(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"json_token_growth",true) in let sizes=lg_ints("0 1 1000 10000 100000") in
+    loop (i=0, runs=0) while i<2*len(sizes) next (i+1,runs+la_token_run(binary,lg_at(sizes,i/2),1+3*(i%2))) yield runs
+
+; bitset_growth.py: dense (mode 0, through 1M) and sparse (mode 1, stride 67)
+; positions come back complete and ordered, in the exact number of words,
+; with at most 128 allocations and words*32+4096 bytes.
+effect fn la_bitset_run(borrow binary:Arr u8 _, mode:i64, n:i64, workers:i64) -> i64
+  = let output=la_run(binary,la_pair(mode,n),workers,"") in
+    let label=la_label("bitset_growth",la_pair(mode,n),workers) in let line=la_line(output) in let v=lg_ints(line) in
+    let stride=if mode==0 then 1 else 67 in let words=if n==0 then 0 else (n-1)*stride/64+1 in
+    let shape=la_expect(lg_ints_ok(line,3),label,output,"expected three counters") in
+    let members=la_expect(la_items(la_payload(output),"","",n,0,stride),label,output,"the positions are not 0, stride, ... in order") in
+    let sized=la_expect(lg_at(v,2)==words,label,output,concat("expected ",int_text(words)," words")) in
+    let bounded=la_expect(lg_at(v,0)<=128 && lg_at(v,1)<=words*32+4096,label,output,"more than 128 allocations or words*32+4096 bytes") in 1
+effect fn la_bitset_growth(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"bitset_growth",true) in
+    let dense=lg_ints("0 1 63 64 65 1000 10000 100000 1000000") in let sparse=lg_ints("0 1 63 64 65 1000 10000 100000") in
+    let a=loop (i=0, runs=0) while i<2*len(dense) next (i+1,runs+la_bitset_run(binary,0,lg_at(dense,i/2),1+3*(i%2))) yield runs in
+    let b=loop (i=0, runs=0) while i<2*len(sparse) next (i+1,runs+la_bitset_run(binary,1,lg_at(sparse,i/2),1+3*(i%2))) yield runs in
+    a+b
+
+; json_writer_growth.py: integer arrays (mode 0), object arrays (1, 3) and a
+; reused fragment (2) come back complete at 1k and 10k. The script also bounded
+; allocation requests (128, or 2n+128 for objects) and bytes (512n+65536) and
+; ran 100k; the native writer exceeds both bounds (its requested bytes grow
+; quadratically), which is entry 6 of tests/porting/language-failures.md, so
+; only the output is checked here.
+effect fn la_writer_run(borrow binary:Arr u8 _, mode:i64, n:i64, workers:i64) -> i64
+  = let output=la_run(binary,la_pair(mode,n),workers,"") in
+    let label=la_label("json_writer_growth",la_pair(mode,n),workers) in let line=la_line(output) in
+    let payload=la_payload(output) in
+    let complete=if mode==0 then la_items(payload,"","",n,0,1)
+      else la_items(payload,"{\"i\":",",\"name\":\"item\"}",n,if mode==2 then 7 else 0,if mode==2 then 0 else 1) in
+    let shape=la_expect(lg_ints_ok(line,2),label,output,"expected two counters") in
+    let same=la_expect(complete,label,output,"the JSON differs from the script's expected value") in 1
+effect fn la_json_writer_growth(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"json_writer_growth",true) in let sizes=lg_ints("1000 10000") in
+    loop (i=0, runs=0) while i<8*len(sizes)
+      next (i+1,runs+la_writer_run(binary,(i/2)%4,lg_at(sizes,i/8),1+3*(i%2))) yield runs
+
+; Allocation traffic of consecutive sizes grows less than 20x per 10x.
+type LaGrowth = { runs:i64, last:i64 }
+
+; branch_ownership.py: checksum 1000*count, fewer than 20*count+100 requests
+; and 2048*count+65536 bytes, at 1k/10k/100k.
+effect fn la_branch_run(borrow binary:Arr u8 _, count:i64, g:LaGrowth) -> LaGrowth
+  = let output=la_run(binary,la_one(count),1,"") in
+    let label=la_label("branch_ownership",la_one(count),1) in let v=lg_ints(output) in
+    let shape=la_expect(lg_ints_ok(output,3),label,output,"expected three integers") in
+    let summed=la_expect(lg_at(v,0)==1000*count,label,output,"checksum is not 1000*count") in
+    let bounded=la_expect(lg_at(v,1)<20*count+100 && lg_at(v,2)<2048*count+65536,label,output,"too many requests or bytes") in
+    let linear=la_expect(g.last<0 || lg_at(v,2)<20*g.last,label,output,concat("traffic grew 20x or more from ",int_text(g.last))) in
+    LaGrowth { runs=g.runs+1, last=lg_at(v,2) }
+effect fn la_branch_ownership(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"branch_ownership",true) in let counts=lg_ints("1000 10000 100000") in
+    let g=loop (i=0, g=LaGrowth { runs=0, last= -1 }) while i<len(counts) next (i+1,la_branch_run(binary,lg_at(counts,i),g)) yield g in
+    g.runs
+
+; loop_record_fields.py: the script's left/right/salt model in closed form.
+; Modes 0-2 write left[i%n]=i+7 and right[i%n]=-i-7 for i < rounds (mode 2
+; then empties right, mode 1 also reports n(n-1)/2); mode 3 snapshots left
+; into right before writing 777, and salt is the snapshot's sum.
+fn la_written(n:i64, rounds:i64) -> i64
+  = if n<1 then 0 else check n>=1 in
+    loop (p=0, total=0) while p<n next (p+1,total+(if p<rounds then p+n*((rounds-1-p)/n)+7 else p)) yield total
+fn la_marked(n:i64, rounds:i64) -> i64 = let m=if rounds<n then rounds else n in n*(n-1)/2-m*(m-1)/2+777*m
+fn la_record_model(n:i64, rounds:i64, mode:i64) -> Arr i64 _
+  = if mode<3 then let left=la_written(n,rounds) in
+      push(push(push(push(tx_ints(),left),if mode==2 then 0 else -left),if mode==1 then n*(n-1)/2 else 0),7)
+    else let right=if rounds==0 then -(n*(n-1)/2) else la_marked(n,rounds-1) in
+      push(push(push(push(tx_ints(),la_marked(n,rounds)),right),0),if rounds==0 then 7 else right)
+effect fn la_record_run(borrow binary:Arr u8 _, n:i64, rounds:i64, mode:i64, workers:i64) -> i64
+  = let args=push(la_pair(n,rounds),mode) in let output=la_run(binary,args,workers,"") in
+    let label=la_label("loop_record_fields",args,workers) in let v=lg_ints(output) in let want=la_record_model(n,rounds,mode) in
+    let shape=la_expect(lg_ints_ok(output,6),label,output,"expected six integers") in
+    let same=la_expect(lg_at(v,0)==lg_at(want,0) && lg_at(v,1)==lg_at(want,1) && lg_at(v,2)==lg_at(want,2) && lg_at(v,3)==lg_at(want,3),
+      label,output,concat("expected ",int_text(lg_at(want,0))," ",int_text(lg_at(want,1))," ",int_text(lg_at(want,2))," ",int_text(lg_at(want,3)))) in
+    let bounded=la_expect(if mode<3 then lg_at(v,4)<=3 && lg_at(v,5)<=16*n+512
+      else lg_at(v,4)<=rounds+2 && lg_at(v,5)<=(rounds+1)*(8*n+128),label,output,"too many allocations or bytes") in 1
+effect fn la_loop_record_fields(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"loop_record_fields",true) in
+    let sizes=lg_ints("1 7 512 8192") in let rounds=lg_ints("0 1 2 31 1000") in
+    loop (i=0, runs=0) while i<160
+      next (i+1,runs+la_record_run(binary,lg_at(sizes,(i/20)%4),lg_at(rounds,(i/4)%5),i%4,1+3*(i/80))) yield runs
+
+; map_optimizations.py: array scalar-result borrows (checksum 4n-2, at most 32
+; requests and 64n+4096 bytes) and the native map against the script's bytes
+; model. Its third part, map_inline_keys.neo at 8192, is neo.toml's
+; inline-byte-map-words case.
+effect fn la_borrow_run(borrow binary:Arr u8 _, n:i64) -> i64
+  = let output=la_run(binary,la_one(n),1,"") in let label=la_label("map_array_borrows",la_one(n),1) in let v=lg_ints(output) in
+    let shape=la_expect(lg_ints_ok(output,3),label,output,"expected three integers") in
+    let ok=la_expect(lg_at(v,0)==4*n-2 && lg_at(v,1)<=32 && lg_at(v,2)<=64*n+4096,label,output,
+      "checksum is not 4n-2, or more than 32 requests or 64n+4096 bytes") in 1
+; value(i) of the script: i%37 bytes, byte j being (j*13+i)%256; weighted as
+; len*31 + the sum of its bytes.
+fn la_value_weight(i:i64) -> i64 = let size=i%37 in loop (j=0, total=size*31) while j<size next (j+1,total+(j*13+i)%256) yield total
+effect fn la_vectors_run(borrow binary:Arr u8 _, n:i64) -> i64
+  = let output=la_run(binary,la_one(n),1,"") in let label=la_label("map_vectors",la_one(n),1) in let v=lg_ints(output) in
+    let original=loop (i=0, total=0) while i<n next (i+1,total+la_value_weight(i)) yield total in
+    let remaining=loop (i=1, total=0) while i<n next (i+2,total+la_value_weight(i)) yield total in
+    let ok=la_expect(lg_ints_ok(output,2) && lg_at(v,0)==original && lg_at(v,1)==remaining,label,output,
+      concat("expected ",int_text(original)," ",int_text(remaining))) in 1
+effect fn la_map_optimizations(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let borrows=la_build(tools,dir,"map_array_borrows",true) in let vectors=la_build(tools,dir,"map_vectors",false) in
+    let a=lg_ints("1 2 17 1000 10000 100000") in let b=lg_ints("0 1 7 8 9 15 16 17 31 32 33 64 127 257 1024") in
+    let x=loop (i=0, runs=0) while i<len(a) next (i+1,runs+la_borrow_run(borrows,lg_at(a,i))) yield runs in
+    let y=loop (i=0, runs=0) while i<len(b) next (i+1,runs+la_vectors_run(vectors,lg_at(b,i))) yield runs in x+y
+
+; bytesmap_smoke.py: the arena map's size and checksum equal the script's
+; dictionary model (frozen below as n size checksum, computed once with the
+; script on Python 3.12) with under 150000 bytes of traffic; field_moves
+; reports 4n(n-1) with at most 100 requests and 64n+8192 bytes.
+fn la_bytesmap_model() -> Arr i64 _
+  = lg_ints("0 0 0  1 0 -1  7 5 -7  257 205 242969  1000 206 1724766  10000 206 20600880  100000 206 215315225")
+effect fn la_bytesmap_run(borrow binary:Arr u8 _, borrow model:Arr i64 _, k:i64) -> i64
+  = let n=lg_at(model,3*k) in let output=la_run(binary,la_one(n),1,"") in
+    let label=la_label("bytesmap",la_one(n),1) in let v=lg_ints(output) in
+    let ok=la_expect(lg_ints_ok(output,3) && lg_at(v,0)==lg_at(model,3*k+1) && lg_at(v,1)==lg_at(model,3*k+2) && lg_at(v,2)<150000,
+      label,output,concat("expected ",int_text(lg_at(model,3*k+1))," ",int_text(lg_at(model,3*k+2))," and under 150000 bytes")) in 1
+effect fn la_moves_run(borrow binary:Arr u8 _, n:i64) -> i64
+  = let output=la_run(binary,la_one(n),1,"") in let label=la_label("field_moves",la_one(n),1) in let v=lg_ints(output) in
+    let ok=la_expect(lg_ints_ok(output,3) && lg_at(v,0)==4*n*(n-1) && lg_at(v,1)<=100 && lg_at(v,2)<=64*n+8192,label,output,
+      "expected 4n(n-1), at most 100 requests and 64n+8192 bytes") in 1
+effect fn la_bytesmap_smoke(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let map=la_build(tools,dir,"bytesmap",true) in let moves=la_build(tools,dir,"field_moves",true) in
+    let model=la_bytesmap_model() in
+    let x=loop (i=0, runs=0) while 3*i<len(model) next (i+1,runs+la_bytesmap_run(map,model,i)) yield runs in
+    let y=loop (i=0, runs=0) while 3*i<len(model) next (i+1,runs+la_moves_run(moves,lg_at(model,3*i))) yield runs in x+y
+
+; language_perf_checks.py: language_bench.neo prints checksum, nanoseconds,
+; requests and bytes. Appends (mode 0) take at most 64 requests and 32n+1024
+; bytes, the sort (1) exactly one 8n-byte buffer, the hash map (2) at most
+; 20n+128 requests and 800n+1MiB; bytes grow at most 20x per 10x size. The
+; time is not checked.
+effect fn la_bench_run(borrow binary:Arr u8 _, mode:i64, n:i64, g:LaGrowth) -> LaGrowth
+  = let output=la_run(binary,la_pair(mode,n),1,"") in
+    let label=la_label("language_bench",la_pair(mode,n),1) in let v=lg_ints(output) in
+    let requests=lg_at(v,2) in let traffic=lg_at(v,3) in
+    let shape=la_expect(lg_ints_ok(output,4),label,output,"expected four integers") in
+    let bounded=la_expect(if mode==0 then requests<=64 && traffic<=32*n+1024
+      else if mode==1 then requests==1 && traffic==8*n else requests<=20*n+128 && traffic<=800*n+1048576,
+      label,output,"allocation requests or bytes out of bounds") in
+    let linear=la_expect(g.last<0 || traffic<=20*g.last,label,output,concat("bytes grew more than 20x from ",int_text(g.last))) in
+    LaGrowth { runs=g.runs+1, last=traffic }
+effect fn la_bench_mode(borrow binary:Arr u8 _, mode:i64) -> i64
+  = let sizes=lg_ints("1000 10000 100000") in
+    let g=loop (i=0, g=LaGrowth { runs=0, last= -1 }) while i<len(sizes) next (i+1,la_bench_run(binary,mode,lg_at(sizes,i),g)) yield g in
+    g.runs
+effect fn la_language_perf_checks(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"language_bench",true) in
+    loop (mode=0, runs=0) while mode<3 next (mode+1,runs+la_bench_mode(binary,mode)) yield runs
+
+; hashmap_entry.py, growth half: checksum 7n(n-1)/2 with at most 64 requests
+; and 512n+1MiB bytes at 1k/10k/100k, 1 and 4 workers. Its model half is the
+; hashmap-entry-* cases of tests/language.neo.toml.
+effect fn la_entry_run(borrow binary:Arr u8 _, n:i64, workers:i64) -> i64
+  = let output=la_run(binary,la_one(n),workers,"") in
+    let label=la_label("hashmap_entry_alloc",la_one(n),workers) in let v=lg_ints(output) in
+    let ok=la_expect(lg_ints_ok(output,3) && lg_at(v,0)==7*n*(n-1)/2 && lg_at(v,1)<=64 && lg_at(v,2)<=512*n+1048576,label,output,
+      "expected 7n(n-1)/2, at most 64 requests and 512n+1MiB bytes") in 1
+effect fn la_hashmap_entry(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
+  = let binary=la_build(tools,dir,"hashmap_entry_alloc",true) in let sizes=lg_ints("1000 10000 100000") in
+    loop (i=0, runs=0) while i<2*len(sizes) next (i+1,runs+la_entry_run(binary,lg_at(sizes,i/2),1+3*(i%2))) yield runs
+
+effect fn la_script(borrow tools:DvTools, borrow dir:Arr u8 _, borrow name:Arr u8 _) -> i64
+  = if tx_equal(name,"json_token_growth") then la_json_token_growth(tools,dir)
+    else if tx_equal(name,"bitset_growth") then la_bitset_growth(tools,dir)
+    else if tx_equal(name,"json_writer_growth") then la_json_writer_growth(tools,dir)
+    else if tx_equal(name,"branch_ownership") then la_branch_ownership(tools,dir)
+    else if tx_equal(name,"loop_record_fields") then la_loop_record_fields(tools,dir)
+    else if tx_equal(name,"map_optimizations") then la_map_optimizations(tools,dir)
+    else if tx_equal(name,"bytesmap_smoke") then la_bytesmap_smoke(tools,dir)
+    else if tx_equal(name,"language_perf_checks") then la_language_perf_checks(tools,dir)
+    else if tx_equal(name,"hashmap_entry") then la_hashmap_entry(tools,dir)
+    else let unknown=dv_fail(concat("unknown script ",name)) in 0
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let script=cli_arg(1) in
+    let named=dv_expect(script.present && len(script.value)>0,"usage: language_allocations SCRIPT") in
+    let dir=dv_temp("allocations") in
+    let runs=la_script(tools,dir,script.value) in
+    let cleaned=dv_clean(dir) in
+    let shown=print_out(concat(script.value,": ",int_text(runs)," runs OK\n")) in noop()
