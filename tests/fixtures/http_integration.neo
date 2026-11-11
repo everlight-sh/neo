@@ -38,12 +38,14 @@ effect(net,time) fn hi_pipeline(port:i64) -> bool
     n.ok && n.value==10 && steps.ok && steps.value==2 && next_response.status==200 &&
     str_equal(next_response.body,"Hello, World!") && len(next_response.rest)==0
 
+; Ambiguous framing is answered with one 400 and Connection: close, then EOF.
 effect(net,time) fn hi_rejected(port:i64, borrow request:Arr u8 _) -> bool
   = let deadline=deadline_after(5000) in
     using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
     let sent=socket_write(socket,request,deadline.value) in if !sent.ok then false else
-    let reply=socket_read(socket,deadline.value) in
-    if reply.ok then len(reply.value)==0 else reply.error.code==54 || reply.error.code==104
+    let raw=hp_receive(socket,deadline.value) in if !raw.ok then false else
+    let reply=hp_frame(raw.value) in
+    reply.status==400 && len(reply.rest)==0 && str_find(raw.value,"\r\nConnection: close\r\n").present
 
 effect fn hi_scenario(port:i64) -> bool
   = let hello=hp_get(port,"/") in let missing=hp_get(port,"/missing") in let page=hp_get(port,"/page/3") in
