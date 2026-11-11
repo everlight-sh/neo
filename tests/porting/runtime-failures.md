@@ -5,21 +5,6 @@ compiler (`neoc` of `chore/remove-python`) gets wrong. Each one is left out of
 the manifest (or out of its driver) until the compiler is fixed. Commands run
 from the repository root with `NEO_ROOT` set to it, on x86_64 Linux.
 
-## native_sections: an unused explicit export is dropped
-
-- Script: `tests/native_sections.py`. Case: `native-sections-library-cache`
-  (in the manifest without this check).
-- Command: `neoc build . main.neo -o whole` (and the same with
-  `--library-cache cache --library-root lib`), where `lib/functions.neo` is
-  `fn twice(x:i64) -> i64 = x*2` / `export fn public_entry(x:i64) -> i64 = x+17`
-  and `main.neo` imports it and calls only `twice`; then `nm whole`.
-- What happens: both binaries build and print 42 for 21, but `nm` lists no
-  `public_entry`; the only symbol from the library is the internal
-  `neo.fn.__m<hash>_twice`. The Python compiler kept unused `export`
-  functions through section collection. The driver
-  `tests/drivers/native_sections.neo` keeps the build, run and static audit
-  and leaves out the `nm` export check.
-
 ## nbody_worker_smoke / kernel_runtime_smoke: no parallel dispatch
 
 - Script: `tests/nbody_worker_smoke.py` (also the parallel parts of

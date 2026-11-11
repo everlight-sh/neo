@@ -38,6 +38,31 @@ fn br_undefined(borrow linked:BdLink) -> Arr u8 _
         if len(line)==0 then out else push(out,concat(if len(out)==0 then "" else ",",json_quote(line)))) yield out in
     concat("[",str_concat_parts(parts),"]")
 
+; The else-if chains this build lowered to a switch (cg_switch marks each
+; "; neo.switch LINE:COL cases N arms K"), with the function that holds it,
+; as the reference compiler reported them. Only the module the build lowered
+; is read: a kept runtime or a prepared library object is not lowered again.
+type BrSwitches = { function:Arr u8 _, parts:Arr Arr u8 _ _ }
+fn br_switch_number(borrow text:Arr u8 _, start:i64) -> Arr u8 _
+  = let end=loop (j=start) while j<len(text) && tx_byte(text,j)>=48 && tx_byte(text,j)<=57 next (j+1) yield j in
+    if end==start then "0" else pt_slice(text,start,end)
+fn br_switch_field(borrow text:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let at=str_find(text,concat(" ",name," ")) in if !at.present then "0" else br_switch_number(text,at.value+len(name)+2)
+fn br_switch(borrow function:Arr u8 _, borrow mark:Arr u8 _) -> Arr u8 _
+  = let line=br_switch_number(mark,0) in let col=br_switch_number(mark,len(line)+1) in
+    concat("{\"fn\":",json_quote(function),",\"pos\":[",line,",",col,"],\"cases\":",br_switch_field(mark,"cases"),
+      ",\"arms\":",br_switch_field(mark,"arms"),"}")
+fn br_switches(borrow ir:Arr u8 _) -> Arr u8 _
+  = let scan=loop (offset=0, out=BrSwitches { function=tx_empty(), parts=md_words() }) while offset<len(ir)
+      next (lx_line_end(ir,offset)+1,
+        if bytes_match_at(ir,offset,"; fn ") then out with { function=pt_slice(ir,offset+5,lx_line_end(ir,offset)) }
+        else if !bytes_match_at(ir,offset,"  switch ") then out else
+        let line=pt_slice(ir,offset,lx_line_end(ir,offset)) in let marked=str_find(line,"] ; neo.switch ") in
+        if !marked.present then out else
+        out with { parts=push(out.parts,concat(if len(out.parts)==0 then "" else ",",
+          br_switch(out.function,pt_slice(line,marked.value+15,len(line))))) }) yield out in
+    concat("[",str_concat_parts(scan.parts),"]")
+
 fn br_sources(borrow m:Mods) -> Arr u8 _
   = let parts=arr(i in 0..len(m.paths)) concat(if i==0 then "" else ",",json_quote(md_path(m,i)),":",
       json_quote(tx_hex_bytes(tx_empty(),sha256(md_word(m.sources,i))))) in
@@ -45,11 +70,12 @@ fn br_sources(borrow m:Mods) -> Arr u8 _
 
 effect(fs,time) fn br_print(borrow m:Mods, borrow stages:BrStages, borrow linked:BdLink,
                           borrow config:BdConfig, borrow output:Arr u8 _, dev:bool, allow_unproven:bool,
-                          borrow library:Arr u8 _) -> IntResult
+                          borrow library:Arr u8 _, borrow ir:Arr u8 _) -> IntResult
   = let now=bd_clock() in
     print_out(concat("{\"ok\":true,\"backend\":\"llvm-ir\",\"binary\":",json_quote(output),
       ",\"target\":",json_quote(config.target),",\"binary_sha256\":",if len(linked.digest)>0 then json_quote(linked.digest) else "null",
       ",\"undefined_symbols\":",br_undefined(linked),
+      ",\"switches\":",br_switches(ir),
       ",\"optimization\":{\"profile\":",if dev then "\"dev\"" else "\"release\"",",\"level\":",config.level,
       ",\"llvm_passes\":",json_encode(br_remarks(linked.remarks)),"},\"allow_unproven\":",if allow_unproven then "true" else "false",
       ",\"sources\":",br_sources(m),",\"build_stages\":{\"parse_seconds\":",br_phase(stages.started,stages.parsed),

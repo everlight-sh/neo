@@ -64,7 +64,7 @@ stdout = "byte_writes_bounds.neo: 7 runs OK\n"
 timeout = 300
 
 # deep_dispatch.py: a 300-arm else-if dispatch proves every arm and computes the
-# script's model. (Its switch-lowering check is in tests/porting/language-failures.md.)
+# script's model. (Its switch-lowering check is in switch-dispatch.)
 [[test]]
 name = "deep-dispatch"
 file = "drivers/language_sweep.neo"
@@ -157,7 +157,7 @@ stdout = "observer_lifetimes.neo: 2 runs OK\n"
 timeout = 300
 
 # opcode_vm.py: the 40-opcode VM against the script's Python model. (Its
-# switch-lowering check is in tests/porting/language-failures.md.)
+# switch-lowering check is in switch-dispatch.)
 [[test]]
 name = "opcode-vm"
 file = "drivers/language_sweep.neo"
@@ -166,14 +166,32 @@ stdin-file = "vectors/opcode_vm/runs.in"
 stdout = "opcode_vm.neo: 7 runs OK\n"
 timeout = 300
 
+# test_switch_dispatch.py and the lowering checks of opcode_vm.py and
+# deep_dispatch.py: else-if chains and matches over one scalar are one LLVM
+# switch, in the IR and in the build report's switches.
+[[test]]
+name = "switch-dispatch"
+file = "drivers/switch_dispatch.neo"
+stdout = "switch dispatch OK\n"
+timeout = 600
+
+# Switch arms that take, keep, replace or drop owned buffers and fields release
+# each one once (no leak, no double release).
+[[test]]
+name = "switch-arms"
+file = "fixtures/switch_arms.neo"
+args = ["20000", "4000"]
+stdout = "switch arms OK 1995176479\n"
+timeout = 120
+
 # push_boundaries.py: push growth equals the exact allocation model through 1M
-# elements (modes 0-3; modes 4 and 5 are in tests/porting/language-failures.md).
+# elements (modes 4 and 5 with the native aggregate layout, see the vector file).
 [[test]]
 name = "push-boundaries"
 file = "drivers/language_sweep.neo"
 args = ["fixtures/push_boundaries.neo", "NEO_ALLOC_STATS=1"]
 stdin-file = "vectors/push_boundaries/runs.in"
-stdout = "push_boundaries.neo: 308 runs OK\n"
+stdout = "push_boundaries.neo: 462 runs OK\n"
 timeout = 300
 
 # set_only_loops.py: set-only loop states, 1 and 4 workers.
@@ -555,14 +573,23 @@ args = ["bitset_growth"]
 stdout = "bitset_growth: 34 runs OK\n"
 timeout = 600
 
-# json_writer_growth.py (outputs only; its allocation bounds are entry 6 of
-# tests/porting/language-failures.md)
+# json_writer_growth.py
 [[test]]
 name = "json-writer-growth"
 file = "drivers/language_allocations.neo"
 args = ["json_writer_growth"]
-stdout = "json_writer_growth: 16 runs OK\n"
+stdout = "json_writer_growth: 24 runs OK\n"
 timeout = 600
+
+# A record field appended to in branches whose other branches hand the record
+# on is taken, not copied (as the JSON writer's buffer above).
+[[test]]
+name = "branch-field-takes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/branch_field_takes.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/branch_field_takes/runs.in"
+stdout = "branch_field_takes.neo: 12 runs OK\n"
+timeout = 300
 
 # branch_ownership.py
 [[test]]

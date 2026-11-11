@@ -1,0 +1,77 @@
+import "std:io"
+; A record's buffer field is appended to in place when the branches that do
+; not append hand the whole record on (failed, or unchanged), as JsonWriter's
+; prefix does: the appending path takes the field, so appends reserve
+; geometrically and n of them make O(log n) allocation requests. A branch
+; that replaces the field releases the old buffer, and one that builds a new
+; record drops the old record (then the field is copied, not taken). A leak
+; grows the resident set (read from /proc/self/statm where it exists) and a
+; double release corrupts the digest. Build with NEO_ALLOC_STATS=1.
+; Arguments: mode (0 appends, 1 fails halfway, 2 appends again after each
+; append that did not fail, 3 replaces the field, 4 starts new records) and
+; calls. Prints "<mode> <count> <length> OK".
+type Log = { raw:Arr u8 _, ok:bool, count:i64 }
+; The append is itself conditional inside the `with`, as in json_writer_prefix.
+fn note(move log:Log, borrow piece:Arr u8 _, x:i64) -> Log
+  = if !log.ok || x<0 then log with { ok=false } else
+    if x%13==5 then log else
+    log with { raw=if x%7!=3 then concat(log.raw,piece) else log.raw, count=log.count+(if x%7!=3 then 1 else 0) }
+; A caller that appends unless the callee failed, as json_writer_int does.
+fn entry(move log:Log, borrow piece:Arr u8 _, x:i64) -> Log
+  = let log=note(log,piece,x) in if !log.ok then log else log with { raw=concat(log.raw,piece), count=log.count+1 }
+fn trim(move log:Log, borrow piece:Arr u8 _, x:i64) -> Log
+  = if x%11==0 then log with { raw="t", count=0 } else
+    if x%13==0 then log else
+    log with { raw=if x%3!=1 then concat(log.raw,piece) else log.raw, count=log.count+(if x%3!=1 then 1 else 0) }
+fn restart(move log:Log, borrow piece:Arr u8 _, x:i64) -> Log
+  = if x%5==0 then Log { raw="r", ok=true, count=0 } else log with { raw=concat(log.raw,piece), count=log.count+1 }
+
+fn calls(mode:i64, n:i64, borrow piece:Arr u8 _) -> Log
+  = loop (i=0, log=Log { raw="", ok=true, count=0 }) while i<n
+      next (i+1,if mode==0 then note(log,piece,i) else if mode==1 then note(log,piece,if i==n/2 then -1 else i)
+        else if mode==2 then entry(log,piece,i) else if mode==3 then trim(log,piece,i) else restart(log,piece,i)) yield log
+; What calls leaves: appended pieces and the length of the fixed prefix.
+type Model = { count:i64, prefix:i64, ok:bool }
+fn model(mode:i64, n:i64) -> Model
+  = loop (i=0, m=Model { count=0, prefix=0, ok=true }) while i<n
+      next (i+1,if mode<=2 then model_note(m,mode,n,i) else if mode==3 then model_trim(m,i)
+        else if i%5==0 then Model { count=0, prefix=1, ok=true } else m with { count=m.count+1 }) yield m
+fn model_note(m:Model, mode:i64, n:i64, i:i64) -> Model
+  = if !m.ok || (mode==1 && i==n/2) then m with { ok=false } else if i%13==5 then model_entry(m,mode,0)
+    else model_entry(m,mode,if i%7!=3 then 1 else 0)
+fn model_entry(m:Model, mode:i64, added:i64) -> Model = m with { count=m.count+added+(if mode==2 then 1 else 0) }
+fn model_trim(m:Model, i:i64) -> Model
+  = if i%11==0 then Model { count=0, prefix=1, ok=true } else if i%13==0 then m else m with { count=m.count+(if i%3!=1 then 1 else 0) }
+; Whether raw is the prefix followed by count copies of piece.
+fn matches(borrow raw:Arr u8 _, borrow piece:Arr u8 _, expected:Model) -> bool
+  = len(raw)==expected.prefix+expected.count*len(piece) && len(piece)>0 &&
+    loop (i=expected.prefix, same=true) while same && i<len(raw)
+      next (i+1,let k=(i-expected.prefix)%len(piece) in check i>=0 && i<len(raw) && k>=0 && k<len(piece) in raw[i]==piece[k]) yield same
+
+fn statm_field(borrow text:Arr u8 _, field:i64) -> i64
+  = let start=loop (i=0, seen=0) while i<len(text) && seen<field
+      next (i+1,check i>=0 && i<len(text) in if text[i]==u8(32) then seen+1 else seen) yield i in
+    loop (i=start, value=0) while digit_at(text,i)>=0 && value<1000000000
+      next (i+1,value*10+digit_at(text,i)) yield value
+fn digit_at(borrow text:Arr u8 _, i:i64) -> i64
+  = let byte=if i>=0 && i<len(text) then i64(text[i]) else 0 in if byte>=48 && byte<=57 then byte-48 else -1
+effect(fs) fn resident_pages() -> i64
+  = let opened=file_open("/proc/self/statm",0) in if !opened.ok then -1 else
+    let text=file_read(opened.value,4096) in let closed=file_close(opened.value) in
+    if !text.ok then -1 else statm_field(text.value,1)
+
+effect(fs,unsafe) fn main(mode:i64{mode>=0 && mode<=4}, n:i64{n>=1 && n<=1000000}) -> unit
+  = let piece=if mode<=2 then "ab" else arr(j in 0..1000) u8(97+j%26) in
+    let warm=calls(mode,200,piece) in let before=resident_pages() in
+    let requests=load_i64(runtime_state(),64) in let bytes=load_i64(runtime_state(),80) in
+    let log=calls(mode,n,piece) in
+    let requests=load_i64(runtime_state(),64)-requests in let bytes=load_i64(runtime_state(),80)-bytes in
+    let after=resident_pages() in let expected=model(mode,n) in
+    let grown=if before<0 || after<0 then 0 else after-before in
+    let problem=if !allocation_stats_enabled() then "built without NEO_ALLOC_STATS=1"
+      else if log.ok!=expected.ok || log.count!=expected.count || !matches(log.raw,piece,expected) then "contents differ from the model"
+      else if mode<=2 && (requests>64 || bytes>8*len(log.raw)+65536) then concat(int_text(requests)," requests and ",int_text(bytes)," bytes are not amortised")
+      else if grown>256 then concat("resident set grew by ",int_text(grown)," pages")
+      else "" in
+    let shown=if len(problem)>0 then print_out(concat(problem,"\n"))
+      else print_out(concat(int_text(mode)," ",int_text(log.count)," ",int_text(len(log.raw))," OK\n")) in noop()

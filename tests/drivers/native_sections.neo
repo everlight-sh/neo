@@ -1,19 +1,27 @@
 ; Ported from tests/native_sections.py: a program importing a module with an
 ; unused explicit ABI export builds with and without a prepared library cache,
-; runs, and imports nothing. The check that section collection keeps the
-; export (nm lists public_entry) fails with the native compiler and is left
-; out; see tests/porting/runtime-failures.md.
+; runs, imports nothing, and keeps the export (nm lists public_entry).
 import "std:fs"
 import "std:io"
+import "std:strings"
 import "../support/driver.neo"
 import "../support/runtime.neo"
 import "../../compiler/src/modules.neo"
 import "../../compiler/src/paths.neo"
 import "../../compiler/src/text.neo"
 
+; Whether nm lists a defined symbol named exactly name (with Darwin's '_').
+effect fn ns_defines(borrow tools:DvTools, borrow binary:Arr u8 _, borrow name:Arr u8 _) -> bool
+  = let symbol=if str_find(tools.target,"-apple-").present then concat("_",name) else pt_copy(name) in
+    let lines=ru_split(ru_tool_output("nm",push(md_words(),binary)),10) in
+    loop (i=0, found=false) while !found && i<len(lines)
+      next (i+1,let words=ru_words(str_trim(md_word(lines,i))) in
+        len(words)==3 && tx_equal(md_word(words,2),symbol)) yield found
+
 effect fn ns_build(borrow tools:DvTools, borrow root:Arr u8 _, borrow name:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> unit
   = let binary=pt_join(root,name) in
     let built=dv_build(tools,pt_join(root,"main.neo"),binary,flags) in
+    let kept=dv_expect(ns_defines(tools,binary,"public_entry"),concat(name," lost the unused export public_entry")) in
     let out=dv_output(binary,push(md_words(),"21"),md_words(),"") in
     let ran=dv_expect(tx_equal(out,"42\n"),concat(name," printed ",tx_repr(out,true))) in
     dv_audit(tools,binary)

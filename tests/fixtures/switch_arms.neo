@@ -1,0 +1,51 @@
+import "std:io"
+; Arms of switches (else-if chains on a scalar or a field, a match on an enum's
+; tag) that take, keep, replace or drop owned buffers and record fields. Each
+; arm releases what it does not hand on, exactly once: a leak grows the
+; resident set by about a buffer per run (read from /proc/self/statm where it
+; exists), and a double release corrupts the buffers the digests read.
+; Arguments: runs and buffer size. Prints "switch arms OK <checksum>".
+type Job = { op:i64, text:Arr u8 _, extra:Arr u8 _ }
+enum Step<T> { Keep, Join(T), Swap(T), Drop, Twice(i64) }
+
+fn pick(op:i64, move s:Arr u8 _, move t:Arr u8 _) -> Arr u8 _
+  = if op==0 then s else if op==1 then concat(s,t) else if op==2 then t
+    else if op==3 || op==4 then concat(t,s) else if op==5 then "five"
+    else if op==6 then let u=concat(s,"-") in concat(u,t) else s
+fn run(move j:Job) -> Arr u8 _
+  = if j.op==0 then j.text else if j.op==1 then concat(j.text,j.extra) else if j.op==2 then j.extra
+    else if j.op==3 then "three" else j.text
+fn apply(move s:Arr u8 _, move e:Step<Arr u8 _>) -> Arr u8 _
+  = match e { Keep => s, Join(t) => concat(s,t), Swap(t) => t, Drop => "drop", Twice(k) => if k>0 then concat(s,s) else s }
+
+fn buffer(seed:i64, size:i64{size>=0}) -> Arr u8 _ = arr(j in 0..size) u8((seed+j)%251)
+fn digest(borrow b:Arr u8 _) -> i64 = if len(b)==0 then 0 else len(b)*7+i64(b[0])+i64(b[len(b)-1])*3
+fn step_of(i:i64, size:i64{size>=0}) -> Step<Arr u8 _>
+  = let k=i%5 in if k==0 then Keep::<Arr u8 _>() else if k==1 then Join(buffer(i+3,size)) else if k==2 then Swap(buffer(i+5,size))
+    else if k==3 then Drop::<Arr u8 _>() else Twice::<Arr u8 _>(i%2)
+fn rounds(n:i64, size:i64{size>=0}) -> i64
+  = loop (i=0, total=0) while i<n
+      next (i+1,let a=pick(i%8,buffer(i,size),buffer(i+1,size)) in
+        let b=run(Job { op=i%5, text=buffer(i+2,size), extra=buffer(i+4,size) }) in
+        let c=apply(buffer(i+6,size),step_of(i,size)) in
+        total+digest(a)+digest(b)+digest(c)) yield total
+
+; The second field of /proc/self/statm (resident pages), or -1.
+fn statm_field(borrow text:Arr u8 _, field:i64) -> i64
+  = let start=loop (i=0, seen=0) while i<len(text) && seen<field
+      next (i+1,check i>=0 && i<len(text) in if text[i]==u8(32) then seen+1 else seen) yield i in
+    loop (i=start, value=0) while digit_at(text,i)>=0 && value<1000000000
+      next (i+1,value*10+digit_at(text,i)) yield value
+fn digit_at(borrow text:Arr u8 _, i:i64) -> i64
+  = let byte=if i>=0 && i<len(text) then i64(text[i]) else 0 in if byte>=48 && byte<=57 then byte-48 else -1
+effect(fs) fn resident_pages() -> i64
+  = let opened=file_open("/proc/self/statm",0) in if !opened.ok then -1 else
+    let text=file_read(opened.value,4096) in let closed=file_close(opened.value) in
+    if !text.ok then -1 else statm_field(text.value,1)
+
+effect(fs) fn main(n:i64{n>=1 && n<=1000000}, size:i64{size>=1 && size<=65536}) -> unit
+  = let warm=rounds(200,size) in let before=resident_pages() in
+    let total=rounds(n,size) in let after=resident_pages() in
+    let grown=if before<0 || after<0 then 0 else after-before in
+    let shown=if grown>256 then print_out(concat("resident set grew by ",int_text(grown)," pages\n"))
+      else print_out(concat("switch arms OK ",int_text(warm+total),"\n")) in noop()
