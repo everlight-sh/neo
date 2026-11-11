@@ -13,7 +13,8 @@ import "native_crypto.neo"
 
 type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 ; moves: uses of the binding that take its own reference (see cg_plan).
-type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _ }
+; parts: fields of a kept record taken out of it (see cg_parts).
+type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, parts:Arr i64 _ }
 type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
                  function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool }
 type CgProgram = { text:Arr u8 _, report:TcReport }
@@ -155,7 +156,7 @@ fn cg_copy_array(move s:CgState, borrow array:CgValue, borrow target:CgValue, bo
     if !cg_managed(element) then s else cg_write(s,concat("  call void @neo.visit.elements(ptr ",destination,", ptr ",
       cg_slot_symbol(element,true),", i64 ",cg_stride(element),", i64 ",length,")\n"))
 
-fn cg_bind(name:i64, borrow value:CgValue) -> CgBinding = CgBinding { name=name, value=value, live=tx_empty(), moves=tx_ints() }
+fn cg_bind(name:i64, borrow value:CgValue) -> CgBinding = CgBinding { name=name, value=value, live=tx_empty(), moves=tx_ints(), parts=tx_ints() }
 fn cg_listed(borrow ids:Arr i64 _, id:i64) -> bool
   = loop (i=0, found=false) while !found && i<len(ids) next (i+1,tx_at(ids,i)==id) yield found
 fn cg_joined(borrow a:Arr i64 _, borrow b:Arr i64 _) -> Arr i64 _
@@ -177,7 +178,7 @@ fn cg_new_owner(move s:CgState) -> CgState
     let s=s with { serial=s.serial+1, allocas=concat(s.allocas,"  ",flag," = alloca i1, align 1\n"), value=cg_value(n_t_ptr(),flag) } in
     cg_write(s,concat("  store i1 true, ptr ",flag,", align 1\n"))
 fn cg_cleanup(borrow m:Mods, move s:CgState, borrow binding:CgBinding, destructor:i64) -> CgState
-  = if len(binding.live)==0 then cg_release(s,binding.value) else
+  = if len(binding.live)==0 then cg_release_rest(m,s,binding.value,binding.parts,-1) else
     let result=s.value in let run=s.serial in let done=run+1 in
     let s=cg_ins(s with { serial=done+1 },n_t_bool(),concat("load i1, ptr ",binding.live,", align 1")) in
     let s=cg_block(cg_branch(s,s.value.operand,run,done),run) in
@@ -233,126 +234,200 @@ fn cg_lent_arguments(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBindi
 ; When only one branch of an `if` hands the value on, the other branch
 ; releases it as it ends: its entry in moves is -1-branch (cg_branch_drops).
 ; state: 0 the name is not used, 1 taken on every path, 2 kept and released.
+; field: when not -1, the plan is that of the field path name.field alone (see
+; cg_parts): reading name.g for another field g is not a use of it, while
+; reading name as a whole or name.field is.
 type CgPlan = { state:i64, moves:Arr i64 _ }
 fn cg_plan_unused() -> CgPlan = CgPlan { state=0, moves=tx_ints() }
 fn cg_plan_kept() -> CgPlan = CgPlan { state=2, moves=tx_ints() }
+fn cg_plan_taken(id:i64) -> CgPlan = CgPlan { state=1, moves=push(tx_ints(),id) }
 fn cg_named(borrow m:Mods, a:i64, b:i64) -> bool = a==b || tx_equal(md_str(m,a),md_str(m,b))
 ; The plan of expression first when later is the plan of what runs after it:
 ; once a later expression uses the name, an earlier one cannot hold its last use.
-fn cg_plan_then(borrow m:Mods, borrow fns:Arr i64 _, first:i64, name:i64, taking:bool, later:CgPlan) -> CgPlan
-  = if later.state!=0 then later else cg_plan(m,fns,first,name,taking)
-; Whether expression id is the variable name or a field path of it.
-fn cg_rooted(borrow m:Mods, id:i64, name:i64) -> bool
+fn cg_plan_then(borrow m:Mods, borrow fns:Arr i64 _, first:i64, name:i64, field:i64, taking:bool, later:CgPlan) -> CgPlan
+  = if later.state!=0 then later else cg_plan(m,fns,first,name,field,taking)
+; Whether expression id is the variable name or a field path of it (one that
+; goes through name.field when field is not -1).
+fn cg_rooted(borrow m:Mods, id:i64, name:i64, field:i64) -> bool
   = let n=md_node(m,id) in
-    if n.kind==n_field() then cg_rooted(m,n.a,name) else n.kind==n_var() && cg_named(m,n.a,name)
+    if n.kind==n_field() then
+      let base=md_node(m,n.a) in
+      if base.kind==n_var() then cg_named(m,base.a,name) && (field<0 || cg_named(m,n.b,field)) else cg_rooted(m,n.a,name,field)
+    else n.kind==n_var() && cg_named(m,n.a,name)
+; Whether expression id is what the plan follows: the variable name, or
+; name.field when field is not -1.
+fn cg_is_target(borrow m:Mods, id:i64, name:i64, field:i64) -> bool
+  = let n=md_node(m,id) in
+    if field<0 then n.kind==n_var() && cg_named(m,n.a,name)
+    else if n.kind!=n_field() || !cg_named(m,n.b,field) then false
+    else let base=md_node(m,n.a) in base.kind==n_var() && cg_named(m,base.a,name)
 ; An argument that is lent or only observed, and reads the binding directly
 ; (the variable or a field path of it), stays unretained until its call runs.
 ; Nothing evaluated after it may take the binding: the taker could update or
 ; free the buffer the pending argument still points to. Any other expression
 ; in such a position yields a value of its own, so its reads are over by then.
-fn cg_plan_held(borrow m:Mods, borrow fns:Arr i64 _, first:i64, name:i64, later:CgPlan) -> CgPlan
-  = if later.state==0 then cg_plan(m,fns,first,name,false)
-    else if later.state==1 && cg_rooted(m,first,name) then cg_plan_kept() else later
-fn cg_plan_list(borrow m:Mods, borrow fns:Arr i64 _, list:i64, name:i64, taking:bool) -> CgPlan
+fn cg_plan_held(borrow m:Mods, borrow fns:Arr i64 _, first:i64, name:i64, field:i64, later:CgPlan) -> CgPlan
+  = if later.state==0 then cg_plan(m,fns,first,name,field,false)
+    else if later.state==1 && cg_rooted(m,first,name,field) then cg_plan_kept() else later
+fn cg_plan_list(borrow m:Mods, borrow fns:Arr i64 _, list:i64, name:i64, field:i64, taking:bool) -> CgPlan
   = loop (i=ast_list_len(m.ast,list)-1, plan=cg_plan_unused()) while i>=0
       next (i-1,let id=ast_list_at(m.ast,list,i) in
-        if taking then cg_plan_then(m,fns,id,name,true,plan) else cg_plan_held(m,fns,id,name,plan)) yield plan
+        if taking then cg_plan_then(m,fns,id,name,field,true,plan) else cg_plan_held(m,fns,id,name,field,plan)) yield plan
 ; Whether argument i of a call is handed over: every operand of push, set and
 ; the byte writers (decl -1), the first part of concat (decl -2), or an
 ; argument for an owning parameter of the function decl.
 fn cg_argument_owned(borrow m:Mods, decl:i64, i:i64) -> bool
   = if decl== -2 then i==0 else if decl<0 then true else let f=md_node(m,decl) in
     i<ast_list_len(m.ast,f.b) && !(cg_lends(m,f) && cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i))))
-; Arguments run in order and the call runs after all of them. A plain `x` in
-; an owning position can therefore be the call's last use of x even when a
-; later argument reads x: that read is over, and owns what it keeps, before
-; the callee can change x. Later arguments are quiet when none of them takes
-; x and none is x, or a field path of x, lent: that one would still point
-; into x during the call.
+; Arguments run in order and the call runs after all of them. A plain `x` (or
+; the field `x.f` a field plan follows) in an owning position can therefore be
+; the call's last use of it even when a later argument reads it: that read is
+; over, and owns what it keeps, before the callee can change it. Later
+; arguments are quiet when none of them takes it and none is it, or a field
+; path of it, lent: that one would still point into it during the call.
 type CgArguments = { plan:CgPlan, quiet:bool }
-fn cg_plan_argument(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, decl:i64, i:i64, later:CgArguments) -> CgArguments
-  = let id=ast_list_at(m.ast,n.b,i) in let argument=md_node(m,id) in let owned=cg_argument_owned(m,decl,i) in
-    let held=!owned && cg_rooted(m,id,name) in
-    let own=cg_plan(m,fns,id,name,owned) in let plan=later.plan in
+fn cg_plan_argument(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64, decl:i64, i:i64, later:CgArguments) -> CgArguments
+  = let id=ast_list_at(m.ast,n.b,i) in let owned=cg_argument_owned(m,decl,i) in
+    let held=!owned && cg_rooted(m,id,name,field) in
+    let own=cg_plan(m,fns,id,name,field,owned) in let plan=later.plan in
     let merged=if plan.state==0 then own
       else if held then (if plan.state==1 then cg_plan_kept() else plan)
-      else if owned && plan.state==2 && later.quiet && argument.kind==n_var() && cg_named(m,argument.a,name) then
-        CgPlan { state=1, moves=push(tx_ints(),id) }
+      else if owned && plan.state==2 && later.quiet && cg_is_target(m,id,name,field) then cg_plan_taken(id)
       else plan in
     CgArguments { plan=merged, quiet=later.quiet && !held && own.state!=1 }
-fn cg_plan_arguments(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, decl:i64) -> CgPlan
+fn cg_plan_arguments(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64, decl:i64) -> CgPlan
   = loop (i=ast_list_len(m.ast,n.b)-1, all=CgArguments { plan=cg_plan_unused(), quiet=true }) while i>=0
-      next (i-1,cg_plan_argument(m,fns,n,name,decl,i,all)) yield all.plan
+      next (i-1,cg_plan_argument(m,fns,n,name,field,decl,i,all)) yield all.plan
 ; Only the operands of the buffer operations (push, set, byte_copy,
 ; byte_write_le, byte_slice, and concat's first part) and arguments for owning
 ; parameters of a direct call are handed over; every other callee is assumed
 ; to observe its arguments.
-fn cg_plan_call(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64) -> CgPlan
+fn cg_plan_call(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64) -> CgPlan
   = let callee=md_str(m,n.a) in
-    if str_find(" push set byte_copy byte_write_le byte_slice ",concat(" ",callee," ")).present then cg_plan_arguments(m,fns,n,name,-1)
-    else if tx_equal(callee,"concat") then cg_plan_arguments(m,fns,n,name,-2)
-    else if md_is_builtin(m,callee) then cg_plan_list(m,fns,n.b,name,false) else
-    let id=md_find_decl(m,fns,n.a) in if id<0 then cg_plan_list(m,fns,n.b,name,false) else
-    cg_plan_arguments(m,fns,n,name,id)
+    if str_find(" push set byte_copy byte_write_le byte_slice ",concat(" ",callee," ")).present then cg_plan_arguments(m,fns,n,name,field,-1)
+    else if tx_equal(callee,"concat") then cg_plan_arguments(m,fns,n,name,field,-2)
+    else if md_is_builtin(m,callee) then cg_plan_list(m,fns,n.b,name,field,false) else
+    let id=md_find_decl(m,fns,n.a) in if id<0 then cg_plan_list(m,fns,n.b,name,field,false) else
+    cg_plan_arguments(m,fns,n,name,field,id)
 ; Initial values run once and in order; the condition and successors repeat,
 ; so a use there is never the last; the yield runs once at the end.
-fn cg_plan_loop(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64) -> CgPlan
+fn cg_plan_loop(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64) -> CgPlan
   = let count=ast_list_len(m.ast,n.a) in
     let shadowed=loop (i=0, found=false) while !found && i<count
       next (i+1,cg_named(m,md_node(m,ast_list_at(m.ast,n.a,i)).a,name)) yield found in
-    let result=if shadowed then cg_plan_unused() else cg_plan(m,fns,n.d,name,true) in
+    let result=if shadowed then cg_plan_unused() else cg_plan(m,fns,n.d,name,field,true) in
     let inside=if shadowed || result.state!=0 then result else
-      if cg_plan(m,fns,n.b,name,false).state!=0 || cg_plan_list(m,fns,n.c,name,false).state!=0 then cg_plan_kept()
+      if cg_plan(m,fns,n.b,name,field,false).state!=0 || cg_plan_list(m,fns,n.c,name,field,false).state!=0 then cg_plan_kept()
       else cg_plan_unused() in
     loop (i=count-1, plan=inside) while i>=0
-      next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.a,i)).c,name,true,plan)) yield plan
-; `x with { ... }` takes x after its field values (see cg_with_owned). A
-; literal evaluates its values in the type's field order, so a name used by
-; more than one of them has no known last use.
-fn cg_plan_record(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64) -> CgPlan
-  = let base=md_node(m,n.a) in let count=ast_list_len(m.ast,n.b) in
-    if n.kind==n_with() && base.kind==n_var() && cg_named(m,base.a,name) then CgPlan { state=1, moves=push(tx_ints(),n.a) } else
-    let values=loop (i=count-1, plan=cg_plan_unused()) while i>=0
-      next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.b,i)).b,name,true,plan)) yield plan in
-    let users=loop (i=0, total=0) while i<count
-      next (i+1,total+(if cg_plan(m,fns,md_node(m,ast_list_at(m.ast,n.b,i)).b,name,true).state!=0 then 1 else 0)) yield total in
-    if n.kind==n_with() then cg_plan_then(m,fns,n.a,name,true,values)
-    else if users>1 then cg_plan_kept() else values
-; The plan of name over expression id when nothing after it uses the name.
-; taking: the expression's value is handed to an owner.
-fn cg_plan(borrow m:Mods, borrow fns:Arr i64 _, id:i64, name:i64, taking:bool) -> CgPlan
+      next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.a,i)).c,name,field,true,plan)) yield plan
+; `x with { ... }` takes x after its field values (see cg_with_owned); for a
+; field plan it is a use of the whole record. A literal evaluates its values
+; in the type's field order (cg_record_fill), whatever order they are written in.
+fn cg_plan_record(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64) -> CgPlan
+  = let base=md_node(m,n.a) in
+    if n.kind==n_with() && base.kind==n_var() && cg_named(m,base.a,name) then
+      (if field<0 then cg_plan_taken(n.a) else cg_plan_kept())
+    else if n.kind==n_with() then
+      let values=loop (i=ast_list_len(m.ast,n.b)-1, plan=cg_plan_unused()) while i>=0
+        next (i-1,cg_plan_then(m,fns,md_node(m,ast_list_at(m.ast,n.b,i)).b,name,field,true,plan)) yield plan in
+      cg_plan_then(m,fns,n.a,name,field,true,values)
+    else let record=tc_find_record(m,n.a) in if record<0 then cg_plan_kept() else
+    let fields=md_node(m,record).b in
+    loop (i=ast_list_len(m.ast,fields)-1, plan=cg_plan_unused()) while i>=0
+      next (i-1,let init=tc_named_node(m,n.b,md_node(m,ast_list_at(m.ast,fields,i)).a) in
+        if init<0 then cg_plan_kept() else cg_plan_then(m,fns,md_node(m,init).b,name,field,true,plan)) yield plan
+; The plan of name (or name.field) over expression id when nothing after it
+; uses the name. taking: the expression's value is handed to an owner.
+; A let value is read lexically (cg_read), which shares a variable's
+; reference, so only a field plan takes one there: a taken field read is
+; owned by the reader.
+fn cg_plan(borrow m:Mods, borrow fns:Arr i64 _, id:i64, name:i64, field:i64, taking:bool) -> CgPlan
   = let n=md_node(m,id) in let kind=n.kind in
     if id<0 || kind==n_num() || kind==n_flt() || kind==n_bool() || kind==n_byte() || kind==n_str() then cg_plan_unused()
     else if kind==n_var() then
       if !cg_named(m,n.a,name) then cg_plan_unused()
-      else if taking then CgPlan { state=1, moves=push(tx_ints(),id) } else cg_plan_kept()
+      else if taking && field<0 then cg_plan_taken(id) else cg_plan_kept()
     else if kind==n_let() || kind==n_using() then
-      cg_plan_then(m,fns,n.b,name,false,if cg_named(m,n.a,name) then cg_plan_unused() else cg_plan(m,fns,n.c,name,true))
+      cg_plan_then(m,fns,n.b,name,field,kind==n_let() && field>=0,
+        if cg_named(m,n.a,name) then cg_plan_unused() else cg_plan(m,fns,n.c,name,field,true))
     else if kind==n_if() then
-      let yes=cg_plan(m,fns,n.b,name,true) in let no=cg_plan(m,fns,n.c,name,true) in
-      if yes.state==0 && no.state==0 then cg_plan(m,fns,n.a,name,false)
+      let yes=cg_plan(m,fns,n.b,name,field,true) in let no=cg_plan(m,fns,n.c,name,field,true) in
+      if yes.state==0 && no.state==0 then cg_plan(m,fns,n.a,name,field,false)
       else if yes.state==1 && no.state==1 then CgPlan { state=1, moves=cg_joined(yes.moves,no.moves) }
       else if yes.state==1 then CgPlan { state=1, moves=push(yes.moves,-1-n.c) }
       else if no.state==1 then CgPlan { state=1, moves=push(no.moves,-1-n.b) } else cg_plan_kept()
-    else if kind==n_check() then cg_plan_then(m,fns,n.a,name,false,cg_plan(m,fns,n.b,name,true))
+    else if kind==n_check() then cg_plan_then(m,fns,n.a,name,field,false,cg_plan(m,fns,n.b,name,field,true))
     else if kind==n_bin() then
-      let right=cg_plan(m,fns,n.c,name,false) in
+      let right=cg_plan(m,fns,n.c,name,field,false) in
       ; The right operand of && and || may not run.
-      if n.a!=10 && n.a!=11 then cg_plan_then(m,fns,n.b,name,false,right)
-      else if right.state==0 then cg_plan(m,fns,n.b,name,false) else cg_plan_kept()
-    else if kind==n_un() || kind==n_cast() then cg_plan(m,fns,n.b,name,false)
-    else if kind==n_len() || kind==n_field() then cg_plan(m,fns,n.a,name,false)
-    else if kind==n_index() then cg_plan_then(m,fns,n.a,name,false,cg_plan(m,fns,n.b,name,false))
+      if n.a!=10 && n.a!=11 then cg_plan_then(m,fns,n.b,name,field,false,right)
+      else if right.state==0 then cg_plan(m,fns,n.b,name,field,false) else cg_plan_kept()
+    else if kind==n_un() || kind==n_cast() then cg_plan(m,fns,n.b,name,field,false)
+    else if kind==n_len() then cg_plan(m,fns,n.a,name,field,false)
+    else if kind==n_field() then
+      if field<0 then cg_plan(m,fns,n.a,name,field,false)
+      else if cg_is_target(m,id,name,field) then (if taking then cg_plan_taken(id) else cg_plan_kept())
+      else if md_node(m,n.a).kind==n_var() then cg_plan_unused()
+      else cg_plan(m,fns,n.a,name,field,false)
+    else if kind==n_index() then cg_plan_then(m,fns,n.a,name,field,false,cg_plan(m,fns,n.b,name,field,false))
     else if kind==n_sum() || kind==n_arrc() then
       ; The body repeats, so a use inside it is never the last.
-      if !cg_named(m,n.a,name) && cg_plan(m,fns,n.d,name,false).state!=0 then cg_plan_kept()
-      else cg_plan_then(m,fns,n.b,name,false,cg_plan(m,fns,n.c,name,false))
-    else if kind==n_loop() then cg_plan_loop(m,fns,n,name)
-    else if kind==n_reclit() || kind==n_with() then cg_plan_record(m,fns,n,name)
-    else if kind==n_call() then cg_plan_call(m,fns,n,name)
+      if !cg_named(m,n.a,name) && cg_plan(m,fns,n.d,name,field,false).state!=0 then cg_plan_kept()
+      else cg_plan_then(m,fns,n.b,name,field,false,cg_plan(m,fns,n.c,name,field,false))
+    else if kind==n_loop() then cg_plan_loop(m,fns,n,name,field)
+    else if kind==n_reclit() || kind==n_with() then cg_plan_record(m,fns,n,name,field)
+    else if kind==n_call() then cg_plan_call(m,fns,n,name,field)
     else cg_plan_kept()
 fn cg_moves(borrow m:Mods, borrow fns:Arr i64 _, id:i64, name:i64) -> Arr i64 _
-  = let plan=cg_plan(m,fns,id,name,true) in if plan.state==1 then plan.moves else tx_ints()
+  = let plan=cg_plan(m,fns,id,name,-1,true) in if plan.state==1 then plan.moves else tx_ints()
+; Field takes. A record binding's fields are released where the binding is:
+; at the end of its scope, or at the end of a branch that the other branch
+; handed it on from (cg_branch_drops). When a field that holds references has
+; a last use before that point which hands it on (its own plan, cg_plan with
+; that field), that use takes the record's reference to the field instead, and
+; the release leaves the field out: a buffer in a record that a function owns
+; is then handed on uniquely referenced, so push and set update it in place.
+; Triples of a scope (-1 for the end of the binding's scope, or the branch
+; node whose end releases the binding), a field index, and a use that takes
+; the field or -1-branch for the other branch of an `if` that releases it.
+; expressions: id is a list of expressions (loop successors).
+fn cg_parts_in(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64, name:i64, expressions:bool, scope:i64,
+               move out:Arr i64 _) -> Arr i64 _
+  = let fields=md_node(m,value.record).b in
+    loop (i=0, all=out) while i<ast_list_len(m.ast,fields)
+      next (i+1,if !cg_counted(m,cg_field_type(m,fields,i)) then all else
+        let field=md_node(m,ast_list_at(m.ast,fields,i)).a in
+        let plan=if expressions then cg_plan_list(m,fns,id,name,field,true) else cg_plan(m,fns,id,name,field,true) in
+        if plan.state!=1 then all else
+        loop (k=0, triples=all) while k<len(plan.moves)
+          next (k+1,push(push(push(triples,scope),i),tx_at(plan.moves,k))) yield triples) yield all
+; The field takes of a binding whose own plan has these moves: over its whole
+; scope when nothing takes it, or else inside each branch that releases it.
+fn cg_parts(borrow m:Mods, borrow fns:Arr i64 _, borrow value:CgValue, id:i64, name:i64, expressions:bool, borrow moves:Arr i64 _) -> Arr i64 _
+  = if value.ty!=n_t_rec() || value.record<0 || !cg_counted(m,value) then tx_ints()
+    else if len(moves)==0 then cg_parts_in(m,fns,value,id,name,expressions,-1,tx_ints()) else
+    loop (k=0, out=tx_ints()) while k<len(moves)
+      next (k+1,let entry=tx_at(moves,k) in
+        if entry>=0 then out else cg_parts_in(m,fns,value,-1-entry,name,false,-1-entry,out)) yield out
+; Whether parts lists the use (or -1-branch entry) id.
+fn cg_part_listed(borrow parts:Arr i64 _, id:i64) -> bool
+  = loop (i=2, found=false) while !found && i<len(parts) next (i+3,tx_at(parts,i)==id) yield found
+; Whether parts takes the field at index within scope.
+fn cg_part_field(borrow parts:Arr i64 _, scope:i64, index:i64) -> bool
+  = loop (i=0, found=false) while !found && i+1<len(parts) next (i+3,tx_at(parts,i)==scope && tx_at(parts,i+1)==index) yield found
+; Releases a binding's value where scope ends, except the fields its parts
+; took or released on the way. The current value is kept.
+fn cg_release_rest(borrow m:Mods, move s:CgState, borrow value:CgValue, borrow parts:Arr i64 _, scope:i64) -> CgState
+  = let result=s.value in
+    if value.ty!=n_t_rec() || value.record<0 || !cg_part_listed_scope(parts,scope) then cg_release(s,value) else
+    let fields=md_node(m,value.record).b in
+    loop (i=0, out=s) while i<ast_list_len(m.ast,fields)
+      next (i+1,let field=cg_field_type(m,fields,i) in
+        if !cg_managed(field) || cg_part_field(parts,scope,i) then out else
+        let got=cg_field_get(out,value,field,i) in cg_release(got,got.value) with { value=result }) yield out
+fn cg_part_listed_scope(borrow parts:Arr i64 _, scope:i64) -> bool
+  = loop (i=0, found=false) while !found && i<len(parts) next (i+3,tx_at(parts,i)==scope) yield found
 
 fn cg_abi_types(borrow m:Mods, f:Node) -> Arr u8 _
   = let count=ast_list_len(m.ast,f.b) in
@@ -435,22 +510,31 @@ fn cg_phi(move s:CgState, borrow yes:CgValue, yes_block:i64, borrow no:CgValue, 
     else cg_ins_value(s,yes,concat("phi ",cg_type_of(yes)," [ ",yes.operand,", %",cg_label(yes_block),
       " ], [ ",no.operand,", %",cg_label(no_block)," ]"))
 
-; The other branch of an `if` handed these bindings on (see cg_plan), so the
-; branch that ends here releases them, once its value no longer views them.
-fn cg_branch_drops(borrow env:Arr CgBinding _, move s:CgState, branch:i64) -> CgState
+; The other branch of an `if` handed these bindings, or fields of them, on
+; (see cg_plan and cg_parts), so the branch that ends here releases them, once
+; its value no longer views them.
+fn cg_branch_drops(borrow m:Mods, borrow env:Arr CgBinding _, move s:CgState, branch:i64) -> CgState
   = loop (i=0, out=s) while i<len(env)
       next (i+1,let binding=cg_binding(env,i) in
-        if cg_listed(binding.moves,-1-branch) then cg_release(cg_own_view(out),binding.value) else out) yield out
+        let whole=if cg_listed(binding.moves,-1-branch) then cg_release_rest(m,cg_own_view(out),binding.value,binding.parts,branch) else out in
+        if !cg_part_listed(binding.parts,-1-branch) then whole else
+        let viewed=cg_own_view(whole) in let result=viewed.value in
+        let fields=md_node(m,binding.value.record).b in
+        loop (k=0, code=viewed) while k+2<len(binding.parts)
+          next (k+3,if tx_at(binding.parts,k+2)!= -1-branch then code else
+            let index=tx_at(binding.parts,k+1) in
+            let got=cg_field_get(code,binding.value,cg_field_type(m,fields,index),index) in
+            cg_release(got,got.value) with { value=result }) yield code) yield out
 
 fn cg_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
   = let s=cg_expr(m,fns,env,s,n.a) in if s.error>=0 then s else
     let yes=s.serial in let no=yes+1 in let join=no+1 in let cond=s.value.operand in
     let s=cg_branch(s with { serial=join+1 },cond,yes,no) in
     let s=cg_expr(m,fns,env,cg_block(s,yes),n.b) in if s.error>=0 then s else
-    let s=cg_branch_drops(env,s,n.b) in
+    let s=cg_branch_drops(m,env,s,n.b) in
     let left=s.value in let left_block=s.block in
     let s=cg_expr(m,fns,env,cg_block(cg_jump(s,join),no),n.c) in if s.error>=0 then s else
-    let s=cg_branch_drops(env,s,n.c) in
+    let s=cg_branch_drops(m,env,s,n.c) in
     let right=s.value in let right_block=s.block in
     cg_phi(cg_block(cg_jump(s,join),join),left,left_block,right,right_block)
 
@@ -947,15 +1031,24 @@ fn cg_loop(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     ; on the way out: either may take it (1) instead of releasing it (0).
     let stepped=loop (i=0, taken=tx_ints()) while i<count
       next (i+1,let state=md_node(m,ast_list_at(m.ast,n.a,i)) in
-        push(taken,if cg_counted(m,cg_arg(values,i)) && cg_plan_list(m,fns,n.c,state.a,true).state==1 then 1 else 0)) yield taken in
+        push(taken,if cg_counted(m,cg_arg(values,i)) && cg_plan_list(m,fns,n.c,state.a,-1,true).state==1 then 1 else 0)) yield taken in
     let yielded=loop (i=0, taken=tx_ints()) while i<count
       next (i+1,let state=md_node(m,ast_list_at(m.ast,n.a,i)) in
-        push(taken,if cg_counted(m,cg_arg(values,i)) && cg_plan(m,fns,n.d,state.a,true).state==1 then 1 else 0)) yield taken in
+        push(taken,if cg_counted(m,cg_arg(values,i)) && cg_plan(m,fns,n.d,state.a,-1,true).state==1 then 1 else 0)) yield taken in
+    ; A state that is not taken whole may still have fields taken (cg_parts),
+    ; by the successors (early) or by the yield (late).
+    let early=arr(i in 0..count) let state=md_node(m,ast_list_at(m.ast,n.a,i)) in
+      cg_parts(m,fns,cg_arg(values,i),n.c,state.a,true,
+        if tx_at(stepped,i)==1 then cg_plan_list(m,fns,n.c,state.a,-1,true).moves else tx_ints()) in
+    let late=arr(i in 0..count) let state=md_node(m,ast_list_at(m.ast,n.a,i)) in
+      cg_parts(m,fns,cg_arg(values,i),n.d,state.a,false,
+        if tx_at(yielded,i)==1 then cg_plan(m,fns,n.d,state.a,-1,true).moves else tx_ints()) in
     let inner=loop (i=0, bindings=env) while i<count
       next (i+1,let state=md_node(m,ast_list_at(m.ast,n.a,i)) in
-        let step=if tx_at(stepped,i)==1 then cg_plan_list(m,fns,n.c,state.a,true).moves else tx_ints() in
-        let last=if tx_at(yielded,i)==1 then cg_plan(m,fns,n.d,state.a,true).moves else tx_ints() in
-        push(bindings,cg_bind(state.a,cg_arg(values,i)) with { moves=cg_joined(step,last) })) yield bindings in
+        let step=if tx_at(stepped,i)==1 then cg_plan_list(m,fns,n.c,state.a,-1,true).moves else tx_ints() in
+        let last=if tx_at(yielded,i)==1 then cg_plan(m,fns,n.d,state.a,-1,true).moves else tx_ints() in
+        let parts=if i>=0 && i<len(early) && i<len(late) then cg_joined(early[i],late[i]) else tx_ints() in
+        push(bindings,cg_bind(state.a,cg_arg(values,i)) with { moves=cg_joined(step,last), parts=parts })) yield bindings in
     ; Reserve phi names before lowering the condition and successors. Their
     ; final block is the back-edge predecessor, even if a successor branches.
     let cond=cg_expr(m,fns,inner,s with { text=tx_empty(), globals=tx_empty(), serial=first+count, block=header },n.b) in
@@ -970,11 +1063,13 @@ fn cg_loop(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     let s=cg_write(s with { block=cond.block },cond.text) in
     let s=cg_write(cg_block(cg_branch(s,cond.value.operand,step,done),step) with { block=back },updated.state.text) in
     let s=loop (i=0, code=s) while i<count
-      next (i+1,if tx_at(stepped,i)==1 then code else cg_release(code,cg_arg(values,i))) yield code in
+      next (i+1,if tx_at(stepped,i)==1 then code else
+        cg_release_rest(m,code,cg_arg(values,i),if i>=0 && i<len(early) then early[i] else tx_ints(),-1)) yield code in
     let result=cg_expr(m,fns,inner,cg_block(cg_jump(s,header),done),n.d) in
     if result.error>=0 then result else
     loop (i=0, code=cg_own_view(result)) while i<count
-      next (i+1,if tx_at(yielded,i)==1 then code else cg_release(code,cg_arg(values,i))) yield code
+      next (i+1,if tx_at(yielded,i)==1 then code else
+        cg_release_rest(m,code,cg_arg(values,i),if i>=0 && i<len(late) then late[i] else tx_ints(),-1)) yield code
 
 fn cg_show(borrow m:Mods, id:i64) -> Arr u8 _
   = let n=md_node(m,id) in
@@ -1025,7 +1120,8 @@ fn cg_observer(borrow m:Mods, id:i64) -> bool
 fn cg_root_taken(borrow m:Mods, borrow env:Arr CgBinding _, id:i64) -> bool
   = let n=md_node(m,id) in
     if n.kind==n_field() then cg_root_taken(m,env,n.a)
-    else n.kind==n_var() && len(cg_binding(env,cg_binding_index(m,env,n.a)).moves)>0
+    else if n.kind!=n_var() then false
+    else let binding=cg_binding(env,cg_binding_index(m,env,n.a)) in len(binding.moves)>0 || len(binding.parts)>0
 
 ; A lexical binding owns its storage through an observation. A temporary
 ; instead transfers its reference to the observer, which must release it.
@@ -1035,11 +1131,13 @@ fn cg_read(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     else if n.kind==n_field() then cg_read_field(m,fns,env,s,n,id)
     else CgRead { state=cg_expr(m,fns,env,s,id),borrowed=false }
 
-; A field that cg_with_owned hands to its own replacement is read without a
-; retain and owned by the reader: the record's reference to it is given up.
+; A field that cg_with_owned hands to its own replacement, or that a field
+; take (cg_parts) hands on, is read without a retain and owned by the reader:
+; the record's reference to it is given up.
 fn cg_read_field(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node, id:i64) -> CgRead
   = let root=cg_path_root(m,id) in
-    let taken=root>=0 && cg_listed(cg_binding(env,cg_binding_index(m,env,md_node(m,root).a)).moves,id) in
+    let owner=if root>=0 then cg_binding(env,cg_binding_index(m,env,md_node(m,root).a)) else cg_bind(-1,cg_unit()) in
+    let taken=root>=0 && (cg_listed(owner.moves,id) || cg_part_listed(owner.parts,id)) in
     let base=cg_read(m,fns,env,s,n.a) in if base.state.error>=0 then base else
     let value=base.state.value in let fields=md_node(m,value.record).b in let index=cg_field_index(m,fields,n.b) in
     let field=cg_field_get(base.state,value,cg_field_type(m,fields,index),index) in
@@ -1120,7 +1218,8 @@ fn cg_path_top(borrow m:Mods, id:i64) -> i64
     if md_node(m,n.a).kind==n_var() then n.b else cg_path_top(m,n.a)
 ; The read of base.field that the new value id of that field can take from the
 ; record, or -1. The value must reach it through first operands that are
-; handed over: push, set, owning parameters, or a `with` on base.field itself
+; handed over: push, set, byte_copy, byte_write_le, concat's first part, owning
+; parameters, or a `with` on base.field itself
 ; (which then takes that record the same way). No other argument on the way
 ; may read the field's subtree or the variable as a whole (cg_mentions), since
 ; the field may already have been changed in place when it runs.
@@ -1131,7 +1230,7 @@ fn cg_chain_take(borrow m:Mods, borrow fns:Arr i64 _, id:i64, base:i64, field:i6
       let record=md_node(m,n.a) in
       if record.kind==n_field() && cg_named(m,record.b,field) && cg_same_path(m,record.a,base) then n.a else -1
     else if n.kind!=n_call() || ast_list_len(m.ast,n.b)<1 then -1 else
-    let callee=md_str(m,n.a) in let edits=tx_equal(callee,"push") || tx_equal(callee,"set") in
+    let callee=md_str(m,n.a) in let edits=str_find(" push set byte_copy byte_write_le concat ",concat(" ",callee," ")).present in
     let decl=if edits || md_is_builtin(m,callee) then -1 else md_find_decl(m,fns,n.a) in
     if !edits && (decl<0 || !cg_argument_owned(m,decl,0)) then -1 else
     let alone=loop (k=1, clear=true) while clear && k<ast_list_len(m.ast,n.b)
@@ -1226,8 +1325,9 @@ fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       let shared=bound.borrowed && !exposed in
       let held=if exposed then cg_retain(bound.state,value) else bound.state in
       let moves=if shared || !cg_counted(m,value) then tx_ints() else cg_moves(m,fns,n.c,n.a) in
-      let body=cg_expr(m,fns,push(env,cg_bind(n.a,value) with { moves=moves }),held,n.c) in
-      if body.error>=0 || shared || len(moves)>0 || !cg_managed(value) then body else cg_release(cg_own_view(body),value)
+      let parts=if shared then tx_ints() else cg_parts(m,fns,value,n.c,n.a,false,moves) in
+      let body=cg_expr(m,fns,push(env,cg_bind(n.a,value) with { moves=moves, parts=parts }),held,n.c) in
+      if body.error>=0 || shared || len(moves)>0 || !cg_managed(value) then body else cg_release_rest(m,cg_own_view(body),value,parts,-1)
     else if kind==n_bin() || kind==n_un() || kind==n_cast() || kind==n_using() then
       let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let value=s.value in
       if kind==n_using() then
@@ -1298,7 +1398,8 @@ fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow t
             ; A parameter this function owns, other than a resource it must drop.
             let owned=!entry && cg_counted(m,value) && !(lends && cg_parameter_lent(m,param)) && md_resource_type(m,param.b)<0 in
             let moves=if owned then cg_moves(m,fns,f.d,param.a) else tx_ints() in
-            CgParams { env=push(params.env,cg_bind(param.a,value) with { moves=moves }),
+            let parts=if owned then cg_parts(m,fns,value,f.d,param.a,false,moves) else tx_ints() in
+            CgParams { env=push(params.env,cg_bind(param.a,value) with { moves=moves, parts=parts }),
               text=concat(params.text,if i==0 then "" else ", ",cg_typed(value)), ok=cg_supported(value) }) yield params in
     if !p.ok || !cg_supported(result) then start with { error=id } else
     let exported=ast_flag(f,fl_exported()) in

@@ -559,6 +559,13 @@ writes the low `width` bytes of an i64 in little endian order. Width must be
 between zero and eight, and both operations check that the complete write fits.
 Aliases and overlapping slices retain their original contents. Unique owned
 buffers may be updated in place; shared buffers and literals detach first.
+A buffer in a field of a record that the function owns (a `move` parameter, a
+computed `let` value or a loop state) stays unique when that field's last use
+hands it on and nothing reads the record as a whole afterwards: `push`, `set`,
+`concat` and the byte writers then update it in place, as they do a variable.
+The same holds for a field that a `with` replaces from its own old value, as
+in `state with {used=n, bytes=byte_copy(state.bytes,at,part)}`, when no value
+after it in the `with` reads the record.
 
 Automatic array allocations use a private heap when `NEO_THREADS=1`, with
 separate slab/free-list pools. Worker-enabled execution retains shared backing

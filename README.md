@@ -132,7 +132,11 @@ changes and add no runtime dependencies.
   along a uniqueness discipline: an array variable whose every control-flow
   path uses it at most once as a whole (passed to a call, updated with `set`,
   returned, stored into a loop state) is moved at that use, and `set(a, i, v)`
-  then updates the buffer in place instead of copying. Whatever still owns a
+  then updates the buffer in place instead of copying. A field of a record the
+  function owns moves the same way at its last use when nothing reads the
+  record as a whole or that field afterwards, so a growable buffer kept in a
+  record (`Rows { slots=set(rows.slots,at,v), count=at+1 }`) is also updated in
+  place. Whatever still owns a
   buffer at scope exit frees it. No GC, no refcounts, no `Rc`. The Neo runtime
   implements power-of-two free lists over kernel-mapped memory. Small blocks
   come from slabs. Freed mapped blocks stay on their class list while those of a

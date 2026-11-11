@@ -218,3 +218,9 @@ name="one-sided-handovers-and-byte-writes-keep-value-semantics"
 file="tests/fixtures/ownership_branches.neo"
 args=["40"]
 stdout="5953455920797871870 -4396072728567268518 -7673095368488778031 1019463432550118032 2398809650377320370\n"
+
+[[test]]
+name="fields-taken-from-owned-records-keep-value-semantics"
+file="tests/fixtures/ownership_fields.neo"
+args=["40"]
+stdout="1382765870709673180 6640593963121351388\n"
