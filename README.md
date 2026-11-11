@@ -245,21 +245,32 @@ python3 tests/freestanding_linux_smoke.py --binary /path/to/http
 ```
 
 To rebuild and compare the current HTTP runtime with Rust (hyper/tokio), Go
-(net/http), and Bun (Bun.serve), including CPU/request, latency, RSS, physical
-footprint and executable size on macOS or Linux:
+(net/http), and Bun (Bun.serve) on Linux, including CPU per request, latency,
+RSS, PSS and executable size, with wrk, cargo, go and bun on `PATH`:
 
 ```bash
-python3 bench/http/compare.py
+NEO_BENCH_REPORT=report.md ./neo run --dev bench/run.neo -- servers 3 > runs.jsonl
 ```
 
-This saves a dated `RESULTS-http-kernel-{macos,linux}-YYYY-MM-DD.md` report and raw per-run
-measurements under `bench/http/results/`. The older `RESULTS-http.md` and
-`RESULTS-http-compute.md` describe the removed C runtime. The current harness
-includes both default-worker and single-worker scenarios; worker settings
-are not CPU affinity. CPU and memory include every worker process. Linux PSS
-and macOS physical footprint are different accounting metrics; aggregate RSS
-can count shared pages more than once. The reproducible Linux tool image is
-`tests/Dockerfile.bench`; use `docker run --init` so orphaned test workers are reaped.
+Before loading a server, the runner checks every route against frozen
+references. It then prints one JSON record per run and writes a Markdown
+summary. `NEO_BENCH_SERVERS` and `NEO_BENCH_SCENARIOS` take comma-separated
+subsets. `NEO_BENCH_NEO`, `NEO_BENCH_RUST` and `NEO_BENCH_GO` supply prebuilt
+servers, and `NEO_BENCH_BEFORE` adds an earlier Neo server.
+`bench/http/protocol_test.neo` checks a running server's pipelining,
+byte-at-a-time delivery, POST body skipping and 300 idle connections.
+
+The older `RESULTS-http.md` and `RESULTS-http-compute.md` describe the
+removed C runtime. The macOS reports came from an earlier Python harness,
+which is still in the `v0.2.3` tag.
+
+The current harness includes both default-worker and single-worker
+scenarios; worker settings are not CPU affinity. CPU and memory include every
+worker process. Aggregate RSS can count shared pages more than once; PSS
+apportions them.
+
+The reproducible Linux tool image is `tests/Dockerfile.bench`. Use
+`docker run --init` so orphaned test workers are reaped.
 
 The bounded-arithmetic compiler comparison is in
 [`RESULTS-http-stencil-linux-2026-10-23.md`](RESULTS-http-stencil-linux-2026-10-23.md)
@@ -269,10 +280,12 @@ kernel-runtime reports, with fresh Rust/Go/Bun measurements and import audits.
 
 The current standalone stencil comparison is in
 [`RESULTS-stencil-optimized-linux-2026-10-24.md`](RESULTS-stencil-optimized-linux-2026-10-24.md).
-Run `python3 bench/stencil/run.py` on native Linux to repeat the unchanged
-Neo/Rust/Go workload across sizes, iteration counts and one/four CPU budgets.
-It also reruns the preserved previous Neo executable, checks every checksum,
-and saves raw timings, CPU usage, peak RSS, hashes and static-link audits.
+`./neo run --dev bench/run.neo -- compute` repeats the Neo side of that
+workload: the `stencil` and `stencil-small` cases of `bench/compute.neo.toml`.
+With `NEO_BENCH_COMPARE=DIR`, it also runs binaries from DIR named after the
+cases, with the same arguments, and checks that their output matches. The
+Python harness behind the report, which also covered Rust and Go across
+sizes and CPU budgets, is in the `v0.2.3` tag.
 
 The current Linux epoll backend and container SSR comparison with Rust and
 Bun are documented in

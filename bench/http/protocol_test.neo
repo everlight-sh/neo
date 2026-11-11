@@ -1,0 +1,99 @@
+; HTTP/1.1 edge cases against a server already listening on 127.0.0.1:PORT
+; (default 18080): pipelining, a request split across many tiny writes, a POST
+; body that must be skipped, and 300 idle connections. Prints one line per
+; check, then ALL OK (exit 0) or FAILURES (exit 1).
+;   neo run bench/http/protocol_test.neo -- PORT
+import "std:io"
+import "std:numbers"
+import "std:socket"
+import "std:strings"
+import "std:time"
+
+type PcRead = { data:Arr u8 _, closed:bool, done:bool }
+
+effect(net,time) fn pc_more(socket:Socket, deadline:i64, move r:PcRead) -> PcRead
+  = let part=socket_read(socket,deadline) in
+    if !part.ok then r with { done=true }
+    else if len(part.value)==0 then r with { closed=true, done=true }
+    else r with { data=concat(r.data,part.value) }
+
+; Status lines: the bodies have no trailing CRLF, so scan rather than split.
+type PcScan = { at:i64, codes:Arr u8 _, done:bool }
+fn pc_scan_step(borrow data:Arr u8 _, move s:PcScan) -> PcScan
+  = let found=str_find(str_slice(data,s.at,len(data)),"HTTP/1.1 ") in
+    if !found.present then s with { done=true } else
+    let start=s.at+found.value+9 in
+    PcScan { at=start, codes=concat(s.codes,if len(s.codes)>0 then " " else "",str_slice(data,start,if start+3<=len(data) then start+3 else len(data))),
+      done=false }
+fn pc_codes(borrow data:Arr u8 _) -> Arr u8 _
+  = let s=loop (s=PcScan { at=0, codes="", done=false }) while !s.done next (pc_scan_step(data,s)) yield s in s.codes
+fn pc_count(borrow data:Arr u8 _) -> i64
+  = let codes=pc_codes(data) in if len(codes)==0 then 0 else (len(codes)+1)/4
+
+; Reads for up to two seconds until n status lines arrived (or, with
+; until_close, until the server closes), then drains what is already queued so
+; the next check starts clean.
+effect(net,time) fn pc_read(socket:Socket, n:i64, until_close:bool) -> PcRead
+  = let deadline=deadline_after(2000) in
+    let r=loop (r=PcRead { data="", closed=false, done=false }) while !r.done
+      next (if !until_close && pc_count(r.data)>=n then r with { done=true } else pc_more(socket,deadline.value,r)) yield r in
+    if until_close || r.closed then r else
+    let quiet=deadline_after(200) in
+    loop (d=r with { done=false }) while !d.done next (pc_more(socket,quiet.value,d)) yield d
+
+fn pc_first_line(borrow data:Arr u8 _) -> Arr u8 _
+  = let end=str_find(data,"\r\n") in str_slice(data,0,if end.present then end.value else len(data))
+fn pc_ends(borrow data:Arr u8 _, borrow tail:Arr u8 _) -> bool
+  = len(data)>=len(tail) && str_equal(str_slice(data,len(data)-len(tail),len(data)),tail)
+effect fn pc_say(borrow line:Arr u8 _, ok:bool) -> bool
+  = let shown=print_out(concat(line,"\n")) in ok
+
+; 1. Three pipelined requests in one write; the last one closes.
+effect fn pc_pipelined(port:i64) -> bool
+  = let deadline=deadline_after(5000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,concat("GET / HTTP/1.1\r\nHost: x\r\n\r\nGET /a HTTP/1.1\r\nHost: x\r\n\r\n",
+      "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),deadline.value) in
+    let r=pc_read(socket,3,true) in let codes=pc_codes(r.data) in
+    pc_say(concat("pipelined   : ",codes," closed by server: ",if r.closed then "yes" else "no"),
+      sent.ok && str_equal(codes,"200 404 200") && r.closed)
+
+; 2. A request delivered one byte at a time, then 3. a POST whose body must not
+; be parsed as a request, followed by a GET on the same connection.
+effect fn pc_trickle(port:i64) -> bool
+  = let deadline=deadline_after(10000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let request="GET / HTTP/1.1\r\nHost: x\r\n\r\n" in
+    let sent=loop (i=0, ok=true) while i<len(request) && ok
+      next (i+1,let one=socket_write(socket,str_slice(request,i,i+1),deadline.value) in let paused=sleep_ms(1) in one.ok) yield ok in
+    let first=pc_read(socket,1,false) in
+    let trickled=pc_say(concat("byte-by-byte: ",pc_first_line(first.data)," ",if pc_ends(first.data,"Hello, World!") then "body ok" else "body wrong"),
+      sent && pc_ends(first.data,"Hello, World!")) in
+    let posted=socket_write(socket,"POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhelloGET / HTTP/1.1\r\nHost: x\r\n\r\n",deadline.value) in
+    let second=pc_read(socket,2,false) in let codes=pc_codes(second.data) in
+    let skipped=pc_say(concat("post+get    : ",codes," (the first is the server's choice for POST; the second must be 200)"),
+      posted.ok && pc_count(second.data)==2 && str_equal(str_slice(codes,4,7),"200")) in
+    trickled && skipped
+
+; 4. A request is served while 300 other connections sit idle.
+effect fn pc_served(port:i64) -> bool
+  = let deadline=deadline_after(5000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,"GET / HTTP/1.1\r\nHost: x\r\n\r\n",deadline.value) in
+    let r=pc_read(socket,1,false) in
+    pc_say(concat("300 idle    : ",pc_first_line(r.data)),sent.ok && str_starts(r.data,"HTTP/1.1 200"))
+effect fn pc_idle(port:i64, remaining:i64) -> bool
+  = if remaining<=0 then pc_served(port) else
+    let deadline=deadline_after(5000) in
+    using idle=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    if !socket_status(idle).ok then pc_say(concat("300 idle    : idle connection ",int_text(301-remaining)," was refused"),false)
+    else pc_idle(port,remaining-1)
+
+effect fn main() -> unit
+  = let given=cli_arg(1) in let port=if given.present then int_parse(given.value) else int_ok(18080) in
+    if !port.ok || port.value<1 || port.value>65535 then
+      let shown=print_error("usage: neo run bench/http/protocol_test.neo -- PORT\n") in process_exit(2) else
+    let a=pc_pipelined(port.value) in let b=pc_trickle(port.value) in let c=pc_idle(port.value,300) in
+    let ok=a && b && c in
+    let shown=print_out(if ok then "ALL OK\n" else "FAILURES\n") in
+    if ok then noop() else process_exit(1)

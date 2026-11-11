@@ -1,0 +1,35 @@
+; Unit tests for the parts of bench/http/compare.neo that need no server.
+import "../bench/http/compare.neo"
+
+; A real wrk 4.2 log from bench/http/results/2026-10-23-212731-native.
+fn test_wrk_report() -> bool
+  = let w=hc_parse_wrk(concat("Running 5s test @ http://127.0.0.1:41623/\n  4 threads and 64 connections\n",
+      "  Thread Stats   Avg      Stdev     Max   +/- Stdev\n    Latency   327.99us  456.78us   7.03ms   87.24%\n",
+      "    Req/Sec    78.44k     7.95k  130.49k    75.62%\n  Latency Distribution\n     50%  129.00us\n     75%  411.00us\n",
+      "     90%    0.91ms\n     99%    2.18ms\n  1568588 requests in 5.10s, 172.03MB read\n",
+      "Requests/sec: 307564.10\nTransfer/sec:     33.73MB\n")) in
+    w.ok && w.requests==1568588 && nt_magnitude(w.rps-307564.1)<0.001 && nt_magnitude(w.p50-129.0)<0.001
+      && nt_magnitude(w.p99-2180.0)<0.001 && w.errors==0 && w.non2xx==0
+
+fn test_wrk_errors() -> bool
+  = let w=hc_parse_wrk(concat("  Latency Distribution\n     50%    1.50s\n     99%    4.00s\n  1200 requests in 5.00s, 1.00MB read\n",
+      "  Socket errors: connect 0, read 3, write 0, timeout 2\n  Non-2xx or 3xx responses: 12\nRequests/sec:    240.00\n")) in
+    w.ok && w.requests==1200 && nt_magnitude(w.p50-1500000.0)<0.001 && w.errors==5 && w.non2xx==12
+
+fn test_wrk_unreadable() -> bool
+  = !hc_parse_wrk("unable to connect to 127.0.0.1:1 Connection refused\n").ok && !hc_parse_wrk("").ok
+
+fn test_proc_stat() -> bool
+  = hc_stat_ticks("1234 (my server) S 1 1234 1234 0 -1 4194560 100 0 0 0 250 50 0 0 20 0 1 0 5 0 0\n")==300
+    && hc_stat_ticks("garbage")==-1
+
+fn test_content_length_any_case() -> bool
+  = let lower=hc_frame("HTTP/1.1 200 OK\r\ncontent-length: 5\r\ncontent-type: text/plain\r\n\r\nhelloGET") in
+    let none=hc_frame("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nmissing") in
+    lower.status==200 && str_equal(lower.body,"hello") && str_equal(lower.rest,"GET")
+      && none.status==404 && str_equal(none.body,"missing")
+
+fn test_median_and_fixed() -> bool
+  = let xs=push(push(push(push(hc_floats(),4.0),1.0),3.0),2.0) in
+    hc_median(xs)==2.5 && hc_rank(xs,0)==1.0 && hc_rank(xs,3)==4.0
+      && str_equal(hc_fixed(2.5,2),"2.50") && str_equal(hc_fixed(0.049,1),"0.0") && str_equal(hc_fixed(1048576.0,0),"1048576")

@@ -1,5 +1,5 @@
 // One step per compile-time benchmark program (zig 0.17.0): zig build NAME
-// -Doptimize=ReleaseFast. run.py times `zig build-exe`, which never caches
+// -Doptimize=ReleaseFast. The report timed `zig build-exe`, which never caches
 // its output, so its unchanged rebuild compiles everything again; this file
 // measures the unchanged rebuild through the build system's cache instead.
 const std = @import("std");

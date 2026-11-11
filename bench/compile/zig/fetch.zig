@@ -3,7 +3,7 @@
 // a connection per request; KEEP 1 reuses one. With a root certificate the
 // requests use HTTPS, verified against that root only. Prints the total
 // nanoseconds and how many responses were 200 with SIZE bytes, then each
-// request's nanoseconds. Built by bench/compile/run.py for compile times.
+// request's nanoseconds. Built for the compile-time benchmark.
 const std = @import("std");
 const Io = std.Io;
 

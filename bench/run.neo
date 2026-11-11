@@ -17,6 +17,7 @@ import "../compiler/src/test_manifest.neo"
 import "../compiler/src/test_process.neo"
 import "../compiler/src/text.neo"
 import "http/probe.neo"
+import "http/compare.neo"
 import "maps/measure.neo"
 
 type Bw = { compiler:Arr u8 _, time_tool:Arr u8 _, scratch:Arr u8 _, environment:Arr Arr u8 _ _ }
@@ -152,18 +153,11 @@ effect fn bw_compile_round(borrow config:Bw, borrow c:NtCase, borrow source:Arr 
 
 effect fn main() -> unit
   = let suite=cli_arg(1).value in let repeat=cli_arg(2) in let rounds=if repeat.present then int_parse(repeat.value) else int_ok(7) in
-    if (!tx_equal(suite,"compute") && !tx_equal(suite,"compile") && !tx_equal(suite,"http") && !tx_equal(suite,"maps")) ||
+    let servers=tx_equal(suite,"servers") in
+    if (!tx_equal(suite,"compute") && !tx_equal(suite,"compile") && !tx_equal(suite,"http") && !tx_equal(suite,"maps") && !servers) ||
       !rounds.ok || rounds.value<1 || rounds.value>1000 then
-      bw_fail("usage: neo run bench/run.neo -- {compute|compile|http|maps} [ROUNDS] [MANIFEST]") else
+      bw_fail("usage: neo run bench/run.neo -- {compute|compile|http|maps} [ROUNDS] [MANIFEST] | servers [ROUNDS]") else
     let root=env_get("NEO_ROOT") in let root=pt_realpath(if root.present then root.value else fs_cwd().value) in
-    let manifest=cli_arg(3) in
-    let path=pt_realpath(if manifest.present then manifest.value else
-      pt_join(root,if tx_equal(suite,"compute") then "bench/compute.neo.toml" else
-        if tx_equal(suite,"http") then "bench/http/neo.toml" else
-        if tx_equal(suite,"maps") then "bench/maps/neo.toml" else "bench/compile/neo.toml")) in
-    let input=fs_read(path) in if !input.ok then bw_fail(input.error.message) else
-    let plan=nt_plan(input.value) in
-    if !plan.valid || len(plan.cases)==0 then bw_fail("invalid or empty benchmark manifest") else
     let compiler=env_get("NEOC") in let compiler=bd_find_tool(if compiler.present then compiler.value else pt_join(root,"neo")) in
     let tool=bd_find_tool("time") in
     if len(compiler)==0 || (len(tool)==0 && (tx_equal(suite,"compile") || tx_equal(suite,"compute"))) then
@@ -175,6 +169,17 @@ effect fn main() -> unit
     let created=fs_mkdir(scratch) in if !created.ok then bw_fail(created.error.message) else
     let config=Bw { compiler=compiler,time_tool=tool,scratch=scratch,
       environment=nt_env_put(bd_environment(),concat("NEO_ROOT=",root)) } in
+    if servers then
+      let error=hc_main(config.compiler,root,config.scratch,config.environment,rounds.value) in
+      if len(error)>0 then bw_abort(config,error) else bw_clean(scratch) else
+    let manifest=cli_arg(3) in
+    let path=pt_realpath(if manifest.present then manifest.value else
+      pt_join(root,if tx_equal(suite,"compute") then "bench/compute.neo.toml" else
+        if tx_equal(suite,"http") then "bench/http/neo.toml" else
+        if tx_equal(suite,"maps") then "bench/maps/neo.toml" else "bench/compile/neo.toml")) in
+    let input=fs_read(path) in if !input.ok then bw_abort(config,input.error.message) else
+    let plan=nt_plan(input.value) in
+    if !plan.valid || len(plan.cases)==0 then bw_abort(config,"invalid or empty benchmark manifest") else
     let done=loop (i=0) while i<len(plan.cases) next (
       let c=nt_case_at(plan.cases,i) in let source=pt_realpath(pt_join(pt_head(path),c.file)) in
       let checked=if !c.valid then bw_abort(config,c.name) else if tx_equal(suite,"compute") then bw_compute(config,c,source,rounds.value)

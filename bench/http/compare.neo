@@ -1,0 +1,495 @@
+; The HTTP server comparison behind `bench/run.neo -- servers`: examples/http.neo
+; against Rust (hyper/tokio), Go (net/http) and Bun (Bun.serve) under wrk, on
+; Linux. Every route is checked against frozen references before a server is
+; loaded. CPU and memory cover the server's whole process tree, read from
+; /proc: user plus system time from stat (in 1/100 s ticks), RSS and PSS from
+; smaps_rollup, sampled every 100 ms while wrk runs.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:net"
+import "std:numbers"
+import "std:process"
+import "std:socket"
+import "std:strings"
+import "std:time"
+import "../../compiler/src/build.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/project_fs.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+import "../maps/measure.neo"
+import "probe.neo"
+
+; ---- scenarios: route, connections, pipeline depth, worker budget
+
+type HcScenario = { name:Arr u8 _, route:Arr u8 _, connections:i64, depth:i64, one_worker:bool, post:bool }
+fn hc_scenario_count() -> i64 = 8
+fn hc_scenario(i:i64) -> HcScenario
+  = if i==0 then HcScenario { name="hello-64", route="/", connections=64, depth=1, one_worker=false, post=false }
+    else if i==1 then HcScenario { name="hello-256", route="/", connections=256, depth=1, one_worker=false, post=false }
+    else if i==2 then HcScenario { name="pipeline-16", route="/", connections=64, depth=16, one_worker=false, post=false }
+    else if i==3 then HcScenario { name="hello-one-worker", route="/", connections=64, depth=1, one_worker=true, post=false }
+    else if i==4 then HcScenario { name="smooth-1000-one-worker", route="/smooth/1000", connections=64, depth=1, one_worker=true, post=false }
+    else if i==5 then HcScenario { name="smooth-10000-one-worker", route="/smooth/10000", connections=64, depth=1, one_worker=true, post=false }
+    else if i==6 then HcScenario { name="smooth-10000-default", route="/smooth/10000", connections=64, depth=1, one_worker=false, post=false }
+    else HcScenario { name="nbody-default", route="/nbody", connections=64, depth=1, one_worker=false, post=true }
+
+fn hc_listed(borrow list:Arr u8 _, borrow name:Arr u8 _) -> bool
+  = str_find(concat(",",list,","),concat(",",name,",")).present
+; An unset or empty list selects everything.
+fn hc_selected(borrow list:Arr u8 _, borrow name:Arr u8 _) -> bool = len(list)==0 || hc_listed(list,name)
+
+type HcServer = { name:Arr u8 _, executable:Arr u8 _, args:Arr Arr u8 _ _, disk:i64 }
+fn hc_server(borrow servers:Arr HcServer _, i:i64) -> HcServer
+  = if i>=0 && i<len(servers) then servers[i] else HcServer { name=tx_empty(), executable=tx_empty(), args=md_words(), disk=0 }
+
+type HcConfig = { root:Arr u8 _, wrk:Arr u8 _, threads:i64, duration:i64, warmup:i64, repeats:i64, environment:Arr Arr u8 _ _ }
+
+; Worker budgets come from the scenario alone. Single-worker rows are budgets,
+; not CPU affinity.
+fn hc_server_env(borrow config:HcConfig, borrow s:HcScenario) -> Arr Arr u8 _ _
+  = let dropped="NEO_THREADS,NEO_SERVE,NEO_HTTP_POLL,AXON_THREADS,TOKIO_WORKER_THREADS,GOMAXPROCS,BUN_REUSE_PORT,HYPER_PIPELINE_FLUSH" in
+    let base=loop (i=0, out=md_words()) while i<len(config.environment)
+      next (i+1,let entry=md_word(config.environment,i) in if hc_listed(dropped,nt_env_key(entry)) then out else push(out,entry)) yield out in
+    let base=push(base,"HYPER_PIPELINE_FLUSH=1") in
+    if !s.one_worker then base else push(push(push(base,"TOKIO_WORKER_THREADS=1"),"GOMAXPROCS=1"),"NEO_THREADS=1")
+
+; ---- the server's process tree
+
+type HcProc = { pid:i64, ticks:i64 }
+fn hc_procs() -> Arr HcProc _ = arr(i in 0..0) HcProc { pid=0, ticks=0 }
+fn hc_proc(borrow procs:Arr HcProc _, i:i64) -> HcProc
+  = if i>=0 && i<len(procs) then procs[i] else HcProc { pid=0, ticks=0 }
+fn hc_ticks(borrow procs:Arr HcProc _) -> i64
+  = loop (i=0, total=0) while i<len(procs) next (i+1,total+hc_proc(procs,i).ticks) yield total
+; A process keeps its last CPU counter after it exits, so totals never drop.
+fn hc_put(move procs:Arr HcProc _, pid:i64, ticks:i64) -> Arr HcProc _
+  = let at=loop (i=0, found=-1) while i<len(procs) next (i+1,if hc_proc(procs,i).pid==pid then i else found) yield found in
+    if at<0 then push(procs,HcProc { pid=pid, ticks=ticks })
+    else arr(i in 0..len(procs)) if i==at then HcProc { pid=pid, ticks=ticks } else hc_proc(procs,i)
+
+; utime + stime from /proc/PID/stat. The command name in parentheses may
+; hold spaces, so fields count from the last ')'.
+fn hc_stat_ticks(borrow stat:Arr u8 _) -> i64
+  = let close=loop (i=len(stat)-1) while i>=0 && tx_byte(stat,i)!=41 next (i-1) yield i in
+    if close<0 then -1 else
+    let fields=nt_words(str_slice(stat,close+1,len(stat))).words in
+    let user=int_parse(md_word(fields,11)) in let system=int_parse(md_word(fields,12)) in
+    if user.ok && system.ok then user.value+system.value else -1
+
+fn hc_i64(borrow xs:Arr i64 _, i:i64) -> i64 = if i>=0 && i<len(xs) then xs[i] else 0
+fn hc_children(move queue:Arr i64 _, borrow text:Arr u8 _) -> Arr i64 _
+  = let words=nt_words(text).words in
+    loop (i=0, out=queue) while i<len(words)
+      next (i+1,let pid=int_parse(md_word(words,i)) in if pid.ok && pid.value>0 then push(out,pid.value) else out) yield out
+
+type HcTree = { queue:Arr i64 _, at:i64, procs:Arr HcProc _, rss:i64, pss:i64, count:i64 }
+effect(fs) fn hc_visit(move t:HcTree) -> HcTree
+  = let pid=hc_i64(t.queue,t.at) in let base=concat("/proc/",int_text(pid)) in
+    let stat=fs_read(concat(base,"/stat")) in let smaps=fs_read(concat(base,"/smaps_rollup")) in
+    let kids=fs_read(concat(base,"/task/",int_text(pid),"/children")) in
+    let ticks=if stat.ok then hc_stat_ticks(stat.value) else -1 in
+    let memory=if smaps.ok then smaps.value else tx_empty() in
+    let rss=bm_memory_field(memory,"Rss") in let pss=bm_memory_field(memory,"Pss") in
+    if ticks<0 || !rss.ok || !pss.ok then t with { at=t.at+1 } else
+    HcTree { queue=hc_children(t.queue,if kids.ok then kids.value else tx_empty()), at=t.at+1,
+      procs=hc_put(t.procs,pid,ticks), rss=t.rss+rss.value, pss=t.pss+pss.value, count=t.count+1 }
+
+; Every live process below pid, with procs carrying the CPU counters seen so far.
+effect(fs) fn hc_tree(pid:i64, move procs:Arr HcProc _) -> HcTree
+  = loop (t=HcTree { queue=push(arr(i in 0..0) 0,pid), at=0, procs=procs, rss=0, pss=0, count=0 })
+      while t.at<len(t.queue) && t.at<4096 next (hc_visit(t)) yield t
+
+; ---- wrk
+
+fn hc_wrk_args(borrow config:HcConfig, borrow s:HcScenario, port:i64, seconds:i64) -> Arr Arr u8 _ _
+  = let base=push(push(push(push(push(push(md_words(),concat("-t",int_text(config.threads))),concat("-c",int_text(s.connections))),
+      concat("-d",int_text(seconds),"s")),"--latency"),"--timeout"),"5s") in
+    let here=pt_join(config.root,"bench/http") in
+    let scripted=if s.depth>1 then push(push(base,"-s"),pt_join(here,"pipeline.lua"))
+      else if s.post then push(push(base,"-s"),pt_join(here,"post_nbody.lua")) else base in
+    let url=push(scripted,concat("http://127.0.0.1:",int_text(port),s.route)) in
+    if s.depth>1 then push(push(url,"--"),int_text(s.depth)) else url
+
+type HcWatch = { output:Arr u8 _, errors:Arr u8 _, procs:Arr HcProc _, count:i64, rss:i64, pss:i64, running:bool, code:i64 }
+
+; One 100 ms tick: wrk's output so far, the server's output drained so it never
+; blocks, and a sample of the server tree.
+effect fn hc_watch_step(wrk:Process, server:Process, pid:i64, move w:HcWatch) -> HcWatch
+  = let status=process_status(wrk) in
+    let out=process_try_read(wrk,1,65536) in let err=process_try_read(wrk,2,65536) in
+    let drained=process_try_read(server,1,65536) in let drained_errors=process_try_read(server,2,65536) in
+    let tree=hc_tree(pid,w.procs) in
+    let running=status.ok && status.running in
+    let paused=if running then sleep_ms(100) else int_ok(0) in
+    HcWatch { output=concat(w.output,if out.ok then out.value else tx_empty()),
+      errors=concat(w.errors,if err.ok then err.value else tx_empty()), procs=tree.procs,
+      count=if tree.count>w.count then tree.count else w.count, rss=if tree.rss>w.rss then tree.rss else w.rss,
+      pss=if tree.pss>w.pss then tree.pss else w.pss, running=running,
+      code=if !status.ok then 127 else if status.signal!=0 then 0-status.signal else status.exit_code }
+
+type HcRun = { ok:bool, error:Arr u8 _, output:Arr u8 _, ticks:i64, wall:i64, count:i64, rss:i64, pss:i64, procs:Arr HcProc _ }
+
+effect fn hc_load(borrow config:HcConfig, borrow s:HcScenario, port:i64, seconds:i64, server:Process, pid:i64,
+                  move procs:Arr HcProc _) -> HcRun
+  = let before=hc_tree(pid,procs) in let start=hc_ticks(before.procs) in let started=bd_clock() in
+    using wrk=process_start(config.wrk,hc_wrk_args(config,s,port,seconds),config.environment) in
+    let w=loop (w=HcWatch { output=tx_empty(), errors=tx_empty(), procs=before.procs, count=before.count, rss=before.rss,
+        pss=before.pss, running=true, code=0 })
+      while w.running next (hc_watch_step(wrk,server,pid,w)) yield w in
+    let wall=bd_elapsed(started,bd_clock()) in
+    HcRun { ok=w.code==0, error=if w.code==0 then tx_empty() else concat("wrk exited ",int_text(w.code),": ",str_trim(w.errors)),
+      output=w.output, ticks=hc_ticks(w.procs)-start, wall=wall, count=w.count, rss=w.rss, pss=w.pss, procs=w.procs }
+
+fn hc_suffix(borrow text:Arr u8 _, borrow tail:Arr u8 _) -> bool
+  = len(text)>=len(tail) && str_equal(str_slice(text,len(text)-len(tail),len(text)),tail)
+; The words on the rest of the line after the first label.
+fn hc_line_after(borrow text:Arr u8 _, borrow label:Arr u8 _) -> Arr Arr u8 _ _
+  = let at=str_find(text,label) in if !at.present then md_words() else
+    let rest=str_slice(text,at.value+len(label),len(text)) in let end=str_find(rest,"\n") in
+    nt_words(str_slice(rest,0,if end.present then end.value else len(rest))).words
+; A wrk latency such as 129.00us, 0.91ms or 1.20s, in microseconds; -1 if unreadable.
+fn hc_micros(borrow text:Arr u8 _) -> f64
+  = let scale=if hc_suffix(text,"us") then 1.0 else if hc_suffix(text,"ms") then 1000.0 else if hc_suffix(text,"s") then 1000000.0 else 0.0 in
+    let cut=if hc_suffix(text,"us") || hc_suffix(text,"ms") then 2 else 1 in
+    let value=float_parse(str_slice(text,0,if len(text)>=cut then len(text)-cut else 0)) in
+    if scale==0.0 || !value.ok then -1.0 else value.value*scale
+fn hc_count_before(borrow text:Arr u8 _, borrow label:Arr u8 _) -> IntResult
+  = let at=str_find(text,label) in if !at.present then int_error(22,"missing request count",0) else
+    let start=loop (i=at.value) while i>0 && tx_byte(text,i-1)!=32 && tx_byte(text,i-1)!=10 next (i-1) yield i in
+    int_parse(str_slice(text,start,at.value))
+fn hc_socket_errors(borrow text:Arr u8 _) -> i64
+  = let words=hc_line_after(text,"Socket errors:") in
+    loop (i=1, total=0) while i<len(words) next (i+2,
+      let word=md_word(words,i) in let clean=if hc_suffix(word,",") then str_slice(word,0,len(word)-1) else word in
+      let n=int_parse(clean) in total+(if n.ok then n.value else 1)) yield total
+
+type HcWrk = { ok:bool, rps:f64, requests:i64, p50:f64, p99:f64, errors:i64, non2xx:i64 }
+fn hc_parse_wrk(borrow out:Arr u8 _) -> HcWrk
+  = let rps=float_parse(md_word(hc_line_after(out,"Requests/sec:"),0)) in
+    let requests=hc_count_before(out," requests in ") in
+    let at=str_find(out,"Latency Distribution") in
+    let section=if at.present then str_slice(out,at.value,len(out)) else tx_empty() in
+    let p50=hc_micros(md_word(hc_line_after(section,"50%"),0)) in let p99=hc_micros(md_word(hc_line_after(section,"99%"),0)) in
+    let non=int_parse(md_word(hc_line_after(out,"Non-2xx or 3xx responses:"),0)) in
+    HcWrk { ok=rps.ok && requests.ok && requests.value>0 && p50>=0.0 && p99>=0.0, rps=rps.value, requests=requests.value,
+      p50=p50, p99=p99, errors=hc_socket_errors(out), non2xx=if non.ok then non.value else 0 }
+
+; ---- route checks against frozen references (the stencil checksums and the
+; n-body energy that compare.py computed independently)
+
+fn hc_lower(borrow text:Arr u8 _) -> Arr u8 _
+  = arr(i in 0..len(text)) let c=tx_byte(text,i) in u8(if c>=65 && c<=90 then c+32 else c)
+
+; Content-Length is matched in any case (hyper writes it in lower case). The
+; requests ask to close, so without one the body runs to the end.
+fn hc_frame(borrow bytes:Arr u8 _) -> HpFrame
+  = let end=str_find(bytes,"\r\n\r\n") in if !end.present then hp_invalid() else
+    let header=str_slice(bytes,0,end.value+2) in let status=net_status(header) in if !status.ok then hp_invalid() else
+    let body_at=end.value+4 in let length=str_find(hc_lower(header),"\r\ncontent-length:") in
+    if !length.present then HpFrame { status=status.value, body=str_slice(bytes,body_at,len(bytes)), rest=tx_empty() } else
+    let tail=str_slice(header,length.value+17,len(header)) in let line=str_find(tail,"\r\n") in
+    let size=int_parse(str_trim(str_slice(tail,0,if line.present then line.value else len(tail)))) in
+    if !size.ok || size.value<0 || size.value>len(bytes)-body_at then hp_invalid() else
+    HpFrame { status=status.value, body=str_slice(bytes,body_at,body_at+size.value), rest=str_slice(bytes,body_at+size.value,len(bytes)) }
+
+effect(net,time) fn hc_request(port:i64, borrow request:Arr u8 _) -> HpFrame
+  = let deadline=deadline_after(10000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,request,deadline.value) in if !sent.ok then hp_invalid() else
+    let reply=hp_receive(socket,deadline.value) in if !reply.ok then hp_invalid() else hc_frame(reply.value)
+fn hc_get(borrow route:Arr u8 _) -> Arr u8 _ = concat("GET ",route," HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+
+fn hc_json_int(borrow body:Json, borrow key:Arr u8 _) -> i64
+  = let field=json_get(body,key) in if !field.present then -1 else let v=json_int(field.value) in if v.ok then v.value else -1
+
+effect fn hc_smooth(port:i64, n:i64, checksum:i64) -> bool
+  = let reply=hc_request(port,hc_get(concat("/smooth/",int_text(n)))) in let body=json_parse(reply.body) in
+    reply.status==200 && body.ok && hc_json_int(body.value,"n")==n && hc_json_int(body.value,"passes")==32
+      && hc_json_int(body.value,"checksum")==checksum
+
+effect fn hc_nbody(port:i64) -> bool
+  = let reply=hc_request(port,concat("POST /nbody HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n",
+      "Content-Length: 19\r\nConnection: close\r\n\r\n{\"n\":256,\"steps\":4}")) in
+    let body=json_parse(reply.body) in if reply.status!=200 || !body.ok then false else
+    let energy=json_get(body.value,"energy") in let value=float_parse(if energy.present then energy.value.raw else tx_empty()) in
+    hc_json_int(body.value,"n")==256 && hc_json_int(body.value,"steps")==4 && value.ok
+      && nt_magnitude(value.value+0.8766643709345364)<=0.000000001
+
+; Empty when every route answers as the references say.
+effect fn hc_validate(port:i64) -> Arr u8 _
+  = let hello=hc_request(port,hc_get("/")) in
+    if hello.status!=200 || !str_equal(hello.body,"Hello, World!") then "GET / did not answer 200 Hello, World!" else
+    let missing=hc_request(port,hc_get("/missing")) in
+    if missing.status!=404 then "GET /missing did not answer 404" else
+    if !hc_smooth(port,1000,499795029) then "GET /smooth/1000 differs from the reference" else
+    if !hc_smooth(port,10000,4999217629) then "GET /smooth/10000 differs from the reference" else
+    if !hc_nbody(port) then "POST /nbody differs from the reference" else tx_empty()
+
+; ---- one server on one scenario: start, check, warm up, measure, stop
+
+type HcRow = { scenario:Arr u8 _, server:Arr u8 _, rps:f64, requests:i64, p50:f64, p99:f64, ticks:i64, wall:i64,
+               count:i64, rss:i64, pss:i64, errors:i64, non2xx:i64 }
+type HcIdle = { server:Arr u8 _, rss:i64, pss:i64, startup:i64 }
+type HcResults = { rows:Arr HcRow _, idles:Arr HcIdle _, failures:i64 }
+type HcSeries = { results:HcResults, procs:Arr HcProc _, error:Arr u8 _ }
+
+fn hc_fixed(value:f64, digits:i64) -> Arr u8 _
+  = let scale=if digits<=0 then 1 else if digits==1 then 10 else 100 in
+    let negative=value<0.0 in let scaled=i64((if negative then 0.0-value else value)*f64(scale)+0.5) in
+    let part=scaled%scale in
+    let fraction=if scale==1 then tx_empty() else if scale==10 then concat(".",int_text(part))
+      else concat(".",if part<10 then "0" else "",int_text(part)) in
+    concat(if negative && scaled>0 then "-" else "",int_text(scaled/scale),fraction)
+fn hc_mib(bytes:i64) -> Arr u8 _ = hc_fixed(f64(bytes)/1048576.0,2)
+
+fn hc_row_json(borrow r:HcRow, run:i64, pipelined:bool) -> Arr u8 _
+  = concat("{\"suite\":\"servers\",\"scenario\":",json_quote(r.scenario),",\"server\":",json_quote(r.server),
+      ",\"round\":",int_text(run),",\"requests\":",int_text(r.requests),",\"requests_per_second\":",hc_fixed(r.rps,2),
+      ",\"p50_us\":",if pipelined then "null" else hc_fixed(r.p50,1),",\"p99_us\":",if pipelined then "null" else hc_fixed(r.p99,1),
+      ",\"cpu_s\":",hc_fixed(f64(r.ticks)/100.0,2),",\"cpu_us_per_request\":",hc_fixed(f64(r.ticks)*10000.0/f64(r.requests),2),
+      ",\"wall_s\":",hc_fixed(f64(r.wall)/1000000000.0,2),",\"processes\":",int_text(r.count),
+      ",\"peak_rss_bytes\":",int_text(r.rss),",\"peak_pss_bytes\":",int_text(r.pss),
+      ",\"socket_errors\":",int_text(r.errors),",\"non2xx\":",int_text(r.non2xx),"}\n")
+
+effect fn hc_series_step(borrow config:HcConfig, borrow s:HcScenario, borrow server:HcServer, port:i64, process:Process, pid:i64,
+                         k:i64, move state:HcSeries) -> HcSeries
+  = let run=hc_load(config,s,port,config.duration,process,pid,state.procs) in let w=hc_parse_wrk(run.output) in
+    let results=state.results in
+    if !run.ok then HcSeries { results=results, procs=run.procs, error=run.error } else
+    if !w.ok then HcSeries { results=results, procs=run.procs, error=concat("unreadable wrk output: ",str_trim(run.output)) } else
+    let row=HcRow { scenario=s.name, server=server.name, rps=w.rps, requests=w.requests, p50=w.p50, p99=w.p99, ticks=run.ticks,
+      wall=run.wall, count=run.count, rss=run.rss, pss=run.pss, errors=w.errors, non2xx=w.non2xx } in
+    let printed=print_out(hc_row_json(row,k+1,s.depth>1)) in
+    HcSeries { results=results with { rows=push(results.rows,row) }, procs=run.procs, error=tx_empty() }
+
+; SIGTERM, then SIGKILL after three seconds, and SIGKILL for any worker the
+; server left behind.
+effect fn hc_stop(process:Process, pid:i64, borrow procs:Arr HcProc _) -> unit
+  = let term=process_signal(process,15) in
+    let running=loop (i=0, up=true) while i<300 && up next (i+1,let paused=sleep_ms(10) in process_status(process).running) yield up in
+    let killed=if running then process_signal(process,9) else int_ok(0) in
+    let swept=loop (i=0) while i<len(procs) next (
+      let other=hc_proc(procs,i).pid in
+      let alive=other>0 && other!=pid && pf_kind(concat("/proc/",int_text(other)),false)==4 in
+      let gone=if alive then rt_kill(other,9) else 0 in i+1) yield i in noop()
+
+effect fn hc_close(borrow s:HcScenario, borrow server:HcServer, process:Process, pid:i64, borrow procs:Arr HcProc _,
+                   startup:i64, idle_rss:i64, idle_pss:i64, borrow error:Arr u8 _, move results:HcResults) -> HcResults
+  = let stopped=hc_stop(process,pid,procs) in let valid=len(error)==0 in
+    let shown=if valid then int_ok(0) else print_error(concat("neo benchmark: ",s.name,", ",server.name,": ",error,"\n")) in
+    let printed=print_out(concat("{\"suite\":\"servers\",\"scenario\":",json_quote(s.name),",\"server\":",json_quote(server.name),
+      ",\"valid\":",if valid then "true" else "false",",\"startup_ms\":",hc_fixed(f64(startup)/1000000.0,1),
+      ",\"idle_rss_bytes\":",int_text(idle_rss),",\"idle_pss_bytes\":",int_text(idle_pss),
+      ",\"executable_bytes\":",int_text(server.disk),if valid then "" else concat(",\"error\":",json_quote(error)),"}\n")) in
+    let idle=HcIdle { server=server.name, rss=idle_rss, pss=idle_pss, startup=startup } in
+    HcResults { rows=results.rows, idles=push(results.idles,idle), failures=results.failures+(if valid then 0 else 1) }
+
+effect fn hc_ready(server:Process, port:i64) -> bool
+  = loop (i=0, ready=false, alive=true) while i<10000 && !ready && alive
+      next (i+1,let up=hp_ready(port) in let paused=if up then int_ok(0) else sleep_ms(1) in up,process_status(server).running)
+      yield ready
+
+effect fn hc_measure(borrow config:HcConfig, borrow s:HcScenario, borrow server:HcServer, move results:HcResults) -> HcResults
+  = let port=hp_port() in let started=bd_clock() in
+    using process=process_start(server.executable,push(nt_extend(md_words(),server.args,0),int_text(port)),hc_server_env(config,s)) in
+    let pid=bm_pid(process) in let ready=pid>0 && hc_ready(process,port) in
+    let startup=bd_elapsed(started,bd_clock()) in
+    if !ready then hc_close(s,server,process,pid,hc_procs(),startup,0,0,"did not start listening",results) else
+    let settle=sleep_ms(200) in let idle=hc_tree(pid,hc_procs()) in let idle_rss=idle.rss in let idle_pss=idle.pss in
+    let invalid=hc_validate(port) in
+    if len(invalid)>0 then hc_close(s,server,process,pid,idle.procs,startup,idle_rss,idle_pss,invalid,results) else
+    let warm=hc_load(config,s,port,config.warmup,process,pid,idle.procs) in let checked=hc_parse_wrk(warm.output) in
+    let first=HcSeries { results=results, procs=warm.procs, error=if !warm.ok then warm.error
+      else if !checked.ok then concat("unreadable wrk output: ",str_trim(warm.output)) else tx_empty() } in
+    let series=loop (k=0, state=first) while k<config.repeats && len(state.error)==0
+      next (k+1,hc_series_step(config,s,server,port,process,pid,k,state)) yield state in
+    hc_close(s,server,process,pid,series.procs,startup,idle_rss,idle_pss,series.error,series.results)
+
+; ---- the Markdown summary
+
+fn hc_f(borrow xs:Arr f64 _, i:i64) -> f64 = if i>=0 && i<len(xs) then xs[i] else 0.0
+fn hc_floats() -> Arr f64 _ = arr(i in 0..0) 0.0
+; The k-th smallest value (from 0).
+fn hc_rank(borrow xs:Arr f64 _, k:i64) -> f64
+  = loop (i=0, found=0.0) while i<len(xs) next (i+1,
+      let x=hc_f(xs,i) in
+      let below=loop (j=0, c=0) while j<len(xs) next (j+1,if hc_f(xs,j)<x then c+1 else c) yield c in
+      let upto=loop (j=0, c=0) while j<len(xs) next (j+1,if hc_f(xs,j)<=x then c+1 else c) yield c in
+      if below<=k && k<upto then x else found) yield found
+fn hc_median(borrow xs:Arr f64 _) -> f64
+  = let n=len(xs) in if n==0 then 0.0 else if n%2==1 then hc_rank(xs,n/2) else (hc_rank(xs,n/2-1)+hc_rank(xs,n/2))/2.0
+
+type HcSum = { rps:Arr f64 _, p50:Arr f64 _, p99:Arr f64 _, requests:i64, ticks:i64, wall:i64, count:i64, rss:i64, pss:i64,
+               errors:i64, non2xx:i64 }
+fn hc_no_row() -> HcRow
+  = HcRow { scenario=tx_empty(), server=tx_empty(), rps=0.0, requests=0, p50=0.0, p99=0.0,
+      ticks=0, wall=0, count=0, rss=0, pss=0, errors=0, non2xx=0 }
+fn hc_row(borrow rows:Arr HcRow _, i:i64) -> HcRow = if i>=0 && i<len(rows) then rows[i] else hc_no_row()
+fn hc_sum_step(move m:HcSum, borrow r:HcRow) -> HcSum
+  = HcSum { rps=push(m.rps,r.rps), p50=push(m.p50,r.p50), p99=push(m.p99,r.p99), requests=m.requests+r.requests,
+      ticks=m.ticks+r.ticks, wall=m.wall+r.wall, count=if r.count>m.count then r.count else m.count,
+      rss=if r.rss>m.rss then r.rss else m.rss, pss=if r.pss>m.pss then r.pss else m.pss,
+      errors=m.errors+r.errors, non2xx=m.non2xx+r.non2xx }
+fn hc_sum(borrow rows:Arr HcRow _, borrow scenario:Arr u8 _, borrow server:Arr u8 _) -> HcSum
+  = let empty=HcSum { rps=hc_floats(), p50=hc_floats(), p99=hc_floats(), requests=0, ticks=0, wall=0, count=0, rss=0, pss=0,
+      errors=0, non2xx=0 } in
+    loop (i=0, m=empty) while i<len(rows) next (i+1,let r=hc_row(rows,i) in
+      if str_equal(r.scenario,scenario) && str_equal(r.server,server) then hc_sum_step(m,r) else m) yield m
+
+fn hc_latency(value:f64, pipelined:bool) -> Arr u8 _ = if pipelined then "n/a" else hc_fixed(value,0)
+
+fn hc_scenario_table(borrow results:HcResults, borrow servers:Arr HcServer _, borrow s:HcScenario) -> Arr u8 _
+  = let head=concat("\n## ",s.name,"\n\n",if s.post then "POST " else "GET ",s.route,", ",int_text(s.connections),
+      " connections, pipeline depth ",int_text(s.depth),if s.one_worker then ", one worker" else "",".\n\n",
+      "| Server | Median req/s | Range req/s | p50 us | p99 us | CPU us/req | CPU cores | Processes | Peak RSS MiB | Peak PSS MiB | Errors / non-2xx |\n",
+      "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n") in
+    loop (j=0, out=head) while j<len(servers) next (j+1,
+      let name=hc_server(servers,j).name in let m=hc_sum(results.rows,s.name,name) in
+      if len(m.rps)==0 || m.requests==0 || m.wall==0 then out else
+      concat(out,"| ",name," | ",hc_fixed(hc_median(m.rps),0)," | ",hc_fixed(hc_rank(m.rps,0),0),"-",
+        hc_fixed(hc_rank(m.rps,len(m.rps)-1),0)," | ",hc_latency(hc_median(m.p50),s.depth>1)," | ",
+        hc_latency(hc_median(m.p99),s.depth>1)," | ",hc_fixed(f64(m.ticks)*10000.0/f64(m.requests),2)," | ",
+        hc_fixed(f64(m.ticks)*10000000.0/f64(m.wall),2)," | ",int_text(m.count)," | ",hc_mib(m.rss)," | ",hc_mib(m.pss),
+        " | ",int_text(m.errors)," / ",int_text(m.non2xx)," |\n")) yield out
+
+type HcIdles = { rss:Arr f64 _, pss:Arr f64 _, startup:Arr f64 _ }
+fn hc_no_idle() -> HcIdle = HcIdle { server=tx_empty(), rss=0, pss=0, startup=0 }
+fn hc_idle(borrow idles:Arr HcIdle _, i:i64) -> HcIdle = if i>=0 && i<len(idles) then idles[i] else hc_no_idle()
+fn hc_idles(borrow idles:Arr HcIdle _, borrow server:Arr u8 _) -> HcIdles
+  = loop (i=0, out=HcIdles { rss=hc_floats(), pss=hc_floats(), startup=hc_floats() }) while i<len(idles) next (i+1,
+      let idle=hc_idle(idles,i) in if !str_equal(idle.server,server) || idle.rss==0 then out else
+      HcIdles { rss=push(out.rss,f64(idle.rss)), pss=push(out.pss,f64(idle.pss)), startup=push(out.startup,f64(idle.startup)) }) yield out
+
+fn hc_idle_table(borrow results:HcResults, borrow servers:Arr HcServer _) -> Arr u8 _
+  = let head=concat("\n## Executables and idle servers\n\nMedians over every start.\n\n",
+      "| Server | Executable MiB | Idle RSS MiB | Idle PSS MiB | Startup ms |\n|---|---:|---:|---:|---:|\n") in
+    loop (j=0, out=head) while j<len(servers) next (j+1,
+      let server=hc_server(servers,j) in let idle=hc_idles(results.idles,server.name) in
+      if len(idle.rss)==0 then out else concat(out,"| ",server.name," | ",hc_mib(server.disk)," | ",
+        hc_mib(i64(hc_median(idle.rss)))," | ",hc_mib(i64(hc_median(idle.pss)))," | ",
+        hc_fixed(hc_median(idle.startup)/1000000.0,1)," |\n")) yield out
+
+fn hc_join(borrow words:Arr Arr u8 _ _, start:i64) -> Arr u8 _
+  = loop (i=start, out=tx_empty()) while i<len(words)
+      next (i+1,concat(out,if i>start then " " else "",md_word(words,i))) yield out
+
+effect fn hc_report(borrow config:HcConfig, borrow results:HcResults, borrow servers:Arr HcServer _, borrow scenarios:Arr u8 _) -> Arr u8 _
+  = let info=fs_read("/proc/cpuinfo") in let release=fs_read("/proc/sys/kernel/osrelease") in
+    let version=nt_process(config.wrk,push(md_words(),"--version"),config.environment,10000,4096) in
+    let line=str_find(version.output,"\n") in
+    let header=concat("# HTTP servers: Neo, Rust, Go and Bun\n\n",
+      hc_join(hc_line_after(if info.ok then info.value else tx_empty(),"model name"),1),", Linux ",
+      str_trim(if release.ok then release.value else tx_empty()),"; ",
+      str_trim(str_slice(version.output,0,if line.present then line.value else len(version.output))),", ",
+      int_text(config.threads)," client threads. Every server is restarted per scenario and runs ",int_text(config.repeats),
+      " measured run(s) of ",int_text(config.duration)," s after a ",int_text(config.warmup)," s warm-up. ",
+      "Client and servers share the machine.\n\n",
+      "CPU is user plus system time of the server and every descendant process, from /proc/PID/stat. Memory is the ",
+      "peak of 100 ms samples of RSS and PSS summed over that tree; aggregate RSS counts shared pages more than once, ",
+      "PSS apportions them. Latencies are closed-loop wrk measurements and are omitted for pipelined runs. ",
+      "Single-worker rows set NEO_THREADS, TOKIO_WORKER_THREADS and GOMAXPROCS to 1: worker budgets, not CPU affinity.\n") in
+    let tables=loop (k=0, out=tx_empty()) while k<hc_scenario_count() next (k+1,
+      let s=hc_scenario(k) in if !hc_selected(scenarios,s.name) then out else concat(out,hc_scenario_table(results,servers,s))) yield out in
+    concat(header,hc_idle_table(results,servers),tables)
+
+; ---- building the servers
+
+fn hc_failed(borrow message:Arr u8 _) -> HcServer
+  = HcServer { name=tx_empty(), executable=message, args=md_words(), disk=-1 }
+
+; The size from the open file: fs_read stops at 16 MiB, and Bun is larger.
+effect(fs,unsafe) fn hc_size(borrow path:Arr u8 _) -> i64
+  = let opened=file_open(path,0) in if !opened.ok then 0 else
+    let size=rt_file_size(opened.value) in let closed=file_close(opened.value) in if size>0 then size else 0
+
+effect fn hc_built(borrow name:Arr u8 _, borrow result:NtProcess, borrow binary:Arr u8 _) -> HcServer
+  = if !result.ok || result.code!=0 then hc_failed(concat(name," build failed: ",nt_diagnostic(result)))
+    else HcServer { name=name, executable=binary, args=md_words(), disk=hc_size(binary) }
+
+effect fn hc_given(borrow name:Arr u8 _, borrow variable:Arr u8 _) -> HcServer
+  = let path=pt_realpath(env_get(variable).value) in
+    if !fs_executable(path) then hc_failed(concat(variable," is not an executable: ",path))
+    else HcServer { name=name, executable=path, args=md_words(), disk=hc_size(path) }
+
+; Neo, Neo (before), Rust, Go and Bun, in that order. NEO_BENCH_NEO,
+; NEO_BENCH_RUST and NEO_BENCH_GO supply prebuilt servers; NEO_BENCH_BEFORE
+; adds an earlier Neo server.
+effect fn hc_build(borrow config:HcConfig, borrow compiler:Arr u8 _, borrow scratch:Arr u8 _, i:i64) -> HcServer
+  = let environment=config.environment in
+    if i==0 then
+      if env_get("NEO_BENCH_NEO").present then hc_given("Neo","NEO_BENCH_NEO") else
+      let binary=pt_join(scratch,"neo-http") in
+      hc_built("Neo",nt_process(compiler,push(push(push(push(md_words(),"build"),pt_join(config.root,"examples/http.neo")),"-o"),binary),
+        environment,-1,65536),binary)
+    else if i==1 then hc_given("Neo (before)","NEO_BENCH_BEFORE")
+    else if i==2 then
+      if env_get("NEO_BENCH_RUST").present then hc_given("Rust","NEO_BENCH_RUST") else
+      let cargo=bd_find_tool("cargo") in if len(cargo)==0 then hc_failed("cargo is required for the Rust server (or set NEO_BENCH_RUST)") else
+      let target=env_get("CARGO_TARGET_DIR") in
+      let directory=if target.present && len(target.value)>0 then target.value else pt_join(config.root,"bench/rust/target") in
+      let args=push(push(push(push(push(push(push(md_words(),"build"),"--release"),"--locked"),"--bin"),"http_hyper"),
+        "--manifest-path"),pt_join(config.root,"bench/rust/Cargo.toml")) in
+      hc_built("Rust",nt_process(cargo,args,nt_env_put(environment,concat("CARGO_TARGET_DIR=",directory)),-1,65536),
+        pt_join(directory,"release/http_hyper"))
+    else if i==3 then
+      if env_get("NEO_BENCH_GO").present then hc_given("Go","NEO_BENCH_GO") else
+      let go=bd_find_tool("go") in if len(go)==0 then hc_failed("go is required for the Go server (or set NEO_BENCH_GO)") else
+      let binary=pt_join(scratch,"go-http") in
+      let args=push(push(push(push(push(md_words(),"-C"),pt_join(config.root,"bench/go")),"build"),"-o"),binary) in
+      hc_built("Go",nt_process(go,push(args,"./http"),nt_env_put(nt_env_put(environment,"GOWORK=off"),"GOTOOLCHAIN=local"),-1,65536),binary)
+    else
+      let bun=bd_find_tool("bun") in if len(bun)==0 then hc_failed("bun is required for the Bun server") else
+      let script=pt_join(config.root,"bench/bun/server.ts") in
+      HcServer { name="Bun", executable=bun, args=push(push(md_words(),"run"),script), disk=hc_size(bun)+hc_size(script) }
+
+fn hc_name(i:i64) -> Arr u8 _
+  = if i==0 then "Neo" else if i==1 then "Neo (before)" else if i==2 then "Rust" else if i==3 then "Go" else "Bun"
+
+type HcServers = { list:Arr HcServer _, error:Arr u8 _ }
+effect fn hc_servers(borrow config:HcConfig, borrow compiler:Arr u8 _, borrow scratch:Arr u8 _, borrow wanted:Arr u8 _) -> HcServers
+  = loop (i=0, out=HcServers { list=arr(k in 0..0) hc_failed(""), error=tx_empty() }) while i<5 && len(out.error)==0
+      next (i+1,
+        if !hc_selected(wanted,hc_name(i)) || (i==1 && !env_get("NEO_BENCH_BEFORE").present) then out else
+        let server=hc_build(config,compiler,scratch,i) in
+        if server.disk<0 then HcServers { list=out.list, error=server.executable }
+        else HcServers { list=push(out.list,server), error=tx_empty() }) yield out
+
+; ---- entry point
+
+effect fn hc_setting(borrow name:Arr u8 _, fallback:i64) -> i64
+  = let value=env_get(name) in if !value.present then fallback else
+    let n=int_parse(value.value) in if n.ok && n.value>0 && n.value<=3600 then n.value else -1
+
+; Runs every selected scenario on every selected server and returns an error
+; message, or empty. NEO_BENCH_SERVERS and NEO_BENCH_SCENARIOS take
+; comma-separated names; NEO_BENCH_DURATION and NEO_BENCH_WARMUP are seconds;
+; NEO_BENCH_THREADS sets wrk's threads; NEO_BENCH_REPORT names the Markdown
+; summary, which otherwise goes to stderr.
+effect fn hc_main(borrow compiler:Arr u8 _, borrow root:Arr u8 _, borrow scratch:Arr u8 _,
+                  borrow environment:Arr Arr u8 _ _, repeats:i64) -> Arr u8 _
+  = let proc=fs_read("/proc/self/smaps_rollup") in if !proc.ok then "the servers mode needs Linux /proc" else
+    let given=env_get("NEO_BENCH_WRK") in let wrk=bd_find_tool(if given.present then given.value else "wrk") in
+    if len(wrk)==0 then "wrk is required for the servers mode (or set NEO_BENCH_WRK)" else
+    let config=HcConfig { root=root, wrk=wrk, threads=hc_setting("NEO_BENCH_THREADS",4), duration=hc_setting("NEO_BENCH_DURATION",5),
+      warmup=hc_setting("NEO_BENCH_WARMUP",2), repeats=repeats, environment=environment } in
+    if config.threads<0 || config.duration<0 || config.warmup<0 then "NEO_BENCH_THREADS, NEO_BENCH_DURATION and NEO_BENCH_WARMUP take 1 to 3600" else
+    let scenarios=env_get("NEO_BENCH_SCENARIOS").value in
+    let servers=hc_servers(config,compiler,scratch,env_get("NEO_BENCH_SERVERS").value) in
+    if len(servers.error)>0 then servers.error else
+    if len(servers.list)==0 then "NEO_BENCH_SERVERS selects no server" else
+    let empty=HcResults { rows=arr(i in 0..0) hc_no_row(), idles=arr(i in 0..0) hc_no_idle(), failures=0 } in
+    ; Each scenario starts one server later in the list, so no server always runs first.
+    let results=loop (k=0, out=empty) while k<hc_scenario_count() next (k+1,
+      let s=hc_scenario(k) in if !hc_selected(scenarios,s.name) then out else
+      let m=len(servers.list) in
+      loop (j=0, inner=out) while j<m next (j+1,hc_measure(config,s,hc_server(servers.list,(j+k)%m),inner)) yield inner) yield out in
+    let report=hc_report(config,results,servers.list,scenarios) in
+    let destination=env_get("NEO_BENCH_REPORT") in
+    let written=if destination.present && len(destination.value)>0 then fs_write(destination.value,report)
+      else let shown=print_error(report) in int_ok(0) in
+    if !written.ok then concat("cannot write ",destination.value,": ",written.error.message)
+    else if results.failures>0 then concat(int_text(results.failures)," server run(s) failed")
+    else tx_empty()

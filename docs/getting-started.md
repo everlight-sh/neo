@@ -303,6 +303,7 @@ GNU `time` for child CPU and RSS measurements.
 ./neo run --dev bench/run.neo -- compile 3
 ./neo run --dev bench/run.neo -- http 3
 ./neo run --dev bench/run.neo -- maps 3
+NEO_BENCH_REPORT=report.md ./neo run --dev bench/run.neo -- servers 3
 ```
 
 The runner writes one JSON record per sample. Pass a TOML manifest as the last
@@ -311,7 +312,9 @@ comparison binaries named after the compute cases. Compile measurements use a
 scratch copy and report cold, unchanged, and incremental builds. The HTTP
 mode validates each response in a loopback pipeline. The maps mode samples
 Linux RSS and PSS at the workload's seven checkpoints. To measure the JSON
-workload, pass `bench/json/neo.toml` to the compute mode.
+workload, pass `bench/json/neo.toml` to the compute mode. The servers mode
+compares `examples/http.neo` with Rust, Go and Bun servers under wrk on Linux
+(see the README).
 
 On ARM64 Linux with Clang/lld and QEMU installed:
 

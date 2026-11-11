@@ -21,37 +21,25 @@ timing, and builds run `--offline`.
 
 ## Running
 
-On a fresh Ubuntu x86-64 box, as root, with this checkout at `/root/new` and
-the checkout to compare against at `/root/base`:
+On a fresh Ubuntu x86-64 box, as root, `sh bench/compile/setup.sh` installs
+the toolchains. The native runner measures the Neo rows: every program cold
+(an empty library cache), unchanged, and after appending one comment line to a
+scratch copy of its source. Wall time, CPU time and peak RSS come from GNU
+time, and each row keeps `--report`'s stage split.
 
 ```sh
-sh bench/compile/setup.sh
-(cd bench/compile/rust && ~/.cargo/bin/cargo fetch --locked)
-export PATH=$HOME/.cargo/bin:$PATH
-NEO_TREES=before=/root/base,after=/root/new NEO_DEV=after python3 bench/compile/run.py results.json 3
-NEO_TREES=before=/root/base,after=/root/new NEO_DEV=after python3 bench/compile/breakdown.py breakdown.json
-NEO_TREES=before=/root/base,after=/root/new python3 bench/compile/runtime_check.py runtime.json 7
-python3 bench/compile/summarize.py results.json
+./neo run --dev bench/run.neo -- compile 3
 ```
 
-- `run.py`: every (program, build) pair cold (all toolchain build caches
-  emptied; downloaded sources kept), unchanged, and after appending one comment
-  line to the main source file, in shuffled order each round. Wall time, CPU
-  time and peak RSS come from GNU time; Neo rows also keep `--report`'s stage
-  split. `LARGE_ROUNDS` (default 1) limits the large program's rounds.
-- `breakdown.py`: one cold Neo build per program with `--report`, then the same
-  IR through clang with `-ftime-report` to split its compile into the LLVM
-  optimizer and code generation.
-- `runtime_check.py`: run time, before and after, of the programs whose
-  generated code the inline expansion cap changes, plus orders_json and the
-  compute kernels.
-- `noop.py OUT.json ROUNDS`: unchanged rebuilds only, many rounds, Neo trees
-  (with and without `--report`) against Rust and Go.
-- `ir_snapshot.py ROOT OUT.json [BASE.json]`: the SHA-256 of the LLVM IR each
-  corpus program lowers to, without clang; with a base snapshot it lists the
-  programs whose IR changed. `NEO_INLINE_EXPANSION=N` compares caps.
-- `zig/build.zig`: `zig build-exe` never caches its output, so `run.py`'s
-  unchanged Zig rebuild compiles everything again. `zig build NAME
-  -Doptimize=ReleaseFast` measures the cached case.
+The report's Rust, Go and Zig rows, its clang `-ftime-report` breakdown, the
+run-time check and the IR snapshots came from Python drivers: `run.py`,
+`breakdown.py`, `runtime_check.py`, `noop.py`, `ir_snapshot.py` and
+`summarize.py`. They were removed with the rest of the repository's Python
+and are still in the `v0.2.3` tag, for example
+`git show v0.2.3:bench/compile/run.py`.
+
+`zig/build.zig` exists because `zig build-exe` never caches its output, so an
+unchanged rebuild with it compiles everything again. `zig build NAME
+-Doptimize=ReleaseFast` measures the cached case.
 
 Run nothing else on the box while measuring.
