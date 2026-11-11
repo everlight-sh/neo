@@ -1,0 +1,10 @@
+; An if whose branches are Ref<Handle> is a Ref<Handle> (it lost its resource type: "borrow_ref
+; requires Ref<T>"). Both branches are taken. Prints 42.
+import "std:arena"
+resource type Handle={value:i64} drop release
+effect(fs) fn release(handle:Handle)->unit=noop()
+effect(process) fn create(v:i64)->Handle=Handle { value=v }
+effect(process) fn value(r:Ref<Handle>)->i64=borrow_ref(r).value
+effect(process) fn choose(big:bool, a:Ref<Handle>, b:Ref<Handle>)->i64=let r=if big then a else b in borrow_ref(r).value
+effect(fs,net,process) fn main()->i64=using arena=new_arena(8) in using a=create(40) in using b=create(2) in
+  let ra=adopt(a,arena) in let rb=adopt(b,arena) in choose(true,ra,rb)+choose(false,ra,rb)

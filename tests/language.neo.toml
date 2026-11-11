@@ -845,6 +845,11 @@ reject = true
 exit = 1
 diagnostic = "function_null is compiler-internal inactive storage"
 
+[[test]]
+name = "callbacks-if-join"
+file = "fixtures/test_callbacks/if_join.neo"
+stdout = "42\n"
+
 # test_resources.py: scoped owners, moves and factories; arena references via
 # std:arena.
 [[test]]
@@ -1115,11 +1120,6 @@ exit = 1
 diagnostic = "bounds"
 
 [[test]]
-name = "ambient-paths-clamped-result"
-file = "fixtures/test_ambient_paths/clamped_result.neo"
-check = true
-
-[[test]]
 name = "ambient-paths-check-postcondition"
 file = "fixtures/test_ambient_paths/check_postcondition.neo"
 check = true
@@ -1205,6 +1205,11 @@ check = true
 [[test]]
 name = "ambient-paths-short-circuit-operand"
 file = "fixtures/test_ambient_paths/short_circuit_operand.neo"
+check = true
+
+[[test]]
+name = "ambient-paths-clamped-result"
+file = "fixtures/test_ambient_paths/clamped_result.neo"
 check = true
 
 [[test]]

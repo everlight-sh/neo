@@ -1,0 +1,10 @@
+; The branches of an if must reference the same resource type.
+import "std:arena"
+resource type Handle={value:i64} drop release
+effect(fs) fn release(handle:Handle)->unit=noop()
+effect(process) fn create(v:i64)->Handle=Handle { value=v }
+effect(process) fn value(r:Ref<Handle>)->i64=borrow_ref(r).value
+resource type Other={value:i64} drop close
+effect(fs) fn close(other:Other)->unit=noop()
+fn either(c:bool, a:Ref<Handle>, b:Ref<Other>) -> Ref<Handle> = if c then a else b
+fn main()->i64=0

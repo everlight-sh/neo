@@ -528,7 +528,11 @@ fn tc_if(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, id:i64, n:Node) 
       let size=if tl_equal(env.facts,yes.value.term,no.value.term)==1 then yes.value.term else tc_symbol(id,0) in
       tc_success(tc_array(yes.value.elem,size) with { inner=joined.lengths, record=yes.value.record, name=yes.value.name })
     else if yes.value.ty==n_t_i64() then tc_success(tc_integer(tc_symbol(id,0)))
-    else if yes.value.ty==n_t_rec() then tc_success(tc_fresh_result(tc_record_value(m,yes.value.record),id)) else tc_type(yes.value.ty) in
+    else if yes.value.ty==n_t_rec() then tc_success(tc_fresh_result(tc_record_value(m,yes.value.record),id))
+    ; Both branches have the same shape: the resource of a Ref, the signature of a function value.
+    else if yes.value.ty==n_t_ref() || yes.value.ty==n_t_fn() then
+      tc_success(tc_value(yes.value.ty) with { record=yes.value.record, name=yes.value.name })
+    else tc_type(yes.value.ty) in
     let then_facts=tl_and(condition.value.yes,yes.value.known) in
     let else_facts=tl_and(condition.value.no,no.value.known) in
     let branches=if result.value.ty!=n_t_i64() then
@@ -729,7 +733,7 @@ fn tc_loop_bind(borrow m:Mods, move env:TcEnv, states:i64, borrow values:Arr TcV
             if !symbolic then tc_bind(env,s.a,v)
             else if v.ty==n_t_i64() then tc_bind(env,s.a,tc_integer(tc_symbol(id,0)))
             else if v.ty==n_t_rec() then tc_bind(env,s.a,tc_fresh_result(tc_record_value(m,v.record),id))
-            else if v.ty!=n_t_arr() then tc_bind(env,s.a,tc_value(v.ty))
+            else if v.ty!=n_t_arr() then tc_bind(env,s.a,tc_value(v.ty) with { record=v.record, name=v.name })
             else let term=if tx_at(widen,i)!=0 || len(v.term)==0 then tc_symbol(id,1) else v.term in
               tc_bind(env,s.a,v with { term=term, known=tl_true() })) yield env
 

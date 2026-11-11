@@ -1,0 +1,8 @@
+; A Ref<Handle> loop state keeps its resource type in the loop body. Prints 120.
+import "std:arena"
+resource type Handle={value:i64} drop release
+effect(fs) fn release(handle:Handle)->unit=noop()
+effect(process) fn create(v:i64)->Handle=Handle { value=v }
+effect(process) fn value(r:Ref<Handle>)->i64=borrow_ref(r).value
+effect(process) fn walk(r:Ref<Handle>, n:i64)->i64=loop (x=r, i=0, t=0) while i<n next (x, i+1, t+borrow_ref(x).value) yield t
+effect(fs,net,process) fn main()->i64=using arena=new_arena(8) in using a=create(40) in walk(adopt(a,arena),3)

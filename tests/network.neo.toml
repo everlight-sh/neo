@@ -447,3 +447,27 @@ PASS connection error (DATA on stream 0), then a new connection
 PASS malformed response field fails the stream only
 """
 timeout = 600
+
+# Ref<T> values through if joins, array indexing and loop state (the type
+# checker lost the resource type; see the http_smoke driver's hs_ask).
+[[test]]
+name = "ref-values-if-join"
+file = "fixtures/ref_values/if_join.neo"
+stdout = "42\n"
+
+[[test]]
+name = "ref-values-array-index"
+file = "fixtures/ref_values/array_index.neo"
+stdout = "142\n"
+
+[[test]]
+name = "ref-values-loop-state"
+file = "fixtures/ref_values/loop_state.neo"
+stdout = "120\n"
+
+[[test]]
+name = "ref-values-if-mixed"
+file = "fixtures/ref_values/if_mixed.neo"
+reject = true
+exit = 1
+diagnostic = "branches differ: Ref<"
