@@ -1,0 +1,34 @@
+; Worker safety, ported from the reference compiler's tests/test_worker_safety.py.
+; Every comprehension of this pure program is a parallel region. A line that
+; ends with "; region: DISPATCHER" names the dispatcher its region must use
+; (tests/drivers/worker_safety.neo checks the build report): worker threads
+; (ax_par_for_shared) only when the body and what it calls cannot allocate
+; or count references, forked children (ax_par_for) otherwise.
+type Pair = { a:f64, b:f64 }
+type Box = { a:Arr i64 _ }
+
+; Record reductions and borrowed arrays are safe.
+fn reduce(a:Arr f64 n) -> Pair = sum(i in 0..n) Pair { a=a[i], b=sqrt(a[i]*a[i]) } ; region: ax_par_for_shared
+; Bounded word reads are allocation-free...
+fn words(a:Arr u8 n) -> i64 = sum(i in 0..n) byte_read_le(a,i,1) ; region: ax_par_for_shared
+; ...unless they read a fresh array.
+fn fresh(k:i64) -> i64 = byte_read_le(arr(i in 0..8) u8(bit_and(i+k,255)),0,8)
+fn fresh_words(n:i64) -> i64 = sum(i in 0..n) bit_and(fresh(i),65535) ; region: ax_par_for
+; Allocating, owned and managed-result calls stay in forked children.
+fn grown(a:Arr i64 n) -> i64 = sum(i in 0..n) len(push(a,i)) ; region: ax_par_for
+fn own(move b:Box) -> i64 = len(b.a)
+fn owned(b:Box, n:i64) -> i64 = sum(i in 0..n) own(b) ; region: ax_par_for
+fn child(x:i64) -> i64 = let a=arr(i in 0..2) x+i in sum(i in 0..2) a[i]
+fn calls(n:i64) -> i64 = sum(i in 0..n) child(i) ; region: ax_par_for
+fn made(k:i64) -> Arr i64 _ = arr(i in 0..4) i+k
+fn lengths(n:i64) -> i64 = sum(i in 0..n) len(made(i)) ; region: ax_par_for
+; A recursive callee may need more stack than a worker thread has.
+fn depth(k:i64) -> i64 = if k<=0 then 0 else 1+depth(k-1)
+fn recursive(n:i64) -> i64 = sum(i in 0..n) depth(bit_and(i,7)) ; region: ax_par_for
+
+fn main(n:i64{n>=1, n<=100000}) -> i64
+  = let floats=arr(i in 0..n) f64(i) in ; region: ax_par_for_shared
+    let bytes=arr(i in 0..n) u8(bit_and(i,255)) in ; region: ax_par_for_shared
+    let ints=arr(i in 0..n) i*3 in ; region: ax_par_for_shared
+    let p=reduce(floats) in let box=Box { a=ints } in
+    i64(p.a)+i64(p.b)+words(bytes)+fresh_words(n)+grown(ints)+owned(box,n)+calls(n)+lengths(n)+recursive(n)

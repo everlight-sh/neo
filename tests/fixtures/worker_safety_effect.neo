@@ -1,0 +1,10 @@
+; An effectful main runs sequentially, as in the reference compiler: neither
+; its own comprehensions nor those of the pure functions it calls are
+; parallel regions (tests/drivers/worker_safety.neo checks the build report).
+import "std:io"
+import "std:strings"
+
+fn total(a:Arr i64 n) -> i64 = sum(i in 0..n) a[i]
+
+effect fn main(n:i64{n>=1, n<=100000}) -> i64
+  = let a=arr(i in 0..n) i*2 in let shown=print_out(concat(int_text(len(a)),"\n")) in total(a)

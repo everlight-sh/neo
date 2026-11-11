@@ -1,0 +1,72 @@
+; Ported from the reference compiler's tests/test_worker_safety.py. On Linux
+; the build report of tests/fixtures/worker_safety.neo has exactly one
+; parallel region per line annotated "; region: DISPATCHER", with that
+; dispatcher, and tests/fixtures/worker_safety_effect.neo (an effectful main)
+; has none. At four workers the forked regions really fork (the fork system
+; call raising SIGSYS ends the run; tests/fixtures/runtime_exec.neo), and
+; with fork and clone failing with EAGAIN the result is the serial one.
+import "std:io"
+import "std:strings"
+import "../support/driver.neo"
+import "../support/runtime.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn ws_count(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (i=0, n=0) while i+len(needle)<=len(text) next (i+1,if bytes_match_at(text,i,needle) then n+1 else n) yield n
+
+; The dispatcher of the region the report places on line `line`, or "".
+fn ws_dispatcher(borrow report:Arr u8 _, line:i64) -> Arr u8 _
+  = let at=str_find(report,concat("\"pos\":[",int_text(line),",")) in
+    if !at.present then tx_empty() else
+    let rest=pt_slice(report,at.value,len(report)) in let key="\"dispatcher\":\"" in
+    let found=str_find(rest,key) in if !found.present then tx_empty() else
+    let tail=pt_slice(rest,found.value+len(key),len(rest)) in let close=str_find(tail,"\"") in
+    if close.present then pt_slice(tail,0,close.value) else tx_empty()
+
+; 1 when source line `line` (1-based) is annotated, after checking its region.
+effect fn ws_line(borrow report:Arr u8 _, borrow text:Arr u8 _, line:i64) -> i64
+  = let marker="; region: " in let found=str_find(text,marker) in
+    if !found.present || str_starts(text,";") then 0 else
+    let wanted=str_trim(pt_slice(text,found.value+len(marker),len(text))) in
+    let got=ws_dispatcher(report,line) in
+    let checked=dv_expect(tx_equal(got,wanted),
+      concat("line ",int_text(line),": expected a region on ",wanted,", the report has '",got,"'")) in 1
+
+effect fn ws_report(borrow tools:DvTools, borrow source:Arr u8 _, borrow binary:Arr u8 _) -> Arr u8 _
+  = let built=dv_build_with(tools,source,binary,push(md_words(),"--report"),md_words()) in
+    let ok=dv_expect(built.ok && built.code==0,concat("build of ",source," failed: ",nt_diagnostic(built))) in built.output
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("worker-safety") in
+    let ran=if !dv_linux(tools) then noop() else
+      let source=pt_join(tools.here,"../fixtures/worker_safety.neo") in let binary=pt_join(dir,"worker_safety") in
+      let report=ws_report(tools,source,binary) in
+      let lines=ru_split(dv_read(source),10) in
+      let annotated=loop (k=0, n=0) while k<len(lines) next (k+1,n+ws_line(report,md_word(lines,k),k+1)) yield n in
+      let counted=dv_expect(annotated>0 && ws_count(report,"\"dispatcher\":\"")==annotated,
+        concat("expected ",int_text(annotated)," parallel regions: ",report)) in
+      let effectful=ws_report(tools,pt_join(tools.here,"../fixtures/worker_safety_effect.neo"),pt_join(dir,"worker_safety_effect")) in
+      let sequential=dv_expect(str_find(effectful,"\"parallel_regions\":[]").present,
+        concat("an effectful main must stay sequential: ",effectful)) in
+      let wrapper=pt_join(dir,"exec") in
+      let made=dv_build(tools,pt_join(tools.here,"../fixtures/runtime_exec.neo"),wrapper,md_words()) in
+      let aarch64=ru_aarch64(tools) in
+      let arch=push(md_words(),if aarch64 then "aarch64" else "x86_64") in
+      let fork=if aarch64 then "220" else "57" in let clone=if aarch64 then "220" else "56" in
+      let four=push(md_words(),"NEO_THREADS=4") in
+      let plain=dv_output(binary,push(md_words(),"4096"),four,"") in
+      let no_fork=dv_output(wrapper,push(push(push(push(push(arch,"deny"),fork),"11"),binary),"4096"),four,"") in
+      let no_clone=dv_output(wrapper,push(push(push(push(push(arch,"deny"),clone),"11"),binary),"4096"),four,"") in
+      let same=dv_expect(tx_equal(plain,"201877504\n") && tx_equal(no_fork,"201877504\n") && tx_equal(no_clone,"201877504\n"),
+        concat("worker_safety 4096 at four workers gave ",str_trim(plain),", without fork ",str_trim(no_fork),
+          ", without clone ",str_trim(no_clone))) in
+      let trapped=push(push(push(push(push(arch,"trap"),fork),"-"),binary),"4096") in
+      let single=dv_output(wrapper,trapped,push(md_words(),"NEO_THREADS=1"),"") in
+      let serial=dv_expect(tx_equal(single,"201877504\n"),concat("one worker under the fork trap gave ",str_trim(single))) in
+      let parallel=dv_run(wrapper,trapped,four,"",60000,1048576) in
+      dv_expect(parallel.ok && parallel.code==0-31,
+        concat("four workers did not fork: exit ",int_text(parallel.code),": ",nt_diagnostic(parallel))) in
+    let cleaned=dv_clean(dir) in let shown=print_out("worker safety OK\n") in noop()

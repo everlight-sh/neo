@@ -1,0 +1,174 @@
+; Parallel regions: the analyses behind the comprehensions that llvm.neo runs
+; on worker threads or forked children (cg_par_range). They follow the
+; reference compiler (neoc/llvm.py comprehension, neoc/kernel_workers.py
+; allocation_free): only a program whose main is pure has par-mode functions,
+; and in them a sum or array comprehension becomes a region unless its range
+; is a short literal one or it fills an array with a constant.
+;
+; Par mode. The functions main reaches through direct calls of pure local
+; functions (lowered in this module as @neo_fn_<id>) and that contain such a
+; comprehension, directly or through those calls, get a par clone
+; @neo_par_<id>. Clones call clones; everything else, a region's own body
+; included, calls the ordinary (sequential) functions, so a region never
+; starts another one.
+;
+; Worker safety. A region may run on the shared-address worker threads
+; (ax_par_for_shared) only when its lowered body and every function it calls,
+; transitively and without recursion, refer to nothing but LLVM intrinsics,
+; the trap helpers, constants, byte reads, the no-op reference helpers of
+; records without counted fields and other such functions: no allocation, no
+; reference count, no indirect call (rg_refs, rg_indirect; cg_par_safe).
+; Other regions use the forking dispatcher ax_par_for.
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "modules.neo"
+import "paths.neo"
+
+; What a syntax tree contains: whether a candidate region (rg_candidate), the
+; functions it calls directly, the names it reads (variables and call
+; targets, which may be bindings of function values), and the reference's
+; work estimate, -1 when it has a call or a loop.
+type RgWalk = { regions:bool, calls:Arr i64 _, names:Arr i64 _, cost:i64 }
+fn rg_none() -> RgWalk = RgWalk { regions=false, calls=tx_ints(), names=tx_ints(), cost=0 }
+fn rg_cost(move w:RgWalk, weight:i64) -> RgWalk
+  = if w.cost<0 then w else w with { cost=if w.cost+weight>1000000 then 1000000 else w.cost+weight }
+
+; A literal range of at most 64 iterations never repays a dispatch.
+fn rg_short(borrow m:Mods, n:Node) -> bool
+  = let lo=md_node(m,n.b) in let hi=md_node(m,n.c) in
+    lo.kind==n_num() && hi.kind==n_num() && lo.b!=1 && hi.b!=1 && hi.a-lo.a<=64
+; A constant fill (arr(i in 0..n) -1, u8(0), false) is a store loop LLVM
+; vectorizes; a region only adds calls.
+fn rg_fill(borrow m:Mods, id:i64) -> bool
+  = let n=md_node(m,id) in
+    if n.kind==n_cast() then rg_fill(m,n.b)
+    else if n.kind==n_un() && n.a!=29 then rg_fill(m,n.b)
+    else n.kind==n_num() || n.kind==n_flt() || n.kind==n_bool() || n.kind==n_byte()
+fn rg_candidate(borrow m:Mods, n:Node) -> bool
+  = (n.kind==n_sum() || (n.kind==n_arrc() && !rg_fill(m,n.d))) && !rg_short(m,n)
+
+fn rg_list(borrow m:Mods, borrow fns:Arr i64 _, move w:RgWalk, list:i64, field:i64) -> RgWalk
+  = loop (i=0, out=w) while i<ast_list_len(m.ast,list)
+      next (i+1,let id=ast_list_at(m.ast,list,i) in let n=md_node(m,id) in
+        rg_walk(m,fns,out,if field==0 then id else if field==2 then n.b else n.c)) yield out
+
+fn rg_walk(borrow m:Mods, borrow fns:Arr i64 _, move w:RgWalk, id:i64) -> RgWalk
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 then w
+    else if kind==n_var() then rg_cost(w with { names=push(w.names,n.a) },1)
+    else if kind==n_call() then
+      let target=md_find_decl(m,fns,n.a) in
+      let w=w with { names=push(w.names,n.a), calls=if target>=0 then push(w.calls,target) else w.calls, cost=-1 } in
+      rg_list(m,fns,w,n.b,0)
+    else if kind==n_bin() then rg_cost(rg_walk(m,fns,rg_walk(m,fns,w,n.b),n.c),if n.a==27 || n.a==28 then 8 else 1)
+    else if kind==n_let() || kind==n_using() then
+      let w=if kind==n_using() && n.e>=0 then w with { calls=push(w.calls,n.e) } else w in
+      rg_cost(rg_walk(m,fns,rg_walk(m,fns,w,n.b),n.c),1)
+    else if kind==n_un() || kind==n_cast() then rg_cost(rg_walk(m,fns,w,n.b),1)
+    else if kind==n_index() then rg_cost(rg_walk(m,fns,rg_walk(m,fns,w,n.a),n.b),2)
+    else if kind==n_check() then rg_cost(rg_walk(m,fns,rg_walk(m,fns,w,n.a),n.b),1)
+    else if kind==n_if() then rg_cost(rg_walk(m,fns,rg_walk(m,fns,rg_walk(m,fns,w,n.a),n.b),n.c),1)
+    else if kind==n_sum() || kind==n_arrc() then
+      let w=if rg_candidate(m,n) then w with { regions=true } else w in
+      rg_cost(rg_walk(m,fns,rg_walk(m,fns,rg_walk(m,fns,w,n.b),n.c),n.d),1)
+    else if kind==n_loop() then
+      let init=rg_list(m,fns,w with { cost=-1 },n.a,3) in
+      rg_walk(m,fns,rg_list(m,fns,rg_walk(m,fns,init,n.b),n.c,0),n.d)
+    else if kind==n_reclit() then rg_cost(rg_list(m,fns,w,n.b,2),1)
+    else if kind==n_len() || kind==n_field() || kind==n_try() then rg_cost(rg_walk(m,fns,w,n.a),1)
+    else if kind==n_with() then rg_cost(rg_list(m,fns,rg_walk(m,fns,w,n.a),n.b,2),1)
+    else if kind==n_match() then rg_cost(rg_list(m,fns,rg_walk(m,fns,w,n.a),n.b,3),1)
+    else rg_cost(w,1)
+
+fn rg_named(borrow m:Mods, borrow names:Arr i64 _, name:i64) -> bool
+  = let text=md_str(m,name) in
+    loop (i=0, found=false) while !found && i<len(names) next (i+1,tx_equal(md_str(m,tx_at(names,i)),text)) yield found
+
+; A pure function lowered in this module under @neo_fn_<id> (see cg_symbol).
+fn rg_follow(borrow m:Mods, id:i64) -> bool
+  = let f=md_node(m,id) in
+    id>=0 && f.kind==n_fn() && bit_and(f.f,fl_effect()+fl_external()+fl_exported())==0 &&
+    !m.stable_symbols && tx_at(m.shared,tx_at(m.owners,id))!=1
+
+; The par-mode functions: flags by node id, or none when main is not pure,
+; not local, or reaches no candidate region.
+type RgReach = { queue:Arr i64 _, seen:Arr i64 _, direct:Arr i64 _, calls:Arr Arr i64 _ _ }
+fn rg_visit(borrow m:Mods, borrow fns:Arr i64 _, move r:RgReach, at:i64) -> RgReach
+  = let w=rg_walk(m,fns,rg_none(),md_node(m,tx_at(r.queue,at)).d) in
+    let r=r with { direct=push(r.direct,if w.regions then 1 else 0), calls=push(r.calls,w.calls) } in
+    loop (i=0, out=r) while i<len(w.calls)
+      next (i+1,let callee=tx_at(w.calls,i) in
+        if tx_at(out.seen,callee)==1 || !rg_follow(m,callee) then out
+        else out with { queue=push(out.queue,callee), seen=set_at(out.seen,callee,1) }) yield out
+type RgMay = { flags:Arr i64 _, changed:bool }
+fn rg_may_round(borrow r:RgReach, borrow position:Arr i64 _, move may:RgMay) -> RgMay
+  = loop (k=0, out=may with { changed=false }) while k<len(r.queue)
+      next (k+1,if tx_at(out.flags,k)==1 then out else
+        let calls=md_list(r.calls,k) in
+        let reaches=loop (i=0, found=false) while !found && i<len(calls)
+          next (i+1,let at=tx_at(position,tx_at(calls,i)) in at>=0 && tx_at(out.flags,at)==1) yield found in
+        if reaches then RgMay { flags=set_at(out.flags,k,1), changed=true } else out) yield out
+fn rg_par_set(borrow m:Mods, borrow fns:Arr i64 _, main:i64) -> Arr i64 _
+  = if !rg_follow(m,main) then tx_ints() else
+    let count=len(m.ast.nodes)/11 in
+    let first=RgReach { queue=push(tx_ints(),main), seen=set_at(arr(i in 0..count) 0,main,1),
+      direct=tx_ints(), calls=arr(i in 0..0) tx_ints() } in
+    let r=loop (at=0, r=first) while at<len(r.queue) next (at+1,rg_visit(m,fns,r,at)) yield r in
+    let position=loop (k=0, out=arr(i in 0..count) -1) while k<len(r.queue)
+      next (k+1,set_at(out,tx_at(r.queue,k),k)) yield out in
+    let may=loop (s=RgMay { flags=r.direct, changed=true }) while s.changed next (rg_may_round(r,position,s)) yield s.flags in
+    if tx_at(may,0)!=1 then tx_ints() else
+    loop (k=0, out=arr(i in 0..count) 0) while k<len(r.queue)
+      next (k+1,if tx_at(may,k)==1 then set_at(out,tx_at(r.queue,k),1) else out) yield out
+
+; The symbols lowered code refers to, except on define lines and comments:
+; each '@' and the quoted or plain name after it.
+fn rg_word(byte:i64) -> bool
+  = (byte>=48 && byte<=57) || (byte>=65 && byte<=90) || (byte>=97 && byte<=122) || byte==95 || byte==46 || byte==36
+fn rg_line_end(borrow text:Arr u8 _, at:i64) -> i64 = loop (j=at) while j<len(text) && tx_byte(text,j)!=10 next (j+1) yield j
+; The name after the '@' at text[at]: where it starts and where it ends.
+fn rg_name_start(borrow text:Arr u8 _, at:i64) -> i64 = if tx_byte(text,at+1)==34 then at+2 else at+1
+fn rg_name_end(borrow text:Arr u8 _, at:i64, end:i64) -> i64
+  = let quoted=tx_byte(text,at+1)==34 in
+    loop (j=rg_name_start(text,at)) while j<end && (if quoted then tx_byte(text,j)!=34 else rg_word(tx_byte(text,j))) next (j+1) yield j
+fn rg_line_refs(borrow text:Arr u8 _, at:i64, end:i64, move out:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = loop (i=at, refs=out) while i<end
+      next (if tx_byte(text,i)==64 then rg_name_end(text,i,end) else i+1,
+        if tx_byte(text,i)==64 then push(refs,pt_slice(text,rg_name_start(text,i),rg_name_end(text,i,end))) else refs) yield refs
+fn rg_refs(borrow text:Arr u8 _) -> Arr Arr u8 _ _
+  = loop (at=0, out=md_words()) while at<len(text)
+      next (rg_line_end(text,at)+1,
+        if tx_byte(text,at)==59 || bytes_match_at(text,at,"define ") then out else rg_line_refs(text,at,rg_line_end(text,at),out)) yield out
+; Whether code calls through a value: `call TYPE %name(`.
+fn rg_call_through(borrow text:Arr u8 _, at:i64) -> bool
+  = let open=loop (j=at+5) while j<len(text) && tx_byte(text,j)!=40 && tx_byte(text,j)!=10 next (j+1) yield j in
+    let start=loop (j=open) while j>at+5 && tx_byte(text,j-1)!=32 next (j-1) yield j in
+    tx_byte(text,start)==37
+fn rg_indirect(borrow text:Arr u8 _) -> bool
+  = loop (at=0, found=false) while !found && at<len(text)
+      next (at+1,if bytes_match_at(text,at,"call ") then rg_call_through(text,at) else false) yield found
+; The first function definition of a lowered function's text (its lent body
+; when it lends, without the owning wrapper).
+fn rg_first(borrow text:Arr u8 _) -> Arr u8 _
+  = let end=str_find(text,"\n}\n") in if end.present then pt_slice(text,0,end.value+3) else text
+; The decimal number at text[at], or -1.
+fn rg_number(borrow text:Arr u8 _, at:i64) -> i64
+  = if tx_byte(text,at)<48 || tx_byte(text,at)>57 then -1 else
+    loop (j=at, value=0) while j<len(text) && j<at+18 && tx_byte(text,j)>=48 && tx_byte(text,j)<=57
+      next (j+1,value*10+tx_byte(text,j)-48) yield value
+
+; A function's source name for the report: the module prefix __m<hash>_ removed.
+fn rg_display(borrow name:Arr u8 _) -> Arr u8 _
+  = if !str_starts(name,"__m") then name else
+    let cut=loop (j=3) while j<len(name) && tx_byte(name,j)!=95 next (j+1) yield j in
+    if cut+1<len(name) then pt_slice(name,cut+1,len(name)) else name
+; The report's parallel_regions: the JSON objects of the region notes that
+; cg_par_range leaves in the lowered program, which survive pruning with
+; their functions.
+fn rg_report(borrow ir:Arr u8 _) -> Arr u8 _
+  = let marker="; neo-region " in
+    let parts=loop (at=0, out=md_words()) while at<len(ir)
+      next (rg_line_end(ir,at)+1,if !bytes_match_at(ir,at,marker) then out else
+        push(out,concat(if len(out)==0 then "" else ",",pt_slice(ir,at+len(marker),rg_line_end(ir,at))))) yield out in
+    concat("[",str_concat_parts(parts),"]")

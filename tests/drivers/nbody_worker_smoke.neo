@@ -1,9 +1,12 @@
 ; Ported from tests/nbody_worker_smoke.py: examples/nbody.neo is a static
-; binary, and with clone failing with a genuine kernel EAGAIN (a seccomp
-; filter from tests/fixtures/runtime_exec.neo) four requested workers still
-; give the reference energy. The energies of the independent Python model at
-; 1 and 4 workers are plain cases in tests/runtime.neo.toml, frozen in
-; tests/vectors/nbody_worker_smoke/reference.out.
+; binary whose parallel regions all run on the shared-address worker threads
+; (ax_par_for_shared, per the build report). Four requested workers really
+; dispatch: with clone raising SIGSYS (a seccomp filter from
+; tests/fixtures/runtime_exec.neo) the run ends, while one worker never
+; clones and gives the reference energy. With clone failing with a genuine
+; kernel EAGAIN four workers fall back and still give it. The energies of the
+; independent Python model at 1 and 4 workers are plain cases in
+; tests/runtime.neo.toml, frozen in tests/vectors/nbody_worker_smoke/reference.out.
 import "std:io"
 import "std:strings"
 import "../support/driver.neo"
@@ -14,23 +17,37 @@ import "../../compiler/src/test_process.neo"
 import "../../compiler/src/text.neo"
 
 fn nb_magnitude(x:f64) -> f64 = if x<0.0 then 0.0-x else x
+fn nb_count(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (i=0, n=0) while i+len(needle)<=len(text) next (i+1,if bytes_match_at(text,i,needle) then n+1 else n) yield n
+fn nb_close(borrow out:Arr u8 _, expected:f64) -> bool
+  = let got=float_parse(str_trim(out)) in got.ok && nb_magnitude(got.value-expected)<=1.0e-10*nb_magnitude(expected)+1.0e-12
 
 effect fn main() -> unit
   = let tools=dv_tools() in let dir=dv_temp("nbody-workers") in let binary=pt_join(dir,"nbody") in
-    let built=dv_build(tools,pt_join(tools.here,"../../examples/nbody.neo"),binary,md_words()) in
+    let built=dv_build_with(tools,pt_join(tools.here,"../../examples/nbody.neo"),binary,push(md_words(),"--report"),md_words()) in
+    let ok=dv_expect(built.ok && built.code==0,concat("build of examples/nbody.neo failed: ",nt_diagnostic(built))) in
     let audited=dv_audit(tools,binary) in
     let ran=if !dv_linux(tools) then noop() else
+      let regions=nb_count(built.output,"\"dispatcher\":\"") in
+      let shared=nb_count(built.output,"\"dispatcher\":\"ax_par_for_shared\"") in
+      let dispatched=dv_expect(regions>0 && regions==shared,concat("expected every parallel region on ax_par_for_shared: ",built.output)) in
       let lines=ru_split(ru_vector(tools,"nbody_worker_smoke","reference.out"),10) in
       let fields=ru_split(md_word(lines,6),32) in
       let ready=dv_expect(tx_equal(md_word(fields,0),"1024") && tx_equal(md_word(fields,1),"2"),"unexpected reference.out layout") in
       let expected=float_parse(md_word(fields,2)) in
       let wrapper=pt_join(dir,"exec") in
       let made=dv_build(tools,pt_join(tools.here,"../fixtures/runtime_exec.neo"),wrapper,md_words()) in
-      let aarch64=ru_aarch64(tools) in
-      let args=push(push(push(push(push(push(push(md_words(),if aarch64 then "aarch64" else "x86_64"),"deny"),
-        if aarch64 then "220" else "56"),"11"),binary),"1024"),"2") in
-      let out=dv_output(wrapper,args,push(md_words(),"NEO_THREADS=4"),"") in
-      let got=float_parse(str_trim(out)) in
-      dv_expect(expected.ok && got.ok && nb_magnitude(got.value-expected.value)<=1.0e-10*nb_magnitude(expected.value)+1.0e-12,
+      let aarch64=ru_aarch64(tools) in let clone=if aarch64 then "220" else "56" in
+      let arch=push(md_words(),if aarch64 then "aarch64" else "x86_64") in
+      let denied=push(push(push(push(push(push(arch,"deny"),clone),"11"),binary),"1024"),"2") in
+      let trapped=push(push(push(push(push(push(arch,"trap"),clone),"-"),binary),"1024"),"2") in
+      let out=dv_output(wrapper,denied,push(md_words(),"NEO_THREADS=4"),"") in
+      let fallback=dv_expect(expected.ok && nb_close(out,expected.value),
         concat("with clone failing the energy is ",str_trim(out),", expected ",md_word(fields,2))) in
+      let single=dv_output(wrapper,trapped,push(md_words(),"NEO_THREADS=1"),"") in
+      let serial=dv_expect(expected.ok && nb_close(single,expected.value),
+        concat("one worker under the clone trap gave ",str_trim(single),", expected ",md_word(fields,2))) in
+      let parallel=dv_run(wrapper,trapped,push(md_words(),"NEO_THREADS=4"),"",60000,1048576) in
+      dv_expect(parallel.ok && parallel.code==0-31,
+        concat("four workers did not clone: exit ",int_text(parallel.code),": ",nt_diagnostic(parallel))) in
     let cleaned=dv_clean(dir) in let shown=print_out("N-body workers OK\n") in noop()

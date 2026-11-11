@@ -37,7 +37,11 @@ fn st_main(borrow m:Mods, id:i64) -> Arr u8 _
     concat(args.globals,if count==0 then "" else cg_bytes("@neo_arg_names",args.names,true),
       "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n",
       "  %count = zext i32 %argc to i64\n  %end = getelementptr ptr, ptr %argv, i64 %count\n",
-      "  %envp = getelementptr ptr, ptr %end, i64 1\n  call void @ax_runtime_init(ptr %envp)\n",
+      "  %envp = getelementptr ptr, ptr %end, i64 1\n",
+      ; The program's heap mode (cg_program_part), before the runtime picks its allocator.
+      "  %heap_mode = load i64, ptr @neo_heap_mode\n",
+      "  store i64 %heap_mode, ptr getelementptr (i8, ptr @ax_runtime_state, i64 184), align 8\n",
+      "  call void @ax_runtime_init(ptr %envp)\n",
       "  store i64 %count, ptr getelementptr (i8, ptr @ax_runtime_state, i64 40), align 8\n",
       "  store ptr %argv, ptr getelementptr (i8, ptr @ax_runtime_state, i64 48), align 8\n",
       usage,args.code,output,"  ret i32 0\n}\n")
