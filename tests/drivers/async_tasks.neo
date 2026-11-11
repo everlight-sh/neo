@@ -1,0 +1,32 @@
+; async_tasks.py: tests/fixtures/async_tasks.neo waits for a file lock that a
+; forked holder keeps for 250 ms, while its nested tasks and timers still
+; finish on time (the fixture checks the timings and prints 42).
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+effect fn at_holder(borrow path:Arr u8 _, borrow ready:Arr u8 _) -> i64
+  = let opened=file_open(path,3) in if !opened.ok then 2 else
+    let locked=file_lock(opened.value,true) in if !locked.ok then 3 else
+    let wrote=fs_write(ready,"locked") in let held=sleep_ms(250) in
+    let closed=file_close(opened.value) in 0
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("async-tasks") in let binary=pt_join(dir,"async-tasks") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/async_tasks.neo"),binary,md_words()) in
+    let lock=pt_join(dir,"lock") in let ready=pt_join(dir,"ready") in let created=fs_write(lock,"") in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(at_holder(lock,ready)) else
+    let held=nw_wait_file(ready,5000) in
+    let result=dv_run(binary,md_words(),push(push(md_words(),"NEO_THREADS=1"),concat("NEO_ASYNC_LOCK_FILE=",lock)),"",4000,65536) in
+    let holder=nw_reap(forked.value) in
+    let a=dv_expect(len(held)>0 && holder==0,concat("the lock holder failed with wait status ",int_text(holder))) in
+    let b=dv_expect(result.ok && !result.timeout && result.code==0 && tx_equal(result.output,"42\n"),
+      concat("async-tasks exited ",int_text(result.code),": ",nt_diagnostic(result))) in
+    let shown=print_out("PASS nested tasks, independent timer progress during a contended file lock, and normal resource cleanup\n") in
+    dv_clean(dir)

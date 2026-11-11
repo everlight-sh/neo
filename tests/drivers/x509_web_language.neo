@@ -1,0 +1,105 @@
+; x509_web_language.py, the parts that depend on the machine (its generated
+; chains are the x509-web-chains and x509-web-bundle cases):
+;   x509_web_language system  tests/fixtures/x509_bundle.neo parses the system
+;                             trust bundle (CA_BUNDLE, else
+;                             /etc/ssl/certs/ca-certificates.crt): one line per
+;                             PEM block, and ISRG Root X2, GTS Root R3/R4 and
+;                             DigiCert Global Root G3 parse valid when present.
+;                             SKIP when there is no bundle. (The script's
+;                             before/after comparison with git's std:x509 is gone.)
+;   x509_web_language live    chains served by live sites (openssl s_client, ECDSA
+;                             and RSA signature algorithms) verify against the
+;                             system roots with tests/fixtures/x509_web.neo; only
+;                             with NEO_TEST_NETWORK=1, else it says SKIP.
+import "std:fs"
+import "std:io"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn xw_marker() -> Arr u8 _ = "-----BEGIN CERTIFICATE-----"
+fn xw_end() -> Arr u8 _ = "-----END CERTIFICATE-----"
+; The PEM CERTIFICATE blocks of text, in order.
+fn xw_blocks(borrow text:Arr u8 _) -> Arr Arr u8 _ _
+  = loop (at=nw_find_from(text,xw_marker(),0), out=md_words()) while at>=0
+      next (let end=nw_find_from(text,xw_end(),at) in if end<0 then -1 else nw_find_from(text,xw_marker(),end),
+        let end=nw_find_from(text,xw_end(),at) in if end<0 then out else push(out,concat(pt_slice(text,at,end+len(xw_end())),"\n"))) yield out
+; The CN of an openssl "subject=" line.
+fn xw_cn(borrow line:Arr u8 _) -> Arr u8 _
+  = let at=str_find(line,"CN = ") in if !at.present then tx_empty() else
+    let rest=nw_after(line,at.value+5) in let comma=str_find(rest,", ") in str_trim(if comma.present then pt_slice(rest,0,comma.value) else rest)
+
+effect fn xw_system(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let configured=env_get("CA_BUNDLE") in
+    let path=if configured.present then configured.value else "/etc/ssl/certs/ca-certificates.crt" in
+    let read=fs_read(path) in
+    if !read.ok then (let shown=print_out(concat("SKIP system bundle: ",path," not found\n")) in noop()) else
+    let bundle=read.value in let blocks=xw_blocks(bundle) in
+    let binary=pt_join(dir,"x509-bundle") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/x509_bundle.neo"),binary,md_words()) in
+    let report=dv_output(binary,md_words(),md_words(),bundle) in let lines=nw_split(str_trim(report),10) in
+    let last=md_word(lines,len(lines)-1) in
+    let a=dv_expect(tx_equal(nw_word(nw_split(last,32),1),int_text(len(blocks))) && len(lines)==len(blocks)+1,
+      concat("the bundle has ",int_text(len(blocks))," certificates but x509_bundle reported ",last)) in
+    ; Subjects in bundle order: one openssl pkcs7 listing.
+    let p7=pt_join(dir,"bundle.p7") in let written=fs_write(pt_join(dir,"bundle.pem"),concat(bundle,"\n")) in
+    let b=nw_tool("openssl",push(push(push(push(push(push(md_words(),"crl2pkcs7"),"-nocrl"),"-certfile"),pt_join(dir,"bundle.pem")),"-out"),p7),md_words()) in
+    let listed=nw_tool("openssl",push(push(push(push(push(md_words(),"pkcs7"),"-print_certs"),"-noout"),"-in"),p7),md_words()) in
+    let all=nw_split(listed.output,10) in
+    let subjects=loop (i=0, out=md_words()) while i<len(all)
+      next (i+1,let line=md_word(all,i) in if str_starts(line,"subject=") then push(out,xw_cn(line)) else out) yield out in
+    let c=dv_expect(len(subjects)==len(blocks),concat("openssl listed ",int_text(len(subjects))," subjects for ",int_text(len(blocks))," certificates")) in
+    let required=push(push(push(push(md_words(),"ISRG Root X2"),"GTS Root R3"),"GTS Root R4"),"DigiCert Global Root G3") in
+    let broken=loop (i=0, out=tx_empty()) while i<len(blocks)
+      next (i+1,let name=md_word(subjects,i) in
+        let wanted=loop (k=0, hit=false) while k<len(required) next (k+1,hit || tx_equal(md_word(required,k),name)) yield hit in
+        if wanted && !str_starts(md_word(lines,i),"1 ") then concat(out,name,"; ") else out) yield out in
+    let d=dv_expect(len(broken)==0,concat("required roots do not parse: ",broken)) in
+    let shown=print_out(concat("PASS system bundle ",path,": ",nw_word(nw_split(last,32),3)," of ",int_text(len(blocks))," roots parse valid; the required roots parse\n")) in noop()
+
+fn xw_sites() -> Arr Arr u8 _ _
+  = nw_split("letsencrypt.org www.google.com github.com www.cloudflare.com en.wikipedia.org www.mozilla.org www.digicert.com www.sectigo.com www.amazon.com www.apple.com www.microsoft.com www.bbc.co.uk www.lemonde.fr stackoverflow.com www.python.org go.dev www.rust-lang.org news.ycombinator.com",32)
+fn xw_frame(borrow der:Arr u8 _) -> Arr u8 _ = concat(nw_be(len(der),3),der)
+
+; One site's served chain (s_client with sigalgs) verified against the bundle:
+; 0 verified, 1 rejected, 2 no chain served (a site without such a
+; certificate; not counted, as in the script).
+effect fn xw_site(borrow binary:Arr u8 _, borrow bundle:Arr u8 _, borrow site:Arr u8 _, borrow label:Arr u8 _, borrow sigalgs:Arr u8 _) -> i64
+  = let openssl=bd_find_tool("openssl") in
+    let args=push(push(push(push(push(push(push(push(md_words(),"s_client"),"-connect"),concat(site,":443")),"-servername"),site),"-showcerts"),"-sigalgs"),sigalgs) in
+    let served=nt_process_input(openssl,args,bd_environment(),"",20000,4194304) in
+    let blocks=xw_blocks(served.output) in
+    if len(blocks)==0 then (let shown=print_out(concat("LIVE ",site," ",label,": no chain\n")) in 2) else
+    let frames=loop (i=0, out=tx_empty()) while i<len(blocks)
+      next (i+1,let der=nt_process_input(openssl,push(push(push(md_words(),"x509"),"-outform"),"DER"),bd_environment(),md_word(blocks,i),20000,1048576) in
+        concat(out,xw_frame(der.output))) yield out in
+    let payload=concat(nw_be(len(site),1),site,nw_be(rt_now_ms()/1000,8),nw_be(len(blocks),1),frames,bundle) in
+    let result=dv_run(binary,push(push(md_words(),"1"),"0"),md_words(),payload,120000,65536) in
+    let shown=print_out(concat("LIVE ",site," ",label,": ",str_trim(result.output),"\n")) in
+    if result.code==0 && str_starts(result.output,"verified") then 0 else 1
+
+effect fn xw_live(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let configured=env_get("CA_BUNDLE") in
+    let bundle=dv_read(if configured.present then configured.value else "/etc/ssl/certs/ca-certificates.crt") in
+    let binary=pt_join(dir,"x509-web") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/x509_web.neo"),binary,md_words()) in
+    let sites=xw_sites() in
+    let failed=loop (i=0, failed=0) while i<len(sites) next (i+1,
+      let site=md_word(sites,i) in
+      let ecdsa=xw_site(binary,bundle,site,"ECDSA","ecdsa_secp256r1_sha256:ecdsa_secp384r1_sha384") in
+      let rsa=xw_site(binary,bundle,site,"RSA","rsa_pss_rsae_sha256:rsa_pss_rsae_sha384:rsa_pkcs1_sha256") in
+      failed+(if ecdsa==1 then 1 else 0)+(if rsa==1 then 1 else 0)) yield failed in
+    dv_expect(failed==0,concat(int_text(failed)," served chains did not verify against the system roots"))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let mode=cli_arg(1) in
+    let live=mode.present && tx_equal(mode.value,"live") in
+    let enabled=env_get("NEO_TEST_NETWORK") in
+    if live && !(enabled.present && tx_equal(enabled.value,"1")) then
+      (let shown=print_out("SKIP live certificate chains (set NEO_TEST_NETWORK=1 to run them)\n") in noop()) else
+    let dir=dv_temp("x509-web") in
+    let ran=if live then xw_live(tools,dir) else xw_system(tools,dir) in
+    dv_clean(dir)

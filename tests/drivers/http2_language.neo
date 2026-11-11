@@ -1,0 +1,242 @@
+; http2_language.py: HTTP/2 over TLS (ALPN h2) with std:https_client's
+; HttpClient (tests/fixtures/language_http2.neo). Go's net/http
+; (tests/http2_server.go) serves small and 1 MiB bodies, 101 headers that fill
+; and evict HPACK's dynamic table, a header block over CONTINUATION frames, a
+; streamed body, a 3 MB upload and GOAWAY on one connection, and resumes TLS
+; sessions; the same server limited to http/1.1, and openssl s_server without
+; ALPN, check the fallback to HTTP/1.1. The scripted HTTP/2 server
+; (tests/fixtures/network_peer.go -mode h2script, the script's Python one) sends
+; PING and SETTINGS mid-exchange, padded and prioritized HEADERS, padded DATA,
+; trailers, a 103 response, dynamic table size updates, RST_STREAM (an error;
+; REFUSED_STREAM a retry), GOAWAY before and after a stream, a connection error
+; and a malformed response field.
+import "std:io"
+import "std:process"
+import "std:sha256"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+type H2 = { dir:Arr u8 _, client:Arr u8 _, go:Arr u8 _, peer:Arr u8 _ }
+
+; ---- Expected bodies and headers -----------------------------------------
+
+; A body's length and SHA-256 (size -1: not checked).
+type H2Body = { size:i64, sha:Arr u8 _ }
+fn h2_body(borrow bytes:Arr u8 _) -> H2Body = H2Body { size=len(bytes), sha=dv_hex(sha256(bytes)) }
+fn h2_any() -> H2Body = H2Body { size= -1, sha=tx_empty() }
+fn h2_pattern(n:i64, m:i64) -> Arr u8 _ = let d=if m<1 then 1 else m in arr(i in 0..(if n<0 then 0 else n)) u8(bit_and(i%d,255))
+; What tests/http2_server.go serves at path.
+fn h2_path_body(borrow path:Arr u8 _) -> H2Body
+  = if tx_equal(path,"/hello") then h2_body("Hello, World!") else if tx_equal(path,"/1m") then h2_body(h2_pattern(1048576,253))
+    else if tx_equal(path,"/headers") then h2_body("headers") else if tx_equal(path,"/big-headers") then h2_body("big")
+    else if tx_equal(path,"/stream") then h2_body(arr(i in 0..500000) u8(bit_and((i%10000)%241,255)))
+    else if tx_equal(path,"/goaway") then h2_body("bye") else h2_any()
+
+fn h2_digits3(i:i64) -> Arr u8 _ = concat(if i<10 then "00" else if i<100 then "0" else "",int_text(i))
+fn h2_header_value(i:i64) -> Arr u8 _
+  = let n=20+i%40 in concat("v",h2_digits3(i),"-",arr(j in 0..(if n<0 then 0 else n)) u8(bit_and(97+i%26,255)))
+fn h2_ascii() -> Arr u8 _
+  = loop (c=33, out=tx_empty()) while c<=126 next (c+1,let more=push(out,u8(bit_and(c,255))) in if c%16==0 then push(more,u8(32)) else more) yield out
+; The 101 headers of /headers, one "name: value" line each.
+fn h2_headers() -> Arr u8 _
+  = let rows=loop (i=0, out=tx_empty()) while i<100 next (i+1,concat(out,"x-neo-h",h2_digits3(i),": ",h2_header_value(i),"\n")) yield out in
+    concat(rows,"x-neo-ascii: ",h2_ascii(),"\n")
+fn h2_big() -> Arr u8 _
+  = let alphabet="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" in
+    arr(i in 0..30000) u8(bit_and(tx_byte(alphabet,(i*7)%62),255))
+
+; ---- The client's output -------------------------------------------------
+
+; One request's line ("METHOD PATH -> STATUS PROTOCOL key=value..." or
+; "METHOD PATH -> error CODE MESSAGE") and its x-neo header lines.
+type H2Result = { line:Arr u8 _, method:Arr u8 _, path:Arr u8 _, error:i64, status:i64, protocol:Arr u8 _,
+                  fields:Arr u8 _, headers:Arr u8 _, count:i64 }
+type H2Scan = { r:i64, line:Arr u8 _, headers:Arr u8 _, count:i64 }
+fn h2_scan_step(borrow line:Arr u8 _, k:i64, move s:H2Scan) -> H2Scan
+  = if len(line)==0 then s else
+    if str_starts(line,"  ") then (if s.r==k then s with { headers=concat(s.headers,nw_after(line,2),"\n"), count=s.count+1 } else s)
+    else if s.r+1==k then s with { r=s.r+1, line=pt_slice(line,0,len(line)) } else s with { r=s.r+1 }
+fn h2_parse(borrow line:Arr u8 _, borrow headers:Arr u8 _, count:i64) -> H2Result
+  = let at=str_find(line," -> ") in
+    let request=if at.present then pt_slice(line,0,at.value) else pt_slice(line,0,len(line)) in
+    let outcome=if at.present then nw_after(line,at.value+4) else tx_empty() in
+    let space=str_find(request," ") in let words=nw_split(outcome,32) in
+    let failed=tx_equal(md_word(words,0),"error") in
+    H2Result { line=pt_slice(line,0,len(line)), method=if space.present then pt_slice(request,0,space.value) else tx_empty(),
+      path=if space.present then nw_after(request,space.value+1) else tx_empty(), error=if failed then nw_int(md_word(words,1)) else -1,
+      status=if failed then 0 else nw_int(md_word(words,0)), protocol=if failed then tx_empty() else md_word(words,1),
+      fields=outcome, headers=pt_slice(headers,0,len(headers)), count=count }
+; The k-th result of the client's output.
+fn h2_result(borrow output:Arr u8 _, k:i64) -> H2Result
+  = let lines=nw_split(output,10) in
+    let s=loop (i=0, s=H2Scan { r= -1, line=tx_empty(), headers=tx_empty(), count=0 }) while i<len(lines)
+      next (i+1,h2_scan_step(md_word(lines,i),k,s)) yield s in
+    h2_parse(s.line,s.headers,s.count)
+fn h2_results(borrow output:Arr u8 _) -> i64
+  = let lines=nw_split(output,10) in
+    loop (i=0, n=0) while i<len(lines) next (i+1,let line=md_word(lines,i) in if len(line)>0 && !str_starts(line,"  ") then n+1 else n) yield n
+; key=value among a result's fields ("" when missing).
+fn h2_field(borrow r:H2Result, borrow key:Arr u8 _) -> Arr u8 _
+  = let words=nw_split(r.fields,32) in
+    loop (i=0, found=tx_empty()) while i<len(words) && len(found)==0
+      next (i+1,let w=md_word(words,i) in if str_starts(w,concat(key,"=")) then nw_after(w,len(key)+1) else tx_empty()) yield found
+; A response header's value ("" when missing).
+fn h2_header(borrow r:H2Result, borrow name:Arr u8 _) -> Arr u8 _
+  = let lines=nw_split(r.headers,10) in
+    loop (i=0, found=tx_empty()) while i<len(lines) && len(found)==0
+      next (i+1,let w=md_word(lines,i) in if str_starts(w,concat(name,": ")) then nw_after(w,len(name)+2) else tx_empty()) yield found
+; Whether the result's headers are exactly the "name: value" lines of expected.
+fn h2_headers_are(borrow r:H2Result, borrow expected:Arr u8 _) -> bool
+  = let wanted=nw_split(str_trim(expected),10) in let have=concat("\n",r.headers) in
+    r.count==len(wanted) && loop (i=0, ok=true) while ok && i<len(wanted) next (i+1,nw_contains(have,concat("\n",md_word(wanted,i),"\n"))) yield ok
+fn h2_expect(borrow r:H2Result, status:i64, borrow protocol:Arr u8 _, borrow body:H2Body, connections:i64, resumptions:i64) -> bool
+  = r.error<0 && r.status==status && tx_equal(r.protocol,protocol) &&
+    (body.size<0 || (nw_int(h2_field(r,"body"))==body.size && tx_equal(h2_field(r,"sha256"),body.sha))) &&
+    (connections<0 || nw_int(h2_field(r,"connections"))==connections) && (resumptions<0 || nw_int(h2_field(r,"resumptions"))==resumptions)
+
+; The client against 127.0.0.1:port with "|"-separated steps.
+type H2Out = { output:Arr u8 _, ok:bool }
+effect fn h2_run(borrow t:H2, port:i64, borrow steps:Arr u8 _) -> H2Out
+  = let words=nw_split(steps,124) in
+    let args=loop (i=0, out=push(push(push(push(md_words(),"localhost"),int_text(port)),pt_join(t.dir,"ca.der")),"127.0.0.1"))
+      while i<len(words) next (i+1,push(out,md_word(words,i))) yield out in
+    let requests=loop (i=0, n=0) while i<len(words) next (i+1,if nw_contains(md_word(words,i),":") then n+1 else n) yield n in
+    let result=dv_run(t.client,args,md_words(),"",180000,16777216) in
+    let ok=result.ok && result.code==0 && h2_results(result.output)==requests in
+    H2Out { output=if ok then result.output else concat("client failed: ",nt_diagnostic(result)), ok=ok }
+fn h2_show(borrow out:H2Out) -> Arr u8 _ = concat(if len(out.output)>3000 then pt_slice(out.output,0,3000) else out.output,"\n")
+; Prints PASS line when problems is empty.
+effect fn h2_pass(borrow problems:Arr u8 _, borrow line:Arr u8 _) -> Arr u8 _
+  = if len(problems)>0 then pt_slice(problems,0,len(problems)) else (let shown=print_out(concat("PASS ",line,"\n")) in tx_empty())
+
+; ---- Go net/http ---------------------------------------------------------
+
+effect fn h2_auth(borrow t:H2, port:i64, borrow protocol:Arr u8 _) -> Arr u8 _
+  = let auth=h2_run(t,port,"POST:/request-headers:4") in
+    nw_note("",auth.ok && h2_expect(h2_result(auth.output,0),200,protocol,h2_body("Bearer fixture-token|application/x-www-form-urlencoded"),-1,-1),
+      concat("request headers: ",h2_show(auth)))
+; Every step answered (404 for /missing) on one connection with its body.
+effect fn h2_steps_ok(borrow out:H2Out, borrow steps:Arr u8 _, borrow protocol:Arr u8 _) -> bool
+  = let words=nw_split(steps,124) in
+    out.ok && loop (k=0, ok=true) while ok && k<len(words) next (k+1,
+      let parts=nw_split(md_word(words,k),58) in let method=md_word(parts,0) in let path=md_word(parts,1) in
+      let body=if tx_equal(method,"POST") then h2_body(h2_pattern(nw_int(md_word(parts,2)),251))
+        else if tx_equal(method,"HEAD") || tx_equal(method,"PUT") then h2_body("") else h2_path_body(path) in
+      h2_expect(h2_result(out.output,k),if tx_equal(path,"/missing") then 404 else 200,protocol,body,1,-1)) yield ok
+
+effect fn h2_go_h2(borrow t:H2, port:i64) -> Arr u8 _
+  = let auth=h2_auth(t,port,"h2") in
+    let steps="GET:/hello|GET:/1m|GET:/headers|GET:/headers|GET:/big-headers|GET:/headers|GET:/stream|POST:/echo:3000000|HEAD:/1m|GET:/missing|PUT:/echo:0|GET:/hello" in
+    let out=h2_run(t,port,steps) in let headers=h2_headers() in
+    let ok=h2_steps_ok(out,steps,"h2") && h2_headers_are(h2_result(out.output,0),"x-neo-proto: HTTP/2.0") &&
+      h2_headers_are(h2_result(out.output,2),headers) && h2_headers_are(h2_result(out.output,3),headers) && h2_headers_are(h2_result(out.output,5),headers) &&
+      h2_headers_are(h2_result(out.output,4),concat("x-neo-big: ",h2_big())) &&
+      h2_headers_are(h2_result(out.output,7),"x-neo-method: POST") && h2_headers_are(h2_result(out.output,10),"x-neo-method: PUT") in
+    let a=h2_pass(nw_note(auth,ok,concat("h2 requests: ",h2_show(out))),
+      "h2: 12 requests on one connection (1 MiB, 101 Huffman/dynamic-table headers, CONTINUATION, streamed body, 3 MB upload, HEAD, 404)") in
+    let away=h2_run(t,port,"GET:/goaway|GET:/hello|GET:/conns") in
+    let b=h2_pass(nw_note("",away.ok && h2_expect(h2_result(away.output,0),200,"h2",h2_body("bye"),1,-1) &&
+      h2_expect(h2_result(away.output,1),200,"h2",h2_path_body("/hello"),2,-1),concat("GOAWAY: ",h2_show(away))),
+      "h2 GOAWAY after Connection: close, next request reconnects") in
+    let resumed=h2_run(t,port,"GET:/hello|disconnect|GET:/hello|disconnect|GET:/1m|close|GET:/hello") in
+    let c=h2_pass(nw_note("",resumed.ok && h2_expect(h2_result(resumed.output,0),200,"h2",h2_path_body("/hello"),1,0) &&
+      h2_expect(h2_result(resumed.output,1),200,"h2",h2_path_body("/hello"),2,1) && h2_expect(h2_result(resumed.output,2),200,"h2",h2_path_body("/1m"),3,2) &&
+      h2_expect(h2_result(resumed.output,3),200,"h2",h2_path_body("/hello"),4,2),concat("resumption: ",h2_show(resumed))),
+      "h2 with TLS resumption: resumptions 0, 1, 2, then 2 after http_client_close") in
+    concat(a,b,c)
+
+effect fn h2_go_h1(borrow t:H2, port:i64) -> Arr u8 _
+  = let auth=h2_auth(t,port,"http/1.1") in
+    let steps="GET:/hello|GET:/1m|GET:/headers|GET:/stream|POST:/echo:1000|HEAD:/1m|GET:/hello" in
+    let out=h2_run(t,port,steps) in
+    let ok=h2_steps_ok(out,steps,"http/1.1") && h2_headers_are(h2_result(out.output,0),"x-neo-proto: HTTP/1.1") &&
+      h2_headers_are(h2_result(out.output,2),h2_headers()) in
+    h2_pass(nw_note(auth,ok,concat("HTTP/1.1 requests: ",h2_show(out))),
+      "fallback to HTTP/1.1 (server ALPN http/1.1 only): 7 keep-alive requests, same headers")
+
+effect fn h2_with_go(borrow t:H2, h1:bool) -> Arr u8 _
+  = let args=push(push(push(push(md_words(),"-cert"),pt_join(t.dir,"leaf.pem")),"-key"),pt_join(t.dir,"leaf.key")) in
+    using go=process_start(t.go,if h1 then push(args,"-h1") else args,dv_environment(md_words())) in
+    let up=nw_await(go,nw_child(),"\n",10000) in let port=nw_int(str_trim(up.output)) in
+    if port<=0 then concat("the Go server did not start: ",up.errors,"\n") else
+    if h1 then h2_go_h1(t,port) else h2_go_h2(t,port)
+
+effect fn h2_openssl(borrow t:H2) -> Arr u8 _
+  = let port=nw_port() in
+    let args=nw_split(concat("s_server|-accept|",int_text(port),"|-cert|",pt_join(t.dir,"leaf.pem"),"|-key|",pt_join(t.dir,"leaf.key"),"|-tls1_3|-www|-quiet"),124) in
+    using server=process_start(bd_find_tool("openssl"),args,dv_environment(md_words())) in
+    if !nw_wait_port(port,6000) then (let s=nw_poll(server,nw_child()) in concat("s_server did not start: ",s.errors,"\n")) else
+    let out=h2_run(t,port,"GET:/|GET:/") in
+    h2_pass(nw_note("",out.ok && h2_expect(h2_result(out.output,0),200,"http/1.1",h2_any(),1,-1) &&
+      h2_expect(h2_result(out.output,1),200,"http/1.1",h2_any(),2,-1),concat("s_server: ",h2_show(out))),
+      "fallback to HTTP/1.1 (server without ALPN)")
+
+; ---- The scripted HTTP/2 server ------------------------------------------
+
+; A scripted result: status and body, with the request echoed in x-neo-request.
+fn h2_answered(borrow out:H2Out, k:i64, borrow body:Arr u8 _, port:i64) -> bool
+  = let r=h2_result(out.output,k) in
+    h2_expect(r,200,"h2",h2_body(body),-1,-1) && str_starts(h2_header(r,"x-neo-request"),concat(r.method," ",r.path," localhost:",int_text(port)," https"))
+fn h2_failed(borrow out:H2Out, k:i64, code:i64) -> bool = h2_result(out.output,k).error==code
+fn h2_connections(borrow out:H2Out, connections:i64) -> bool
+  = nw_int(h2_field(h2_result(out.output,h2_results(out.output)-1),"connections"))==connections
+
+effect fn h2_scripted_cases(borrow t:H2, port:i64) -> Arr u8 _
+  = let a=h2_run(t,port,"GET:/ping|GET:/padded|GET:/trailers|GET:/early|GET:/size-update|GET:/size-again|POST:/plain:5000|GET:/plain") in
+    let first=a.ok && h2_answered(a,0,"pong",port) && h2_answered(a,1,"abcdefgh",port) && h2_answered(a,2,"body",port) &&
+      h2_answered(a,3,"final",port) && h2_answered(a,4,"",port) && h2_answered(a,5,"",port) && h2_answered(a,6,h2_pattern(5000,251),port) &&
+      h2_answered(a,7,"plain",port) && h2_connections(a,1) &&
+      tx_equal(h2_header(h2_result(a.output,0),"x-neo-ping"),"acked") && tx_equal(h2_header(h2_result(a.output,1),"x-neo-padded"),"yes") &&
+      tx_equal(h2_header(h2_result(a.output,3),"x-neo-final"),"yes") && len(h2_header(h2_result(a.output,2),"x-neo-trailer"))==0 &&
+      tx_equal(h2_header(h2_result(a.output,4),"x-neo-indexed"),"first") && tx_equal(h2_header(h2_result(a.output,5),"x-neo-indexed"),"first") &&
+      nw_ends(h2_header(h2_result(a.output,6),"x-neo-request")," 5000") in
+    let p=h2_pass(nw_note("",first,h2_show(a)),"PING, SETTINGS, padding, priority, CONTINUATION, trailers, 103, size updates") in
+    let b=h2_run(t,port,"GET:/plain|GET:/rst|GET:/plain") in
+    let q=h2_pass(nw_note("",b.ok && h2_answered(b,0,"plain",port) && h2_failed(b,1,104) && h2_answered(b,2,"plain",port) && h2_connections(b,1),h2_show(b)),
+      "RST_STREAM fails the request and keeps the connection") in
+    let c=h2_run(t,port,"POST:/refuse:10") in
+    let r=h2_pass(nw_note("",c.ok && h2_answered(c,0,h2_pattern(10,251),port),h2_show(c)),"REFUSED_STREAM retries a POST") in
+    let d=h2_run(t,port,"POST:/goaway-zero:0") in
+    let s=h2_pass(nw_note("",d.ok && h2_answered(d,0,"plain",port) && h2_connections(d,2),h2_show(d)),"GOAWAY before the stream retries on a new connection") in
+    let e=h2_run(t,port,"GET:/goaway-after|GET:/plain") in
+    let u=h2_pass(nw_note("",e.ok && h2_answered(e,0,"",port) && h2_answered(e,1,"plain",port) && h2_connections(e,2),h2_show(e)),
+      "GOAWAY after the stream: the next request reconnects") in
+    let f=h2_run(t,port,"GET:/bad-frame|GET:/plain") in
+    let v=h2_pass(nw_note("",f.ok && h2_failed(f,0,71) && h2_answered(f,1,"plain",port) && h2_connections(f,2),h2_show(f)),
+      "connection error (DATA on stream 0), then a new connection") in
+    let g=h2_run(t,port,"GET:/uppercase|GET:/plain") in
+    let w=h2_pass(nw_note("",g.ok && h2_failed(g,0,71) && h2_answered(g,1,"plain",port) && h2_connections(g,1),h2_show(g)),
+      "malformed response field fails the stream only") in
+    concat(p,q,r,s,u,v,w)
+
+; Occurrences of needle (which may overlap: "\nline\n" on consecutive lines).
+fn h2_count(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (at=nw_find_from(text,needle,0), count=0) while at>=0 next (nw_find_from(text,needle,at+1),count+1) yield count
+effect fn h2_scripted(borrow t:H2) -> Arr u8 _
+  = let args=push(push(push(push(push(push(md_words(),"-mode"),"h2script"),"-cert"),pt_join(t.dir,"leaf.pem")),"-key"),pt_join(t.dir,"leaf.key")) in
+    using peer=process_start(t.peer,args,dv_environment(md_words())) in
+    let up=nw_await(peer,nw_child(),"\n",10000) in let port=nw_peer_port(up) in
+    if port<=0 then concat("the scripted server did not start: ",up.errors,"\n") else
+    let problems=h2_scripted_cases(t,port) in
+    let done=nw_peer_finish(peer,up) in
+    let refused=h2_count(done.output,"\nrequest POST /refuse\n") in
+    nw_note(nw_note(problems,refused==2,concat("/refuse was requested ",int_text(refused)," times, not twice\n")),
+      !nw_contains(done.output,"\nerror ") && nw_contains(done.output,"\ndone\n"),concat("scripted server: ",tx_repr(done.output,true),"\n"))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("http2") in let client=pt_join(dir,"http2") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/language_http2.neo"),client,md_words()) in
+    let certificates=nw_certificates(dir) in
+    let server=pt_join(dir,"http2-server") in
+    let go=nw_tool("go",push(push(push(push(push(md_words(),"build"),"-trimpath"),"-o"),server),pt_join(tools.here,"../http2_server.go")),
+      push(push(md_words(),"GOWORK=off"),"CGO_ENABLED=0")) in
+    let t=H2 { dir=dir, client=client, go=server, peer=nw_build_peer(tools,dir) } in
+    let a=h2_with_go(t,false) in let ac=dv_expect(len(a)==0,concat("Go net/http, h2:\n",a)) in
+    let b=h2_with_go(t,true) in let bc=dv_expect(len(b)==0,concat("Go net/http, http/1.1:\n",b)) in
+    let c=h2_openssl(t) in let cc=dv_expect(len(c)==0,c) in
+    let d=h2_scripted(t) in let dc=dv_expect(len(d)==0,concat("scripted HTTP/2 server:\n",d)) in
+    dv_clean(dir)

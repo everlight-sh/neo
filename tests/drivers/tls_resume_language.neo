@@ -1,0 +1,101 @@
+; tls_resume_language.py: TLS 1.3 session resumption (PSK tickets) in
+; tests/fixtures/language_tls_resume.neo against openssl s_server -www and Go
+; net/http (tests/http2_server.go). A chain of connections: a full handshake
+; that receives a ticket, a resumed one, a tampered and an expired ticket (both
+; fall back to a full handshake), a ticket offered to another host name (not
+; offered) and to the same name spelled differently (resumed), and a wrong PSK
+; whose binder the server rejects. OpenSSL variants: default tickets, three per
+; connection, a HelloRetryRequest for P-256, a stateless cookie, AES-128-GCM,
+; ChaCha20-Poly1305 and no tickets. An HttpClient resumes on every reconnect
+; until http_client_close forgets its ticket.
+import "std:io"
+import "std:process"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; The rest of the line that starts with "LABEL " ("" when missing).
+fn tr_hop(borrow output:Arr u8 _, borrow label:Arr u8 _) -> Arr u8 _
+  = let lines=nw_split(output,10) in
+    loop (i=0, found=tx_empty()) while i<len(lines) && len(found)==0
+      next (i+1,let line=md_word(lines,i) in if str_starts(line,concat(label," ")) then nw_after(line,len(label)+1) else tx_empty()) yield found
+; The value of key=value among a hop's fields.
+fn tr_field(borrow hop:Arr u8 _, borrow key:Arr u8 _) -> Arr u8 _
+  = let words=nw_split(hop,32) in
+    loop (i=0, found=tx_empty()) while i<len(words) && len(found)==0
+      next (i+1,let w=md_word(words,i) in if str_starts(w,concat(key,"=")) then nw_after(w,len(key)+1) else tx_empty()) yield found
+
+type TrRun = { output:Arr u8 _, ok:bool }
+effect fn tr_fixture(borrow binary:Arr u8 _, port:i64, borrow dir:Arr u8 _, borrow mode:Arr u8 _, borrow path:Arr u8 _) -> TrRun
+  = let result=dv_run(binary,push(push(push(push(md_words(),int_text(port)),pt_join(dir,"ca.der")),mode),path),md_words(),"",120000,1048576) in
+    TrRun { output=if result.ok && result.code==0 then result.output else nt_diagnostic(result), ok=result.ok && result.code==0 }
+
+; One expected hop: resumed flag and what the server's page says (server_view).
+fn tr_check(borrow output:Arr u8 _, borrow label:Arr u8 _, borrow resumed:Arr u8 _, borrow seen:Arr u8 _, server_view:bool,
+            borrow suite:Arr u8 _, borrow group:Arr u8 _) -> bool
+  = let hop=tr_hop(output,label) in
+    len(hop)>0 && !str_starts(hop,"rejected:") && tx_equal(tr_field(hop,"resumed"),resumed) && tx_equal(tr_field(hop,"ticket"),"1") &&
+    tx_equal(tr_field(hop,"server"),if server_view then seen else "-") && nw_contains(hop," 200 ") &&
+    (len(suite)==0 || tx_equal(tr_field(hop,"suite"),suite)) && (len(group)==0 || tx_equal(tr_field(hop,"group"),group))
+fn tr_chain_ok(borrow output:Arr u8 _, server_view:bool, borrow suite:Arr u8 _, borrow group:Arr u8 _) -> bool
+  = tr_check(output,"full","0","new",server_view,suite,group) && tr_check(output,"resumed","1","reused",server_view,suite,group) &&
+    tr_check(output,"tampered","0","new",server_view,suite,group) && tr_check(output,"expired","0","new",server_view,suite,group) &&
+    tr_check(output,"other-host","0","new",server_view,suite,group) && tr_check(output,"same-host","1","reused",server_view,suite,group) &&
+    str_starts(tr_hop(output,"wrong-psk"),"rejected")
+fn tr_client_ok(borrow output:Arr u8 _) -> bool
+  = tx_equal(output,concat("200 connections=1 resumptions=0\n200 connections=2 resumptions=1\n200 connections=3 resumptions=2\n",
+      "200 connections=4 resumptions=3\n200 connections=5 resumptions=3\n200 connections=6 resumptions=4\n"))
+
+; openssl s_server -www on a fresh port with options ("|"-separated); kind is
+; "chain", "client" or "none" (no tickets).
+effect fn tr_openssl(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow options:Arr u8 _, borrow kind:Arr u8 _,
+                     borrow suite:Arr u8 _, borrow group:Arr u8 _) -> unit
+  = let port=nw_port() in
+    let args=push(push(push(push(push(push(push(push(push(push(md_words(),"s_server"),"-accept"),int_text(port)),"-cert"),pt_join(dir,"leaf.pem")),
+      "-key"),pt_join(dir,"leaf.key")),"-tls1_3"),"-www"),"-quiet") in
+    let extra=if len(options)>0 then nw_split(options,124) else md_words() in
+    let args=loop (i=0, out=args) while i<len(extra) next (i+1,push(out,md_word(extra,i))) yield out in
+    let run=(using server=process_start(bd_find_tool("openssl"),args,dv_environment(md_words())) in
+      if !nw_wait_port(port,6000) then (let s=nw_poll(server,nw_child()) in TrRun { output=concat("s_server did not start: ",s.errors), ok=false }) else
+      tr_fixture(binary,port,dir,if tx_equal(kind,"client") then "client" else "tls","/")) in
+    let ok=if tx_equal(kind,"client") then run.ok && tr_client_ok(run.output)
+      else if tx_equal(kind,"none") then run.ok && tx_equal(tr_field(tr_hop(run.output,"full"),"ticket"),"0") &&
+        tx_equal(tr_field(tr_hop(run.output,"resumed"),"resumed"),"0") && tx_equal(tr_field(tr_hop(run.output,"resumed"),"server"),"new")
+      else run.ok && tr_chain_ok(run.output,true,suite,group) in
+    let checked=dv_expect(ok,concat(name,": ",run.output)) in
+    let shown=print_out(concat("PASS ",name,if tx_equal(kind,"client") then ": resumptions 0, 1, 2, 3, 3, 4 (the 5th request follows http_client_close)\n"
+      else if tx_equal(kind,"none") then ": every connection is a full handshake\n" else ": resumed; tampered, expired fall back; wrong PSK rejected\n")) in noop()
+
+; Go net/http over HTTP/1.1 (-h1: the chain and the client) or h2 (the client).
+effect fn tr_go(borrow binary:Arr u8 _, borrow server:Arr u8 _, borrow dir:Arr u8 _, h1:bool) -> unit
+  = let args=push(push(push(push(md_words(),"-cert"),pt_join(dir,"leaf.pem")),"-key"),pt_join(dir,"leaf.key")) in
+    let problems=(using go=process_start(server,if h1 then push(args,"-h1") else args,dv_environment(md_words())) in
+      let up=nw_await(go,nw_child(),"\n",10000) in let port=nw_int(str_trim(up.output)) in
+      let chain=if h1 then tr_fixture(binary,port,dir,"tls","/hello") else TrRun { output=tx_empty(), ok=true } in
+      let client=tr_fixture(binary,port,dir,"client","/hello") in
+      nw_note(nw_note("",!h1 || (chain.ok && tr_chain_ok(chain.output,false,"","")),concat("chain: ",chain.output)),
+        client.ok && tr_client_ok(client.output),concat("client: ",client.output))) in
+    let checked=dv_expect(len(problems)==0,concat("Go net/http: ",problems)) in
+    let a=if h1 then print_out("PASS Go net/http: resumed; tampered, expired fall back; wrong PSK rejected\n") else int_ok(0) in
+    let shown=print_out(concat("PASS HttpClient against Go net/http (",if h1 then "HTTP/1.1" else "h2","): resumptions 0, 1, 2, 3, 3, 4 (the 5th request follows http_client_close)\n")) in noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("tls-resume") in let binary=pt_join(dir,"tls-resume") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/language_tls_resume.neo"),binary,md_words()) in
+    let certificates=nw_certificates(dir) in
+    let a=tr_openssl(binary,dir,"OpenSSL, default tickets","","chain","","29") in
+    let b=tr_openssl(binary,dir,"OpenSSL, three tickets per connection","-num_tickets|3","chain","","29") in
+    let c=tr_openssl(binary,dir,"OpenSSL, P-256 only: HelloRetryRequest with a PSK","-groups|P-256","chain","","23") in
+    let d=tr_openssl(binary,dir,"OpenSSL, stateless cookie","-stateless","chain","","29") in
+    let e=tr_openssl(binary,dir,"OpenSSL, AES-128-GCM","-ciphersuites|TLS_AES_128_GCM_SHA256","chain","4865","29") in
+    let f=tr_openssl(binary,dir,"OpenSSL, ChaCha20-Poly1305","-ciphersuites|TLS_CHACHA20_POLY1305_SHA256","chain","4867","29") in
+    let g=tr_openssl(binary,dir,"OpenSSL without tickets","-num_tickets|0","none","","") in
+    let h=tr_openssl(binary,dir,"HttpClient against OpenSSL","","client","","") in
+    let server=pt_join(dir,"http2-server") in
+    let go=nw_tool("go",push(push(push(push(push(md_words(),"build"),"-trimpath"),"-o"),server),pt_join(tools.here,"../http2_server.go")),
+      push(push(md_words(),"GOWORK=off"),"CGO_ENABLED=0")) in
+    let i=tr_go(binary,server,dir,true) in let j=tr_go(binary,server,dir,false) in
+    dv_clean(dir)

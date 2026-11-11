@@ -1,0 +1,14 @@
+; SipHash-2-4 (std:hash hash_bytes) over bytes 0..n-1 for n = 0..63 with the
+; key 00 01 .. 0f: the 64 published vectors (tests/vectors/test_hash/siphash.out).
+import "std:hash"
+import "std:io"
+
+fn sv_digit(d:i64) -> u8 = u8(if d<10 then 48+d else 87+d)
+; The 64-bit result as 16 hex digits, most significant first, and a newline.
+fn sv_hex(value:i64) -> Arr u8 _
+  = arr(i in 0..17) if i==16 then u8(10) else sv_digit(bit_and(shift_right(value,60-4*i),15))
+
+effect(fs) fn main() -> unit
+  = let seed0=506097522914230528 in let seed1=1084818905618843912 in
+    let lines=loop (n:i64{n>=0}=0, out="") while n<64 next (n+1,concat(out,sv_hex(hash_bytes(arr(i in 0..n) u8(bit_and(i,255)),seed0,seed1)))) yield out in
+    let printed=print_out(lines) in noop()

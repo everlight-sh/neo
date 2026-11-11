@@ -1,3 +1,6 @@
+; Provenance: the regions between "; generated: begin NAME" and "; generated: end NAME"
+; were written by tests/generate_crypto_fields.py, which was removed with the
+; Python tests; it is in the v0.2.3 tag. Edit those regions by hand now.
 import "std:strings"
 
 type Sha256State = { a:i64,b:i64,c:i64,d:i64,e:i64,f:i64,g:i64,h:i64 }

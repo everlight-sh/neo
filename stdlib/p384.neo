@@ -1,3 +1,6 @@
+; Provenance: the regions between "; generated: begin NAME" and "; generated: end NAME"
+; were written by tests/generate_p384_fields.py, which was removed with the
+; Python tests; it is in the v0.2.3 tag. Edit those regions by hand now.
 import "std:sha256"
 import "std:sha512"
 import "std:der"
@@ -7,8 +10,8 @@ import "std:p256"
 ; P-256 with digests other than the SHA-256 path of std:p256 (which does the
 ; P-256 arithmetic). Field and order values are records of six unsigned 64-bit
 ; limbs (no allocation per operation) in Montgomery form with R = 2^384, fully
-; reduced between operations; tests/generate_p384_fields.py writes the
-; unrolled products and the constants. Limb arithmetic is exact: wrapping
+; reduced between operations; tests/generate_p384_fields.py (v0.2.3 tag) wrote
+; the unrolled products and the constants. Limb arithmetic is exact: wrapping
 ; sums with unsigned comparisons for carries, and wrapping_mul/mul_high for
 ; the two words of each 128-bit product.
 ; Verification works only on public data, so it uses ordinary branches, NAF

@@ -1,9 +1,12 @@
+; Provenance: the regions between "; generated: begin NAME" and "; generated: end NAME"
+; were written by tests/generate_crypto_fields.py, which was removed with the
+; Python tests; it is in the v0.2.3 tag. Edit those regions by hand now.
 import "std:sha256"
 
 ; X25519 (RFC 7748). Field elements are records of five unsigned limbs in radix
 ; 2^51, so field operations allocate nothing. Products are 128-bit columns of
-; hi and lo words (mul_high and wrapping_mul); the unrolled products come from
-; tests/generate_crypto_fields.py. Limbs below 2^53 keep every column below
+; hi and lo words (mul_high and wrapping_mul); the unrolled products came from
+; tests/generate_crypto_fields.py (v0.2.3 tag). Limbs below 2^53 keep every column below
 ; 2^113. The ladder swaps with masks and runs a fixed 255 steps: no branch or
 ; address depends on the scalar, and carries are compares LLVM lowers to adc.
 type XFe = { f0:i64,f1:i64,f2:i64,f3:i64,f4:i64 }

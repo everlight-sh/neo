@@ -1,0 +1,313 @@
+; http_smoke.py: examples/http.neo with 4 workers on the default backend
+; (io_uring on x86_64 Linux), 4 workers on epoll, and 1 worker: endpoints and
+; keep-alive framing against the reference stencil checksums, 100 concurrent
+; requests, 512 simultaneous connections, slow readers, a fragmented POST with a
+; pipelined GET, 512 pipelined requests, ready-batch close and slot compaction,
+; backpressure, refused body framing, a fragmented chunked request, then
+; bench/http/protocol_test.neo, the worker count and whether an io_uring ring is
+; open.
+import "std:arena"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn hs_hello() -> Arr u8 _ = "Hello, World!"
+fn hs_get(borrow path:Arr u8 _, borrow extra:Arr u8 _) -> Arr u8 _ = concat("GET ",path," HTTP/1.1\r\nHost: x\r\n",extra,"\r\n")
+fn hs_show(borrow wire:Arr u8 _) -> Arr u8 _ = tx_repr(if len(wire)>240 then pt_slice(wire,0,240) else wire,true)
+fn hs_count(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (at=nw_find_from(text,needle,0), count=0) while at>=0
+      next (nw_find_from(text,needle,at+len(needle)),count+1) yield count
+; Prints "label: PASS" when a section found no problems.
+effect fn hs_section(borrow problems:Arr u8 _, borrow label:Arr u8 _) -> Arr u8 _
+  = if len(problems)==0 then (let shown=print_out(concat(label,": PASS\n")) in tx_empty()) else concat(label,":\n",problems)
+
+; SO_RCVBUF on a connected socket.
+effect(net,unsafe) fn hs_rcvbuf(socket:Socket, size:i64) -> unit
+  = let fd=rt_handle_fd(socket_identity(socket),2) in if fd<0 then noop() else
+    let value=stack_alloc(8) in let set=store_i32(value,0,i32(size)) in let done=rt_setsockopt(fd,1,8,value,4) in noop()
+; Whether the peer's next read is EOF.
+effect(net,time) fn hs_at_eof(socket:Socket, deadline:i64) -> bool
+  = let part=socket_read(socket,deadline) in part.ok && len(part.value)==0
+
+; ---- Many connections held in an arena -----------------------------------
+
+type HsSock = { socket:Ref<Socket> }
+effect fn hs_open(arena:Arena, port:i64, deadline:i64) -> HsSock
+  = using socket=tcp_connect_ipv4("127.0.0.1",port,deadline) in HsSock { socket=adopt(socket,arena) }
+; n (at least one) new connections.
+effect fn hs_open_many(arena:Arena, port:i64, n:i64, deadline:i64) -> Arr HsSock _
+  = let first=hs_open(arena,port,deadline) in
+    loop (i=1, out=arr(j in 0..1) first) while i<n next (i+1,push(out,hs_open(arena,port,deadline))) yield out
+; Sends request on every connection: how many writes succeeded.
+effect fn hs_send_all(borrow clients:Arr HsSock _, borrow request:Arr u8 _, deadline:i64) -> i64
+  = loop (i : i64{i >= 0} = 0, sent=0) while i<len(clients)
+      next (i+1,let w=socket_write(borrow_ref(clients[i].socket),request,deadline) in if w.ok then sent+1 else sent) yield sent
+
+; What a connection sent until it ended with needle, closed (eof) or failed.
+type HsReply = { got:Arr u8 _, eof:bool, error:bool }
+effect(net,time) fn hs_reply_step(socket:Socket, move r:HsReply, deadline:i64) -> HsReply
+  = let part=socket_read(socket,deadline) in
+    if !part.ok then r with { error=true } else if len(part.value)==0 then r with { eof=true } else r with { got=concat(r.got,part.value) }
+effect(net,time) fn hs_reply(socket:Socket, borrow needle:Arr u8 _, deadline:i64) -> HsReply
+  = loop (r=HsReply { got=tx_empty(), eof=false, error=false }) while !r.eof && !r.error && !nw_ends(r.got,needle)
+      next (hs_reply_step(socket,r,deadline)) yield r
+
+; n connections at once, then one GET on each: how many were answered. A
+; reset or a failed connect leaves one unanswered (the kernel resets what
+; overflows the listen queue); a connection closed without a full response is
+; a problem.
+type HsMany = { answered:i64, problems:Arr u8 _ }
+effect fn hs_tally(borrow c:HsSock, move m:HsMany, deadline:i64) -> HsMany
+  = let r=hs_reply(borrow_ref(c.socket),hs_hello(),deadline) in
+    if nw_ends(r.got,hs_hello()) then m with { answered=m.answered+1 }
+    else if r.eof then m with { problems=concat(m.problems,"a connection closed after ",hs_show(r.got),"\n") } else m
+effect fn hs_many(port:i64, n:i64) -> HsMany
+  = using arena=new_arena(n+8) in let deadline=deadline_after(20000) in let d=deadline.value in
+    let clients=hs_open_many(arena,port,n,d) in
+    let sent=hs_send_all(clients,hs_get("/",""),d) in
+    loop (i : i64{i >= 0} = 0, m=HsMany { answered=0, problems=tx_empty() }) while i<len(clients)
+      next (i+1,hs_tally(clients[i],m,d)) yield m
+
+effect fn hs_concurrent(port:i64) -> Arr u8 _
+  = let m=hs_many(port,100) in nw_note(m.problems,m.answered==100,concat(int_text(m.answered)," of 100 concurrent requests answered"))
+
+; 512 at once; unanswered connections are retried (up to five attempts).
+type HsBurst = { attempt:i64, left:i64, problems:Arr u8 _ }
+effect fn hs_burst_step(port:i64, move b:HsBurst) -> HsBurst
+  = let m=hs_many(port,b.left) in let paused=if m.answered<b.left then sleep_ms(200) else int_ok(0) in
+    HsBurst { attempt=b.attempt+1, left=b.left-m.answered, problems=concat(b.problems,m.problems) }
+effect fn hs_burst(port:i64) -> Arr u8 _
+  = let b=loop (b=HsBurst { attempt=0, left=512, problems=tx_empty() }) while b.attempt<5 && b.left>0 && len(b.problems)==0
+      next (hs_burst_step(port,b)) yield b in
+    nw_note(b.problems,b.left==0,concat(int_text(b.left)," of 512 simultaneous connections unanswered after ",int_text(b.attempt)," attempts"))
+
+; Eight clients with a 2 KiB receive buffer ask for a large page and do not read.
+effect fn hs_slow_readers(port:i64) -> Arr u8 _
+  = using arena=new_arena(16) in let deadline=deadline_after(10000) in
+    let clients=hs_open_many(arena,port,8,deadline.value) in
+    let shrunk=loop (i : i64{i >= 0} = 0) while i<len(clients) next (let s=hs_rcvbuf(borrow_ref(clients[i].socket),2048) in i+1) yield i in
+    let sent=hs_send_all(clients,hs_get("/page/1000",""),deadline.value) in
+    let paused=sleep_ms(50) in
+    nw_note(nw_note("",sent==8,"a slow reader's request was not sent"),nw_get_is(port,"/",200,hs_hello()),
+      "a request was not answered while slow readers held large responses")
+
+; ---- Endpoints on one keep-alive connection ------------------------------
+
+; The connection (reopened after the server closes it), the bytes read past
+; the last response, and the problems so far.
+type HsSession = { socket:Ref<Socket>, pending:Arr u8 _, open:bool, problems:Arr u8 _ }
+; The JSON number after "energy": is finite (digits, sign, point, exponent).
+fn hs_finite(borrow body:Arr u8 _) -> bool
+  = let at=str_find(body,"\"energy\":") in if !at.present then false else
+    let tail=nw_after(body,at.value+9) in let end=str_find(tail,"}") in
+    let value=pt_slice(tail,0,if end.present then end.value else len(tail)) in
+    len(value)>0 && loop (i=0, ok=true) while ok && i<len(value)
+      next (i+1,let c=tx_byte(value,i) in (c>=48 && c<=57) || c==46 || c==45 || c==43 || c==101 || c==69) yield ok
+; mode 0: the body is expected; 1: n-body JSON for n=10, steps=2; 2: an HTML
+; page with expected rows; 3: any body.
+fn hs_body_ok(borrow body:Arr u8 _, mode:i64, borrow expected:Arr u8 _) -> bool
+  = if mode==0 then tx_equal(body,expected)
+    else if mode==1 then nw_contains(body,"\"n\":10") && nw_contains(body,"\"steps\":2") && hs_finite(body)
+    else if mode==2 then str_starts(body,"<!DOCTYPE html>") && hs_count(body,"<tr class=")==nw_int(expected)
+    else true
+effect fn hs_ask(arena:Arena, port:i64, move s:HsSession, borrow request:Arr u8 _, status:i64, mode:i64, borrow expected:Arr u8 _) -> HsSession
+  = let deadline=deadline_after(10000) in
+    let held=if s.open then HsSock { socket=s.socket } else hs_open(arena,port,deadline.value) in
+    let pending=if s.open then s.pending else tx_empty() in
+    let sent=socket_write(borrow_ref(held.socket),request,deadline.value) in
+    let read=nw_read_response(borrow_ref(held.socket),pending,deadline.value,false) in
+    let ok=sent.ok && read.response.complete && read.response.status==status && len(nw_header(read.response.head,"content-length"))>0 &&
+      hs_body_ok(read.response.body,mode,expected) in
+    let problems=nw_note(s.problems,ok,concat(hs_show(request)," -> ",int_text(read.response.status)," ",hs_show(read.response.body),"\n")) in
+    let closing=read.closed || nw_contains(nw_lower(nw_header(read.response.head,"connection")),"close") in
+    HsSession { socket=held.socket, pending=read.response.rest, open=!closing, problems=problems }
+fn hs_post(borrow path:Arr u8 _, borrow body:Arr u8 _) -> Arr u8 _
+  = concat("POST ",path," HTTP/1.1\r\nHost: x\r\nContent-Length: ",int_text(len(body)),"\r\n\r\n",body)
+; The stencil checksums are the reference values of http_smoke.py's checksum().
+effect fn hs_endpoints(port:i64) -> Arr u8 _
+  = using arena=new_arena(32) in let deadline=deadline_after(10000) in
+    let s0=HsSession { socket=hs_open(arena,port,deadline.value).socket, pending=tx_empty(), open=true, problems=tx_empty() } in
+    let s1=hs_ask(arena,port,s0,hs_get("/",""),200,0,hs_hello()) in
+    let s2=hs_ask(arena,port,s1,hs_get("/smooth/1",""),200,0,"{\"n\":1,\"passes\":32,\"checksum\":0}") in
+    let s3=hs_ask(arena,port,s2,hs_get("/smooth/10",""),200,0,"{\"n\":10,\"passes\":32,\"checksum\":4835164}") in
+    let s4=hs_ask(arena,port,s3,hs_get("/smooth/1000",""),200,0,"{\"n\":1000,\"passes\":32,\"checksum\":499795029}") in
+    let s5=hs_ask(arena,port,s4,hs_post("/nbody","{\"n\":10,\"steps\":2}"),200,1,"") in
+    let s6=hs_ask(arena,port,s5,hs_get("/page/3",""),200,2,"3") in
+    let s7=hs_ask(arena,port,s6,hs_get("/page/1000",""),200,2,"1000") in
+    let s8=hs_ask(arena,port,s7,hs_get("/missing",""),404,0,"Not Found") in
+    let s9=hs_ask(arena,port,s8,hs_post("/","hello"),405,0,"") in
+    let s10=hs_ask(arena,port,s9,hs_get("/smooth/0",""),400,3,"") in
+    let s11=hs_ask(arena,port,s10,hs_get("/page/0",""),400,3,"") in
+    s11.problems
+
+; ---- One connection, several requests -----------------------------------
+
+; A fragmented POST body followed by a pipelined GET keeps both the body
+; boundary and the next request; "Connection: Keep-Alive, Close" closes.
+effect fn hs_fragmented(port:i64) -> Arr u8 _
+  = let deadline=deadline_after(5000) in let d=deadline.value in
+    using s=tcp_connect_ipv4("127.0.0.1",port,d) in
+    let body="{\"n\":10,\"steps\":2}" in
+    let a=socket_write(s,concat("POST /nbody HTTP/1.1\r\nHost: x\r\ncontent-length: ",int_text(len(body)),"\r\n\r\n"),d) in
+    let b=nw_send_slowly(s,body,1,1,d) in
+    let c=socket_write(s,hs_get("/","Connection: Keep-Alive, Close\r\n"),d) in
+    let all=nw_until_closed(s,d) in
+    if !all.ok then concat("the connection failed: ",all.error.message,"\n") else
+    let first=nw_response(all.value,false) in let second=nw_response(first.rest,false) in
+    nw_note("",a.ok && b && c.ok && first.complete && first.status==200 && nw_contains(first.body,"energy") &&
+      second.complete && second.status==200 && nw_contains(second.body,hs_hello()) && len(second.rest)==0,concat("responses: ",hs_show(all.value)))
+
+; 512 pipelined requests in one write, the last with Connection: close.
+type HsWalk = { rest:Arr u8 _, count:i64, ok:bool }
+fn hs_walk_step(move w:HsWalk) -> HsWalk
+  = let r=nw_response(w.rest,false) in
+    let good=r.complete && r.status==200 && tx_equal(r.body,hs_hello()) && len(nw_header(r.head,"content-length"))>0 in
+    HsWalk { rest=if good then r.rest else tx_empty(), count=w.count+1, ok=w.ok && good }
+effect fn hs_pipelined(port:i64) -> Arr u8 _
+  = let request=loop (i=0, out=tx_empty()) while i<511 next (i+1,concat(out,hs_get("/",""))) yield out in
+    let all=nw_exchange(port,concat(request,hs_get("/","Connection: close\r\n")),20000) in
+    if !all.ok then concat("the pipelined connection failed: ",all.error.message,"\n") else
+    let w=loop (w=HsWalk { rest=all.value, count=0, ok=true }) while w.ok && len(w.rest)>0 next (hs_walk_step(w)) yield w in
+    nw_note("",w.ok && w.count==512,concat("only ",int_text(if w.ok then w.count else w.count-1)," good responses of 512"))
+
+; Closing half a ready batch moves surviving dense slots; refilling them
+; sixteen times catches stale event tokens and descriptor reuse.
+type HsSweep = { survivors:Arr HsSock _, problems:Arr u8 _ }
+effect fn hs_sweep(borrow c:HsSock, i:i64, turn:i64, move s:HsSweep, deadline:i64) -> HsSweep
+  = let n=3+(i+turn)%2 in let closing=i%2==turn%2 in
+    let read=nw_read_response(borrow_ref(c.socket),"",deadline,false) in
+    let rows=hs_count(read.response.body,"<tr class=") in
+    let ended=if closing then read.closed || hs_at_eof(borrow_ref(c.socket),deadline) else true in
+    let ok=read.response.complete && read.response.status==200 && rows==n && len(read.response.rest)==0 && ended in
+    let problems=nw_note(s.problems,ok,concat("turn ",int_text(turn)," client ",int_text(i),": status ",int_text(read.response.status),", ",
+      int_text(rows)," rows of ",int_text(n),if ended then "" else ", not closed","\n")) in
+    if closing then (let released=ref_release(c.socket) in HsSweep { survivors=s.survivors, problems=problems })
+    else HsSweep { survivors=push(s.survivors,c), problems=problems }
+type HsTurn = { clients:Arr HsSock _, problems:Arr u8 _ }
+effect fn hs_turn(arena:Arena, port:i64, turn:i64, move t:HsTurn) -> HsTurn
+  = let deadline=deadline_after(10000) in let d=deadline.value in
+    let clients=loop (out=t.clients) while len(out)<80 next (push(out,hs_open(arena,port,d))) yield out in
+    let sent=loop (i : i64{i >= 0} = 0, ok=true) while i<len(clients)
+      next (i+1,let n=3+(i+turn)%2 in let close=if i%2==turn%2 then "Connection: close\r\n" else "" in
+        let w=socket_write(borrow_ref(clients[i].socket),hs_get(concat("/page/",int_text(n)),close),d) in ok && w.ok) yield ok in
+    let swept=loop (i : i64{i >= 0} = 0, s=HsSweep { survivors=arr(j in 0..0) clients[j], problems=t.problems }) while i<len(clients)
+      next (i+1,hs_sweep(clients[i],i,turn,s,d)) yield s in
+    HsTurn { clients=swept.survivors, problems=nw_note(swept.problems,sent,concat("turn ",int_text(turn),": a request was not sent\n")) }
+effect fn hs_compaction(port:i64) -> Arr u8 _
+  = using arena=new_arena(1024) in let deadline=deadline_after(10000) in
+    let seed=hs_open(arena,port,deadline.value) in
+    let t=loop (turn=0, t=HsTurn { clients=arr(j in 0..1) seed, problems=tx_empty() }) while turn<16 && len(t.problems)==0
+      next (turn+1,hs_turn(arena,port,turn,t)) yield t in
+    t.problems
+
+; More output than the socket can queue forces write readiness: 80 large
+; pages and a final GET, with another client served meanwhile.
+type HsBack = { pending:Arr u8 _, count:i64, first:Arr u8 _, problems:Arr u8 _ }
+effect(net,time) fn hs_back_step(socket:Socket, move b:HsBack, deadline:i64) -> HsBack
+  = let read=nw_read_response(socket,b.pending,deadline,false) in
+    let ok=read.response.complete && read.response.status==200 &&
+      (if b.count==80 then tx_equal(read.response.body,hs_hello())
+       else if b.count==0 then hs_count(read.response.body,"<tr class=")==1000 else tx_equal(read.response.body,b.first)) in
+    let problems=nw_note(b.problems,ok,concat("response ",int_text(b.count),": status ",int_text(read.response.status),", ",
+      int_text(len(read.response.body))," bytes\n")) in
+    HsBack { first=if b.count==0 then pt_slice(read.response.body,0,len(read.response.body)) else b.first,
+      pending=read.response.rest, count=b.count+1, problems=problems }
+effect fn hs_backpressure(port:i64) -> Arr u8 _
+  = let deadline=deadline_after(30000) in let d=deadline.value in
+    using s=tcp_connect_ipv4("127.0.0.1",port,d) in
+    let shrunk=hs_rcvbuf(s,32768) in
+    let request=loop (i=0, out=tx_empty()) while i<80 next (i+1,concat(out,hs_get("/page/1000",""))) yield out in
+    let sent=socket_write(s,concat(request,hs_get("/","Connection: close\r\n")),d) in
+    let paused=sleep_ms(100) in
+    let other=nw_get_is(port,"/",200,hs_hello()) in
+    let b=loop (b=HsBack { pending=tx_empty(), count=0, first=tx_empty(), problems=tx_empty() }) while b.count<81 && len(b.problems)==0
+      next (hs_back_step(s,b,d)) yield b in
+    let ended=len(b.problems)==0 && len(b.pending)==0 && hs_at_eof(s,d) in
+    nw_note(nw_note(nw_note(b.problems,sent.ok,"the requests were not sent\n"),other,"another client was not answered during backpressure\n"),
+      ended || len(b.problems)>0,"the connection did not close after the last response\n")
+
+; Unsupported or ambiguous framing: 400 (413 over the size limit), Connection: close.
+effect fn hs_refused(port:i64, borrow headers:Arr u8 _, status:i64) -> Arr u8 _
+  = let wire=nw_exchange(port,concat("POST / HTTP/1.1\r\nHost: x\r\n",headers,"\r\n\r\n"),3000) in
+    nw_note("",wire.ok && str_starts(wire.value,concat("HTTP/1.1 ",int_text(status)," ")) && nw_ends(wire.value,"Connection: close\r\n\r\n"),
+      concat(tx_repr(headers,true),": ",if wire.ok then hs_show(wire.value) else wire.error.message,"\n"))
+effect fn hs_framing(port:i64) -> Arr u8 _
+  = concat(hs_refused(port,"Content-Length: -1",400),hs_refused(port,"Content-Length: 1\r\nContent-Length: 1",400),
+      hs_refused(port,"Transfer-Encoding: gzip",400),hs_refused(port,"Content-Length: 0\r\nTransfer-Encoding: chunked",400),
+      hs_refused(port,"Content-Length: 16777217",413),hs_refused(port,"Content-Length: 9999999999999999999999999",413))
+
+; A chunked POST split inside a chunk, then a pipelined GET that closes.
+effect fn hs_chunked(port:i64) -> Arr u8 _
+  = let deadline=deadline_after(5000) in let d=deadline.value in
+    using s=tcp_connect_ipv4("127.0.0.1",port,d) in
+    let a=socket_write(s,"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhe",d) in
+    let paused=sleep_ms(10) in
+    let b=socket_write(s,concat("llo\r\n0\r\n\r\n",hs_get("/","Connection: close\r\n")),d) in
+    let all=nw_until_closed(s,d) in
+    if !all.ok then concat("the connection failed: ",all.error.message,"\n") else
+    let first=nw_response(all.value,false) in let second=nw_response(first.rest,false) in
+    nw_note("",a.ok && b.ok && first.complete && first.status==405 && len(first.body)==0 && len(nw_header(first.head,"content-length"))>0 &&
+      second.complete && second.status==200 && tx_equal(second.body,hs_hello()) && len(second.rest)==0,concat("responses: ",hs_show(all.value),"\n"))
+
+effect fn hs_protocol(borrow protocol:Arr u8 _, port:i64) -> Arr u8 _
+  = let result=dv_run(protocol,push(md_words(),int_text(port)),md_words(),"",20000,1048576) in
+    nw_note("",result.ok && result.code==0 && nw_ends(result.output,"ALL OK\n"),concat(nt_diagnostic(result),"\n"))
+
+; ---- Worker processes and the backend ------------------------------------
+
+effect fn hs_children(pid:i64) -> Arr Arr u8 _ _
+  = let listed=fs_read(concat("/proc/",int_text(pid),"/task/",int_text(pid),"/children")) in
+    if !listed.ok || len(str_trim(listed.value))==0 then md_words() else nw_split(str_trim(listed.value),32)
+; Whether a process has an io_uring ring open.
+effect fn hs_ring(pid:i64) -> bool
+  = loop (fd=0, found=false) while !found && fd<4096
+      next (fd+1,let link=fs_readlink(concat("/proc/",int_text(pid),"/fd/",int_text(fd))) in link.ok && nw_contains(link.value,"io_uring")) yield found
+; Every worker has served by now, so a ring exists exactly when io_uring is in
+; use; with several workers the parent only supervises them.
+effect fn hs_workers(server:Process, workers:i64, uring:bool) -> Arr u8 _
+  = let state=process_status(server) in let pid=nw_process_pid(server) in let children=hs_children(pid) in
+    let ring=hs_ring(pid) || loop (i=0, hit=false) while i<len(children) next (i+1,hit || hs_ring(nw_int(md_word(children,i)))) yield hit in
+    nw_note(nw_note(nw_note("",state.ok && state.running,"the server exited\n"),
+      len(children)==(if workers==1 then 0 else workers),concat(int_text(len(children))," worker processes for ",int_text(workers)," workers\n")),
+      ring==uring,concat("io_uring ring open: ",if ring then "yes" else "no",", expected ",if uring then "yes" else "no","\n"))
+
+; backend 0: the default (io_uring on x86_64 Linux); 1: epoll.
+effect fn hs_run(borrow binary:Arr u8 _, borrow protocol:Arr u8 _, workers:i64, backend:i64) -> unit
+  = let port=nw_port() in
+    let threads=concat("NEO_THREADS=",int_text(workers)) in
+    let environment=if backend==1 then push(push(md_words(),threads),"NEO_HTTP_URING=0") else push(md_words(),threads) in
+    let name=concat(if backend==1 then "epoll backend" else "io_uring backend (default)",", ",int_text(workers)," worker(s)") in
+    let shown=print_out(concat("== ",name,"\n")) in
+    let problems=(using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(environment)) in
+      if !nw_wait_port(port,5000) then (let s=nw_poll(server,nw_child()) in concat("the server did not start: ",s.errors)) else
+      let a=hs_section(hs_endpoints(port),"Endpoints, framing, keep-alive, reference checksum, large HTML") in
+      let b=hs_section(hs_concurrent(port),"100 concurrent requests") in
+      let c=hs_section(hs_burst(port),"512 simultaneous connections") in
+      let e=hs_section(hs_slow_readers(port),"Slow readers do not block other clients") in
+      let f=hs_section(hs_fragmented(port),"Fragmented POST, case-insensitive headers, pipelined GET and close") in
+      let g=hs_section(hs_pipelined(port),"512 pipelined responses cross batch limits and preserve close/order") in
+      let h=hs_section(hs_compaction(port),"Ready-batch close, slot compaction and descriptor reuse") in
+      let k=hs_section(hs_backpressure(port),"Backpressure drains 80 large responses, resumes buffered work and closes") in
+      let m=hs_section(hs_framing(port),"Invalid, duplicate, overflowing and unsupported body framing") in
+      let n=hs_section(hs_chunked(port),"Fragmented chunked request preserves the next pipelined response") in
+      let p=hs_section(hs_protocol(protocol,port),"bench/http/protocol_test.neo") in
+      let q=hs_section(hs_workers(server,workers,backend==0),"Worker processes and backend") in
+      let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,nw_child(),3000) in
+      concat(a,b,c,e,f,g,h,k,m,n,p,q)) in
+    dv_expect(len(problems)==0,concat(name,":\n",problems))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("http-smoke") in
+    let binary=pt_join(dir,"http") in let protocol=pt_join(dir,"protocol-test") in
+    let a=dv_build(tools,pt_join(tools.here,"../../examples/http.neo"),binary,md_words()) in
+    let b=dv_build(tools,pt_join(tools.here,"../../bench/http/protocol_test.neo"),protocol,md_words()) in
+    let c=hs_run(binary,protocol,4,0) in let d=hs_run(binary,protocol,4,1) in let e=hs_run(binary,protocol,1,0) in
+    dv_clean(dir)

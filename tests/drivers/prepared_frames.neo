@@ -1,0 +1,76 @@
+; prepared_frames.py: the tests/fixtures/async_frames.neo server with one and
+; two workers. Prepared frames keep per-callback state and reset it per
+; request, a callback whose next wake passes during its own work finishes,
+; four backpressured 4 MiB responses survive cache eviction while fast
+; requests stay quick, and disconnects and shutdown release every callback.
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn pf_small() -> Arr u8 _ = "SHELLAAAAAAAAAAAAAAAEND"
+
+; /stats reports no subscribers within 2 s.
+effect fn pf_quiet(port:i64) -> bool
+  = let deadline=deadline_after(2000) in
+    loop (quiet=false) while !quiet && deadline_remaining(deadline.value)>0
+      next (let r=nw_get(port,"/stats","") in if nw_contains(r.body,"\"subscribers\":0}") then true else let paused=sleep_ms(10) in false)
+      yield quiet
+
+effect fn pf_frames(port:i64, count:i64) -> bool
+  = loop (i=0, ok=true) while i<count next (i+1, ok && nw_get_is(port,"/frames",200,pf_small())) yield ok
+
+; With the large responses unread: fast requests, then eviction.
+effect fn pf_middle(port:i64) -> Arr u8 _
+  = let paused=sleep_ms(300) in let start=nw_now_ms() in
+    let fast=loop (i=0, ok=true) while i<30 next (i+1, ok && nw_get_is(port,"/fast",200,"FAST")) yield ok in
+    let elapsed=nw_now_ms()-start in
+    let problems=nw_note(nw_note("",fast,"a /fast request failed"),elapsed<300,concat("30 fast requests took ",int_text(elapsed)," ms")) in
+    nw_note(problems,nw_get_is(port,"/evict",200,"EVICTED"),"/evict failed")
+
+; Opens count /large requests (one per recursion level) and reads their
+; headers. With read_bodies the innermost level runs pf_middle and each level
+; then reads its whole body; otherwise each level closes without reading.
+effect fn pf_large(port:i64, count:i64, read_bodies:bool, borrow expected:Arr u8 _) -> Arr u8 _
+  = if count<=0 then (if read_bodies then pf_middle(port) else tx_empty()) else
+    let deadline=deadline_after(10000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,"GET /large HTTP/1.1\r\nHost: localhost\r\n\r\n",deadline.value) in
+    let head=nw_read_until(socket,"\r\n\r\n",deadline.value) in
+    let inner=pf_large(port,count-1,read_bodies,expected) in
+    if !read_bodies then inner else
+    let read=nw_read_response(socket,head,deadline.value,false) in let body=read.response.body in
+    nw_note(inner,str_starts(head,"HTTP/1.1 200") && read.response.complete && tx_equal(body,expected),
+      concat("a large response ended after ",int_text(len(body))," body bytes: ",tx_repr(nw_after(body,len(body)-50),true)))
+
+effect fn pf_case(borrow binary:Arr u8 _, workers:i64) -> unit
+  = let port=nw_port() in let expected=concat("SHELL",arr(i in 0..4194304) u8(65),"END") in
+    let problems=(using server=process_start(binary,push(md_words(),int_text(port)),
+        dv_environment(push(md_words(),concat("NEO_THREADS=",int_text(workers))))) in
+      let up=nw_await(server,nw_child(),"neo: serving",5000) in
+      if !nw_contains(up.errors,"neo: serving") then concat("server did not start: ",up.errors,up.output) else
+      let p=nw_note("",pf_frames(port,8),"/frames failed") in
+      let p=nw_note(p,nw_get_is(port,"/late-wake",200,pf_small()),"/late-wake failed") in
+      let p=nw_note(p,pf_quiet(port),"retained callback after the small responses") in
+      let p=concat(p,pf_large(port,4,true,expected)) in
+      let p=nw_note(p,pf_quiet(port),"retained callback after the large responses") in
+      let p=nw_note(p,pf_frames(port,8),"/frames failed after eviction") in
+      let p=concat(p,pf_large(port,4,false,expected)) in
+      let p=nw_note(p,pf_quiet(port),"retained callback after disconnects") in
+      let start=nw_now_ms() in let signalled=process_signal(server,15) in
+      let done=nw_finish(server,up,2000) in let elapsed=nw_now_ms()-start in
+      nw_note(nw_note(p,!done.running && done.code==0,concat("server exit ",int_text(done.code),": ",done.errors)),
+        elapsed<1000,concat("shutdown took ",int_text(elapsed)," ms"))) in
+    let checked=dv_expect(len(problems)==0,concat(int_text(workers)," workers: ",problems)) in
+    let shown=print_out(concat("PASS ",int_text(workers)," workers: persistent state/reset, prepared fast writes, 4 backpressured 4 MiB bodies across cache eviction, responsive fast requests and disconnect/shutdown cleanup\n")) in noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("prepared-frames") in let binary=pt_join(dir,"async-frames") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/async_frames.neo"),binary,md_words()) in
+    let a=pf_case(binary,1) in let b=pf_case(binary,2) in
+    dv_clean(dir)

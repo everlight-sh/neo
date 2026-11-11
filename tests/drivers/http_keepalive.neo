@@ -1,0 +1,43 @@
+; http_keepalive.py: std:https_client's keep-alive HttpClient
+; (tests/fixtures/http_keepalive.neo) against the Go peer's HTTP/1.1 server
+; (tests/fixtures/network_peer.go -mode keepalive) over TCP and TLS 1.3: reuse,
+; a server-requested close, an idle connection closed without warning (a GET is
+; sent again on a new connection, a POST is not), a body over the limit and a
+; chunked body: 12 requests on exactly 5 connections.
+import "std:io"
+import "std:process"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; Status and body (or error:CODE), then the connections the client has opened;
+; line 9 is the POST over the silently closed connection, which fails at the
+; write or at the read.
+fn hk_expected() -> Arr u8 _
+  = "200 a 1\n200 b 1\n200 chunked! 1\n200 close 1\n200 a 2\n200 drop 2\n200 b 3\n200 drop 3\n*\n200 3 4\nerror:27 4\n200 a 5\n"
+fn hk_dead_post(borrow line:Arr u8 _) -> bool = tx_equal(line,"error:5 3") || tx_equal(line,"error:32 3") || tx_equal(line,"error:104 3")
+fn hk_matches(borrow output:Arr u8 _) -> bool
+  = let got=nw_split(output,10) in let want=nw_split(hk_expected(),10) in
+    len(got)==len(want) && loop (i=0, ok=true) while ok && i<len(want)
+      next (i+1,let w=md_word(want,i) in if tx_equal(w,"*") then hk_dead_post(md_word(got,i)) else tx_equal(md_word(got,i),w)) yield ok
+
+effect fn hk_case(borrow binary:Arr u8 _, borrow peer:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _, tls:bool) -> unit
+  = let problems=(using server=process_start(peer,nw_peer_args("keepalive",if tls then "1.3" else "",dir),dv_environment(md_words())) in
+      let up=nw_await(server,nw_child(),"\n",10000) in let port=nw_peer_port(up) in
+      let args=push(md_words(),int_text(port)) in
+      let result=dv_run(binary,if tls then push(args,pt_join(dir,"ca.der")) else args,md_words(),"",60000,1048576) in
+      let done=nw_peer_finish(server,up) in
+      nw_note(nw_note(nw_note("",result.ok && result.code==0 && hk_matches(result.output),concat("client: ",tx_repr(result.output,true)," ",nt_diagnostic(result))),
+        nw_contains(done.output,"\naccepted 5\n"),concat("expected 5 connections: ",done.output)),!nw_contains(done.output,"\nerror "),concat("peer: ",done.output))) in
+    let checked=dv_expect(len(problems)==0,concat(name,": ",problems)) in
+    let shown=print_out(concat("PASS keep-alive over ",name,": 12 requests on 5 connections; reuse, server close, silent close retried for GET and not for POST, body limit, chunked body\n")) in noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("http-keepalive") in let binary=pt_join(dir,"keepalive") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/http_keepalive.neo"),binary,md_words()) in
+    let certificates=nw_certificates(dir) in let peer=nw_build_peer(tools,dir) in
+    let a=hk_case(binary,peer,dir,"TCP",false) in let b=hk_case(binary,peer,dir,"TLS 1.3",true) in
+    dv_clean(dir)

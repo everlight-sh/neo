@@ -1,3 +1,449 @@
 # Native cases ported from the Python network tests (see tests/porting/README.md).
 [tool.neo]
 test-globs = []
+
+[[test]]
+name = "sha512-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/language_sha512.neo", "vectors/sha512_language/sha512.in", "SHA-512/384 and HMAC (FIPS 180-4, RFC 4231, hashlib)"]
+stdout = "SHA-512/384 and HMAC (FIPS 180-4, RFC 4231, hashlib): 155 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "agent-codecs-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/agent_codecs.neo", "vectors/agent_codecs/codecs.in", "decimal/binary64 conversion and strict Base64/Base64url"]
+stdout = "decimal/binary64 conversion and strict Base64/Base64url: 750 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "aes-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/language_aes.neo", "vectors/aes_language/aes.in", "AES-128 FIPS-197/GCM vectors and Go-oracle GCM, portable and fast paths"]
+stdout = "AES-128 FIPS-197/GCM vectors and Go-oracle GCM, portable and fast paths: 479 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "crypto-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/language_crypto.neo", "vectors/crypto_language/crypto.in", "SHA-1/SHA-256/HMAC/HKDF, ChaCha20-Poly1305, X25519 and RSA vs OpenSSL"]
+stdout = "SHA-1/SHA-256/HMAC/HKDF, ChaCha20-Poly1305, X25519 and RSA vs OpenSSL: 179 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "crypto-rfc-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/crypto_rfc.neo", "vectors/test_crypto/rfc.in", "HMAC, RFC 5869 HKDF and RFC 8439 ChaCha20-Poly1305"]
+stdout = "HMAC, RFC 5869 HKDF and RFC 8439 ChaCha20-Poly1305: 14 cases OK\n"
+timeout = 120
+
+[[test]]
+name = "siphash-vectors"
+file = "fixtures/siphash_vectors.neo"
+stdout-file = "vectors/test_hash/siphash.out"
+
+[[test]]
+name = "p256-montgomery"
+file = "drivers/p256_language.neo"
+stdout = "P-256 field/order Montgomery add/sub/multiply/inverse vs Python integers: 346 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "p256-ecdh-ecdsa"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/language_p256.neo", "vectors/p256_protocols/p256.in", "P-256 ECDH/ECDSA vs RFC 6979 and Go"]
+stdout = "P-256 ECDH/ECDSA vs RFC 6979 and Go: 95 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "p384-field-ecdsa"
+file = "drivers/p384_language.neo"
+stdout = "P-384 field/order Montgomery records: 1 cases OK\nP-384/P-256 public keys and ECDSA vs Go: 3 cases OK\n"
+timeout = 600
+
+[[test]]
+name = "deflate-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/deflate_language.neo", "vectors/deflate_language/deflate.in", "raw DEFLATE, zlib, gzip and Content-Encoding vs Python zlib"]
+stdout = "raw DEFLATE, zlib, gzip and Content-Encoding vs Python zlib: 145 cases OK\n"
+timeout = 600
+
+# http_data.py: the page data, checked once with Python's HTMLParser (one
+# <template data-web-data="rows-a_2">, its text the original JSON).
+[[test]]
+name = "http-data-inert"
+file = "fixtures/http_data.neo"
+args = ["0"]
+stdout-file = "vectors/http_data/page.out"
+
+[[test]]
+name = "http-data-empty-name"
+file = "fixtures/http_data.neo"
+args = ["1"]
+exit = 1
+stdout = ""
+
+[[test]]
+name = "http-data-quote-name"
+file = "fixtures/http_data.neo"
+args = ["2"]
+exit = 1
+stdout = ""
+
+[[test]]
+name = "http-data-long-name"
+file = "fixtures/http_data.neo"
+args = ["3"]
+exit = 1
+stdout = ""
+
+# reactor_language.py
+[[test]]
+name = "reactor"
+file = "fixtures/reactor.neo"
+stdout = "reactor OK\n"
+timeout = 10
+
+[[test]]
+name = "datagram"
+file = "fixtures/datagram.neo"
+stdout = "UDP OK\n"
+timeout = 10
+
+[[test]]
+name = "tls-x509-vectors"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/language_x509.neo", "vectors/tls_language/x509.in", "X.509 SANs, wildcards, validity, extensions, EKU, CA rules, signatures and malformed input"]
+stdout = "X.509 SANs, wildcards, validity, extensions, EKU, CA rules, signatures and malformed input: 205 cases OK\n"
+timeout = 300
+
+[[test]]
+name = "x509-web-chains"
+file = "drivers/network_vectors.neo"
+args = ["fixtures/x509_web.neo", "vectors/x509_web_language/x509.in", "X.509 web chain shapes and TLS 1.3 CertificateVerify"]
+stdout = "X.509 web chain shapes and TLS 1.3 CertificateVerify: 224 cases OK\n"
+timeout = 600
+
+# x509_web_language.py: every generated certificate parses with the expected
+# signature mode, key type and size (checked against openssl x509 -text).
+[[test]]
+name = "x509-web-bundle"
+file = "fixtures/x509_bundle.neo"
+stdin-file = "vectors/x509_web_language/bundle.pem"
+stdout-file = "vectors/x509_web_language/bundle.out"
+
+# network_language.py: DNS and HTTP/1.1 clients against forked UDP/TCP peers.
+[[test]]
+name = "network-language"
+file = "drivers/network_language.neo"
+stdout = "PASS DNS: UDP, compressed CNAME, ID/question validation, pointer cycles, fragmented TCP fallback, truncation and monotonic deadlines\nPASS HTTP: seven methods, HEAD, fixed/chunked/EOF framing, 1xx, malicious framing, early chunks and 4 MiB streamed through a bounded buffer\n"
+timeout = 300
+
+# async_tasks.py: a forked holder keeps the file lock for 250 ms.
+[[test]]
+name = "async-tasks"
+file = "drivers/async_tasks.neo"
+stdout = "PASS nested tasks, independent timer progress during a contended file lock, and normal resource cleanup\n"
+timeout = 120
+
+# http_async.py: deferred fragments, fast requests and graceful shutdown.
+[[test]]
+name = "http-async"
+file = "drivers/http_async.neo"
+stdout = "PASS 1 workers grace 150\nPASS 1 workers grace 2000\nPASS 2 workers grace 150\nPASS 2 workers grace 2000\nPASS 4 workers grace 150\nPASS 4 workers grace 2000\n"
+timeout = 300
+
+# prepared_frames.py: the async_frames.neo server under backpressure,
+# eviction, disconnects and shutdown; prepared_frames.neo checks the frame
+# cache itself (keys, bounded storage, eviction, fork ownership).
+[[test]]
+name = "prepared-frames"
+file = "drivers/prepared_frames.neo"
+stdout = "PASS 1 workers: persistent state/reset, prepared fast writes, 4 backpressured 4 MiB bodies across cache eviction, responsive fast requests and disconnect/shutdown cleanup\nPASS 2 workers: persistent state/reset, prepared fast writes, 4 backpressured 4 MiB bodies across cache eviction, responsive fast requests and disconnect/shutdown cleanup\n"
+timeout = 300
+
+[[test]]
+name = "prepared-frame-cache"
+file = "fixtures/prepared_frames.neo"
+stdout = "42\n"
+timeout = 60
+
+# async_pressure.py: streaming backpressure, admission and shutdown.
+[[test]]
+name = "async-pressure"
+file = "drivers/async_pressure.neo"
+stdout = "PASS root I/O-to-stream handoff, partial admission rollback, and root failure before headers\nPASS 8 backpressured 8 MiB streams do not stall fast requests\nPASS exact 256-task admission bound and cancellation of every admitted task\nPASS slow-reader deadlines release task and result memory\nPASS graceful shutdown cancels held socket/timer continuations by deadline\n"
+timeout = 300
+
+# http_handoff.py: 1024 short-lived binary echoes from 32 concurrent clients.
+[[test]]
+name = "http-handoff"
+file = "drivers/http_handoff.neo"
+stdout = "PASS 2 native workers: 1024 short-lived concurrent connections, binary echoes, no retries\nPASS 4 native workers: 1024 short-lived concurrent connections, binary echoes, no retries\n"
+timeout = 300
+
+# listener_release.py: a stopped server frees its port at once.
+[[test]]
+name = "listener-release"
+file = "drivers/listener_release.neo"
+stdout = "PASS io_uring #0: port bindable within 50 ms; restart serves\nPASS io_uring #1: port bindable within 50 ms; restart serves\nPASS io_uring #2: port bindable within 50 ms; restart serves\nPASS io_uring, 2 workers #0: port bindable within 50 ms; restart serves\nPASS io_uring, 2 workers #1: port bindable within 50 ms; restart serves\nPASS io_uring, 2 workers #2: port bindable within 50 ms; restart serves\nPASS epoll #0: port bindable within 50 ms; restart serves\nPASS epoll #1: port bindable within 50 ms; restart serves\nPASS epoll #2: port bindable within 50 ms; restart serves\n"
+timeout = 300
+
+# tls_language.py, TLS half: Go and openssl s_server peers.
+[[test]]
+name = "tls-language"
+file = "drivers/tls_language.neo"
+stdout = "PASS TLS 1.3: RSA/ECDSA and mixed issuer chains, independent encrypted peer, byte fragmentation, tickets, close-notify, hostname/chain rejection, corrupt tags, truncation, deadlines and KeyUpdate; a TLS 1.2-only peer over TLS 1.2\n"
+timeout = 300
+
+# http_keepalive.py: keep-alive HttpClient against the Go peer, TCP and TLS 1.3.
+[[test]]
+name = "http-keepalive"
+file = "drivers/http_keepalive.neo"
+stdout = "PASS keep-alive over TCP: 12 requests on 5 connections; reuse, server close, silent close retried for GET and not for POST, body limit, chunked body\nPASS keep-alive over TLS 1.3: 12 requests on 5 connections; reuse, server close, silent close retried for GET and not for POST, body limit, chunked body\n"
+timeout = 300
+
+# http_large_body.py: large Content-Length bodies over TCP, TLS 1.3 and TLS 1.2.
+[[test]]
+name = "http-large-body"
+file = "drivers/http_large_body.neo"
+stdout = "PASS large bodies over TCP: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes\nPASS large bodies over TLS 1.3 (client order): 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes\nPASS large bodies over TLS 1.3 (server order): 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes\nPASS large bodies over TLS 1.2: 13 requests, 1 B to 1 MiB, small writes, early close, excess bytes\n"
+timeout = 300
+
+# agent_network.py: socket cancellation, and SSE over TCP and TLS 1.3.
+[[test]]
+name = "agent-network"
+file = "drivers/agent_network.neo"
+stdout = "PASS first-read preservation and cross-process cancellation of stalled socket\nPASS authorization/custom headers, bounded HTTP chunk decoding and fragmented SSE over TCP and authenticated TLS 1.3\n"
+timeout = 300
+
+# async_protocols.py: concurrent TLS, HTTP and DNS tasks against delayed peers.
+[[test]]
+name = "async-protocols"
+file = "drivers/async_protocols.neo"
+stdout = "PASS verified TLS 1.3 + HTTP + DNS suspended call stacks, await deadlines and resource cleanup\n"
+timeout = 300
+
+# tls_resume_language.py: TLS 1.3 PSK resumption against OpenSSL and Go.
+[[test]]
+name = "tls-resume"
+file = "drivers/tls_resume_language.neo"
+stdout = """PASS OpenSSL, default tickets: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL, three tickets per connection: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL, P-256 only: HelloRetryRequest with a PSK: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL, stateless cookie: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL, AES-128-GCM: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL, ChaCha20-Poly1305: resumed; tampered, expired fall back; wrong PSK rejected
+PASS OpenSSL without tickets: every connection is a full handshake
+PASS HttpClient against OpenSSL: resumptions 0, 1, 2, 3, 3, 4 (the 5th request follows http_client_close)
+PASS Go net/http: resumed; tampered, expired fall back; wrong PSK rejected
+PASS HttpClient against Go net/http (HTTP/1.1): resumptions 0, 1, 2, 3, 3, 4 (the 5th request follows http_client_close)
+PASS HttpClient against Go net/http (h2): resumptions 0, 1, 2, 3, 3, 4 (the 5th request follows http_client_close)
+"""
+timeout = 600
+
+# tls_web_language.py: TLS 1.3 suites, groups, HelloRetryRequest and KeyUpdate
+# against openssl s_server.
+[[test]]
+name = "tls-web"
+file = "drivers/tls_web_language.neo"
+stdout = """PASS the client's first suite, X25519
+PASS AES-128-GCM only
+PASS ChaCha20-Poly1305 only
+PASS P-256 only: HelloRetryRequest
+PASS P-256 and AES-128-GCM
+PASS stateless cookie, X25519
+PASS stateless cookie, P-256
+PASS unsupported group (X448 only) fails cleanly
+PASS KeyUpdate with TLS_AES_128_GCM_SHA256
+PASS KeyUpdate with TLS_CHACHA20_POLY1305_SHA256
+"""
+timeout = 300
+
+# tls_web_language.py, live sites: runs only with NEO_TEST_NETWORK=1 (it
+# prints SKIP otherwise), so only its exit status is checked.
+[[test]]
+name = "tls-web-live"
+file = "drivers/tls_web_language.neo"
+args = ["live"]
+timeout = 1200
+
+# x509_web_language.py, the system trust bundle (machine-dependent: it prints
+# what it found, or SKIP without a bundle, so only its exit status is checked).
+[[test]]
+name = "x509-web-system"
+file = "drivers/x509_web_language.neo"
+args = ["system"]
+timeout = 300
+
+# x509_web_language.py, live chains: runs only with NEO_TEST_NETWORK=1.
+[[test]]
+name = "x509-web-live"
+file = "drivers/x509_web_language.neo"
+args = ["live"]
+timeout = 1200
+
+# http_limits.py: refusals, 100-continue, timeouts, the connection limit,
+# client addresses and worker restarts on io_uring, epoll and poll.
+[[test]]
+name = "http-limits"
+file = "drivers/http_limits.neo"
+stdout = """
+== io_uring
+  400, 413 and 431 with Connection: close, including mid-upload and pipelined; Expect: 100-continue: PASS
+  header (408), body and keep-alive idle timeouts: PASS
+  NEO_HTTP_CONNECTIONS limit answers 503: PASS
+  web_peer, web_client_ip and web_client_proto without trusted proxies: PASS
+  web_peer, web_client_ip and web_client_proto behind NEO_TRUSTED_PROXIES: PASS
+  crashed workers are replaced and the accept turn moves on: PASS
+== epoll
+  400, 413 and 431 with Connection: close, including mid-upload and pipelined; Expect: 100-continue: PASS
+  header (408), body and keep-alive idle timeouts: PASS
+  NEO_HTTP_CONNECTIONS limit answers 503: PASS
+  web_peer, web_client_ip and web_client_proto without trusted proxies: PASS
+  web_peer, web_client_ip and web_client_proto behind NEO_TRUSTED_PROXIES: PASS
+  crashed workers are replaced and the accept turn moves on: PASS
+== poll
+  400, 413 and 431 with Connection: close, including mid-upload and pipelined; Expect: 100-continue: PASS
+  header (408), body and keep-alive idle timeouts: PASS
+  NEO_HTTP_CONNECTIONS limit answers 503: PASS
+  web_peer, web_client_ip and web_client_proto without trusted proxies: PASS
+  web_peer, web_client_ip and web_client_proto behind NEO_TRUSTED_PROXIES: PASS
+  crashed workers are replaced and the accept turn moves on: PASS
+"""
+timeout = 300
+
+# http_smoke.py: examples/http.neo (4 workers on io_uring and on epoll, 1
+# worker) and bench/http/protocol_test.neo; x86_64 Linux.
+[[test]]
+name = "http-smoke"
+file = "drivers/http_smoke.neo"
+stdout = """
+== io_uring backend (default), 4 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+512 simultaneous connections: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+Fragmented chunked request preserves the next pipelined response: PASS
+bench/http/protocol_test.neo: PASS
+Worker processes and backend: PASS
+== epoll backend, 4 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+512 simultaneous connections: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+Fragmented chunked request preserves the next pipelined response: PASS
+bench/http/protocol_test.neo: PASS
+Worker processes and backend: PASS
+== io_uring backend (default), 1 worker(s)
+Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
+100 concurrent requests: PASS
+512 simultaneous connections: PASS
+Slow readers do not block other clients: PASS
+Fragmented POST, case-insensitive headers, pipelined GET and close: PASS
+512 pipelined responses cross batch limits and preserve close/order: PASS
+Ready-batch close, slot compaction and descriptor reuse: PASS
+Backpressure drains 80 large responses, resumes buffered work and closes: PASS
+Invalid, duplicate, overflowing and unsupported body framing: PASS
+Fragmented chunked request preserves the next pipelined response: PASS
+bench/http/protocol_test.neo: PASS
+Worker processes and backend: PASS
+"""
+timeout = 600
+
+# tls12_language.py: openssl s_server -tls1_2 peers and the Go rewriting proxy
+# (tests/fixtures/network_peer.go -mode proxy); timings are not ported.
+[[test]]
+name = "tls12-language"
+file = "drivers/tls12_language.neo"
+stdout = """
+PASS rsa ECDHE-RSA-AES128-GCM-SHA256 X25519
+PASS rsa ECDHE-RSA-AES128-GCM-SHA256 P-256
+PASS rsa ECDHE-RSA-CHACHA20-POLY1305 X25519
+PASS rsa ECDHE-RSA-CHACHA20-POLY1305 P-256
+PASS p256 ECDHE-ECDSA-AES128-GCM-SHA256 X25519
+PASS p256 ECDHE-ECDSA-AES128-GCM-SHA256 P-256
+PASS p256 ECDHE-ECDSA-CHACHA20-POLY1305 X25519
+PASS p256 ECDHE-ECDSA-CHACHA20-POLY1305 P-256
+PASS p384 ECDHE-ECDSA-AES128-GCM-SHA256 X25519
+PASS p384 ECDHE-ECDSA-AES128-GCM-SHA256 P-256
+PASS p384 ECDHE-ECDSA-CHACHA20-POLY1305 X25519
+PASS p384 ECDHE-ECDSA-CHACHA20-POLY1305 P-256
+PASS rsa ServerKeyExchange signed with RSA+SHA256
+PASS rsa ServerKeyExchange signed with RSA+SHA384
+PASS rsa ServerKeyExchange signed with RSA+SHA512
+PASS rsa ServerKeyExchange signed with rsa_pss_rsae_sha256
+PASS rsa ServerKeyExchange signed with rsa_pss_rsae_sha384
+PASS p256 ServerKeyExchange signed with ECDSA+SHA256
+PASS p256 ServerKeyExchange signed with ECDSA+SHA384
+PASS p384 ServerKeyExchange signed with ECDSA+SHA384
+PASS p384 ServerKeyExchange signed with ECDSA+SHA256
+PASS CertificateRequest answered with an empty Certificate
+PASS 300 kB download over ECDHE-RSA-AES128-GCM-SHA256
+PASS 300 kB download over ECDHE-RSA-CHACHA20-POLY1305
+PASS rsa TLS 1.3-capable server
+PASS p256 TLS 1.3-capable server
+PASS TLS 1.3 with HelloRetryRequest to P-256
+PASS server without extended master secret (OpenSSL -ExtendedMasterSecret)
+PASS no shared TLS 1.2 suite
+PASS TLS 1.2 server insisting on secp384r1 key exchange
+PASS TLS 1.3 server insisting on secp384r1 (HelloRetryRequest)
+PASS wrong hostname evil.test
+PASS wrong hostname localhost.evil.test
+PASS leaf issued by an untrusted root
+PASS unmodified proxy, 1-byte TCP writes, 7-byte handshake records
+PASS unmodified proxy, 3-byte TCP writes, ECDSA P-384
+PASS downgrade sentinel from a TLS 1.3-capable OpenSSL
+PASS same rewrite, TLS 1.2-only server: no sentinel, transcript mismatch
+PASS ClientHello without extended master secret reaches the server
+PASS rsa tampered ServerKeyExchange signature
+PASS p256 tampered ServerKeyExchange signature
+PASS p384 tampered ServerKeyExchange signature
+PASS tampered ServerKeyExchange point
+PASS server Finished re-encrypted unchanged (key-log control)
+PASS server Finished with wrong verify_data, validly encrypted
+PASS corrupted Finished record (ECDHE-RSA-AES128-GCM-SHA256)
+PASS corrupted Finished record (ECDHE-RSA-CHACHA20-POLY1305)
+PASS ChangeCipherSpec injected after ServerHello
+PASS renegotiation_info removed
+PASS renegotiation_info not empty
+PASS extended_master_secret removed from ServerHello
+PASS unsolicited session_ticket extension
+PASS server echoes the client session id (resumption)
+PASS truncated server flight
+PASS truncated Finished record
+PASS truncated application record
+PASS TLS 1.2: 56 cases
+"""
+timeout = 600
+
+# http2_language.py: Go net/http (tests/http2_server.go), openssl s_server
+# without ALPN, and the scripted HTTP/2 server (network_peer.go -mode h2script).
+[[test]]
+name = "http2-language"
+file = "drivers/http2_language.neo"
+stdout = """
+PASS h2: 12 requests on one connection (1 MiB, 101 Huffman/dynamic-table headers, CONTINUATION, streamed body, 3 MB upload, HEAD, 404)
+PASS h2 GOAWAY after Connection: close, next request reconnects
+PASS h2 with TLS resumption: resumptions 0, 1, 2, then 2 after http_client_close
+PASS fallback to HTTP/1.1 (server ALPN http/1.1 only): 7 keep-alive requests, same headers
+PASS fallback to HTTP/1.1 (server without ALPN)
+PASS PING, SETTINGS, padding, priority, CONTINUATION, trailers, 103, size updates
+PASS RST_STREAM fails the request and keeps the connection
+PASS REFUSED_STREAM retries a POST
+PASS GOAWAY before the stream retries on a new connection
+PASS GOAWAY after the stream: the next request reconnects
+PASS connection error (DATA on stream 0), then a new connection
+PASS malformed response field fails the stream only
+"""
+timeout = 600

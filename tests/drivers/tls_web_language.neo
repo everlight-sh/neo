@@ -1,0 +1,107 @@
+; tls_web_language.py: TLS 1.3 suites, groups and HelloRetryRequest in
+; tests/fixtures/language_tls_web.neo against openssl s_server -www: the
+; client's first suite, AES-128-GCM or ChaCha20-Poly1305 only, P-256 (a
+; HelloRetryRequest), P-256 with AES-128-GCM, a stateless cookie with X25519
+; and P-256, and X448 only (a clean failure); then s_server sends KeyUpdate
+; (requesting one back) before its answer, with each suite.
+;   tls_web_language          local OpenSSL cases
+;   tls_web_language live     live sites over std:tls and std:https_client
+;                             (only with NEO_TEST_NETWORK=1, else it says SKIP)
+import "std:io"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn tw_last(borrow output:Arr u8 _) -> Arr u8 _
+  = let lines=nw_split(str_trim(output),10) in md_word(lines,len(lines)-1)
+
+; The client against s_server -www with options ("|"-separated): its last line.
+effect fn tw_client(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow options:Arr u8 _) -> Arr u8 _
+  = let port=nw_port() in
+    let args=push(push(push(push(push(push(push(push(push(push(md_words(),"s_server"),"-accept"),int_text(port)),"-cert"),pt_join(dir,"leaf.pem")),
+      "-key"),pt_join(dir,"leaf.key")),"-tls1_3"),"-www"),"-quiet") in
+    let extra=if len(options)>0 then nw_split(options,124) else md_words() in
+    let args=loop (i=0, out=args) while i<len(extra) next (i+1,push(out,md_word(extra,i))) yield out in
+    using server=process_start(bd_find_tool("openssl"),args,dv_environment(md_words())) in
+    if !nw_wait_port(port,6000) then (let s=nw_poll(server,nw_child()) in concat("s_server did not start: ",s.errors)) else
+    let result=dv_run(binary,push(push(push(md_words(),"127.0.0.1"),int_text(port)),pt_join(dir,"ca.der")),md_words(),"",30000,1048576) in
+    if !result.ok || result.code!=0 then concat("client failed: ",nt_diagnostic(result)) else tw_last(result.output)
+
+effect fn tw_case(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow options:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let line=tw_client(binary,dir,options) in
+    let checked=dv_expect(str_starts(line,expected) && nw_contains(line,"HTTP/1.0 200"),concat(name,": ",line," (expected ",expected,")")) in
+    let shown=print_out(concat("PASS ",name,"\n")) in noop()
+
+; s_server (interactive) sends KeyUpdate with K, then two lines; the client reads twice.
+effect fn tw_key_update(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow suite:Arr u8 _, number:i64) -> unit
+  = let port=nw_port() in
+    let args=push(push(push(push(push(push(push(push(push(push(push(push(md_words(),"s_server"),"-accept"),int_text(port)),"-cert"),pt_join(dir,"leaf.pem")),
+      "-key"),pt_join(dir,"leaf.key")),"-tls1_3"),"-ciphersuites"),suite),"-naccept"),"1") in
+    let line=(using server=process_start(bd_find_tool("openssl"),args,dv_environment(md_words())) in
+      let up=nw_await(server,nw_child(),"ACCEPT",10000) in
+      using client=process_start(binary,push(push(push(md_words(),"127.0.0.1"),int_text(port)),pt_join(dir,"ca.der")),dv_environment(md_words())) in
+      ; s_server echoes the request it receives; each stdin write is one read and record.
+      let heard=nw_await(server,up,"GET / ",6000) in
+      let a=process_try_write(server,"K\n",0) in let pa=sleep_ms(300) in
+      let b=process_try_write(server,"HTTP/1.0 200 after KeyUpdate\r\n",0) in let pb=sleep_ms(300) in
+      let c=process_try_write(server,"second line\r\n",0) in let pc=sleep_ms(300) in
+      let done=nw_finish(client,nw_child(),30000) in
+      if done.running || done.code!=0 then concat("client failed: ",done.output,done.errors) else tw_last(done.output)) in
+    let expected=concat("suite=",int_text(number)," group=29 HTTP/1.0 200 after KeyUpdate") in
+    let checked=dv_expect(tx_equal(line,expected),concat("KeyUpdate with ",suite,": ",line)) in
+    let shown=print_out(concat("PASS KeyUpdate with ",suite,"\n")) in noop()
+
+effect fn tw_local(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=pt_join(dir,"tls-web") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/language_tls_web.neo"),binary,md_words()) in
+    let certificates=nw_certificates(dir) in
+    ; OpenSSL follows the client's order: AES-128-GCM first with the CPU's AES instructions.
+    let first=int_text(if aes_hardware() then 4865 else 4867) in
+    let a=tw_case(binary,dir,"the client's first suite, X25519","",concat("suite=",first," group=29")) in
+    let b=tw_case(binary,dir,"AES-128-GCM only","-ciphersuites|TLS_AES_128_GCM_SHA256","suite=4865 group=29") in
+    let c=tw_case(binary,dir,"ChaCha20-Poly1305 only","-ciphersuites|TLS_CHACHA20_POLY1305_SHA256","suite=4867 group=29") in
+    let d=tw_case(binary,dir,"P-256 only: HelloRetryRequest","-groups|P-256",concat("suite=",first," group=23")) in
+    let e=tw_case(binary,dir,"P-256 and AES-128-GCM","-groups|P-256|-ciphersuites|TLS_AES_128_GCM_SHA256","suite=4865 group=23") in
+    let f=tw_case(binary,dir,"stateless cookie, X25519","-stateless",concat("suite=",first," group=29")) in
+    let g=tw_case(binary,dir,"stateless cookie, P-256","-stateless|-groups|P-256",concat("suite=",first," group=23")) in
+    let x448=tw_client(binary,dir,"-groups|X448") in
+    let h=dv_expect(str_starts(x448,"rejected:"),concat("X448 only: ",x448)) in
+    let shown=print_out("PASS unsupported group (X448 only) fails cleanly\n") in
+    let i=tw_key_update(binary,dir,"TLS_AES_128_GCM_SHA256",4865) in
+    tw_key_update(binary,dir,"TLS_CHACHA20_POLY1305_SHA256",4867)
+
+fn tw_sites() -> Arr Arr u8 _ _
+  = nw_split("example.com www.google.com www.wikipedia.org en.wikipedia.org github.com www.cloudflare.com www.mozilla.org letsencrypt.org news.ycombinator.com www.python.org go.dev www.rust-lang.org www.bbc.co.uk www.lemonde.fr stackoverflow.com www.apple.com www.microsoft.com lightpanda.io",32)
+
+; Every live site must answer over std:tls (HTTP/1.1) and over HttpClient (h2 or HTTP/1.1).
+effect fn tw_live(borrow tools:DvTools, borrow dir:Arr u8 _) -> unit
+  = let binary=pt_join(dir,"tls-web") in let http2=pt_join(dir,"http2") in
+    let a=dv_build(tools,pt_join(tools.here,"../fixtures/language_tls_web.neo"),binary,md_words()) in
+    let b=dv_build(tools,pt_join(tools.here,"../fixtures/language_http2.neo"),http2,md_words()) in
+    let sites=tw_sites() in
+    let failures=loop (i=0, failed=0) while i<len(sites) next (i+1,
+      let site=md_word(sites,i) in
+      let direct=dv_run(binary,push(push(push(md_words(),site),"443"),"system"),md_words(),"",30000,1048576) in
+      let line=tw_last(direct.output) in
+      let fetched=dv_run(http2,push(push(push(push(push(md_words(),site),"443"),"system"),"-"),"GET:/"),md_words(),"",60000,1048576) in
+      let first=md_word(nw_split(str_trim(fetched.output),10),0) in
+      let ok=direct.code==0 && nw_contains(line,"HTTP/1.1") && nw_contains(line,"suite=") &&
+        fetched.code==0 && nw_contains(first," -> ") && !nw_contains(first," -> error") in
+      let shown=print_out(concat(if ok then "LIVE " else "FAIL ",site,": ",line,"; HttpClient: ",first,"\n")) in
+      if ok then failed else failed+1) yield failed in
+    dv_expect(failures==0,concat(int_text(failures)," of ",int_text(len(sites))," live sites failed"))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let mode=cli_arg(1) in
+    let live=mode.present && tx_equal(mode.value,"live") in
+    let enabled=env_get("NEO_TEST_NETWORK") in
+    if live && !(enabled.present && tx_equal(enabled.value,"1")) then
+      (let shown=print_out("SKIP live TLS sites (set NEO_TEST_NETWORK=1 to run them)\n") in noop()) else
+    let dir=dv_temp("tls-web") in
+    let ran=if live then tw_live(tools,dir) else tw_local(tools,dir) in
+    dv_clean(dir)

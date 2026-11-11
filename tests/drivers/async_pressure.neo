@@ -1,0 +1,92 @@
+; async_pressure.py: the tests/fixtures/async_pressure.neo server (one worker).
+; Root handoff, partial admission rollback and a root failure before headers;
+; eight backpressured 8 MiB streams beside fast requests; the exact 256-task
+; admission bound; slow-reader deadlines; and graceful shutdown with held
+; continuations. After each step /stats must return to all zeros.
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+; /stats is all zeros (live tasks, captures, results, handles) within 3 s.
+effect fn ap_zero(port:i64) -> bool
+  = let deadline=deadline_after(3000) in
+    loop (zero=false) while !zero && deadline_remaining(deadline.value)>0
+      next (let r=nw_get(port,"/stats","") in
+        if tx_equal(r.body,"{\"live\":0,\"captures\":0,\"results\":0,\"handles\":0}") then true else let paused=sleep_ms(5) in false)
+      yield zero
+effect fn ap_stats(port:i64) -> Arr u8 _ = let r=nw_get(port,"/stats","") in r.body
+
+type ApHeld = { problems:Arr u8 _, begin:i64 }
+
+; What runs while every request is held open: 1 fast requests, 2 the
+; admission bound, 3 slow-reader deadlines, 4 SIGTERM.
+effect fn ap_inner(server:Process, port:i64, phase:i64) -> ApHeld
+  = if phase==1 then
+      let paused=sleep_ms(50) in let start=nw_now_ms() in
+      let fast=loop (i=0, ok=true) while i<30 next (i+1, ok && nw_get_is(port,"/fast",200,"FAST")) yield ok in
+      let elapsed=nw_now_ms()-start in
+      ApHeld { problems=nw_note(nw_note("",fast,"a /fast request failed"),elapsed<300,concat("30 fast requests took ",int_text(elapsed)," ms")), begin=0 }
+    else if phase==2 then
+      let stats=ap_stats(port) in let refused=nw_get(port,"/hold","") in
+      ApHeld { problems=nw_note(nw_note("",nw_contains(stats,"\"live\":256,"),concat("stats with 256 held tasks: ",stats)),
+        refused.status==503,concat("the 257th task got status ",int_text(refused.status))), begin=0 }
+    else if phase==3 then
+      let paused=sleep_ms(400) in ApHeld { problems=nw_note("",ap_zero(port),concat("slow readers kept tasks: ",ap_stats(port))), begin=0 }
+    else let signalled=process_signal(server,15) in ApHeld { problems=tx_empty(), begin=nw_now_ms() }
+
+; Opens count requests for path (one per recursion level) and reads up to
+; the shell; runs ap_inner; in phase 4 each level then reads to EOF.
+effect fn ap_hold(server:Process, port:i64, borrow path:Arr u8 _, count:i64, phase:i64) -> ApHeld
+  = if count<=0 then ap_inner(server,port,phase) else
+    let deadline=deadline_after(4000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let sent=socket_write(socket,concat("GET ",path," HTTP/1.1\r\nHost: localhost\r\n\r\n"),deadline.value) in
+    let wire=nw_read_until(socket,"SHELL",deadline.value) in
+    let inner=ap_hold(server,port,path,count-1,phase) in
+    let drained=if phase==4 then (let after=deadline_after(4000) in nw_drain(socket,after.value)) else tx_empty() in
+    inner with { problems=nw_note(inner.problems,nw_contains(wire,"SHELL"),concat(path," request ",int_text(count)," got no shell: ",tx_repr(wire,true))) }
+
+effect fn ap_run(server:Process, port:i64) -> Arr u8 _
+  = let p=nw_note("",ap_zero(port),concat("not idle at start: ",ap_stats(port))) in
+    let p=nw_note(p,nw_get_is(port,"/handoff",200,"SHELLCHILD"),"/handoff failed") in
+    let p=nw_note(p,nw_get_is(port,"/queued-timeout",200,"SHELLTIMEOUT"),"/queued-timeout failed") in
+    let p=nw_note(p,ap_zero(port),concat("not idle after /queued-timeout: ",ap_stats(port))) in
+    let p=nw_note(p,nw_get_is(port,"/rollback",503,"ROLLBACK"),"/rollback failed") in
+    let p=nw_note(p,ap_zero(port),concat("not idle after /rollback: ",ap_stats(port))) in
+    let failed=nw_get(port,"/root-fail","") in
+    let p=nw_note(p,failed.status==503 && !nw_contains(failed.body,"CHILD"),concat("/root-fail: ",int_text(failed.status)," ",failed.body)) in
+    let p=nw_note(p,ap_zero(port),concat("not idle after /root-fail: ",ap_stats(port))) in
+    let shown=if len(p)==0 then print_out("PASS root I/O-to-stream handoff, partial admission rollback, and root failure before headers\n") else int_ok(0) in
+    let held=ap_hold(server,port,"/large",8,1) in let p=concat(p,held.problems) in
+    let p=nw_note(p,ap_zero(port),concat("not idle after closing the large streams: ",ap_stats(port))) in
+    let shown=if len(p)==0 then print_out("PASS 8 backpressured 8 MiB streams do not stall fast requests\n") else int_ok(0) in
+    let large=nw_get(port,"/large","") in
+    let p=nw_note(p,large.status==200 && str_starts(large.body,"SHELL") && nw_ends(large.body,"END") && len(large.body)==5+512*16384+3,
+      concat("/large: ",int_text(large.status)," with ",int_text(len(large.body))," bytes")) in
+    let p=nw_note(p,ap_zero(port),concat("not idle after /large: ",ap_stats(port))) in
+    let held=ap_hold(server,port,"/hold",256,2) in let p=concat(p,held.problems) in
+    let p=nw_note(p,ap_zero(port),concat("not idle after cancelling 256 tasks: ",ap_stats(port))) in
+    let shown=if len(p)==0 then print_out("PASS exact 256-task admission bound and cancellation of every admitted task\n") else int_ok(0) in
+    let held=ap_hold(server,port,"/large?short=1",16,3) in let p=concat(p,held.problems) in
+    let shown=if len(p)==0 then print_out("PASS slow-reader deadlines release task and result memory\n") else int_ok(0) in
+    let held=ap_hold(server,port,"/hold",16,4) in let p=concat(p,held.problems) in
+    let done=nw_finish(server,nw_child(),3000) in let elapsed=nw_now_ms()-held.begin in
+    let p=nw_note(nw_note(p,!done.running && done.code==0,concat("server exit ",int_text(done.code),": ",done.errors)),
+      elapsed<1000,concat("shutdown took ",int_text(elapsed)," ms")) in
+    let shown=if len(p)==0 then print_out("PASS graceful shutdown cancels held socket/timer continuations by deadline\n") else int_ok(0) in p
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("async-pressure") in let binary=pt_join(dir,"async-pressure") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/async_pressure.neo"),binary,md_words()) in
+    let port=nw_port() in
+    let problems=(using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(push(md_words(),"NEO_THREADS=1"))) in
+      let up=nw_await(server,nw_child(),"neo: serving",5000) in
+      if !nw_contains(up.errors,"neo: serving") then concat("server did not start: ",up.errors,up.output) else ap_run(server,port)) in
+    let checked=dv_expect(len(problems)==0,problems) in
+    dv_clean(dir)

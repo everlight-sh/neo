@@ -1,0 +1,16 @@
+; Runs a fixture against frozen vectors (see tests/support/network.neo for the
+; line format): network_vectors SOURCE VECTORS LABEL, paths relative to tests/.
+; The vectors were computed once from the retired Python oracles (hashlib,
+; zlib, OpenSSL, Go crypto); nothing here runs Python.
+import "std:io"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/paths.neo"
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let tests=pt_head(tools.here) in
+    let source=cli_arg(1) in let vectors=cli_arg(2) in let label=cli_arg(3) in
+    let given=dv_expect(source.present && vectors.present && label.present,"usage: network_vectors SOURCE VECTORS LABEL") in
+    let dir=dv_temp("vectors") in
+    let ran=nw_vector_suite(tools,dir,pt_join(tests,source.value),pt_join(tests,vectors.value),label.value) in
+    dv_clean(dir)

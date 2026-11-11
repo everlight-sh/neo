@@ -1,0 +1,67 @@
+; agent_network.py: native callback transports against independent peers.
+; tests/fixtures/socket_cancellation.neo keeps the first chunk a forked TCP
+; peer sends, and a forked worker cancels its read of a stalled peer within
+; 1.5 s; tests/fixtures/agent_transport.neo posts with authorization and
+; custom headers and decodes a fragmented chunked SSE body from the Go peer
+; (tests/fixtures/network_peer.go -mode sse) over TCP and TLS 1.3.
+import "std:cancel"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; One connection: sends greeting (unless empty), then holds it until done appears (at most 3 s).
+effect fn an_peer(borrow ready:Arr u8 _, borrow done:Arr u8 _, borrow greeting:Arr u8 _) -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,4) in let port=nw_listener_port(listener) in
+    if port==0 then 2 else let wrote=fs_write(ready,int_text(port)) in
+    let deadline=deadline_after(5000) in using cancellation=new_cancellation() in
+    using connection=listener_accept(listener,deadline.value,cancellation) in if !socket_status(connection).ok then 3 else
+    let sent=if len(greeting)>0 then socket_write(connection,greeting,deadline.value).ok else true in
+    let held=nw_wait_file(done,3000) in if sent then 0 else 4
+
+effect fn an_raw(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow greeting:Arr u8 _,
+                 borrow mode:Arr u8 _, borrow expected:Arr u8 _, limit:i64) -> unit
+  = let ready=pt_join(dir,concat(name,"-ready")) in let done=pt_join(dir,concat(name,"-done")) in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(an_peer(ready,done,greeting)) else
+    let port=nw_wait_file(ready,5000) in
+    let args=push(md_words(),port) in
+    let start=nw_now_ms() in
+    let result=dv_run(binary,if len(mode)>0 then push(args,mode) else args,md_words(),"",12000,65536) in
+    let elapsed=nw_now_ms()-start in
+    let told=fs_write(done,"done") in let peer=nw_reap(forked.value) in
+    let a=dv_expect(result.ok && result.code==0 && tx_equal(result.output,expected),
+      concat(name,": ",tx_repr(result.output,true)," (expected ",expected,") ",nt_diagnostic(result))) in
+    let b=dv_expect(limit<=0 || elapsed<limit,concat(name," took ",int_text(elapsed)," ms")) in
+    dv_expect(peer==0,concat(name," peer failed with wait status ",int_text(peer)))
+
+effect fn an_sse(borrow binary:Arr u8 _, borrow peer:Arr u8 _, borrow dir:Arr u8 _, tls:bool, borrow expected:Arr u8 _) -> unit
+  = let problems=(using server=process_start(peer,nw_peer_args("sse",if tls then "1.3" else "",dir),dv_environment(md_words())) in
+      let up=nw_await(server,nw_child(),"\n",10000) in let port=nw_peer_port(up) in
+      let args=push(md_words(),int_text(port)) in
+      let result=dv_run(binary,if tls then push(args,pt_join(dir,"ca.der")) else args,md_words(),"",12000,1048576) in
+      let done=nw_peer_finish(server,up) in
+      nw_note(nw_note("",result.ok && result.code==0 && tx_equal(result.output,expected),concat("client: ",tx_repr(result.output,true)," ",nt_diagnostic(result))),
+        !nw_contains(done.output,"\nerror "),concat("peer: ",done.output))) in
+    dv_expect(len(problems)==0,concat(if tls then "SSE over TLS 1.3: " else "SSE over TCP: ",problems))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("agent-network") in
+    let transport=pt_join(dir,"transport") in let cancellation=pt_join(dir,"cancel") in
+    let a=dv_build(tools,pt_join(tools.here,"../fixtures/agent_transport.neo"),transport,md_words()) in
+    let b=dv_build(tools,pt_join(tools.here,"../fixtures/socket_cancellation.neo"),cancellation,md_words()) in
+    let c=an_raw(cancellation,dir,"first","first chunk","","first chunk",0) in
+    let d=an_raw(cancellation,dir,"stalled","","cancel","error:125",1500) in
+    let shown=print_out("PASS first-read preservation and cross-process cancellation of stalled socket\n") in
+    let certificates=nw_certificates(dir) in let peer=nw_build_peer(tools,dir) in
+    let e=an_sse(transport,peer,dir,false,"id: 1\r\ndata: h\xc3\xa9llo\r\n\r\nevent: tool\ndata: second\n\n") in
+    let f=an_sse(transport,peer,dir,true,"h\xc3\xa9llo\nsecond\n") in
+    let shown=print_out("PASS authorization/custom headers, bounded HTTP chunk decoding and fragmented SSE over TCP and authenticated TLS 1.3\n") in
+    dv_clean(dir)

@@ -1,0 +1,23 @@
+; p256_language.py: std:p256's Montgomery field and order arithmetic against
+; Python integers (vectors/p256_language/montgomery.in). The arithmetic is
+; private to the module, so the program is stdlib/p256.neo plus this main.
+import "std:io"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/paths.neo"
+
+fn pl_main() -> Arr u8 _
+  = concat("import \"std:io\"\n",
+      "effect(fs,process) fn main() -> unit\n",
+      "  = let input=file_read(0,1024) in check input.ok && len(input.value)==66 in\n",
+      "    let order=str_byte(input.value,0)!=0 in let mode=str_byte(input.value,1) in let mod=p256_mod(order) in\n",
+      "    let a=p256_montgomery(p256_words(str_slice(input.value,2,34)),mod) in let b=p256_montgomery(p256_words(str_slice(input.value,34,66)),mod) in\n",
+      "    let result=if mode==0 then p256_multiply(a,b,mod) else if mode==1 then p256_add(a,b,mod.modulus) else if mode==2 then p256_sub(a,b,mod.modulus) else p256_inverse(a,mod) in\n",
+      "    let output=file_write(1,p256_bytes(p256_normal(result,mod))) in check output.ok in noop()\n")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("p256") in
+    let source=nw_stdlib_program(tools,dir,"p256.neo","p256_math",pl_main()) in
+    let ran=nw_vector_suite(tools,dir,source,pt_join(tools.here,"../vectors/p256_language/montgomery.in"),
+      "P-256 field/order Montgomery add/sub/multiply/inverse vs Python integers") in
+    dv_clean(dir)

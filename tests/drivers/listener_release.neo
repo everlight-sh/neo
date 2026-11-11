@@ -1,0 +1,64 @@
+; listener_release.py: a stopped examples/http.neo server releases its port at
+; once. For io_uring with one and two workers and for epoll, three times
+; each: hold eight keep-alive connections, stop the server with SIGTERM to it
+; and its workers (the script used killpg on the server's session), and
+; require the port to be bindable again within 50 ms; then stop a second
+; server the same way and start a third on its port at once, which must serve.
+import "std:arena"
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn lr_page() -> Arr u8 _ = "GET /page/3 HTTP/1.1\r\nHost: x\r\n\r\n"
+
+; Milliseconds until 0.0.0.0:port can be bound again (SO_REUSEADDR), or -1 after 10 s.
+effect fn lr_bindable(port:i64) -> i64
+  = let start=nw_now_ms() in let deadline=deadline_after(10000) in
+    let bound=loop (bound=false) while !bound && deadline_remaining(deadline.value)>0
+      next (let ok=(using listener=tcp_listen_ipv4("0.0.0.0",port,1) in listener_status(listener).ok) in
+        if ok then true else let paused=sleep_ms(2) in false) yield bound in
+    if bound then nw_now_ms()-start else -1
+
+; Starts the server on port, holds eight connections, stops it; with measure
+; the port must then be bindable within 50 ms, otherwise a fresh server must
+; start on it and serve while those connections are still held.
+effect fn lr_stop_held(borrow binary:Arr u8 _, port:i64, borrow environment:Arr Arr u8 _ _, measure:bool) -> Arr u8 _
+  = using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(environment)) in
+    if !nw_wait_port(port,4000) then (let state=nw_poll(server,nw_child()) in concat("server did not start: ",state.errors)) else
+    using arena=new_arena(16) in
+    let held=nw_hold(arena,port,8,lr_page(),"\r\n\r\n",5000) in
+    let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,nw_child(),10000) in
+    let p=nw_note(nw_note("",held==8,concat("only ",int_text(held)," of 8 connections answered")),!done.running,"the server ignored SIGTERM") in
+    if measure then
+      let free=lr_bindable(port) in
+      nw_note(p,free>=0 && free<50,if free<0 then "the port was not bindable within 10 s" else concat("the port became bindable after ",int_text(free)," ms"))
+    else concat(p,lr_restart(binary,port,environment))
+
+effect fn lr_restart(borrow binary:Arr u8 _, port:i64, borrow environment:Arr Arr u8 _ _) -> Arr u8 _
+  = using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(environment)) in
+    if !nw_wait_port(port,4000) then (let state=nw_poll(server,nw_child()) in concat("the restarted server did not serve: ",state.errors,"\n")) else
+    let r=nw_get(port,"/page/3","") in
+    let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,nw_child(),10000) in
+    nw_note("",r.complete && r.status==200,concat("the restarted server answered status ",int_text(r.status)))
+
+effect fn lr_backend(borrow binary:Arr u8 _, borrow name:Arr u8 _, borrow environment:Arr Arr u8 _ _) -> unit
+  = loop (trial=0) while trial<3 next (
+      let first=lr_stop_held(binary,nw_port(),environment,true) in
+      let second=lr_stop_held(binary,nw_port(),environment,false) in
+      let problems=concat(first,second) in
+      let checked=dv_expect(len(problems)==0,concat(name," #",int_text(trial),": ",problems)) in
+      let shown=print_out(concat("PASS ",name," #",int_text(trial),": port bindable within 50 ms; restart serves\n")) in trial+1) yield noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("listener-release") in let binary=pt_join(dir,"http") in
+    let built=dv_build(tools,pt_join(tools.here,"../../examples/http.neo"),binary,md_words()) in
+    let a=lr_backend(binary,"io_uring",md_words()) in
+    let b=lr_backend(binary,"io_uring, 2 workers",push(md_words(),"NEO_THREADS=2")) in
+    let c=lr_backend(binary,"epoll",push(md_words(),"NEO_HTTP_URING=0")) in
+    dv_clean(dir)

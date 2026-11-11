@@ -1,0 +1,225 @@
+; tls12_language.py: the TLS 1.2 client in tests/fixtures/language_tls12.neo
+; against openssl s_server -tls1_2 and, for attacks, the rewriting proxy in
+; tests/fixtures/network_peer.go (-mode proxy). Positive cases: every
+; ECDHE_ECDSA/ECDHE_RSA suite with AES-128-GCM and ChaCha20-Poly1305 over
+; RSA-2048, P-256 and P-384 leaves and X25519/P-256, each ServerKeyExchange
+; signature scheme forced with -sigalgs, an optional CertificateRequest, a
+; 300 kB download with both AEADs, and TLS 1.3 servers still choosing 1.3.
+; Negative cases: a server without extended master secret, no shared suite,
+; secp384r1 key exchange, wrong hostnames and roots, and through the proxy a
+; stripped ClientHello extension (with the RFC 8446 downgrade sentinel), a
+; tampered ServerKeyExchange, a server Finished re-encrypted from the key log
+; (unchanged and forged), a corrupted Finished record, an early
+; ChangeCipherSpec, renegotiation_info and extended_master_secret edits, an
+; unsolicited session_ticket, an echoed session id and truncated records. The
+; script's handshake timings are not ported.
+import "std:fs"
+import "std:io"
+import "std:process"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+type T2 = { dir:Arr u8 _, client:Arr u8 _, peer:Arr u8 _ }
+type T2Run = { line:Arr u8 _, notes:Arr u8 _ }
+
+; Leaf name -> certificate and key base name, and its trust anchor.
+fn t2_cert(borrow leaf:Arr u8 _) -> Arr u8 _ = if tx_equal(leaf,"rsa") then "leaf" else if tx_equal(leaf,"p256") then "ec-leaf" else "p384-leaf"
+fn t2_trust(borrow leaf:Arr u8 _) -> Arr u8 _ = if tx_equal(leaf,"rsa") then "ca.der" else "ec-ca.der"
+fn t2_words(borrow options:Arr u8 _) -> Arr Arr u8 _ _ = if len(options)>0 then nw_split(options,124) else md_words()
+fn t2_append(move out:Arr Arr u8 _ _, borrow words:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = loop (i=0, out=out) while i<len(words) next (i+1,push(out,md_word(words,i))) yield out
+fn t2_last(borrow output:Arr u8 _) -> Arr u8 _ = let lines=nw_split(str_trim(output),10) in md_word(lines,len(lines)-1)
+; The value of key=value in a client line ("" when missing).
+fn t2_field(borrow line:Arr u8 _, borrow key:Arr u8 _) -> Arr u8 _
+  = let words=nw_split(line,32) in
+    loop (i=0, found=tx_empty()) while i<len(words) && len(found)==0
+      next (i+1,let w=md_word(words,i) in if str_starts(w,concat(key,"=")) then nw_after(w,len(key)+1) else tx_empty()) yield found
+
+fn t2_cipher(i:i64) -> Arr u8 _
+  = if i==0 then "ECDHE-ECDSA-AES128-GCM-SHA256" else if i==1 then "ECDHE-RSA-AES128-GCM-SHA256"
+    else if i==2 then "ECDHE-ECDSA-CHACHA20-POLY1305" else "ECDHE-RSA-CHACHA20-POLY1305"
+fn t2_suite(i:i64) -> i64 = if i==0 then 49195 else if i==1 then 49199 else if i==2 then 52393 else 52392
+
+; The script's checksum of a downloaded body.
+fn t2_sum(borrow bytes:Arr u8 _) -> i64 = loop (i=0, h=0) while i<len(bytes) next (i+1,(h*31+tx_byte(bytes,i))%1000000007) yield h
+
+; The P-384 leaf, the no-EMS OpenSSL configuration and www/big.bin; returns
+; what the client must report for big.bin.
+effect fn t2_files(borrow dir:Arr u8 _) -> Arr u8 _
+  = let a=nw_openssl(dir,"req|-new|-newkey|ec|-pkeyopt|ec_paramgen_curve:P-384|-nodes|-keyout|@p384-leaf.key|-out|@p384-leaf.csr|-subj|/CN=localhost") in
+    let b=nw_issue(dir,"p384-leaf","p384-leaf","ec-ca",nw_leaf_extensions("DNS:localhost,IP:127.0.0.1")) in
+    let c=fs_write(pt_join(dir,"noems.cnf"),concat("openssl_conf = openssl_init\n[openssl_init]\nssl_conf = ssl_sect\n[ssl_sect]\n",
+      "system_default = system_default_sect\n[system_default_sect]\nOptions = -ExtendedMasterSecret\n")) in
+    let d=fs_mkdir(pt_join(dir,"www")) in
+    let big=nw_random_bytes(1205,300000) in
+    let e=fs_write(pt_join(dir,"www/big.bin"),big) in
+    concat("body=",int_text(len(big))," sum=",int_text(t2_sum(big)))
+
+; sh arguments that start s_server in dir/www (for -WWW) with page (-www or
+; -WWW), an optional key log, and "|"-separated options.
+effect fn t2_server_args(borrow t:T2, port:i64, borrow leaf:Arr u8 _, borrow options:Arr u8 _, borrow page:Arr u8 _, borrow keylog:Arr u8 _) -> Arr Arr u8 _ _
+  = let cert=pt_join(t.dir,t2_cert(leaf)) in
+    let args=nw_split(concat("-c|cd \"$0\" && exec \"$@\"|",pt_join(t.dir,"www"),"|",bd_find_tool("openssl"),"|s_server|-accept|",int_text(port),
+      "|-cert|",cert,".pem|-key|",cert,".key|",page,"|-quiet"),124) in
+    let args=if len(keylog)>0 then push(push(args,"-keylogfile"),keylog) else args in
+    t2_append(args,t2_words(options))
+
+; The client's last line, or why it failed.
+effect fn t2_client(borrow t:T2, port:i64, borrow trust:Arr u8 _, borrow host:Arr u8 _, borrow path:Arr u8 _) -> Arr u8 _
+  = let result=dv_run(t.client,push(push(push(push(push(md_words(),host),int_text(port)),pt_join(t.dir,trust)),path),"127.0.0.1"),md_words(),"",30000,4194304) in
+    if !result.ok || result.code!=0 then concat("client failed: ",nt_diagnostic(result)) else t2_last(result.output)
+
+; The client against s_server with options, environment, page, host, path and trust.
+effect fn t2_line_with(borrow t:T2, borrow leaf:Arr u8 _, borrow options:Arr u8 _, borrow environment:Arr Arr u8 _ _, borrow page:Arr u8 _,
+                       borrow host:Arr u8 _, borrow path:Arr u8 _, borrow trust:Arr u8 _) -> Arr u8 _
+  = let port=nw_port() in
+    using server=process_start(bd_find_tool("sh"),t2_server_args(t,port,leaf,options,page,""),dv_environment(environment)) in
+    if !nw_wait_port(port,6000) then (let s=nw_poll(server,nw_child()) in concat("s_server did not start: ",s.errors)) else
+    t2_client(t,port,trust,host,path)
+effect fn t2_line(borrow t:T2, borrow leaf:Arr u8 _, borrow options:Arr u8 _) -> Arr u8 _
+  = t2_line_with(t,leaf,options,md_words(),"-www","localhost","/",t2_trust(leaf))
+
+; The client through the Go proxy (hooks: "|"-separated peer flags) to s_server.
+effect fn t2_proxied(borrow t:T2, borrow leaf:Arr u8 _, borrow options:Arr u8 _, borrow hooks:Arr u8 _, keylog:bool) -> T2Run
+  = let port=nw_port() in
+    let keys=if keylog then pt_join(t.dir,concat("keys-",int_text(port))) else tx_empty() in
+    using server=process_start(bd_find_tool("sh"),t2_server_args(t,port,leaf,options,"-www",keys),dv_environment(md_words())) in
+    if !nw_wait_port(port,6000) then (let s=nw_poll(server,nw_child()) in T2Run { line=concat("s_server did not start: ",s.errors), notes=tx_empty() }) else
+    let args=t2_append(nw_split(concat("-mode|proxy|-upstream|",int_text(port)),124),t2_words(hooks)) in
+    let args=if keylog then push(push(args,"-keylog"),keys) else args in
+    using peer=process_start(t.peer,args,dv_environment(md_words())) in
+    let up=nw_await(peer,nw_child(),"\n",10000) in
+    let line=t2_client(t,nw_peer_port(up),t2_trust(leaf),"localhost","/") in
+    let done=nw_peer_finish(peer,up) in
+    T2Run { line=line, notes=done.output }
+
+; ---- Checks (each returns count+1) ---------------------------------------
+
+effect fn t2_ok(count:i64, borrow name:Arr u8 _, borrow line:Arr u8 _, version:i64, suite:i64, group:i64) -> i64
+  = let ok=str_starts(line,"version=") && tx_equal(t2_field(line,"version"),int_text(version)) && nw_contains(line,"HTTP/1.0 200 ok") &&
+      !nw_contains(line,"read rejected") && (suite<0 || tx_equal(t2_field(line,"suite"),int_text(suite))) &&
+      (group<0 || tx_equal(t2_field(line,"group"),int_text(group))) in
+    let checked=dv_expect(ok,concat(name,": ",line)) in
+    let shown=print_out(concat("PASS ",name,"\n")) in count+1
+effect fn t2_rejected(count:i64, borrow name:Arr u8 _, borrow line:Arr u8 _, borrow reason:Arr u8 _, borrow prefix:Arr u8 _) -> i64
+  = let checked=dv_expect((str_starts(line,prefix) || nw_contains(line,prefix)) && nw_contains(line,reason),
+      concat(name,": ",line," (expected ",prefix," ... ",reason,")")) in
+    let shown=print_out(concat("PASS ",name,"\n")) in count+1
+effect fn t2_proxy_clean(borrow name:Arr u8 _, borrow r:T2Run) -> unit
+  = dv_expect(!nw_contains(r.notes,"\nerror ") && nw_contains(r.notes,"\ndone\n"),concat(name,": proxy ",tx_repr(r.notes,true)))
+effect fn t2_proxy_ok(count:i64, borrow name:Arr u8 _, borrow r:T2Run, suite:i64) -> i64
+  = let clean=t2_proxy_clean(name,r) in t2_ok(count,name,r.line,771,suite,-1)
+effect fn t2_proxy_rejected(count:i64, borrow name:Arr u8 _, borrow r:T2Run, borrow reason:Arr u8 _, borrow prefix:Arr u8 _) -> i64
+  = let clean=t2_proxy_clean(name,r) in t2_rejected(count,name,r.line,reason,prefix)
+; 1 when the ServerHello random the proxy saw ends with DOWNGRD\x01, 0 when it
+; does not, -1 when the proxy saw no ServerHello.
+fn t2_sentinel(borrow notes:Arr u8 _) -> i64
+  = let at=str_find(notes,"\nserver_random ") in if !at.present || at.value+15+64>len(notes) then -1 else
+    if nw_ends(pt_slice(notes,at.value+15,at.value+15+64),"444f574e47524401") then 1 else 0
+
+; ---- Cases ---------------------------------------------------------------
+
+; Suites x groups for one leaf (ECDSA suites for EC leaves, RSA suites for RSA).
+effect fn t2_suites(borrow t:T2, borrow leaf:Arr u8 _, count:i64) -> i64
+  = loop (k=0, n=count) while k<8 next (k+1,
+      let i=k/2 in let group=if k%2==0 then "X25519" else "P-256" in
+      let rsa_suite=nw_contains(t2_cipher(i),"-RSA-") in let rsa_leaf=tx_equal(leaf,"rsa") in
+      if (rsa_suite && !rsa_leaf) || (!rsa_suite && rsa_leaf) then n else
+      t2_ok(n,concat(leaf," ",t2_cipher(i)," ",group),t2_line(t,leaf,concat("-tls1_2|-cipher|",t2_cipher(i),"|-groups|",group)),
+        771,t2_suite(i),if k%2==0 then 29 else 23)) yield n
+
+fn t2_sigalg_case(i:i64) -> Arr u8 _
+  = if i==0 then "rsa RSA+SHA256" else if i==1 then "rsa RSA+SHA384" else if i==2 then "rsa RSA+SHA512"
+    else if i==3 then "rsa rsa_pss_rsae_sha256" else if i==4 then "rsa rsa_pss_rsae_sha384" else if i==5 then "p256 ECDSA+SHA256"
+    else if i==6 then "p256 ECDSA+SHA384" else if i==7 then "p384 ECDSA+SHA384" else "p384 ECDSA+SHA256"
+; ServerKeyExchange signature schemes forced on the server.
+effect fn t2_sigalgs(borrow t:T2, count:i64) -> i64
+  = loop (i=0, n=count) while i<9 next (i+1,
+      let words=nw_split(t2_sigalg_case(i),32) in let leaf=md_word(words,0) in let alg=md_word(words,1) in
+      t2_ok(n,concat(leaf," ServerKeyExchange signed with ",alg),t2_line(t,leaf,concat("-tls1_2|-sigalgs|",alg)),771,-1,-1)) yield n
+
+; Many records each way of a 300 kB -WWW download.
+effect fn t2_download(borrow t:T2, i:i64, borrow expected:Arr u8 _, count:i64) -> i64
+  = let line=t2_line_with(t,"rsa",concat("-tls1_2|-cipher|",t2_cipher(i)),md_words(),"-WWW","localhost","/big.bin","ca.der") in
+    let body=dv_expect(nw_contains(line,expected),concat(t2_cipher(i),": ",line," (expected ",expected,")")) in
+    t2_ok(count,concat("300 kB download over ",t2_cipher(i)),line,771,t2_suite(i),-1)
+
+effect fn t2_tampered_ske(borrow t:T2, borrow leaf:Arr u8 _, count:i64) -> i64
+  = t2_proxy_rejected(count,concat(leaf," tampered ServerKeyExchange signature"),t2_proxied(t,leaf,"-tls1_2","-flight|ske-flip-last",false),
+      "ServerKeyExchange signature rejected","rejected:")
+effect fn t2_flight(borrow t:T2, count:i64, borrow name:Arr u8 _, borrow hooks:Arr u8 _, borrow reason:Arr u8 _) -> i64
+  = t2_proxy_rejected(count,name,t2_proxied(t,"rsa","-tls1_2",hooks,false),reason,"rejected:")
+
+effect fn t2_positive(borrow t:T2, borrow expected:Arr u8 _) -> i64
+  = let n=t2_suites(t,"rsa",0) in let n=t2_suites(t,"p256",n) in let n=t2_suites(t,"p384",n) in
+    let n=t2_sigalgs(t,n) in
+    ; Optional client authentication: an empty client Certificate.
+    let n=t2_ok(n,"CertificateRequest answered with an empty Certificate",
+      t2_line(t,"rsa",concat("-tls1_2|-verify|1|-CAfile|",pt_join(t.dir,"ca.pem"))),771,-1,-1) in
+    let n=t2_download(t,1,expected,n) in let n=t2_download(t,3,expected,n) in
+    ; TLS 1.3 servers still negotiate TLS 1.3 from the same ClientHello.
+    let first=if aes_hardware() then 4865 else 4867 in
+    let n=t2_ok(n,"rsa TLS 1.3-capable server",t2_line(t,"rsa",""),772,first,29) in
+    let n=t2_ok(n,"p256 TLS 1.3-capable server",t2_line(t,"p256",""),772,first,29) in
+    t2_ok(n,"TLS 1.3 with HelloRetryRequest to P-256",t2_line(t,"rsa","-ciphersuites|TLS_AES_128_GCM_SHA256|-groups|P-256"),772,4865,23)
+
+effect fn t2_negative(borrow t:T2, count:i64) -> i64
+  = let n=t2_rejected(count,"server without extended master secret (OpenSSL -ExtendedMasterSecret)",
+      t2_line_with(t,"rsa","-tls1_2",push(md_words(),concat("OPENSSL_CONF=",pt_join(t.dir,"noems.cnf"))),"-www","localhost","/","ca.der"),
+      "extended master secret","rejected:") in
+    let n=t2_rejected(n,"no shared TLS 1.2 suite",t2_line(t,"rsa","-tls1_2|-cipher|ECDHE-RSA-AES256-GCM-SHA384"),"alert 40","rejected:") in
+    ; secp384r1 is offered only for TLS 1.2 ECDSA certificate curves; key exchange on it fails cleanly.
+    let n=t2_rejected(n,"TLS 1.2 server insisting on secp384r1 key exchange",t2_line(t,"rsa","-tls1_2|-groups|P-384"),"secp384r1 key exchange","rejected:") in
+    let n=t2_rejected(n,"TLS 1.3 server insisting on secp384r1 (HelloRetryRequest)",t2_line(t,"rsa","-groups|P-384"),"HelloRetryRequest","rejected:") in
+    let n=t2_rejected(n,"wrong hostname evil.test",t2_line_with(t,"rsa","-tls1_2",md_words(),"-www","evil.test","/","ca.der"),"hostname rejected","rejected:") in
+    let n=t2_rejected(n,"wrong hostname localhost.evil.test",t2_line_with(t,"rsa","-tls1_2",md_words(),"-www","localhost.evil.test","/","ca.der"),
+      "hostname rejected","rejected:") in
+    t2_rejected(n,"leaf issued by an untrusted root",t2_line_with(t,"p256","-tls1_2",md_words(),"-www","localhost","/","ca.der"),"hostname rejected","rejected:")
+
+effect fn t2_attacks(borrow t:T2, count:i64) -> i64
+  = let n=t2_proxy_ok(count,"unmodified proxy, 1-byte TCP writes, 7-byte handshake records",t2_proxied(t,"rsa","-tls1_2","-flight|fragmented|-chunk|1",false),-1) in
+    let n=t2_proxy_ok(n,"unmodified proxy, 3-byte TCP writes, ECDSA P-384",t2_proxied(t,"p384","-tls1_2","-chunk|3",false),-1) in
+    ; Downgrade: a TLS 1.3-capable server sees no supported_versions, negotiates
+    ; TLS 1.2 and marks ServerHello.random with DOWNGRD\x01; the same rewrite
+    ; against a TLS 1.2-only server has no sentinel and fails only when the
+    ; transcripts disagree.
+    let downgraded=t2_proxied(t,"rsa","","-hello|strip:43",false) in
+    let n=t2_proxy_rejected(n,"downgrade sentinel from a TLS 1.3-capable OpenSSL",downgraded,"downgrade detected","rejected:") in
+    let a=dv_expect(t2_sentinel(downgraded.notes)==1,concat("no DOWNGRD sentinel in the ServerHello random: ",tx_repr(downgraded.notes,true))) in
+    let control=t2_proxied(t,"rsa","-tls1_2","-hello|strip:43",false) in
+    let n=t2_proxy_rejected(n,"same rewrite, TLS 1.2-only server: no sentinel, transcript mismatch",control,"alert","rejected:") in
+    let b=dv_expect(t2_sentinel(control.notes)==0,concat("unexpected ServerHello random: ",tx_repr(control.notes,true))) in
+    let n=t2_flight(t,n,"ClientHello without extended master secret reaches the server","-hello|strip:23","extended master secret") in
+    let n=t2_tampered_ske(t,"rsa",n) in let n=t2_tampered_ske(t,"p256",n) in let n=t2_tampered_ske(t,"p384",n) in
+    let n=t2_flight(t,n,"tampered ServerKeyExchange point","-flight|ske-flip-point","ServerKeyExchange signature rejected") in
+    let n=t2_proxy_ok(n,"server Finished re-encrypted unchanged (key-log control)",
+      t2_proxied(t,"rsa","-tls1_2|-cipher|ECDHE-RSA-CHACHA20-POLY1305","-record|finished-control",true),52392) in
+    let n=t2_proxy_rejected(n,"server Finished with wrong verify_data, validly encrypted",
+      t2_proxied(t,"rsa","-tls1_2|-cipher|ECDHE-RSA-CHACHA20-POLY1305","-record|finished-forged",true),"TLS Finished rejected","rejected:") in
+    let n=t2_proxy_rejected(n,"corrupted Finished record (ECDHE-RSA-AES128-GCM-SHA256)",
+      t2_proxied(t,"rsa","-tls1_2|-cipher|ECDHE-RSA-AES128-GCM-SHA256","-record|corrupt-finished",false),"record authentication failed","rejected:") in
+    let n=t2_proxy_rejected(n,"corrupted Finished record (ECDHE-RSA-CHACHA20-POLY1305)",
+      t2_proxied(t,"rsa","-tls1_2|-cipher|ECDHE-RSA-CHACHA20-POLY1305","-record|corrupt-finished",false),"record authentication failed","rejected:") in
+    let n=t2_flight(t,n,"ChangeCipherSpec injected after ServerHello","-flight|early-ccs","unexpected TLS change-cipher-spec") in
+    let n=t2_flight(t,n,"renegotiation_info removed","-flight|sh-no-reneg","secure renegotiation") in
+    let n=t2_flight(t,n,"renegotiation_info not empty","-flight|sh-reneg-not-empty","invalid TLS 1.2 ServerHello extensions") in
+    let n=t2_flight(t,n,"extended_master_secret removed from ServerHello","-flight|sh-no-ems","extended master secret") in
+    let n=t2_flight(t,n,"unsolicited session_ticket extension","-flight|sh-ticket","invalid TLS 1.2 ServerHello extensions") in
+    let n=t2_flight(t,n,"server echoes the client session id (resumption)","-flight|echo-session","session resumption") in
+    let n=t2_flight(t,n,"truncated server flight","-flight|truncate-flight","transport closed") in
+    let n=t2_flight(t,n,"truncated Finished record","-record|truncate:0","transport closed") in
+    t2_proxy_rejected(n,"truncated application record",t2_proxied(t,"rsa","-tls1_2","-record|truncate:1",false),"transport closed","read rejected:")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("tls12") in let client=pt_join(dir,"tls12") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/language_tls12.neo"),client,md_words()) in
+    let certificates=nw_certificates(dir) in
+    let expected=t2_files(dir) in
+    let t=T2 { dir=dir, client=client, peer=nw_build_peer(tools,dir) } in
+    let n=t2_positive(t,expected) in let n=t2_negative(t,n) in let n=t2_attacks(t,n) in
+    let shown=print_out(concat("PASS TLS 1.2: ",int_text(n)," cases\n")) in
+    dv_clean(dir)

@@ -1,0 +1,166 @@
+; network_language.py: tests/fixtures/language_dns.neo and language_http.neo
+; against independent UDP/TCP peers that run in a forked child of this driver.
+; DNS: UDP answers, a compressed CNAME, ID and question validation, a pointer
+; cycle, truncation with a fragmented TCP fallback, a TCP peer that closes or
+; stalls, and the 300 ms deadline. HTTP: seven methods and HEAD without
+; waiting for EOF, fixed/chunked/EOF framing, a 1xx response, malicious
+; framing, 4 MiB streamed through a bounded buffer, and a chunk returned
+; before the response ends.
+import "std:cancel"
+import "std:datagram"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:strings"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+fn nl_flip_first(borrow bytes:Arr u8 _) -> Arr u8 _
+  = arr(i in 0..len(bytes)) u8(bit_and(if i==0 then bit_xor(tx_byte(bytes,0),1) else tx_byte(bytes,i),255))
+fn nl_replace_first(borrow text:Arr u8 _, borrow needle:Arr u8 _, borrow other:Arr u8 _) -> Arr u8 _
+  = let at=str_find(text,needle) in if !at.present then pt_slice(text,0,len(text)) else
+    concat(pt_slice(text,0,at.value),other,nw_after(text,at.value+len(needle)))
+
+; network_language.py's dns_answer.
+fn nl_answer(borrow query:Arr u8 _, borrow kind:Arr u8 _) -> Arr u8 _
+  = let question=nw_after(query,12) in let cname=tx_equal(kind,"cname") in
+    let header=concat(pt_slice(query,0,2),"\x81\x80",nw_be(1,2),nw_be(if cname then 2 else 1,2),nw_be(0,2),nw_be(0,2)) in
+    let owner=if tx_equal(kind,"cycle") then nw_be(49152+12+len(question),2) else "\xc0\x0c" in
+    let record=concat(nw_be(1,2),nw_be(1,2),nw_be(60,4),nw_be(4,2),"\xcb\x00\x71\x07") in
+    let answer=if !cname then concat(owner,record) else
+      let name="\x05alias\xc0\x0c" in
+      concat("\xc0\x0c",nw_be(5,2),nw_be(1,2),nw_be(60,4),nw_be(len(name),2),name,nw_be(49152+12+len(question)+12,2),record) in
+    let wire=concat(header,question,answer) in
+    if tx_equal(kind,"id") then nl_flip_first(wire) else if tx_equal(kind,"question") then nl_replace_first(wire,"test","evil") else wire
+
+fn nl_framed(borrow got:Arr u8 _) -> bool = len(got)>=2 && len(got)>=nw_be_value(got,0,2)+2
+
+; The DNS peer: UDP and TCP on one port, written to ready. It keeps its
+; sockets until done appears and exits 0 when it saw what it expected.
+effect fn nl_dns_serve(listener:Listener, udp:Datagram, borrow kind:Arr u8 _) -> i64
+  = let deadline=deadline_after(3000) in using cancellation=new_cancellation() in
+    let query=datagram_receive(udp,16384,deadline.value,cancellation) in if !query.ok then 3 else
+    let wire=nl_answer(query.bytes,kind) in
+    if tx_equal(kind,"timeout") then 0 else
+    if !str_starts(kind,"tcp") then (let sent=datagram_try_send(udp,query.host,query.port,wire) in if sent.ok then 0 else 4) else
+    let truncated=concat(pt_slice(query.bytes,0,2),"\x83\x80",nw_be(1,2),nw_be(0,2),nw_be(0,2),nw_be(0,2),nw_after(query.bytes,12)) in
+    let told=datagram_try_send(udp,query.host,query.port,truncated) in
+    using connection=listener_accept(listener,deadline.value,cancellation) in if !socket_status(connection).ok then 5 else
+    let request=loop (a=nw_acc()) while a.open && !nl_framed(a.got) next (nw_read_more(connection,a,deadline.value)) yield a.got in
+    if !tx_equal(nw_after(request,2),query.bytes) then 6 else
+    let response=concat(nw_be(len(wire),2),wire) in
+    if tx_equal(kind,"tcp-timeout") then (let paused=sleep_ms(500) in 0) else
+    let response=if tx_equal(kind,"tcp-close") then pt_slice(response,0,20) else response in
+    if nw_send_slowly(connection,response,3,1,deadline.value) then 0 else 7
+effect fn nl_dns_peer(borrow ready:Arr u8 _, borrow done:Arr u8 _, borrow kind:Arr u8 _) -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,4) in let port=nw_listener_port(listener) in
+    using udp=udp_bind_ipv4("127.0.0.1",port) in
+    if port==0 || !datagram_status(udp).ok then 2 else
+    let wrote=fs_write(ready,int_text(port)) in
+    let status=nl_dns_serve(listener,udp,kind) in
+    let finished=nw_wait_file(done,4000) in status
+
+effect fn nl_dns(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow kind:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let ready=pt_join(dir,concat("dns-",kind)) in let done=pt_join(dir,concat("dns-done-",kind)) in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(nl_dns_peer(ready,done,kind)) else
+    let port=nw_wait_file(ready,5000) in
+    let start=nw_now_ms() in
+    let result=dv_run(binary,push(md_words(),port),md_words(),"",5000,65536) in let elapsed=nw_now_ms()-start in
+    let told=fs_write(done,"done") in let peer=nw_reap(forked.value) in
+    let a=dv_expect(result.ok && result.code==0 && tx_equal(str_trim(result.output),expected),
+      concat("DNS ",kind,": ",tx_repr(result.output,true)," (expected ",expected,") ",nt_diagnostic(result))) in
+    let b=dv_expect(elapsed<2000,concat("DNS ",kind," took ",int_text(elapsed)," ms")) in
+    dv_expect(peer==0,concat("DNS ",kind," peer failed with wait status ",int_text(peer)))
+
+; The HTTP peer: one connection; checks the request line and payload, then
+; answers with wire (in 3-byte writes; at once with a gate or a body, the body
+; in 8 KiB writes). With a gate it waits for that file before sending "last".
+effect fn nl_http_serve(listener:Listener, borrow method:Arr u8 _, borrow wire:Arr u8 _, hold:bool, borrow gate:Arr u8 _, body_size:i64) -> i64
+  = let deadline=deadline_after(3000) in using cancellation=new_cancellation() in
+    using connection=listener_accept(listener,deadline.value,cancellation) in if !socket_status(connection).ok then 2 else
+    let request=loop (a=nw_acc()) while a.open && !(nw_contains(a.got,"\r\n\r\n") && len(nw_after(a.got,str_find(a.got,"\r\n\r\n").value+4))>=7)
+      next (nw_read_more(connection,a,deadline.value)) yield a.got in
+    let end=str_find(request,"\r\n\r\n") in
+    if !end.present || !str_starts(request,concat(method," /test HTTP/1.1\r\n")) then 3 else
+    if !tx_equal(nw_after(request,end.value+4),"payload") then 4 else
+    let sent=if body_size>0 then
+        (let head=socket_write(connection,wire,deadline.value) in
+         let body=arr(i in 0..body_size) u8(bit_and(i,255)) in nw_send_slowly(connection,body,8192,0,deadline.value))
+      else if len(gate)>0 then socket_write(connection,wire,deadline.value).ok
+      else nw_send_slowly(connection,wire,3,1,deadline.value) in
+    let gated=if len(gate)==0 then true else
+      (let opened=nw_wait_file(gate,2000) in len(opened)>0 && socket_write(connection,"last",deadline.value).ok) in
+    let held=if hold then sleep_ms(500) else int_ok(0) in
+    if !gated then 5 else 0
+effect fn nl_http_peer(borrow ready:Arr u8 _, borrow method:Arr u8 _, borrow wire:Arr u8 _, hold:bool, borrow gate:Arr u8 _, body_size:i64) -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,4) in let port=nw_listener_port(listener) in
+    if port==0 then 2 else let wrote=fs_write(ready,int_text(port)) in
+    nl_http_serve(listener,method,wire,hold,gate,body_size)
+
+effect fn nl_http(borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow method:Arr u8 _, borrow wire:Arr u8 _,
+                  hold:bool, body_size:i64, borrow mode:Arr u8 _, borrow expected:Arr u8 _, limit_ms:i64) -> unit
+  = let ready=pt_join(dir,concat("http-",name)) in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(nl_http_peer(ready,method,wire,hold,"",body_size)) else
+    let port=nw_wait_file(ready,5000) in
+    let start=nw_now_ms() in
+    let result=dv_run(binary,push(push(push(md_words(),port),mode),method),md_words(),"",5000,65536) in let elapsed=nw_now_ms()-start in
+    let peer=nw_reap(forked.value) in
+    let a=dv_expect(result.ok && result.code==0 && tx_equal(result.output,expected),
+      concat("HTTP ",name,": ",tx_repr(result.output,true)," (expected ",tx_repr(expected,true),") ",nt_diagnostic(result))) in
+    let b=dv_expect(limit_ms<=0 || elapsed<limit_ms,concat("HTTP ",name," waited for EOF despite response framing: ",int_text(elapsed)," ms")) in
+    dv_expect(peer==0,concat("HTTP ",name," peer failed with wait status ",int_text(peer)))
+
+; The client must return the first chunk before the peer sends the rest.
+effect fn nl_gate(borrow binary:Arr u8 _, borrow dir:Arr u8 _) -> unit
+  = let ready=pt_join(dir,"http-gate") in let gate=pt_join(dir,"gate-open") in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(nl_http_peer(ready,"GET","HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nfirst",false,gate,0)) else
+    let port=nw_wait_file(ready,5000) in
+    using child=process_start(binary,push(push(md_words(),port),"2"),dv_environment(md_words())) in
+    let first=nw_await(child,nw_child(),"chunk\n",5000) in
+    let early=tx_equal(first.output,"chunk\n") in
+    let opened=fs_write(gate,"open") in
+    let done=nw_finish(child,first,5000) in let peer=nw_reap(forked.value) in
+    let a=dv_expect(early,concat("HTTP early chunk: the client returned no chunk before the rest arrived: ",tx_repr(first.output,true)," ",first.errors)) in
+    let b=dv_expect(!done.running && done.code==0 && tx_equal(done.output,"chunk\n200 9 988\n"),
+      concat("HTTP early chunk: ",tx_repr(done.output,true)," ",done.errors)) in
+    dv_expect(peer==0,concat("HTTP early chunk peer failed with wait status ",int_text(peer)))
+
+effect fn nl_methods(borrow binary:Arr u8 _, borrow dir:Arr u8 _) -> unit
+  = let methods=push(push(push(push(push(push(push(md_words(),"GET"),"POST"),"PUT"),"PATCH"),"DELETE"),"OPTIONS"),"HEAD") in
+    loop (i=0) while i<len(methods) next (
+      let method=md_word(methods,i) in let head=tx_equal(method,"HEAD") in
+      let wire=concat("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n",if head then "" else "hello") in
+      let ran=nl_http(binary,dir,method,method,wire,true,0,"0",if head then "200 \n" else "200 hello\n",450) in i+1) yield noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("network-language") in
+    let dns=pt_join(dir,"dns") in let http=pt_join(dir,"http") in
+    let b1=dv_build(tools,pt_join(tools.here,"../fixtures/language_dns.neo"),dns,md_words()) in
+    let b2=dv_build(tools,pt_join(tools.here,"../fixtures/language_http.neo"),http,md_words()) in
+    let d1=nl_dns(dns,dir,"valid","203.0.113.7") in let d2=nl_dns(dns,dir,"cname","203.0.113.7") in
+    let d3=nl_dns(dns,dir,"id","error:1") in let d4=nl_dns(dns,dir,"question","error:1") in
+    let d5=nl_dns(dns,dir,"cycle","error:2") in let d6=nl_dns(dns,dir,"tcp","203.0.113.7") in
+    let d7=nl_dns(dns,dir,"tcp-close","error:5") in let d8=nl_dns(dns,dir,"tcp-timeout","error:110") in
+    let d9=nl_dns(dns,dir,"timeout","error:110") in
+    let shown=print_out("PASS DNS: UDP, compressed CNAME, ID/question validation, pointer cycles, fragmented TCP fallback, truncation and monotonic deadlines\n") in
+    let m=nl_methods(http,dir) in
+    let h1=nl_http(http,dir,"chunked","GET","HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhe\r\n3\r\nllo\r\n0\r\nX-T: a\r\n\r\n",false,0,"0","200 hello\n",0) in
+    let h2=nl_http(http,dir,"eof","GET","HTTP/1.0 200 OK\r\n\r\nhello",false,0,"0","200 hello\n",0) in
+    let h3=nl_http(http,dir,"continue","GET","HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",false,0,"0","200 hello\n",0) in
+    let h4=nl_http(http,dir,"short","GET","HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nhello",false,0,"0","error:5\n",0) in
+    let h5=nl_http(http,dir,"both","GET","HTTP/1.1 200 OK\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",false,0,"0","error:1\n",0) in
+    let h6=nl_http(http,dir,"bad-header","GET","HTTP/1.1 200 OK\r\nBad Header: a\r\n\r\n",false,0,"0","error:1\n",0) in
+    let h7=nl_http(http,dir,"bad-chunk","GET","HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcXX0\r\n\r\n",false,0,"0","error:1\n",0) in
+    let h8=nl_http(http,dir,"stream","GET","HTTP/1.1 200 OK\r\nContent-Length: 4194304\r\n\r\n",false,4194304,"1","200 4194304 534773760\n",0) in
+    let g=nl_gate(http,dir) in
+    let shown=print_out("PASS HTTP: seven methods, HEAD, fixed/chunked/EOF framing, 1xx, malicious framing, early chunks and 4 MiB streamed through a bounded buffer\n") in
+    dv_clean(dir)

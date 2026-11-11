@@ -1,0 +1,37 @@
+; std:deflate's decoders for deflate_language.py's frozen vectors
+; (tests/vectors/deflate_language). main MODE LIMIT reads stdin:
+;   0 raw DEFLATE, 1 zlib, 2 gzip, 3 HTTP Content-Encoding ("CODING\nBODY"),
+;   4 "crc32 adler32\n" of the input. The decoded bytes are written out, or
+;   "CODE POSITION MESSAGE" with exit 2.
+;   20+kind: a batch of [u32 little-endian length][stream] records of kind,
+;   answered with "ok LENGTH SHA256\n" or "error\n" per record.
+import "std:deflate"
+import "std:io"
+import "std:sha256"
+import "std:strings"
+
+fn dl_decode(kind:i64, borrow bytes:Arr u8 n, limit:i64) -> BytesResult
+  = if kind==0 then inflate_raw(bytes,limit) else if kind==1 then zlib_decode(bytes,limit) else if kind==2 then gzip_decode(bytes,limit)
+    else if kind==3 then let split=str_find(bytes,"\n") in
+      if !split.present then bytes_error(22,"missing encoding line",0) else
+      http_content_decode(str_slice(bytes,0,split.value),str_slice(bytes,split.value+1,n),limit)
+    else if kind==4 then bytes_ok(concat(int_text(crc32(bytes))," ",int_text(adler32(bytes)),"\n"))
+    else bytes_error(22,"unknown mode",0)
+
+fn dl_digit(d:i64) -> u8 = u8(if d<10 then 48+d else 87+d)
+fn dl_hex(borrow bytes:Arr u8 n) -> Arr u8 _
+  = arr(i in 0..2*n) dl_digit(bit_and(shift_right(str_byte(bytes,i/2),if i%2==0 then 4 else 0),15))
+fn dl_record(borrow result:BytesResult) -> Arr u8 _
+  = if result.ok then concat("ok ",int_text(len(result.value))," ",dl_hex(sha256(result.value)),"\n") else "error\n"
+
+fn dl_batch(kind:i64, borrow bytes:Arr u8 n, limit:i64) -> Arr u8 _
+  = loop (at=0, out="") while at>=0 && at+4<=n
+      next (at+4+bytes_le32(bytes,at),
+        let size=bytes_le32(bytes,at) in concat(out,dl_record(dl_decode(kind,str_slice(bytes,at+4,at+4+size),limit)))) yield out
+
+effect(fs,process) fn main(mode:i64, limit:i64) -> unit
+  = let input=file_read(0,67108864) in check input.ok in let bytes=input.value in
+    if mode>=20 then let written=print_out(dl_batch(mode-20,bytes,limit)) in noop() else
+    let result=dl_decode(mode,bytes,limit) in
+    if result.ok then let written=print_out(result.value) in noop() else
+      let written=print_out(concat(int_text(result.error.code)," ",int_text(result.error.position)," ",result.error.message)) in process_exit(2)

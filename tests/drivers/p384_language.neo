@@ -1,0 +1,38 @@
+; p384_language.py: std:p384's six-limb Montgomery field and order arithmetic
+; against Python integers (the program is stdlib/p384.neo plus the old
+; FIELD_MAIN, since the arithmetic is private), then tests/fixtures/
+; language_p384.neo's public-key validation and batched ECDSA verification
+; against Go's crypto/ecdsa (vectors/p384_language). The old per-operation
+; timing is not kept.
+import "std:io"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/paths.neo"
+
+fn pl_field_main() -> Arr u8 _
+  = concat(
+      "import \"std:io\"\n",
+      "; Records: [order u8][op u8][a 48][b 48]; each result is 48 big-endian bytes.\n",
+      "; op 0 a*b, 1 a+b, 2 a-b, 3 a^-1 (order only), 4 a mod m, 5 a*a (field only).\n",
+      "type FieldBatch = { at:i64,out:Arr u8 _ }\n",
+      "fn field_mul(order:i64,a:P6,b:P6) -> P6 = if order==1 then p6_order_mul(a,b) else p6_field_mul(a,b)\n",
+      "fn field_step(move state:FieldBatch,input:Arr u8 n) -> FieldBatch\n",
+      "  = let at=state.at in let order=str_byte(input,at) in let op=str_byte(input,at+1) in\n",
+      "    let m=if order==1 then p6_order() else p6_prime() in let r2=if order==1 then p6_order_r2() else p6_field_r2() in\n",
+      "    let a=field_mul(order,p6_words(str_slice(input,at+2,at+50)),r2) in\n",
+      "    let b=field_mul(order,p6_words(str_slice(input,at+50,at+98)),r2) in\n",
+      "    let result=if op==0 then field_mul(order,a,b) else if op==1 then p6_add_mod(a,b,m) else if op==2 then p6_sub_mod(a,b,m) else\n",
+      "      if op==3 then p6_order_inverse(field_mul(order,a,p6_small(1))) else if op==5 then p6_field_square(a) else a in\n",
+      "    FieldBatch { at=at+98,out=concat(state.out,p6_bytes(field_mul(order,result,p6_small(1)))) }\n",
+      "effect(fs,process) fn main() -> unit\n",
+      "  = let raw=file_read(0,4194304) in check raw.ok in let input=raw.value in\n",
+      "    let batch=loop(state=FieldBatch { at=0,out=\"\" }) while state.at<len(input) next(field_step(state,input)) yield state in\n",
+      "    let output=file_write(1,batch.out) in check output.ok in noop()\n")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("p384") in let vectors=pt_join(tools.here,"../vectors/p384_language") in
+    let source=nw_stdlib_program(tools,dir,"p384.neo","p384_field",pl_field_main()) in
+    let field=nw_vector_suite(tools,dir,source,pt_join(vectors,"montgomery.in"),"P-384 field/order Montgomery records") in
+    let ecdsa=nw_vector_suite(tools,dir,pt_join(tools.here,"../fixtures/language_p384.neo"),pt_join(vectors,"p384.in"),
+      "P-384/P-256 public keys and ECDSA vs Go") in
+    dv_clean(dir)

@@ -1,11 +1,14 @@
+; Provenance: the regions between "; generated: begin NAME" and "; generated: end NAME"
+; were written by tests/generate_crypto_fields.py, which was removed with the
+; Python tests; it is in the v0.2.3 tag. Edit those regions by hand now.
 import "std:sha256"
 import "std:der"
 
 ; P-256 arithmetic for ECDSA/ECDH protocol libraries. Field and order values
 ; are records of four unsigned 64-bit limbs (no allocation per operation) in
 ; Montgomery form with R = 2^256, fully reduced between operations;
-; tests/generate_crypto_fields.py writes the unrolled products and the
-; constants. Limb arithmetic is exact: wrapping sums with unsigned comparisons
+; tests/generate_crypto_fields.py (v0.2.3 tag) wrote the unrolled products and
+; the constants. Limb arithmetic is exact: wrapping sums with unsigned comparisons
 ; for carries, and wrapping_mul/mul_high for the two words of each 128-bit
 ; product. p256_normal returns a value out of Montgomery form.
 ; Secret scalars (key generation, ECDH, signing) use a fixed 4-bit window with

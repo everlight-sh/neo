@@ -1,0 +1,235 @@
+; http_limits.py: the HTTP runtime's limits over real sockets in
+; tests/fixtures/http_limits.neo, on io_uring, epoll and poll (Linux x86_64):
+; refused requests (400, 413, 431) answered with Connection: close, including
+; mid-upload and pipelined; Expect: 100-continue; header (408), body and
+; keep-alive idle timeouts; NEO_HTTP_CONNECTIONS (503); client addresses
+; behind NEO_TRUSTED_PROXIES; and crashed workers being replaced.
+import "std:arena"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn hl_hello() -> Arr u8 _ = "Hello, World!"
+fn hl_status(borrow wire:Arr u8 _, status:i64) -> bool = str_starts(wire,concat("HTTP/1.1 ",int_text(status)," "))
+fn hl_show(borrow wire:Arr u8 _) -> Arr u8 _ = tx_repr(if len(wire)>240 then pt_slice(wire,0,240) else wire,true)
+
+; Everything the server sends on a new connection after request (nothing sent
+; when it is empty) until it closes; "<error ...>" on a reset or timeout.
+effect(net,time) fn hl_wire(port:i64, borrow request:Arr u8 _) -> Arr u8 _
+  = let deadline=deadline_after(10000) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    if !socket_status(socket).ok then "<error: connect failed>" else
+    let sent=if len(request)>0 then socket_write(socket,request,deadline.value) else int_ok(0) in
+    if !sent.ok then "<error: send failed>" else
+    let wire=nw_until_closed(socket,deadline.value) in
+    if wire.ok then wire.value else concat("<error: ",wire.error.message,">")
+
+effect fn hl_refusal(port:i64, borrow headers:Arr u8 _, status:i64) -> Arr u8 _
+  = let wire=hl_wire(port,concat("POST /echo HTTP/1.1\r\nHost: x\r\n",headers,"\r\n\r\n")) in
+    nw_note("",hl_status(wire,status) && nw_contains(wire,"Connection: close\r\n"),
+      concat(tx_repr(headers,true),": expected ",int_text(status)," with Connection: close, got ",hl_show(wire)))
+
+effect fn hl_refusals(port:i64) -> Arr u8 _
+  = let a=hl_refusal(port,"Content-Length: -1",400) in
+    let b=hl_refusal(port,"Content-Length: 1\r\nContent-Length: 1",400) in
+    let c=hl_refusal(port,"Transfer-Encoding: gzip",400) in
+    let d=hl_refusal(port,"Content-Length: 0\r\nTransfer-Encoding: chunked",400) in
+    let e=hl_refusal(port,"Content-Length: 16777217",413) in
+    let f=hl_refusal(port,"Content-Length: 9999999999999999999999999",413) in
+    ; Headers over 16 KiB, with and without their end.
+    let big=arr(i in 0..17000) u8(97) in
+    let g=hl_wire(port,concat("GET / HTTP/1.1\r\nHost: x\r\nX-Big: ",big)) in
+    let h=hl_wire(port,concat("GET / HTTP/1.1\r\nHost: x\r\nX-Big: ",big,"\r\n\r\n")) in
+    ; A client still uploading a body over the limit reads the 413, not a reset.
+    let upload=arr(i in 0..200000) u8(120) in
+    let k=hl_wire(port,concat("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 20000000\r\n\r\n",upload)) in
+    let m=hl_wire(port,"POST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n") in
+    ; Pipelined: the good request is answered, then the bad one is refused.
+    let n=hl_wire(port,"GET / HTTP/1.1\r\nHost: x\r\n\r\nPOST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: x\r\n\r\n") in
+    let p=nw_note(nw_note(concat(a,b,c,d,e,f),hl_status(g,431),concat("17000-byte header without its end: ",hl_show(g))),
+      hl_status(h,431),concat("17000-byte header: ",hl_show(h))) in
+    let q=nw_note(nw_note(p,hl_status(k,413),concat("413 mid-upload: ",hl_show(k))),hl_status(m,400),concat("bad chunk size: ",hl_show(m))) in
+    nw_note(q,hl_status(n,200) && nw_contains(n,"Hello, World!HTTP/1.1 400 "),concat("pipelined refusal: ",hl_show(n)))
+
+fn hl_continue() -> Arr u8 _ = "HTTP/1.1 100 Continue\r\n\r\n"
+effect fn hl_continues(port:i64) -> Arr u8 _
+  = let deadline=deadline_after(10000) in let d=deadline.value in
+    let first=(using s=tcp_connect_ipv4("127.0.0.1",port,d) in
+      let a=socket_write(s,"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n",d) in
+      let interim=nw_read_until(s,"\r\n\r\n",d) in
+      let b=socket_write(s,"he",d) in let paused=sleep_ms(50) in let c=socket_write(s,"llo",d) in
+      let reply=nw_read_response(s,"",d,false) in
+      ; The next request on the connection gets its own 100 Continue.
+      let e=socket_write(s,"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nExpect: 100-Continue\r\nConnection: close\r\n\r\n",d) in
+      let again=nw_read_until(s,"\r\n\r\n",d) in
+      let f=socket_write(s,"ok",d) in let rest=nw_until_closed(s,d) in
+      nw_note(nw_note(nw_note(nw_note("",tx_equal(interim,hl_continue()),concat("interim response: ",hl_show(interim))),
+        reply.response.status==200 && tx_equal(reply.response.body,"5") && nw_ends(reply.buffer,"\r\n\r\n5"),concat("reply after 100 Continue: ",hl_show(reply.buffer))),
+        tx_equal(again,hl_continue()),concat("second interim response: ",hl_show(again))),
+        rest.ok && nw_ends(rest.value,"\r\n\r\n2"),concat("second reply: ",hl_show(if rest.ok then rest.value else rest.error.message)))) in
+    ; Body sent with the headers: no interim response.
+    let together=hl_wire(port,"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\nExpect: 100-continue\r\nConnection: close\r\n\r\nabc") in
+    ; Over the limit: 413 at once, without 100 Continue.
+    let over=hl_wire(port,"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 16777217\r\nExpect: 100-continue\r\n\r\n") in
+    ; HTTP/1.0 clients get no interim response.
+    let old=(using s=tcp_connect_ipv4("127.0.0.1",port,d) in
+      let a=socket_write(s,"POST /echo HTTP/1.0\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n",d) in
+      let ready=socket_wait_ready(s,1,500) in
+      let early=!ready.ok || ready.value>0 in
+      let b=socket_write(s,"ok",d) in let rest=nw_until_closed(s,d) in
+      nw_note(nw_note("",!early,"an HTTP/1.0 client got an early response"),
+        rest.ok && nw_ends(rest.value,"\r\n\r\n2"),concat("HTTP/1.0 reply: ",hl_show(if rest.ok then rest.value else rest.error.message)))) in
+    nw_note(nw_note(concat(first,old),hl_status(together,200) && nw_ends(together,"3"),concat("body with the headers: ",hl_show(together))),
+      hl_status(over,413) && !nw_contains(over,"100 Continue"),concat("over the limit with Expect: ",hl_show(over)))
+
+; Five requests 600 ms apart on one keep-alive connection all answer.
+effect(net,time) fn hl_active(port:i64) -> bool
+  = let deadline=deadline_after(15000) in
+    using s=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    loop (i=0, ok=true) while i<5 && ok
+      next (i+1,let w=socket_write(s,"GET / HTTP/1.1\r\nHost: x\r\n\r\n",deadline.value) in
+        let got=nw_read_until(s,hl_hello(),deadline.value) in let paused=sleep_ms(600) in w.ok && nw_ends(got,hl_hello())) yield ok
+
+fn hl_between(value:i64, low:i64, high:i64) -> bool = value>low && value<high
+; Header 1.5 s, body 1.5 s, idle 2 s.
+effect fn hl_timeouts(port:i64) -> Arr u8 _
+  = let start=nw_now_ms() in let deadline=deadline_after(15000) in let d=deadline.value in
+    using slow=tcp_connect_ipv4("127.0.0.1",port,d) in let a=socket_write(slow,"GET / HTTP/1.1\r\nHost: x\r\n",d) in
+    using body=tcp_connect_ipv4("127.0.0.1",port,d) in let b=socket_write(body,"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\nabc",d) in
+    using idle=tcp_connect_ipv4("127.0.0.1",port,d) in let c=socket_write(idle,"GET / HTTP/1.1\r\nHost: x\r\n\r\n",d) in
+    let answered=nw_read_until(idle,hl_hello(),d) in
+    ; Slowloris: a byte every 600 ms keeps nothing alive past the header timeout.
+    using drip=tcp_connect_ipv4("127.0.0.1",port,d) in let e=socket_write(drip,"GET / HTTP/1.1\r\n",d) in
+    let dripped=loop (i=0) while i<2 next (let paused=sleep_ms(600) in let w=socket_write(drip,"X",d) in i+1) yield i in
+    let slow_wire=nw_until_closed(slow,d) in let t1=nw_now_ms()-start in
+    let drip_wire=nw_until_closed(drip,d) in
+    let body_wire=nw_until_closed(body,d) in let t2=nw_now_ms()-start in
+    let idle_wire=nw_until_closed(idle,d) in let t3=nw_now_ms()-start in
+    let p=nw_note(nw_note("",nw_ends(answered,hl_hello()),concat("the keep-alive request was not answered: ",hl_show(answered))),
+      slow_wire.ok && hl_status(slow_wire.value,408) && hl_between(t1,1400,3600),
+      concat("header timeout: ",hl_show(if slow_wire.ok then slow_wire.value else slow_wire.error.message)," after ",int_text(t1)," ms")) in
+    let q=nw_note(nw_note(p,drip_wire.ok && hl_status(drip_wire.value,408),concat("slowloris: ",hl_show(if drip_wire.ok then drip_wire.value else drip_wire.error.message))),
+      body_wire.ok && len(body_wire.value)==0 && hl_between(t2,1400,3600),
+      concat("body timeout: ",hl_show(if body_wire.ok then body_wire.value else body_wire.error.message)," after ",int_text(t2)," ms")) in
+    let r=nw_note(q,idle_wire.ok && len(idle_wire.value)==0 && hl_between(t3,1900,4100),
+      concat("idle timeout: ",hl_show(if idle_wire.ok then idle_wire.value else idle_wire.error.message)," after ",int_text(t3)," ms")) in
+    ; An active keep-alive connection is not idle.
+    nw_note(r,hl_active(port),"an active keep-alive connection was closed")
+
+; NEO_HTTP_CONNECTIONS=4: a fifth connection is answered 503 with Retry-After.
+effect fn hl_limit(port:i64) -> Arr u8 _
+  = ; Let the startup probe's connection close first: it counts until then.
+    let first=nw_get_is(port,"/",200,hl_hello()) in let paused=sleep_ms(200) in
+    using arena=new_arena(8) in
+    let held=nw_hold(arena,port,3,"GET / HTTP/1.1\r\nHost: x\r\n\r\n",hl_hello(),5000) in
+    let deadline=deadline_after(10000) in
+    let full=(using s=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+      let w=socket_write(s,"GET / HTTP/1.1\r\nHost: x\r\n\r\n",deadline.value) in
+      let got=nw_read_until(s,hl_hello(),deadline.value) in
+      let extra=hl_wire(port,"") in
+      nw_note(nw_note("",held==3 && nw_ends(got,hl_hello()),concat(int_text(held+(if nw_ends(got,hl_hello()) then 1 else 0))," of 4 held connections answered")),
+        hl_status(extra,503) && nw_contains(extra,"Retry-After: 1"),concat("the fifth connection: ",hl_show(extra)))) in
+    let after=sleep_ms(200) in
+    nw_note(nw_note(full,first,"the first request failed"),nw_get_is(port,"/",200,hl_hello()),"no answer after a held connection closed")
+
+effect fn hl_peer(port:i64, borrow headers:Arr u8 _, borrow expected:Arr u8 _) -> Arr u8 _
+  = let r=nw_get(port,"/peer",headers) in
+    nw_note("",r.complete && r.status==200 && tx_equal(r.body,expected),
+      concat(tx_repr(headers,true),": ",int_text(r.status)," ",tx_repr(r.body,true)," (expected ",expected,")"))
+effect fn hl_addresses(port:i64) -> Arr u8 _
+  = concat(hl_peer(port,"","127.0.0.1 127.0.0.1 http"),
+      hl_peer(port,"X-Forwarded-For: 203.0.113.9\r\nX-Forwarded-Proto: https\r\n","127.0.0.1 127.0.0.1 http"))
+effect fn hl_trusted(port:i64) -> Arr u8 _
+  = let a=hl_peer(port,"","127.0.0.1 127.0.0.1 http") in
+    let b=hl_peer(port,"X-Forwarded-For: 203.0.113.9\r\nX-Forwarded-Proto: https\r\n","127.0.0.1 203.0.113.9 https") in
+    ; The right-most untrusted entry; spoofed entries to its left are ignored.
+    let c=hl_peer(port,"X-Forwarded-For: 1.1.1.1, 203.0.113.9, 10.1.2.3\r\nX-Forwarded-Proto: http, https, http\r\n","127.0.0.1 203.0.113.9 https") in
+    let d=hl_peer(port,"X-Forwarded-For: 1.1.1.1\r\nX-Forwarded-For: 198.51.100.7:4711, fd00::1\r\n","127.0.0.1 198.51.100.7 http") in
+    let e=hl_peer(port,"X-Forwarded-For: [2001:DB8:0:0:0:0:0:1]:443\r\n","127.0.0.1 2001:db8::1 http") in
+    let f=hl_peer(port,"X-Forwarded-For: ::ffff:192.0.2.1\r\n","127.0.0.1 192.0.2.1 http") in
+    ; Every entry trusted: the left-most. An unreadable entry: the hop to its right.
+    let g=hl_peer(port,"X-Forwarded-For: 10.0.0.1, 10.0.0.2\r\n","127.0.0.1 10.0.0.1 http") in
+    let h=hl_peer(port,"X-Forwarded-For: 203.0.113.9, garbage, 10.0.0.2\r\nX-Forwarded-Proto: https\r\n","127.0.0.1 10.0.0.2 https") in
+    concat(a,b,c,d,e,f,g,h)
+
+; A process's children (/proc/PID/task/PID/children).
+effect fn hl_children(pid:i64) -> Arr Arr u8 _ _
+  = let listed=fs_read(concat("/proc/",int_text(pid),"/task/",int_text(pid),"/children")) in
+    if !listed.ok || len(str_trim(listed.value))==0 then md_words() else nw_split(str_trim(listed.value),32)
+; The listener opens before the workers fork, so wait for them.
+effect fn hl_settled(pid:i64, count:i64) -> Arr Arr u8 _ _
+  = let deadline=deadline_after(3000) in
+    loop (found=hl_children(pid)) while len(found)!=count && deadline_remaining(deadline.value)>0
+      next (let paused=sleep_ms(20) in hl_children(pid)) yield found
+fn hl_has(borrow words:Arr Arr u8 _ _, borrow word:Arr u8 _) -> bool
+  = loop (i=0, hit=false) while i<len(words) && !hit next (i+1,tx_equal(md_word(words,i),word)) yield hit
+fn hl_occurrences(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (at=nw_find_from(text,needle,0), count=0) while at>=0
+      next (nw_find_from(text,needle,at+len(needle)),count+1) yield count
+
+; NEO_THREADS=2: six crashes, each answered by a closed connection while every
+; other request is served; the workers are then new processes.
+effect fn hl_restarts(server:Process, port:i64) -> Arr u8 _
+  = let pid=nw_process_pid(server) in
+    let workers=hl_settled(pid,2) in
+    let rounds=loop (round=0, problems=tx_empty()) while round<6
+      next (round+1,
+        let crashed=hl_wire(port,"GET /crash HTTP/1.1\r\nHost: x\r\nX-Crash: yes\r\n\r\n") in
+        let served=loop (k=0, good=0) while k<8 next (k+1,if nw_get_is(port,"/",200,hl_hello()) then good+1 else good) yield good in
+        nw_note(nw_note(problems,len(crashed)==0,concat("crash ",int_text(round),": ",hl_show(crashed))),
+          served==8,concat("crash ",int_text(round),": ",int_text(served)," of 8 requests answered"))) yield problems in
+    let paused=sleep_ms(1200) in
+    let now=hl_settled(pid,2) in
+    let changed=loop (i=0, hit=false) while i<len(now) next (i+1,hit || !hl_has(workers,md_word(now,i))) yield hit in
+    nw_note(nw_note(rounds,len(workers)==2,concat(int_text(len(workers))," workers at startup")),
+      len(now)==2 && changed,concat("workers before ",nw_join(workers," ")," and after ",nw_join(now," ")))
+
+fn hl_environment(backend:i64, part:i64) -> Arr Arr u8 _ _
+  = let base=push(md_words(),if backend==0 then "NEO_HTTP_URING=1" else if backend==1 then "NEO_HTTP_URING=0" else "NEO_HTTP_POLL=1") in
+    if part==1 then push(push(push(base,"NEO_HTTP_HEADER_TIMEOUT_MS=1500"),"NEO_HTTP_BODY_TIMEOUT_MS=1500"),"NEO_HTTP_IDLE_TIMEOUT_MS=2000")
+    else if part==2 then push(base,"NEO_HTTP_CONNECTIONS=4")
+    else if part==4 then push(base,"NEO_TRUSTED_PROXIES=127.0.0.1, 10.0.0.0/8,fd00::/8")
+    else if part==5 then push(base,"NEO_THREADS=2") else base
+
+; Starts the fixture for one part (0 refusals and 100-continue, 1 timeouts,
+; 2 connection limit, 3 addresses, 4 trusted proxies, 5 restarts), runs it and
+; stops the server with SIGTERM to it and its workers.
+effect fn hl_serve(borrow binary:Arr u8 _, backend:i64, part:i64) -> Arr u8 _
+  = let port=nw_port() in
+    using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(hl_environment(backend,part))) in
+    if !nw_wait_port(port,5000) then (let s=nw_poll(server,nw_child()) in concat("the server did not start: ",s.errors,"\n")) else
+    let problems=if part==0 then concat(hl_refusals(port),hl_continues(port)) else if part==1 then hl_timeouts(port)
+      else if part==2 then hl_limit(port) else if part==3 then hl_addresses(port) else if part==4 then hl_trusted(port)
+      else hl_restarts(server,port) in
+    let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,nw_child(),3000) in
+    let log=concat(done.output,done.errors) in
+    let restarted=hl_occurrences(log,"neo: an HTTP worker exited; starting another") in
+    let checked=if part==5 then nw_note(problems,restarted==6,concat(int_text(restarted)," worker restarts logged instead of 6")) else problems in
+    if len(checked)==0 then checked else concat(checked,"server output: ",hl_show(log),"\n")
+
+effect fn hl_part(borrow binary:Arr u8 _, backend:i64, borrow name:Arr u8 _, part:i64, borrow label:Arr u8 _) -> unit
+  = let problems=hl_serve(binary,backend,part) in
+    let checked=dv_expect(len(problems)==0,concat(name,", ",label,":\n",problems)) in
+    let shown=print_out(concat("  ",label,": PASS\n")) in noop()
+
+effect fn hl_backend(borrow binary:Arr u8 _, backend:i64, borrow name:Arr u8 _) -> unit
+  = let shown=print_out(concat("== ",name,"\n")) in
+    let a=hl_part(binary,backend,name,0,"400, 413 and 431 with Connection: close, including mid-upload and pipelined; Expect: 100-continue") in
+    let b=hl_part(binary,backend,name,1,"header (408), body and keep-alive idle timeouts") in
+    let c=hl_part(binary,backend,name,2,"NEO_HTTP_CONNECTIONS limit answers 503") in
+    let d=hl_part(binary,backend,name,3,"web_peer, web_client_ip and web_client_proto without trusted proxies") in
+    let e=hl_part(binary,backend,name,4,"web_peer, web_client_ip and web_client_proto behind NEO_TRUSTED_PROXIES") in
+    hl_part(binary,backend,name,5,"crashed workers are replaced and the accept turn moves on")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("http-limits") in let binary=pt_join(dir,"limits") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/http_limits.neo"),binary,md_words()) in
+    let a=hl_backend(binary,0,"io_uring") in let b=hl_backend(binary,1,"epoll") in let c=hl_backend(binary,2,"poll") in
+    dv_clean(dir)

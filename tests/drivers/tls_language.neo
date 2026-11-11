@@ -1,0 +1,100 @@
+; tls_language.py, TLS half (its X.509 half is the tls-x509-vectors case):
+; tests/fixtures/language_tls.neo against independent TLS peers. The Go peer
+; (tests/fixtures/network_peer.go -mode echo) serves RSA/ECDSA and mixed
+; issuer chains, fragmented writes, close-notify, rejected hosts and chains, a
+; TLS 1.2-only server, corrupt handshake and application tags, truncation, a
+; missing close-notify and a stalled peer; openssl s_server sends a KeyUpdate
+; (the script forged one from the key log instead).
+import "std:io"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+type TlPaths = { dir:Arr u8 _, peer:Arr u8 _, client:Arr u8 _ }
+type TlRun = { output:Arr u8 _, notes:Arr u8 _ }
+
+; The client against a Go echo peer: its output and the peer's notes. Like
+; the script's OpenSSL peer (server preference), the peer chooses
+; ChaCha20-Poly1305 for TLS 1.3: GODEBUG=cpu.aes=off drops AES-GCM from Go's order.
+effect fn tl_echo(borrow t:TlPaths, borrow cert:Arr u8 _, borrow key:Arr u8 _, borrow trust:Arr u8 _, borrow host:Arr u8 _,
+                  borrow kind:Arr u8 _, fragment:i64, drain:bool) -> TlRun
+  = let args=push(push(push(push(push(push(push(push(push(push(push(push(md_words(),"-mode"),"echo"),"-tls"),if tx_equal(kind,"legacy") then "1.2" else "1.3"),
+      "-cert"),pt_join(t.dir,cert)),"-key"),pt_join(t.dir,key)),"-case"),kind),"-fragment"),int_text(fragment)) in
+    using peer=process_start(t.peer,args,dv_environment(push(md_words(),"GODEBUG=cpu.aes=off"))) in
+    let up=nw_await(peer,nw_child(),"\n",10000) in let port=nw_peer_port(up) in
+    let client=push(push(push(md_words(),int_text(port)),pt_join(t.dir,concat(trust,".der"))),host) in
+    let result=dv_run(t.client,if drain then push(client,"drain") else client,md_words(),"",8000,1048576) in
+    let done=nw_peer_finish(peer,up) in
+    TlRun { output=if result.ok && result.code==0 then result.output else concat("client failed: ",nt_diagnostic(result)), notes=done.output }
+
+fn tl_received(borrow r:TlRun) -> bool = nw_contains(r.notes,"\nreceived Neo TLS\n")
+fn tl_clean(borrow r:TlRun) -> bool = !nw_contains(r.notes,"\nerror ")
+fn tl_chacha(borrow r:TlRun) -> bool = nw_contains(r.notes,"\nsuite TLS_CHACHA20_POLY1305_SHA256\n")
+fn tl_show(borrow name:Arr u8 _, borrow r:TlRun) -> Arr u8 _ = concat(name,": ",tx_repr(r.output,true)," peer: ",tx_repr(r.notes,true))
+
+; A TLS 1.3 echo that must succeed.
+effect fn tl_ok(borrow t:TlPaths, borrow name:Arr u8 _, borrow cert:Arr u8 _, borrow key:Arr u8 _, borrow trust:Arr u8 _, borrow host:Arr u8 _,
+                borrow kind:Arr u8 _, fragment:i64, drain:bool) -> unit
+  = let r=tl_echo(t,cert,key,trust,host,kind,fragment,drain) in
+    dv_expect(tx_equal(r.output,"secure echo\n") && tl_received(r) && tl_clean(r) && tl_chacha(r),tl_show(name,r))
+; A handshake the client must reject before sending anything.
+effect fn tl_rejected(borrow t:TlPaths, borrow name:Arr u8 _, borrow cert:Arr u8 _, borrow host:Arr u8 _, borrow kind:Arr u8 _) -> unit
+  = let r=tl_echo(t,cert,"leaf.key","ca",host,kind,0,false) in
+    dv_expect(str_starts(r.output,"rejected:") && !tl_received(r),tl_show(name,r))
+; A response the client must refuse to read.
+effect fn tl_read_rejected(borrow t:TlPaths, borrow kind:Arr u8 _) -> unit
+  = let r=tl_echo(t,"leaf.pem","leaf.key","ca","localhost",kind,0,true) in
+    dv_expect(str_starts(r.output,"read rejected:") && !nw_contains(r.output,"secure echo"),tl_show(kind,r))
+
+; openssl s_server sends KeyUpdate ("k") before the echo.
+effect fn tl_key_update(borrow t:TlPaths) -> unit
+  = let port=nw_port() in
+    let args=push(push(push(push(push(push(push(push(push(push(md_words(),"s_server"),"-accept"),int_text(port)),"-cert"),pt_join(t.dir,"leaf.pem")),
+      "-key"),pt_join(t.dir,"leaf.key")),"-tls1_3"),"-alpn"),"http/1.1") in
+    let problems=(using server=process_start(bd_find_tool("openssl"),args,dv_environment(md_words())) in
+      let up=nw_await(server,nw_child(),"ACCEPT",10000) in
+      using client=process_start(t.client,push(push(push(md_words(),int_text(port)),pt_join(t.dir,"ca.der")),"localhost"),dv_environment(md_words())) in
+      let heard=nw_await(server,up,"Neo TLS",5000) in
+      let updating=process_try_write(server,"k\n",0) in
+      ; s_server reads each stdin chunk as one command or message, and its
+      ; KeyUpdate log line is buffered, so the echo follows after a pause.
+      let paused=sleep_ms(200) in
+      let echoed=process_try_write(server,"secure echo\n",0) in
+      let done=nw_finish(client,nw_child(),5000) in
+      nw_note(nw_note("",nw_contains(heard.output,"Neo TLS") && updating.ok && echoed.ok,concat("s_server did not relay the exchange: ",heard.output,heard.errors)),
+        !done.running && done.code==0 && tx_equal(done.output,"secure echo\n"),concat("key update: ",tx_repr(done.output,true)," ",done.errors))) in
+    dv_expect(len(problems)==0,problems)
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("tls-language") in
+    let client=pt_join(dir,"tls") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/language_tls.neo"),client,md_words()) in
+    let certificates=nw_certificates(dir) in
+    let t=TlPaths { dir=dir, peer=nw_build_peer(tools,dir), client=client } in
+    let a=tl_ok(t,"unfragmented","leaf.pem","leaf.key","ca","localhost","normal",0,false) in
+    let b=tl_ok(t,"1-byte writes","leaf.pem","leaf.key","ca","localhost","normal",1,false) in
+    let c=tl_ok(t,"7-byte writes","leaf.pem","leaf.key","ca","localhost","normal",7,false) in
+    let d=tl_ok(t,"intermediate chain","intermediate-chain.pem","leaf.key","ca","localhost","normal",0,false) in
+    let e=tl_ok(t,"wildcard","wildcard.pem","leaf.key","ca","one.example.test","normal",0,false) in
+    let f=tl_ok(t,"ECDSA leaf","ec-leaf.pem","ec-leaf.key","ec-ca","localhost","normal",0,false) in
+    let g=tl_ok(t,"ECDSA leaf from an RSA root","ec-cross.pem","ec-leaf.key","ca","localhost","normal",0,false) in
+    let h=tl_ok(t,"RSA leaf from an ECDSA root","rsa-ec.pem","leaf.key","ec-ca","localhost","normal",0,false) in
+    let i=tl_ok(t,"close-notify","leaf.pem","leaf.key","ca","localhost","close",0,true) in
+    let j=tl_rejected(t,"wrong host","leaf.pem","evil.test","reject") in
+    let k=tl_rejected(t,"unknown critical extension","unknown.pem","localhost","reject") in
+    let l=tl_rejected(t,"client-auth EKU","wrong-eku.pem","localhost","reject") in
+    let m=tl_rejected(t,"bad signature","signature.pem","localhost","reject") in
+    let legacy=tl_echo(t,"leaf.pem","leaf.key","ca","localhost","legacy",0,false) in
+    let n=dv_expect(tx_equal(legacy.output,"secure echo\n") && tl_received(legacy) && tl_clean(legacy) &&
+      nw_contains(legacy.notes,"\nversion TLS 1.2\n") && nw_contains(legacy.notes,"\nsuite TLS_ECDHE_RSA_"),tl_show("TLS 1.2-only peer",legacy)) in
+    let o=tl_rejected(t,"corrupt handshake tag","leaf.pem","localhost","handshake-tag") in
+    let p=tl_read_rejected(t,"application-tag") in let q=tl_read_rejected(t,"truncated") in
+    let r=tl_read_rejected(t,"no-close") in let s=tl_read_rejected(t,"timeout") in
+    let u=tl_key_update(t) in
+    let shown=print_out("PASS TLS 1.3: RSA/ECDSA and mixed issuer chains, independent encrypted peer, byte fragmentation, tickets, close-notify, hostname/chain rejection, corrupt tags, truncation, deadlines and KeyUpdate; a TLS 1.2-only peer over TLS 1.2\n") in
+    dv_clean(dir)

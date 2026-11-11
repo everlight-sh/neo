@@ -1,0 +1,51 @@
+; async_protocols.py: tests/fixtures/async_protocols.neo runs verified TLS 1.3,
+; HTTP and DNS calls as concurrent tasks against delayed peers (the Go peer's
+; -mode delayed over TCP and TLS 1.3, and a forked UDP name server that answers
+; after 100 ms), cancels a held request at its deadline, and releases every
+; task and handle.
+import "std:cancel"
+import "std:datagram"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; Answers one A query with 127.0.0.1 after 100 ms.
+effect fn ap_nameserver(borrow ready:Arr u8 _) -> i64
+  = using udp=udp_bind_ipv4("127.0.0.1",0) in let port=datagram_local_port(udp) in
+    if !port.ok then 2 else let wrote=fs_write(ready,int_text(port.value)) in
+    let deadline=deadline_after(10000) in using cancellation=new_cancellation() in
+    let query=datagram_receive(udp,4096,deadline.value,cancellation) in if !query.ok then 3 else
+    let paused=sleep_ms(100) in
+    let reply=concat(pt_slice(query.bytes,0,2),"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00",nw_after(query.bytes,12),
+      "\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\x7f\x00\x00\x01") in
+    let sent=datagram_try_send(udp,query.host,query.port,reply) in if sent.ok then 0 else 4
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("async-protocols") in let binary=pt_join(dir,"async-protocols") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/async_protocols.neo"),binary,md_words()) in
+    let certificates=nw_certificates(dir) in let peer=nw_build_peer(tools,dir) in
+    let ready=pt_join(dir,"dns-ready") in
+    let forked=process_fork() in let checked=dv_expect(forked.ok,"fork failed") in
+    if forked.value==0 then process_exit(ap_nameserver(ready)) else
+    let dns=nw_wait_file(ready,5000) in
+    let problems=(using plain=process_start(peer,nw_peer_args("delayed","",dir),dv_environment(md_words())) in
+      using secure=process_start(peer,nw_peer_args("delayed","1.3",dir),dv_environment(md_words())) in
+      let p=nw_await(plain,nw_child(),"\n",10000) in let s=nw_await(secure,nw_child(),"\n",10000) in
+      let environment=push(push(push(push(push(md_words(),"NEO_THREADS=1"),concat("NEO_ASYNC_HTTP_PORT=",int_text(nw_peer_port(p)))),
+        concat("NEO_ASYNC_TLS_PORT=",int_text(nw_peer_port(s)))),concat("NEO_ASYNC_DNS_PORT=",dns)),concat("NEO_ASYNC_CA=",pt_join(dir,"ca.der"))) in
+      let result=dv_run(binary,md_words(),environment,"",15000,65536) in
+      let a=nw_peer_finish(plain,p) in let b=nw_peer_finish(secure,s) in
+      nw_note("",result.ok && result.code==0 && nw_ends(result.output,"42\n") && str_starts(result.output,"TLS OK,HTTP OK,127.0.0.1 "),
+        concat("async-protocols: ",tx_repr(result.output,true)," ",nt_diagnostic(result)))) in
+    let nameserver=nw_reap(forked.value) in
+    let a=dv_expect(len(problems)==0,problems) in
+    let b=dv_expect(nameserver==0,concat("the name server failed with wait status ",int_text(nameserver))) in
+    let shown=print_out("PASS verified TLS 1.3 + HTTP + DNS suspended call stacks, await deadlines and resource cleanup\n") in
+    dv_clean(dir)

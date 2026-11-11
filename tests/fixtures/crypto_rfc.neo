@@ -1,0 +1,41 @@
+; RFC test vectors kept from the reference compiler's unit tests (test_crypto.py):
+; HMAC-SHA256 and HMAC-SHA1 with keys of any length, HKDF (RFC 5869) and the
+; RFC 8439 ChaCha20 block, Poly1305 and AEAD. Reads stdin; exit 2 rejects.
+;   0 HMAC-SHA256, 1 HMAC-SHA1: [u16 key length][key][message]
+;   2 HKDF: [u16 salt length][salt][u16 IKM length][IKM][info] -> PRK || 42-byte OKM
+;   3 ChaCha20 block: key[32] nonce[12] counter (u32 little-endian)
+;   4 Poly1305: key[32] message
+;   5/6 ChaCha20-Poly1305 seal/open: key[32] nonce[12] [u16 AAD length][AAD] data
+import "std:chacha20"
+import "std:io"
+import "std:sha1"
+import "std:sha256"
+import "std:strings"
+
+fn cr_u16(borrow input:Arr u8 n, at:i64) -> i64 = str_byte(input,at)*256+str_byte(input,at+1)
+fn cr_framed(borrow input:Arr u8 n, at:i64) -> bool = at+2<=n && cr_u16(input,at)>=0 && cr_u16(input,at)<=n-at-2
+
+effect(fs,process) fn main(mode:i64) -> unit
+  = let raw=file_read(0,1048576) in check raw.ok in let input=raw.value in let size=len(input) in
+    let result=if mode==0 || mode==1 then
+        if !cr_framed(input,0) then bytes_error(22,"key header",0) else
+        let count=cr_u16(input,0) in let key=str_slice(input,2,2+count) in let message=str_slice(input,2+count,size) in
+        bytes_ok(if mode==0 then hmac_sha256(key,message) else hmac_sha1(key,message))
+      else if mode==2 then
+        if !cr_framed(input,0) then bytes_error(22,"salt header",0) else
+        let salt_size=cr_u16(input,0) in let at=2+salt_size in
+        if !cr_framed(input,at) then bytes_error(22,"IKM header",0) else
+        let ikm_size=cr_u16(input,at) in let prk=hkdf_extract(str_slice(input,2,at),str_slice(input,at+2,at+2+ikm_size)) in
+        bytes_ok(concat(prk,hkdf_expand(prk,str_slice(input,at+2+ikm_size,size),42)))
+      else if mode==3 then
+        if size!=48 then bytes_error(22,"block input",0) else
+        bytes_ok(chacha20_block(str_slice(input,0,32),str_slice(input,32,44),
+          loop(i=0,word=0) while i<4 next(i+1,bit_or(word,shift_left(str_byte(input,44+i),i*8))) yield word))
+      else if mode==4 then if size<32 then bytes_error(22,"Poly1305 key",0) else bytes_ok(poly1305(str_slice(input,0,32),str_slice(input,32,size)))
+      else if mode==5 || mode==6 then
+        if !cr_framed(input,44) then bytes_error(22,"AEAD header",0) else
+        let aad_size=cr_u16(input,44) in let aad=str_slice(input,46,46+aad_size) in let rest=str_slice(input,46+aad_size,size) in
+        if mode==5 then bytes_ok(chacha20_poly1305_seal(str_slice(input,0,32),str_slice(input,32,44),aad,rest))
+        else chacha20_poly1305_open(str_slice(input,0,32),str_slice(input,32,44),aad,rest)
+      else bytes_error(22,"unknown mode",0) in
+    if !result.ok then process_exit(2) else let output=file_write(1,result.value) in check output.ok in noop()

@@ -1,0 +1,51 @@
+; http_handoff.py: tests/fixtures/http_handoff.neo with 2 and 4 workers takes
+; 1024 short-lived POST /echo connections from 32 concurrent clients (forked
+; children of this driver) and echoes every binary body; nothing is retried,
+; so a dropped or duplicated connection fails.
+import "std:io"
+import "std:process"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn hh_requests() -> i64 = 1024
+fn hh_clients() -> i64 = 32
+
+fn hh_body(index:i64) -> Arr u8 _ = concat(int_text(index),": café\x00",arr(i in 0..1024) u8(bit_and(i,255)))
+effect fn hh_one(port:i64, index:i64) -> bool
+  = let body=hh_body(index) in
+    let request=concat("POST /echo HTTP/1.1\r\nHost: 127.0.0.1:",int_text(port),"\r\nContent-Type: application/octet-stream\r\nContent-Length: ",
+      int_text(len(body)),"\r\n",if index%2==1 then "Connection: close\r\n" else "","\r\n",body) in
+    let r=nw_request(port,request,15000,false) in r.complete && r.status==200 && tx_equal(r.body,body)
+; One client: requests client, client+32, ...; exits with the number of failures.
+effect fn hh_client(port:i64, client:i64) -> i64
+  = loop (index=client, failures=0) while index<hh_requests()
+      next (index+hh_clients(), if hh_one(port,index) then failures else failures+1) yield if failures>100 then 100 else failures
+
+; Forks the clients and returns how many failed.
+effect fn hh_fork(port:i64, client:i64) -> i64
+  = if client>=hh_clients() then 0 else
+    let forked=process_fork() in if !forked.ok then 1 else
+    if forked.value==0 then (let exited=process_exit(hh_client(port,client)) in 0) else
+    let rest=hh_fork(port,client+1) in let status=nw_reap(forked.value) in rest+(if status==0 then 0 else 1)
+
+effect fn hh_case(borrow binary:Arr u8 _, workers:i64) -> unit
+  = let port=nw_port() in
+    let problems=(using server=process_start(binary,push(md_words(),int_text(port)),
+        dv_environment(push(md_words(),concat("NEO_THREADS=",int_text(workers))))) in
+      if !nw_wait_port(port,2000) then (let state=nw_poll(server,nw_child()) in concat("server not ready: ",state.errors)) else
+      let failed=hh_fork(port,0) in
+      let signalled=process_signal(server,15) in let done=nw_finish(server,nw_child(),10000) in
+      nw_note(nw_note("",failed==0,concat(int_text(failed)," of ",int_text(hh_clients())," clients saw failed echoes")),
+        !done.running,"the server ignored SIGTERM")) in
+    let checked=dv_expect(len(problems)==0,concat(int_text(workers)," workers: ",problems)) in
+    let shown=print_out(concat("PASS ",int_text(workers)," native workers: ",int_text(hh_requests())," short-lived concurrent connections, binary echoes, no retries\n")) in noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("http-handoff") in let binary=pt_join(dir,"server") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/http_handoff.neo"),binary,md_words()) in
+    let a=hh_case(binary,2) in let b=hh_case(binary,4) in
+    dv_clean(dir)

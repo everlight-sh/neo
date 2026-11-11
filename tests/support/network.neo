@@ -1,0 +1,447 @@
+; Helpers for the network stream's drivers (crypto, TLS, network and HTTP):
+; frozen vector files run against a fixture, loopback ports, peers in a
+; forked child, and child processes polled together.
+import "std:arena"
+import "std:cancel"
+import "std:datagram"
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:sha256"
+import "std:socket"
+import "std:strings"
+import "std:time"
+import "driver.neo"
+import "../../compiler/src/build.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/test_manifest.neo"
+import "../../compiler/src/test_process.neo"
+import "../../compiler/src/text.neo"
+
+; text split at every separator byte (an empty text is one empty field).
+type NwSplit = { at:i64, parts:Arr Arr u8 _ _ }
+fn nw_split(borrow text:Arr u8 _, separator:i64) -> Arr Arr u8 _ _
+  = let s=loop (s=NwSplit { at=0, parts=md_words() }) while s.at<=len(text)
+      next (let end=loop (j=s.at) while j<len(text) && tx_byte(text,j)!=separator next (j+1) yield j in
+        NwSplit { at=end+1, parts=push(s.parts,pt_slice(text,s.at,end)) }) yield s in s.parts
+fn nw_word(borrow words:Arr Arr u8 _ _, i:i64) -> Arr u8 _ = md_word(words,i)
+fn nw_int(borrow text:Arr u8 _) -> i64 = let value=int_parse(text) in if value.ok then value.value else -1
+fn nw_starts(borrow text:Arr u8 _, borrow prefix:Arr u8 _) -> bool = str_starts(text,prefix)
+fn nw_contains(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> bool = str_find(text,needle).present
+fn nw_after(borrow text:Arr u8 _, start:i64) -> Arr u8 _ = pt_slice(text,start,len(text))
+
+; SplitMix64 output k (k >= 0) for a seed, the k-th dv_next value.
+fn nw_mix(seed:i64, k:i64) -> i64
+  = let state=wrapping_add(seed,wrapping_mul(k+1,-7046029254386353131)) in
+    let z=wrapping_mul(bit_xor(state,shift_right(state,30)),-4658895280553007687) in
+    let z=wrapping_mul(bit_xor(z,shift_right(z,27)),-7723592293110705685) in
+    bit_xor(z,shift_right(z,31))
+; n bytes: the little-endian SplitMix64 outputs from seed, concatenated.
+fn nw_random_bytes(seed:i64, n:i64) -> Arr u8 _
+  = arr(i in 0..(if n<0 then 0 else n)) u8(bit_and(shift_right(nw_mix(seed,i/8),8*(i%8)),255))
+
+; Input spec: "-" (nothing) or "+"-joined parts: x:HEX, r:HH:COUNT (one byte
+; repeated), p:COUNT:MOD (byte i is i%MOD), s:SEED:COUNT[:START] (SplitMix64
+; bytes from output byte START), f:PATH[:START:COUNT] (a file relative to the
+; vector file, or a slice of it), and ^:OFFSET:HH, which XORs byte OFFSET of
+; the input so far (negative: from its end) with HH.
+type NwBytes = { ok:bool, value:Arr u8 _ }
+fn nw_fail() -> NwBytes = NwBytes { ok=false, value=tx_empty() }
+fn nw_count(borrow text:Arr u8 _) -> i64 = let value=nw_int(text) in if value<0 then 0 else value
+effect fn nw_part(borrow base:Arr u8 _, borrow so_far:Arr u8 _, borrow part:Arr u8 _) -> NwBytes
+  = let fields=nw_split(part,58) in let kind=nw_word(fields,0) in
+    if tx_equal(kind,"x") && len(fields)==2 then
+      let decoded=nt_hex(nw_word(fields,1)) in NwBytes { ok=decoded.ok, value=if decoded.ok then concat(so_far,decoded.value) else tx_empty() }
+    else if tx_equal(kind,"r") && len(fields)==3 then
+      let byte=nt_hex(nw_word(fields,1)) in let count=nw_count(nw_word(fields,2)) in
+      NwBytes { ok=byte.ok && len(byte.value)==1 && nw_int(nw_word(fields,2))>=0, value=concat(so_far,arr(i in 0..(if count<0 then 0 else count)) u8(bit_and(tx_byte(byte.value,0),255))) }
+    else if tx_equal(kind,"p") && len(fields)==3 then
+      let count=nw_count(nw_word(fields,1)) in let modulus=nw_int(nw_word(fields,2)) in
+      NwBytes { ok=modulus>0 && modulus<=256, value=concat(so_far,arr(i in 0..(if count<0 then 0 else count)) u8(if modulus>0 then i%modulus else 0)) }
+    else if tx_equal(kind,"s") && (len(fields)==3 || len(fields)==4) then
+      let seed=int_parse(nw_word(fields,1)) in let count=nw_count(nw_word(fields,2)) in
+      let start=if len(fields)==4 then nw_count(nw_word(fields,3)) else 0 in
+      NwBytes { ok=seed.ok, value=concat(so_far,pt_slice(nw_random_bytes(seed.value,start+count),start,start+count)) }
+    else if tx_equal(kind,"f") && (len(fields)==2 || len(fields)==4) then
+      let read=fs_read(pt_join(base,nw_word(fields,1))) in if !read.ok then nw_fail() else
+      if len(fields)==2 then NwBytes { ok=true, value=concat(so_far,read.value) } else
+      let start=nw_int(nw_word(fields,2)) in let count=nw_int(nw_word(fields,3)) in
+      if start<0 || count<0 || start+count>len(read.value) then nw_fail() else
+      NwBytes { ok=true, value=concat(so_far,pt_slice(read.value,start,start+count)) }
+    else if tx_equal(kind,"^") && len(fields)==3 then
+      let given=int_parse(nw_word(fields,1)) in let mask=nt_hex(nw_word(fields,2)) in
+      let at=if given.value<0 then len(so_far)+given.value else given.value in
+      if !given.ok || !mask.ok || len(mask.value)!=1 || at<0 || at>=len(so_far) then nw_fail() else
+      NwBytes { ok=true, value=arr(i in 0..len(so_far)) u8(bit_and(if i==at then bit_xor(tx_byte(so_far,i),tx_byte(mask.value,0)) else tx_byte(so_far,i),255)) }
+    else nw_fail()
+effect fn nw_input(borrow base:Arr u8 _, borrow spec:Arr u8 _) -> NwBytes
+  = if tx_equal(spec,"-") then NwBytes { ok=true, value=tx_empty() } else
+    let parts=nw_split(spec,43) in
+    loop (i=0, out=NwBytes { ok=true, value=tx_empty() }) while out.ok && i<len(parts)
+      next (i+1,nw_part(base,out.value,nw_word(parts,i))) yield out
+
+; \n in a text spec is a newline, \t a tab and \\ a backslash.
+fn nw_unescape(borrow text:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(text)
+      next (if tx_byte(text,i)==92 && i+1<len(text) then i+2 else i+1,
+        if tx_byte(text,i)==92 && i+1<len(text) then
+          let c=tx_byte(text,i+1) in push(out,u8(bit_and(if c==110 then 10 else if c==116 then 9 else c,255)))
+        else push(out,u8(bit_and(tx_byte(text,i),255)))) yield out
+
+; Expected output: "-" nothing, "*" anything, x:HEX exactly, h:HEX its SHA-256,
+; t:TEXT exactly, b:TEXT starting with TEXT, n:TEXT anything but TEXT (texts
+; with nw_unescape's escapes), f:PATH a file's bytes.
+effect fn nw_output_matches(borrow base:Arr u8 _, borrow spec:Arr u8 _, borrow output:Arr u8 _) -> bool
+  = if tx_equal(spec,"*") then true else if tx_equal(spec,"-") then len(output)==0 else
+    if nw_starts(spec,"x:") then let want=nt_hex(nw_after(spec,2)) in want.ok && tx_equal(want.value,output) else
+    if nw_starts(spec,"h:") then tx_equal(nw_after(spec,2),dv_hex(sha256(output))) else
+    if nw_starts(spec,"t:") then tx_equal(nw_unescape(nw_after(spec,2)),output) else
+    if nw_starts(spec,"b:") then str_starts(output,nw_unescape(nw_after(spec,2))) else
+    if nw_starts(spec,"n:") then !tx_equal(nw_unescape(nw_after(spec,2)),output) else
+    if nw_starts(spec,"f:") then let want=fs_read(pt_join(base,nw_after(spec,2))) in want.ok && tx_equal(want.value,output) else false
+
+fn nw_excerpt(borrow bytes:Arr u8 _) -> Arr u8 _
+  = concat(int_text(len(bytes))," bytes ",dv_hex(pt_slice(bytes,0,if len(bytes)>48 then 48 else len(bytes))))
+
+; One vector line: ARGS<TAB>INPUT<TAB>EXIT<TAB>OUTPUT, ARGS space-separated
+; (or "-"). Returns "" when the binary agrees, else what went wrong.
+effect fn nw_vector(borrow binary:Arr u8 _, borrow base:Arr u8 _, borrow line:Arr u8 _) -> Arr u8 _
+  = let fields=nw_split(line,9) in if len(fields)!=4 then "malformed vector line" else
+    let words=nw_word(fields,0) in let args=if tx_equal(words,"-") then md_words() else nw_split(words,32) in
+    let input=nw_input(base,nw_word(fields,1)) in let code=int_parse(nw_word(fields,2)) in
+    if !input.ok || !code.ok then "malformed vector input or exit" else
+    let result=dv_run(binary,args,md_words(),input.value,120000,67108864) in
+    if !result.ok || result.timeout || result.overflow then concat("did not finish: ",nt_diagnostic(result)) else
+    if result.code!=code.value then concat("exit ",int_text(result.code)," (expected ",int_text(code.value),"): ",str_trim(result.errors)) else
+    if !nw_output_matches(base,nw_word(fields,3),result.output) then concat("output ",nw_excerpt(result.output)) else ""
+
+type NwTally = { cases:i64, failures:i64 }
+; Runs every vector line of path against binary; failures go to stderr.
+effect fn nw_vectors(borrow binary:Arr u8 _, borrow path:Arr u8 _) -> NwTally
+  = let text=dv_read(path) in let base=pt_head(path) in let lines=nw_split(text,10) in
+    loop (i=0, t=NwTally { cases=0, failures=0 }) while i<len(lines)
+      next (i+1,let line=nw_word(lines,i) in
+        if len(line)==0 || tx_byte(line,0)==35 then t else
+        let problem=nw_vector(binary,base,line) in
+        if len(problem)==0 then t with { cases=t.cases+1 } else
+        let shown=if t.failures<20 then print_error(concat(pt_tail(path),":",int_text(i+1),": ",problem,"\n")) else int_ok(0) in
+        NwTally { cases=t.cases+1, failures=t.failures+1 }) yield t
+
+; Builds source and runs the vector file; prints "LABEL: N cases OK" or fails.
+effect fn nw_vector_suite(borrow tools:DvTools, borrow dir:Arr u8 _, borrow source:Arr u8 _, borrow vectors:Arr u8 _, borrow label:Arr u8 _) -> unit
+  = let binary=pt_join(dir,"fixture") in let built=dv_build(tools,source,binary,md_words()) in
+    let tally=nw_vectors(binary,vectors) in
+    let checked=dv_expect(tally.cases>0 && tally.failures==0,
+      concat(label,": ",int_text(tally.failures)," of ",int_text(tally.cases)," vector cases failed")) in
+    let shown=print_out(concat(label,": ",int_text(tally.cases)," cases OK\n")) in noop()
+
+; A program made of a standard-library module's own source followed by a main
+; that reaches its private functions (written to dir/name.neo).
+effect fn nw_stdlib_program(borrow tools:DvTools, borrow dir:Arr u8 _, borrow module:Arr u8 _, borrow name:Arr u8 _, borrow main:Arr u8 _) -> Arr u8 _
+  = let first=fs_read(pt_join(tools.root,pt_join("stdlib",module))) in
+    let text=if first.ok then first.value else dv_read(pt_join(tools.project,pt_join("stdlib",module))) in
+    let source=pt_join(dir,concat(name,".neo")) in
+    let wrote=fs_write(source,concat(text,"\n",main)) in
+    let saved=dv_expect(wrote.ok,concat("cannot write ",source)) in source
+
+; ---- Loopback peers and child processes ---------------------------------
+
+; The port a listener is bound to (0 when it failed).
+effect(net,unsafe) fn nw_listener_port(listener:Listener) -> i64
+  = let fd=rt_handle_fd(listener_identity(listener),3) in if fd<0 then 0 else
+    let address=stack_alloc(32) in let size=stack_alloc(8) in let ready=store_i64(size,0,32) in
+    let named=rt_socket_name(fd,address,size) in if named!=0 then 0 else
+    i64(load_u8(address,2))*256+i64(load_u8(address,3))
+; A port that was free a moment ago (bound to 127.0.0.1:0 and released).
+effect(net,unsafe) fn nw_port() -> i64
+  = using listener=tcp_listen_ipv4("127.0.0.1",0,1) in nw_listener_port(listener)
+
+effect(net,time) fn nw_connects(port:i64) -> bool
+  = let deadline=deadline_after(200) in using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in socket_status(socket).ok
+; Waits up to ms for something to accept on 127.0.0.1:port.
+effect(net,time) fn nw_wait_port(port:i64, ms:i64) -> bool
+  = let deadline=deadline_after(ms) in
+    loop (ready=false) while !ready && deadline_remaining(deadline.value)>0
+      next (if nw_connects(port) then true else let paused=sleep_ms(20) in false) yield ready
+
+effect(time) fn nw_now_ms() -> i64 = let now=monotonic_ms() in now.value
+effect(time) fn nw_sleep(ms:i64) -> unit = let slept=sleep_ms(ms) in noop()
+
+; A file another process writes when it is ready (a forked peer's port, ...).
+effect fn nw_wait_file(borrow path:Arr u8 _, ms:i64) -> Arr u8 _
+  = let deadline=deadline_after(ms) in
+    loop (found=fs_read(path)) while !(found.ok && len(found.value)>0) && deadline_remaining(deadline.value)>0
+      next (let paused=sleep_ms(5) in fs_read(path)) yield if found.ok then found.value else tx_empty()
+
+; A forked child's exit status (0 when it exited 0) after waiting for it.
+effect(process) fn nw_reap(pid:i64) -> i64 = let waited=process_wait(pid) in if waited.ok then waited.value else -1
+
+; A running child and what it has written so far. Start it with
+; process_start(binary,args,dv_environment(extra)) (a Process is a resource only
+; std:process can make).
+type NwChild = { output:Arr u8 _, errors:Arr u8 _, running:bool, code:i64 }
+fn nw_child() -> NwChild = NwChild { output=tx_empty(), errors=tx_empty(), running=true, code=0 }
+; Collects what the child has written, and whether it still runs.
+effect fn nw_poll(process:Process, move c:NwChild) -> NwChild
+  = let out=process_try_read(process,1,65536) in let err=process_try_read(process,2,65536) in
+    let state=process_status(process) in
+    let more=(out.ok && len(out.value)>0) || (err.ok && len(err.value)>0) in
+    NwChild { output=if out.ok then concat(c.output,out.value) else c.output, errors=if err.ok then concat(c.errors,err.value) else c.errors,
+      running=state.ok && (state.running || more), code=if state.signal!=0 then 0-state.signal else state.exit_code }
+; Polls until the child wrote needle to stdout (or stderr), exited, or ms passed.
+effect fn nw_await(process:Process, move c:NwChild, borrow needle:Arr u8 _, ms:i64) -> NwChild
+  = let deadline=deadline_after(ms) in
+    loop (s=nw_poll(process,c)) while s.running && !nw_contains(s.output,needle) && !nw_contains(s.errors,needle) && deadline_remaining(deadline.value)>0
+      next (let paused=sleep_ms(5) in nw_poll(process,s)) yield s
+; nw_await for needle written after the first from bytes of stdout.
+effect fn nw_await_from(process:Process, move c:NwChild, borrow needle:Arr u8 _, from:i64, ms:i64) -> NwChild
+  = let deadline=deadline_after(ms) in
+    loop (s=nw_poll(process,c)) while s.running && !nw_contains(nw_after(s.output,from),needle) && deadline_remaining(deadline.value)>0
+      next (let paused=sleep_ms(5) in nw_poll(process,s)) yield s
+; Polls until the child exits (running stays true after ms).
+effect fn nw_finish(process:Process, move c:NwChild, ms:i64) -> NwChild
+  = let deadline=deadline_after(ms) in
+    loop (s=nw_poll(process,c)) while s.running && deadline_remaining(deadline.value)>0
+      next (let paused=sleep_ms(5) in nw_poll(process,s)) yield s
+; SIGTERM, then up to ms for the child to exit.
+effect fn nw_terminate(process:Process, move c:NwChild, ms:i64) -> NwChild
+  = let signalled=process_signal(process,15) in nw_finish(process,c,ms)
+
+; ---- Raw HTTP/1.1 over loopback ------------------------------------------
+
+; Everything the peer sends until it closes (or the deadline passes).
+effect(net,time) fn nw_until_closed(socket:Socket, deadline:i64) -> BytesResult
+  = loop (part=socket_read(socket,deadline), out=tx_empty()) while part.ok && len(part.value)>0
+      next (socket_read(socket,deadline),concat(out,part.value))
+      yield if !part.ok then bytes_error(part.error.code,concat(part.error.message," after ",int_text(len(out))," bytes"),len(out)) else bytes_ok(out)
+; Sends raw bytes on a new connection and returns all the peer sent back.
+effect(net,time) fn nw_exchange(port:i64, borrow request:Arr u8 _, ms:i64) -> BytesResult
+  = let deadline=deadline_after(ms) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let connected=socket_status(socket) in if !connected.ok then bytes_error(connected.error.code,"connect failed",0) else
+    let sent=socket_write(socket,request,deadline.value) in if !sent.ok then bytes_error(sent.error.code,"send failed",0) else
+    nw_until_closed(socket,deadline.value)
+
+; One parsed response: status (0 when incomplete or malformed), lowercased
+; header block, body, and the bytes after it (empty while incomplete).
+type NwResponse = { status:i64, head:Arr u8 _, body:Arr u8 _, rest:Arr u8 _, complete:bool }
+fn nw_incomplete(borrow bytes:Arr u8 _) -> NwResponse = NwResponse { status=0, head=tx_empty(), body=tx_empty(), rest=tx_empty(), complete=false }
+fn nw_lower(borrow text:Arr u8 _) -> Arr u8 _
+  = arr(i in 0..len(text)) let c=tx_byte(text,i) in u8(bit_and(if c>=65 && c<=90 then c+32 else c,255))
+; The value of a header in a lowercased head ("\r\nname: value\r\n"), or "".
+fn nw_header(borrow head:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let at=str_find(head,concat("\r\n",name,":")) in if !at.present then tx_empty() else
+    let start=at.value+len(name)+3 in let tail=nw_after(head,start) in let end=str_find(tail,"\r\n") in
+    str_trim(pt_slice(tail,0,if end.present then end.value else len(tail)))
+; The first index of needle at or after start, or -1.
+fn nw_find_from(borrow text:Arr u8 _, borrow needle:Arr u8 _, start:i64) -> i64
+  = loop (i=if start<0 then 0 else start, at= -1) while at<0 && i+len(needle)<=len(text)
+      next (i+1,if bytes_match_at(text,i,needle) then i else -1) yield at
+; A hex chunk size (leading zeros allowed), or -1 when malformed or 2^40 or more.
+fn nw_hex_value(borrow text:Arr u8 _) -> i64
+  = loop (i=0, value=0, ok=len(text)>0) while ok && i<len(text)
+      next (i+1,let d=tm_hex(tx_byte(text,i)) in value*16+(if d<0 then 0 else d),
+        ok && tm_hex(tx_byte(text,i))>=0 && value<68719476736) yield if ok then value else -1
+; A chunk-size line at at: the size (-1 when malformed or incomplete) and where the data starts.
+type NwChunkHead = { size:i64, start:i64 }
+fn nw_chunk_head(borrow bytes:Arr u8 _, at:i64) -> NwChunkHead
+  = let line=nw_find_from(bytes,"\r\n",at) in if line<0 then NwChunkHead { size= -1, start=0 } else
+    let field=pt_slice(bytes,at,line) in let semicolon=str_find(field,";") in
+    NwChunkHead { size=nw_hex_value(str_trim(if semicolon.present then pt_slice(field,0,semicolon.value) else field)), start=line+2 }
+; Walks a chunked body from at: where it ends and its decoded size (state 0
+; walking, 1 complete, 2 malformed or incomplete).
+type NwChunks = { at:i64, total:i64, state:i64 }
+fn nw_chunk_step(borrow bytes:Arr u8 _, move s:NwChunks) -> NwChunks
+  = let h=nw_chunk_head(bytes,s.at) in
+    if h.size<0 then s with { state=2 } else
+    if h.size==0 then (let end=nw_find_from(bytes,"\r\n\r\n",h.start-2) in if end<0 then s with { state=2 } else s with { at=end+4, state=1 }) else
+    if h.start+h.size+2>len(bytes) then s with { state=2 } else NwChunks { at=h.start+h.size+2, total=s.total+h.size, state=0 }
+; The decoded body of a complete chunked body of total bytes starting at at.
+fn nw_chunk_body(borrow bytes:Arr u8 _, start:i64, total:i64) -> Arr u8 _
+  = loop (at=start, w=0, out=arr(j in 0..(if total<0 then 0 else total)) u8(0)) while w<total
+      next (let h=nw_chunk_head(bytes,at) in h.start+h.size+2,
+        let h=nw_chunk_head(bytes,at) in w+h.size,
+        let h=nw_chunk_head(bytes,at) in byte_copy(out,w,pt_slice(bytes,h.start,h.start+h.size))) yield out
+; Parses the first response in bytes (HEAD responses: no body).
+fn nw_response(borrow bytes:Arr u8 _, head_only:bool) -> NwResponse
+  = let end=str_find(bytes,"\r\n\r\n") in if !end.present || len(bytes)<12 || !str_starts(bytes,"HTTP/1.") then nw_incomplete(bytes) else
+    let status=int_parse(pt_slice(bytes,9,12)) in let head=nw_lower(pt_slice(bytes,0,end.value+2)) in let start=end.value+4 in
+    if !status.ok then nw_incomplete(bytes) else
+    if head_only || status.value==204 || status.value==304 || (status.value>=100 && status.value<200) then
+      NwResponse { status=status.value, head=head, body=tx_empty(), rest=nw_after(bytes,start), complete=true } else
+    if tx_equal(nw_lower(nw_header(head,"transfer-encoding")),"chunked") then
+      let c=loop (c=NwChunks { at=start, total=0, state=0 }) while c.state==0 next (nw_chunk_step(bytes,c)) yield c in
+      if c.state!=1 then nw_incomplete(bytes) else
+      NwResponse { status=status.value, head=head, body=nw_chunk_body(bytes,start,c.total), rest=nw_after(bytes,c.at), complete=true } else
+    let length=int_parse(nw_header(head,"content-length")) in
+    if !length.ok then NwResponse { status=status.value, head=head, body=nw_after(bytes,start), rest=tx_empty(), complete=false } else
+    if start+length.value>len(bytes) then nw_incomplete(bytes) else
+    NwResponse { status=status.value, head=head, body=pt_slice(bytes,start,start+length.value), rest=nw_after(bytes,start+length.value), complete=true }
+
+; Reads from socket until one full response is buffered after pending (an
+; EOF-framed response completes when the peer closes).
+type NwRead = { response:NwResponse, buffer:Arr u8 _, closed:bool, error:bool }
+effect(net,time) fn nw_read_step(socket:Socket, move r:NwRead, deadline:i64, head_only:bool) -> NwRead
+  = let part=socket_read(socket,deadline) in
+    if !part.ok then r with { error=true } else
+    if len(part.value)==0 then
+      (if r.response.status>0 && !r.response.complete then r with { closed=true, response=r.response with { complete=true } } else r with { closed=true })
+    else let buffered=concat(r.buffer,part.value) in r with { buffer=buffered, response=nw_response(buffered,head_only) }
+effect(net,time) fn nw_read_response(socket:Socket, borrow pending:Arr u8 _, deadline:i64, head_only:bool) -> NwRead
+  = loop (r=NwRead { response=nw_response(pending,head_only), buffer=pt_slice(pending,0,len(pending)), closed=false, error=false })
+      while !r.response.complete && !r.closed && !r.error
+      next (nw_read_step(socket,r,deadline,head_only)) yield r
+; Sends one raw request on a new connection and reads one response.
+effect(net,time) fn nw_request(port:i64, borrow request:Arr u8 _, ms:i64, head_only:bool) -> NwResponse
+  = let deadline=deadline_after(ms) in
+    using socket=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    if !socket_status(socket).ok then nw_incomplete("") else
+    let sent=socket_write(socket,request,deadline.value) in if !sent.ok then nw_incomplete("") else
+    let read=nw_read_response(socket,"",deadline.value,head_only) in read.response
+; GET path (Connection: close plus extra header lines): status and body.
+effect(net,time) fn nw_get(port:i64, borrow path:Arr u8 _, borrow headers:Arr u8 _) -> NwResponse
+  = nw_request(port,concat("GET ",path," HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n",headers,"\r\n"),10000,false)
+; Whether GET path answered status with exactly body.
+effect(net,time) fn nw_get_is(port:i64, borrow path:Arr u8 _, status:i64, borrow body:Arr u8 _) -> bool
+  = let r=nw_get(port,path,"") in r.complete && r.status==status && tx_equal(r.body,body)
+
+; Problems collected while a child runs (fail only after it is dropped).
+fn nw_note(borrow problems:Arr u8 _, ok:bool, borrow message:Arr u8 _) -> Arr u8 _
+  = if ok then pt_slice(problems,0,len(problems)) else concat(problems,message,"\n")
+
+; ---- Byte streams --------------------------------------------------------
+
+; Bytes read so far and whether the peer may send more.
+type NwAcc = { got:Arr u8 _, open:bool }
+fn nw_acc() -> NwAcc = NwAcc { got=tx_empty(), open=true }
+; One more read into a (open turns false on EOF, error or deadline).
+effect(net,time) fn nw_read_more(socket:Socket, move a:NwAcc, deadline:i64) -> NwAcc
+  = let part=socket_read(socket,deadline) in
+    if part.ok && len(part.value)>0 then NwAcc { got=concat(a.got,part.value), open=true } else a with { open=false }
+; Reads until at least count bytes arrived (or EOF/deadline).
+effect(net,time) fn nw_read_count(socket:Socket, count:i64, deadline:i64) -> Arr u8 _
+  = loop (a=nw_acc()) while a.open && len(a.got)<count next (nw_read_more(socket,a,deadline)) yield a.got
+; Reads until needle arrived (or EOF/deadline).
+effect(net,time) fn nw_read_until(socket:Socket, borrow needle:Arr u8 _, deadline:i64) -> Arr u8 _
+  = loop (a=nw_acc()) while a.open && !nw_contains(a.got,needle) next (nw_read_more(socket,a,deadline)) yield a.got
+; Writes bytes in pieces of step bytes with pause ms between them.
+effect(net,time) fn nw_send_slowly(socket:Socket, borrow bytes:Arr u8 _, step:i64, pause:i64, deadline:i64) -> bool
+  = loop (at=0, ok=true) while ok && at<len(bytes)
+      next (at+step,
+        let sent=socket_write(socket,pt_slice(bytes,at,if at+step<len(bytes) then at+step else len(bytes)),deadline) in
+        let paused=if pause>0 && at+step<len(bytes) then sleep_ms(pause) else int_ok(0) in sent.ok) yield ok
+; Big-endian unsigned integer of size bytes.
+fn nw_be(value:i64, size:i64) -> Arr u8 _
+  = arr(i in 0..(if size<0 then 0 else size)) u8(bit_and(shift_right(value,8*(size-1-i)),255))
+fn nw_be_value(borrow bytes:Arr u8 _, at:i64, size:i64) -> i64
+  = loop (i=0, value=0) while i<size next (i+1,value*256+tx_byte(bytes,at+i)) yield value
+; Everything until EOF, an error or the deadline (what arrived before an error is kept).
+effect(net,time) fn nw_drain(socket:Socket, deadline:i64) -> Arr u8 _
+  = loop (a=nw_acc()) while a.open next (nw_read_more(socket,a,deadline)) yield a.got
+fn nw_ends(borrow text:Arr u8 _, borrow suffix:Arr u8 _) -> bool
+  = len(text)>=len(suffix) && tx_equal(nw_after(text,len(text)-len(suffix)),suffix)
+
+; ---- Many sockets at once ------------------------------------------------
+; Sockets adopted into an arena stay open until it is dropped or each Ref is
+; released, so a driver can hold any number of them.
+
+; A new connection to 127.0.0.1:port held by arena.
+effect fn nw_open(arena:Arena, port:i64, deadline:i64) -> Ref<Socket>
+  = using socket=tcp_connect_ipv4("127.0.0.1",port,deadline) in adopt(socket,arena)
+; Opens count connections, sends request on each and reads until needle; the
+; number whose reply contained needle.
+effect fn nw_hold(arena:Arena, port:i64, count:i64, borrow request:Arr u8 _, borrow needle:Arr u8 _, ms:i64) -> i64
+  = loop (i=0, good=0) while i<count
+      next (i+1, let deadline=deadline_after(ms) in let held=nw_open(arena,port,deadline.value) in
+        let sent=socket_write(borrow_ref(held),request,deadline.value) in
+        let reply=nw_read_until(borrow_ref(held),needle,deadline.value) in
+        if sent.ok && nw_contains(reply,needle) then good+1 else good) yield good
+
+; ---- Process groups ------------------------------------------------------
+
+; The operating-system process id of a started child (0 once it was reaped).
+effect(process,unsafe) fn nw_process_pid(process:Process) -> i64
+  = let address=rt_handle_fd(process_identity(process),10) in if address<0 then 0 else load_i64(ptr_from_i64(address),8)
+; Signals a child and, on Linux, its direct children (a multi-worker server's
+; workers) together, like killpg on a session of its own.
+effect fn nw_signal_tree(process:Process, signal:i64) -> unit
+  = let pid=nw_process_pid(process) in
+    let listed=if pid>0 then fs_read(concat("/proc/",int_text(pid),"/task/",int_text(pid),"/children")) else bytes_error(2,"no pid",0) in
+    let children=if listed.ok then nw_split(str_trim(listed.value),32) else md_words() in
+    let signalled=loop (i=0) while i<len(children)
+      next (let child=int_parse(md_word(children,i)) in let sent=if child.ok && child.value>0 then rt_kill(child.value,signal) else 0 in i+1) yield i in
+    let parent=process_signal(process,signal) in noop()
+
+; ---- External tools: openssl and the Go peer -----------------------------
+
+fn nw_join(borrow words:Arr Arr u8 _ _, borrow separator:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(words) next (i+1,concat(out,if i>0 then separator else "",md_word(words,i))) yield out
+; Runs a tool found on PATH with stdin and requires exit 0.
+effect fn nw_tool_input(borrow name:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _, borrow input:Arr u8 _) -> NtProcess
+  = let path=bd_find_tool(name) in let found=dv_expect(len(path)>0,concat(name," is required on PATH")) in
+    let result=nt_process_input(path,args,nt_env_merge(bd_environment(),environment),input,120000,16777216) in
+    let ok=dv_expect(result.ok && result.code==0,concat(name," ",nw_join(args," ")," failed: ",nt_diagnostic(result))) in result
+effect fn nw_tool(borrow name:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _) -> NtProcess
+  = nw_tool_input(name,args,environment,"")
+; openssl with "|"-separated arguments; "@name" is dir/name.
+effect fn nw_openssl(borrow dir:Arr u8 _, borrow line:Arr u8 _) -> NtProcess
+  = let words=nw_split(line,124) in
+    let args=loop (i=0, out=md_words()) while i<len(words)
+      next (i+1,let w=md_word(words,i) in push(out,if str_starts(w,"@") then pt_join(dir,nw_after(w,1)) else w)) yield out in
+    nw_tool("openssl",args,md_words())
+
+effect fn nw_issue(borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow csr:Arr u8 _, borrow issuer:Arr u8 _, borrow extensions:Arr u8 _) -> unit
+  = let written=fs_write(pt_join(dir,"extensions"),extensions) in
+    let a=nw_openssl(dir,concat("x509|-req|-in|@",csr,".csr|-CA|@",issuer,".pem|-CAkey|@",issuer,".key|-CAcreateserial|-out|@",name,".pem|-days|1|-sha256|-extfile|@extensions")) in
+    let b=nw_openssl(dir,concat("x509|-in|@",name,".pem|-outform|DER|-out|@",name,".der")) in noop()
+fn nw_leaf_extensions(borrow names:Arr u8 _) -> Arr u8 _
+  = concat("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=",names,"\n")
+
+; tls_language.py's certificates: an RSA root (ca), leaves issued by it (leaf,
+; unknown critical extension, wrong-eku, wildcard, ca-leaf), intermediates
+; (middle, middle-wrong-ku, middle-leaf, intermediate-chain.pem), a pathlen:0
+; root (zero-ca), a leaf with a broken signature (signature), and P-256 ones
+; (ec-ca, ec-leaf, ec-cross issued by ca, rsa-ec issued by ec-ca); .pem and .der.
+effect fn nw_certificates(borrow dir:Arr u8 _) -> unit
+  = let a=nw_openssl(dir,"req|-new|-x509|-newkey|rsa:2048|-nodes|-keyout|@ca.key|-out|@ca.pem|-subj|/CN=Neo Test Root|-days|2|-sha256|-addext|basicConstraints=critical,CA:TRUE,pathlen:1|-addext|keyUsage=critical,keyCertSign,cRLSign") in
+    let b=nw_openssl(dir,"req|-new|-newkey|rsa:2048|-nodes|-keyout|@leaf.key|-out|@leaf.csr|-subj|/CN=localhost") in
+    let c=nw_issue(dir,"leaf","leaf","ca",nw_leaf_extensions("DNS:localhost,IP:127.0.0.1")) in
+    let d=nw_issue(dir,"unknown","leaf","ca",concat(nw_leaf_extensions("DNS:localhost,IP:127.0.0.1"),"1.2.3.4.5=critical,DER:05:00\n")) in
+    let e=nw_issue(dir,"wrong-eku","leaf","ca","basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n") in
+    let f=nw_issue(dir,"wildcard","leaf","ca",nw_leaf_extensions("DNS:*.example.test")) in
+    let g=nw_issue(dir,"ca-leaf","leaf","ca","basicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n") in
+    let h=nw_openssl(dir,"x509|-in|@ca.pem|-outform|DER|-out|@ca.der") in
+    let i=nw_openssl(dir,"req|-new|-newkey|rsa:2048|-nodes|-keyout|@middle.key|-out|@middle.csr|-subj|/CN=Neo Test Intermediate") in
+    let j=nw_issue(dir,"middle","middle","ca","basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n") in
+    let k=nw_issue(dir,"middle-wrong-ku","middle","ca","basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,digitalSignature\n") in
+    let l=nw_issue(dir,"middle-leaf","leaf","middle",nw_leaf_extensions("DNS:localhost")) in
+    let chain=fs_write(pt_join(dir,"intermediate-chain.pem"),concat(dv_read(pt_join(dir,"middle-leaf.pem")),dv_read(pt_join(dir,"middle.pem")))) in
+    let m=nw_openssl(dir,"req|-new|-x509|-key|@ca.key|-out|@zero-ca.pem|-subj|/CN=Neo Test Root|-days|2|-sha256|-addext|basicConstraints=critical,CA:TRUE,pathlen:0|-addext|keyUsage=critical,keyCertSign,cRLSign") in
+    let n=nw_openssl(dir,"x509|-in|@zero-ca.pem|-outform|DER|-out|@zero-ca.der") in
+    let leaf=dv_read(pt_join(dir,"leaf.der")) in
+    let broken=fs_write(pt_join(dir,"signature.der"),arr(x in 0..len(leaf)) u8(bit_and(if x==len(leaf)-1 then bit_xor(tx_byte(leaf,x),1) else tx_byte(leaf,x),255))) in
+    let o=nw_openssl(dir,"x509|-inform|DER|-in|@signature.der|-out|@signature.pem") in
+    let p=nw_openssl(dir,"req|-new|-x509|-newkey|ec|-pkeyopt|ec_paramgen_curve:P-256|-nodes|-keyout|@ec-ca.key|-out|@ec-ca.pem|-subj|/CN=Neo EC Test Root|-days|2|-sha256|-addext|basicConstraints=critical,CA:TRUE,pathlen:1|-addext|keyUsage=critical,keyCertSign,cRLSign") in
+    let q=nw_openssl(dir,"req|-new|-newkey|ec|-pkeyopt|ec_paramgen_curve:P-256|-nodes|-keyout|@ec-leaf.key|-out|@ec-leaf.csr|-subj|/CN=localhost") in
+    let r=nw_issue(dir,"ec-leaf","ec-leaf","ec-ca",nw_leaf_extensions("DNS:localhost,IP:127.0.0.1")) in
+    let s=nw_issue(dir,"ec-cross","ec-leaf","ca",nw_leaf_extensions("DNS:localhost,IP:127.0.0.1")) in
+    let t=nw_issue(dir,"rsa-ec","leaf","ec-ca",nw_leaf_extensions("DNS:localhost,IP:127.0.0.1")) in
+    let u=nw_openssl(dir,"x509|-in|@ec-ca.pem|-outform|DER|-out|@ec-ca.der") in noop()
+
+; Builds tests/fixtures/network_peer.go into dir/peer.
+effect fn nw_build_peer(borrow tools:DvTools, borrow dir:Arr u8 _) -> Arr u8 _
+  = let binary=pt_join(dir,"peer") in
+    let built=nw_tool("go",push(push(push(push(push(md_words(),"build"),"-trimpath"),"-o"),binary),pt_join(tools.here,"../fixtures/network_peer.go")),
+      push(push(md_words(),"GOWORK=off"),"CGO_ENABLED=0")) in binary
+; The port a started peer printed first ("port N"), or 0.
+fn nw_peer_port(borrow c:NwChild) -> i64
+  = if !str_starts(c.output,"port ") then 0 else
+    let end=str_find(c.output,"\n") in nw_int(pt_slice(c.output,5,if end.present then end.value else len(c.output)))
+; Closes the peer's stdin and waits for its notes (ending in "done").
+effect fn nw_peer_finish(process:Process, move c:NwChild) -> NwChild
+  = let closed=process_close_input(process) in nw_await(process,c,"\ndone\n",10000)
+; Go peer arguments: -mode MODE, and with tls ("1.3" or "1.2") the dir's leaf certificate.
+fn nw_peer_args(borrow mode:Arr u8 _, borrow tls:Arr u8 _, borrow dir:Arr u8 _) -> Arr Arr u8 _ _
+  = let args=push(push(md_words(),"-mode"),mode) in if len(tls)==0 then args else
+    push(push(push(push(push(push(args,"-tls"),tls),"-cert"),pt_join(dir,"leaf.pem")),"-key"),pt_join(dir,"leaf.key"))
