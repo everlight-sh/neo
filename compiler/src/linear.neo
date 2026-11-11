@@ -83,9 +83,34 @@ fn tl_eliminate_pos(move s:TlSystem, borrow term:Arr i64 _, borrow negative:Arr 
             else if tl_is_constant(combined) && tx_at(combined,0)>0 then o with { status=1 }
             else o with { rows=tl_fact(o.rows,combined) }, i+1) yield o
 
+fn tl_has(borrow ids:Arr i64 _, id:i64) -> bool
+  = loop (i=0, found=false) while !found && i<len(ids) next (i+1,tx_at(ids,i)==id) yield found
+; The symbols of term, added to out.
+fn tl_symbols_of(move out:Arr i64 _, borrow term:Arr i64 _) -> Arr i64 _
+  = if len(term)==0 then out else
+    loop (i=tl_end(term,0), all=out) while i<len(term)
+      next (tl_end(term,i+1),let id=tx_at(term,i) in if tl_has(all,id) then all else push(all,id)) yield all
+fn tl_touches(borrow term:Arr i64 _, borrow ids:Arr i64 _) -> bool
+  = len(term)>0 && loop (i=tl_end(term,0), found=false) while !found && i<len(term)
+      next (tl_end(term,i+1),tl_has(ids,tx_at(term,i))) yield found
+; Rows that bound symbol from above and from below.
+type TlCount = { pos:i64, neg:i64 }
+fn tl_count(borrow rows:Arr Arr i64 _ _, symbol:i64) -> TlCount
+  = loop (i=0, c=TlCount { pos=0, neg=0 }) while i<len(rows)
+      next (i+1,let term=tl_row(rows,i) in let at=if len(term)==0 || tl_is_constant(term) then -1 else tl_coefficient(term,symbol) in
+        if at<0 then c else if tx_at(term,at)>0 then c with { pos=c.pos+1 } else c with { neg=c.neg+1 }) yield c
+type TlChoice = { symbol:i64, cost:i64 }
+; Eliminating a symbol replaces its rows by every pairing of an upper and a
+; lower bound, so the symbol with the fewest new rows goes first.
+fn tl_choose(borrow rows:Arr Arr i64 _ _) -> i64
+  = let symbols=loop (i=0, all=tx_ints()) while i<len(rows) next (i+1,tl_symbols_of(all,tl_row(rows,i))) yield all in
+    let chosen=loop (k=0, best=TlChoice { symbol=-1, cost=0 }) while k<len(symbols)
+      next (k+1,let id=tx_at(symbols,k) in let c=tl_count(rows,id) in let rows_added=c.pos*c.neg-c.pos-c.neg in
+        if best.symbol<0 || rows_added<best.cost || (rows_added==best.cost && id<best.symbol)
+        then TlChoice { symbol=id, cost=rows_added } else best) yield best in chosen.symbol
+
 fn tl_eliminate(borrow rows:Arr Arr i64 _ _) -> TlSystem
-  = let symbol=loop (i=0, id=-1) while i<len(rows) && id<0
-      next (i+1, let term=tl_row(rows,i) in if len(term)>0 && !tl_is_constant(term) then tx_at(term,tl_end(term,0)) else -1) yield id in
+  = let symbol=tl_choose(rows) in
     let split=loop (s=TlSplit { pos=tl_rows(), neg=tl_rows(), rest=tl_rows(), status=2 }, i=0)
       while s.status==2 && i<len(rows) next (tl_split_row(s,tl_row(rows,i),symbol), i+1) yield s in
     if split.status!=2 then TlSystem { rows=tl_rows(), status=split.status }
@@ -94,15 +119,39 @@ fn tl_eliminate(borrow rows:Arr Arr i64 _ _) -> TlSystem
     else loop (s=TlSystem { rows=split.rest, status=2 }, i=0) while s.status==2 && i<len(split.pos)
       next (tl_eliminate_pos(s,tl_row(split.pos,i),split.neg,symbol), i+1) yield s
 
-fn tl_prove(borrow facts:Arr Arr i64 _ _, borrow goal:Arr i64 _) -> i64
-  = if len(goal)==0 then -1
-    else if (tl_is_constant(goal) && tx_at(goal,0)<=0) || tl_contains(facts,goal) then 1
-    else if len(facts)>256 then -1
-    else let opposite=tl_sub(tl_constant(1),goal) in
-    if len(opposite)==0 then -1 else
+; Whether facts and the negation of goal have no rational solution: 1, 0
+; when they have one, -1 past the budget.
+fn tl_refute(borrow facts:Arr Arr i64 _ _, borrow goal:Arr i64 _) -> i64
+  = let opposite=tl_sub(tl_constant(1),goal) in
+    if len(facts)>256 || len(opposite)==0 then -1 else
     let solved=loop (s=TlSystem { rows=push(facts,opposite), status=2 }, i=0) while s.status==2 && i<128
       next (tl_eliminate(s.rows), i+1) yield s in
     if solved.status==2 then -1 else solved.status
+
+; The facts connected to the goal through shared symbols, and those without
+; symbols. Facts about other symbols cannot help prove the goal unless they
+; contradict each other, so dropping them only weakens the hypothesis.
+type TlSlice = { kept:Arr Arr i64 _ _, rest:Arr Arr i64 _ _, want:Arr i64 _, changed:bool }
+fn tl_slice_pass(move s:TlSlice) -> TlSlice
+  = loop (i=0, out=TlSlice { kept=s.kept, rest=tl_rows(), want=s.want, changed=false }) while i<len(s.rest)
+      next (i+1,let row=tl_row(s.rest,i) in
+        if tl_touches(row,out.want) then TlSlice { kept=push(out.kept,row), rest=out.rest, want=tl_symbols_of(out.want,row), changed=true }
+        else out with { rest=push(out.rest,row) }) yield out
+fn tl_relevant(borrow facts:Arr Arr i64 _ _, borrow goal:Arr i64 _) -> Arr Arr i64 _ _
+  = let start=loop (i=0, s=TlSlice { kept=tl_rows(), rest=tl_rows(), want=tl_symbols_of(tx_ints(),goal), changed=true })
+      while i<len(facts)
+      next (i+1,let row=tl_row(facts,i) in if tl_is_constant(row) then s with { kept=push(s.kept,row) } else s with { rest=push(s.rest,row) }) yield s in
+    let sliced=loop (s=start) while s.changed next (tl_slice_pass(s)) yield s in sliced.kept
+
+fn tl_prove(borrow facts:Arr Arr i64 _ _, borrow goal:Arr i64 _) -> i64
+  = if len(goal)==0 then -1
+    else if (tl_is_constant(goal) && tx_at(goal,0)<=0) || tl_contains(facts,goal) then 1 else
+    let full=tl_refute(facts,goal) in if full!= -1 then full else
+    ; Past the budget, long chains of facts about other values (an else-if
+    ; per opcode, say) no longer stand in the way. The facts kept are only a
+    ; part of the hypothesis, so a failure still says nothing definite.
+    let relevant=tl_relevant(facts,goal) in
+    if len(relevant)==len(facts) then -1 else if tl_refute(relevant,goal)==1 then 1 else -1
 
 ; A formula is a disjunction of conjunctions. An unknown formula weakens to
 ; true, so it can never establish a proof on its own. Track that weakening
