@@ -8,6 +8,7 @@ import "std:time"
 import "text.neo"
 import "paths.neo"
 import "project_fs.neo"
+import "ast.neo"
 import "modules.neo"
 import "startup.neo"
 
@@ -111,18 +112,31 @@ fn bd_link_arguments(borrow config:BdConfig, borrow object:Arr u8 _, borrow libr
   = let target=config.target in let args=push(push(push(md_words(),concat("--target=",target)),"-nostdlib"),object) in
     let args=md_words_append(args,libraries) in
     let args=if len(config.runtime)>0 then push(args,config.runtime) else args in
-    let args=push(push(args,"-o"),output) in
-    if str_find(target,"-apple-").present then push(push(args,"-lSystem"),"-Wl,-dead_strip")
-    else push(push(args,"-static"),"-Wl,-e,_start,--no-undefined,--gc-sections")
+    let args=push(push(args,"-o"),output) in bd_link_tail(config,args)
 
 ; One Clang run that compiles the module and links it: a build then starts
 ; one tool instead of two.
 fn bd_build_arguments(borrow config:BdConfig, borrow ir:Arr u8 _, borrow libraries:Arr Arr u8 _ _, borrow output:Arr u8 _) -> Arr Arr u8 _ _
-  = let target=config.target in let args=md_words_append(push(push(bd_compile_flags(config,""),"-nostdlib"),ir),libraries) in
+  = let args=md_words_append(push(push(bd_compile_flags(config,""),"-nostdlib"),ir),libraries) in
     let args=if len(config.runtime)>0 then push(args,config.runtime) else args in
-    let args=push(push(args,"-o"),output) in
-    if str_find(target,"-apple-").present then push(push(args,"-lSystem"),"-Wl,-dead_strip")
+    let args=push(push(args,"-o"),output) in bd_link_tail(config,args)
+
+; The platform's link options. The program's explicit ABI exports are link
+; roots, so section collection keeps one that nothing in the program calls.
+fn bd_link_tail(borrow config:BdConfig, move args:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let apple=str_find(config.target,"-apple-").present in
+    let args=loop (i=0, all=args) while i<len(config.exports)
+      next (i+1,push(all,concat("-Wl,-u,",if apple then "_" else "",md_word(config.exports,i)))) yield all in
+    if apple then push(push(args,"-lSystem"),"-Wl,-dead_strip")
     else push(push(args,"-static"),"-Wl,-e,_start,--no-undefined,--gc-sections")
+
+; The names of the program's explicit exports, outside the runtime.
+fn bd_export_roots(borrow m:Mods) -> Arr Arr u8 _ _
+  = loop (k=0, out=md_words()) while k<len(m.fns)
+      next (k+1,if pt_within(md_path(m,k),m.runtime) then out else let ids=md_list(m.fns,k) in
+        loop (i=0, all=out) while i<len(ids)
+          next (i+1,let f=md_node(m,tx_at(ids,i)) in
+            if ast_flag(f,fl_exported()) && !ast_flag(f,fl_external()) then push(all,md_str(m,f.a)) else all) yield all) yield out
 
 fn md_words_append(move args:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr Arr u8 _ _
   = loop (i=0, all=args) while i<len(extra) next (i+1,push(all,md_word(extra,i))) yield all
@@ -195,10 +209,11 @@ effect(process,fs,env,time,unsafe) fn bd_undefined_symbols(borrow config:BdConfi
 effect(process,fs,env,time,unsafe) fn bd_link(borrow config:BdConfig, borrow ir:Arr u8 _, borrow output:Arr u8 _) -> unit
   = let linked=bd_link_profile(config,ir,"",output,false) in noop()
 
-type BdConfig = { clang:Arr u8 _, runtime:Arr u8 _, target:Arr u8 _, level:Arr u8 _, error:Arr u8 _ }
+; exports: the program's explicit ABI exports (bd_export_roots), kept by the link.
+type BdConfig = { clang:Arr u8 _, runtime:Arr u8 _, target:Arr u8 _, level:Arr u8 _, error:Arr u8 _, exports:Arr Arr u8 _ _ }
 effect(process,fs,env,time,unsafe) fn bd_configuration(borrow requested:Arr u8 _, seed:bool, borrow level:Arr u8 _) -> BdConfig
   = let clang=bd_clang() in
-    let config=BdConfig { clang=clang, runtime=tx_empty(), target=tx_empty(), level=level, error=tx_empty() } in
+    let config=BdConfig { clang=clang, runtime=tx_empty(), target=tx_empty(), level=level, error=tx_empty(), exports=md_words() } in
     if len(clang)==0 then config with { error="Clang executable not found" } else
     let env_target=env_get("NEO_TARGET") in let target=if len(requested)>0 then requested else env_target.value in
     if seed then

@@ -220,6 +220,7 @@ effect fn cli_build(borrow root:Arr u8 _, borrow path:Arr u8 _, borrow opts:CliO
     let checked_program=cli_check_rest(m,false,false,opts.allow_unproven,format,if found.hit then shared else tx_ints()) in let checked=bd_clock() in
     let selected=if caching then lc_selection(m,opts.library_roots) else shared in
     let m=m with { stable_symbols=caching, shared=shared, threaded=found.threads } in
+    let config=config with { exports=bd_export_roots(m) } in
     let startup=st_startup(m,config.target,!opts.seed) in
     let ir=concat(cli_ir_part(m,config.target,!opts.seed,format,selected,if split then 1 else 0,startup),startup) in
     let library_ir=if caching then cli_ir_part(m,config.target,true,format,selected,2,"") else runtime_ir in
