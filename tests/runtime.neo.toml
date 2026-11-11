@@ -58,6 +58,66 @@ file = "drivers/kernel_runtime_smoke.neo"
 stdout = "kernel runtime audit OK\n"
 timeout = 120
 
+# The parallel regions of parallel_runtime.neo with enough elements to split
+# into chunks (n=1000000): the same total at 1 and 4 workers.
+[[test]]
+name = "parallel-runtime-chunks-1-worker"
+file = "fixtures/parallel_runtime.neo"
+args = ["1000000"]
+env.NEO_THREADS = "1"
+stdout = "1499999500000\n"
+timeout = 15
+
+[[test]]
+name = "parallel-runtime-chunks-4-workers"
+file = "fixtures/parallel_runtime.neo"
+args = ["1000000"]
+env.NEO_THREADS = "4"
+stdout = "1499999500000\n"
+timeout = 15
+
+# test_worker_safety.py: the dispatcher of every parallel region (worker
+# threads or forked children), real dispatch and the EAGAIN fallbacks
+# (driver), and the results at 1 and 4 workers; an effectful main stays
+# sequential.
+[[test]]
+name = "worker-safety-regions-and-dispatchers"
+file = "drivers/worker_safety.neo"
+stdout = "worker safety OK\n"
+timeout = 120
+
+[[test]]
+name = "worker-safety-1-worker"
+file = "fixtures/worker_safety.neo"
+args = ["4096"]
+env.NEO_THREADS = "1"
+stdout = "201877504\n"
+timeout = 15
+
+[[test]]
+name = "worker-safety-4-workers"
+file = "fixtures/worker_safety.neo"
+args = ["4096"]
+env.NEO_THREADS = "4"
+stdout = "201877504\n"
+timeout = 15
+
+[[test]]
+name = "worker-safety-one-chunk-4-workers"
+file = "fixtures/worker_safety.neo"
+args = ["7"]
+env.NEO_THREADS = "4"
+stdout = "7455\n"
+timeout = 15
+
+[[test]]
+name = "worker-safety-effectful-main-4-workers"
+file = "fixtures/worker_safety_effect.neo"
+args = ["4096"]
+env.NEO_THREADS = "4"
+stdout = "4096\n16773120\n"
+timeout = 15
+
 # write_parts.py: complete multipart writes; the short write needs a driver.
 [[test]]
 name = "write-parts-complete"
