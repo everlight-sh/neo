@@ -1,0 +1,7 @@
+check nested-ragged.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== nested-ragged.neo
+fn main() -> i64 = let a=arr(i in 0..3) arr(j in 0..i) u8(j) in let b=a[2] in check len(b)>0 in i64(b[0])

@@ -1,0 +1,44 @@
+; Replaces compiler/tests/ast_dump.py, the Python reference of `neoc parse
+; FILE`. golden/ast_dump/cases.bundle.gz holds frozen inputs (in/NAME) and
+; the reference's dumps of them (out/NAME): every examples/ and
+; tests/fixtures/ source (except tests/fixtures/deep_dispatch.neo, which
+; overflowed the Python parser's recursion), a few stdlib, runtime and
+; compiler sources, and differential.py's changed copies of the examples
+; under 8 KiB (NAME@cutK truncations, @delN deletions, @insN insertions,
+; @crlf), which reach the parser's error paths. Each input is written to a
+; file and `neoc parse` must exit 0 and print the dump byte for byte. Cases
+; listed in golden/ast_dump/skip.txt are not run.
+import "std:io"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type AdTally = { ran:i64, skipped:i64, failed:i64, report:Arr u8 _ }
+
+effect fn ad_case(borrow tools:DvTools, borrow file:Arr u8 _, borrow label:Arr u8 _, borrow input:Arr u8 _, borrow expected:Arr u8 _) -> Arr u8 _
+  = let written=ru_write(file,input) in
+    let run=nt_process(tools.compiler,tg_a2("parse",file),tg_env(tools,"/nonexistent"),60000,67108864) in
+    if run.ok && run.code==0 && tx_equal(run.output,expected) then tx_empty()
+    else if !run.ok || run.code!=0 then concat(label,": ",tg_status(run))
+    else concat(label,": ",tg_difference(expected,run.output))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("ast-dump") in let file=pt_join(dir,"case.neo") in
+    let cases=tg_bundle(tg_golden(tools,"ast_dump","cases.bundle")) in let skips=tg_skips(tools,"ast_dump") in
+    let tally=loop (i=0, t=AdTally { ran=0, skipped=0, failed=0, report=tx_empty() }) while i+1<len(cases.names)
+      next (i+2,let name=md_word(cases.names,i) in let label=pt_slice(name,3,len(name)) in
+        let paired=dv_expect(str_starts(name,"in/") && tx_equal(md_word(cases.names,i+1),concat("out/",label)),
+          concat("cases.bundle is not in/out pairs at ",name)) in
+        if tg_has(skips,label) then t with { skipped=t.skipped+1 } else
+        let problem=ad_case(tools,file,label,md_word(cases.data,i),md_word(cases.data,i+1)) in
+        if len(problem)==0 then t with { ran=t.ran+1 } else
+        AdTally { ran=t.ran+1, skipped=t.skipped, failed=t.failed+1,
+          report=if t.failed<8 then concat(t.report,"  ",problem,"\n") else t.report }) yield t in
+    let a=dv_expect(tally.failed==0,concat(int_text(tally.failed)," of ",int_text(tally.ran),
+      " parse dumps differ from the reference:\n",tally.report)) in
+    let b=dv_expect(tally.ran>0,"no parse cases ran") in
+    let cleaned=dv_clean(dir) in let shown=print_out("ast dumps OK\n") in noop()

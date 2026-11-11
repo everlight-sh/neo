@@ -1,0 +1,9 @@
+check effect-comprehension.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/effect-comprehension.neo 2:42 __mf763b7368e990ee2_work requires an effect function and cannot run in a refinement or comprehension
+exit 1
+stdout (error <dir>/effect-comprehension.neo 2:42 __mf763b7368e990ee2_work requires an effect function and cannot run in a refinement or comprehension)\n
+=== effect-comprehension.neo
+effect fn work() -> i64 = 7
+effect fn main() -> i64 = sum(i in 0..1) work()

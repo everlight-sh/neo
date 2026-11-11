@@ -1,0 +1,6 @@
+args 9223372036854775807
+exit 1
+stdout
+stderr neo: trap: integer overflow at main:1\n
+=== input.neo
+fn main(x:i64) -> i64 = x+1

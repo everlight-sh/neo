@@ -1,0 +1,8 @@
+check explicit-size.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== explicit-size.neo
+fn f(n:i64,a:Arr u8 n) -> i64 = n
+fn main() -> i64 = f(2,"hi")

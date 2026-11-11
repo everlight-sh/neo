@@ -1,0 +1,7 @@
+check loop-invariant.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== loop-invariant.neo
+fn main() -> i64{result>=0} = loop(i:i64{i>=0}=0) while i<4 next(i+1) yield i

@@ -1,0 +1,6 @@
+exit 0
+stdout cdb
+stderr
+=== input.neo
+fn rows() -> Arr Arr u8 _ (3) = arr(i in 0..3) arr(j in 0..i) u8(97+i+j)
+fn main() -> Arr u8 _ = let a=rows() in concat(a[2],a[1])

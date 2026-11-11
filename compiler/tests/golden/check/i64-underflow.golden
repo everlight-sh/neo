@@ -1,0 +1,8 @@
+check i64-underflow.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/i64-underflow.neo 1:20 integer literal outside i64
+exit 1
+stdout (error <dir>/i64-underflow.neo 1:20 integer literal outside i64)\n
+=== i64-underflow.neo
+fn main() -> i64 = -9223372036854775809

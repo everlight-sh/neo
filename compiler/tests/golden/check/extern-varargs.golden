@@ -1,0 +1,8 @@
+check extern-varargs.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== extern-varargs.neo
+extern fn foreign(x:i64, ...) -> unit
+effect(unsafe) fn main() -> unit = foreign(1,i32(2),3.0,null())

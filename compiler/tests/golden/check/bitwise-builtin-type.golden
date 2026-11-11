@@ -1,0 +1,8 @@
+check bitwise-builtin-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/bitwise-builtin-type.neo 1:20 bit_and requires two i64 arguments
+exit 1
+stdout (error <dir>/bitwise-builtin-type.neo 1:20 bit_and requires two i64 arguments)\n
+=== bitwise-builtin-type.neo
+fn main() -> i64 = bit_and(3,true)

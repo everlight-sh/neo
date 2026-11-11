@@ -1,0 +1,7 @@
+check large-affine-index.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== large-affine-index.neo
+fn main(n:i64) -> i64 = check n==1 in i64("x"[9223372036854775807*(n-1)])

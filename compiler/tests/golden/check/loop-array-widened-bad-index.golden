@@ -1,0 +1,8 @@
+check loop-array-widened-bad-index.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:59 bounds 0 <= i && i < len(a)
+exit 1
+stdout (unproven <dir>/loop-array-widened-bad-index.neo 1:59 bounds)\n
+=== loop-array-widened-bad-index.neo
+fn main() -> i64 = loop(a="x",i=0) while i<4 next(push(a,a[i]),i+1) yield len(a)

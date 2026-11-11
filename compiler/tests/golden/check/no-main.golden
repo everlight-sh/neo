@@ -1,0 +1,8 @@
+check no-main.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/no-main.neo 0:0 no `main` function
+exit 1
+stdout (error <dir>/no-main.neo 0:0 no `main` function)\n
+=== no-main.neo
+fn helper() -> i64 = 0

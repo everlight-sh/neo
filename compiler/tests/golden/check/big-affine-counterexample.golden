@@ -1,0 +1,8 @@
+check big-affine-counterexample.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:46 bounds 0 <= (9223372036854775807 * (9223372036854775807 * (n - 1))) && (9223372036854775807 * (9223372036854775807 * (n - 1))) < len('x')
+exit 1
+stdout (unproven <dir>/big-affine-counterexample.neo 1:46 bounds)\n
+=== big-affine-counterexample.neo
+fn main(n:i64) -> i64 = check n>=1 in i64("x"[9223372036854775807*(9223372036854775807*(n-1))])

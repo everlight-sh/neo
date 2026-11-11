@@ -1,0 +1,5 @@
+exit 0
+stdout 3\n
+stderr
+=== input.neo
+fn main() -> i64 = let a=arr(i in 0..2) arr(j in 0..2) arr(k in 0..2) i+j+k in let row=a[1][1] in check len(row)>1 in row[1]

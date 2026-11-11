@@ -1,0 +1,9 @@
+check array-equality.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/array-equality.neo 1:27 equality on Arr u8 (…) and Arr u8 (…)
+reference-error type <dir>/array-equality.neo 1:27 if condition must be bool
+exit 1
+stdout (error <dir>/array-equality.neo 1:27 equality on Arr u8 (\xe2\x80\xa6) and Arr u8 (\xe2\x80\xa6))\n
+=== array-equality.neo
+fn main() -> i64 = if "x" == "x" then 1 else 0

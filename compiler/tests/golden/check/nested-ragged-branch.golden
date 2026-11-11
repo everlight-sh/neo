@@ -1,0 +1,9 @@
+check nested-ragged-branch.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:54 bounds 0 <= 0 && 0 < len(c)
+exit 1
+stdout (unproven <dir>/nested-ragged-branch.neo 2:54 bounds)\n
+=== nested-ragged-branch.neo
+fn main() -> i64 = let a=arr(i in 0..2) if i==0 then "" else "x" in
+  let b=a[1] in let c=a[0] in check len(b)>0 in i64(c[0])

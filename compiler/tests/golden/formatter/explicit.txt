@@ -1,0 +1,31 @@
+-dash.neo	f	fn main() -> i64 = 42\n
+.axon	d
+.axon-build	d
+.axon-build/ignored.ax	f	fn main()->i64=4\n
+.axon/ignored.neo	f	fn main()->i64=5\n
+.kernel-build	d
+.kernel-build/ignored.neo	f	fn main()->i64=6\n
+.neo-build	d
+.neo-build/ignored.neo	f	fn main()->i64=3\n
+a	d
+a.neo	f	fn id<T>(x: T) -> T = x  ; keep this\nfn main() -> i64 = id::<i64>(-7) + 9\n
+a/nested.ax	f	  fn main() -> i64 = 1 + 2  # comment\n
+b file.neo	f	    fn main() -> Arr u8 _ = "a  b\\n\\x2A"\n
+clean-crlf.neo	f	fn main() -> i64 = 42\r\n
+comments.neo	f	  ; a comment with "quote" and non-breaking space\n\n\nfn f() -> i64 = 3  #end\n
+dirty-crlf.neo	f	fn main() -> i64 = 42\n
+extra.neo	f	fn main() -> i64 = 42\n
+guard.neo	f	fn main()->i64=1 . . 2\n
+legacy.ax	f	fn main() -> i64 = 42\n
+linked-directory	l	a
+linked.neo	l	a.neo
+multiline.neo	f	fn main()->Arr u8 _="a\nb"\n\n\n
+node_modules	d
+node_modules target	d
+node_modules target/format.neo	f	fn main() -> i64 = 7\n
+node_modules/ignored.neo	f	fn main()->i64=1\n
+notes.txt	f	fn main() -> i64 = 42\n
+operators.neo	f	fn main() -> i64 = if !(2 < 3) || false then -7 else 1 + -2\nfn g() -> f64 = 1.4e-3 + 2.0E+4\nfn f(x: i64) -> i64 = let z = arr (i in 0 .. 2) i in sum (i in 0 .. 2) z[i] + x\n
+target	d
+target/ignored.neo	f	fn main()->i64=2\n
+unicode.neo	f	fn caf\xc3\xa9() -> i64 = 3\nfn main() -> i64 = caf\xc3\xa9()\n

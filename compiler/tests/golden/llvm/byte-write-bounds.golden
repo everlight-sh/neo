@@ -1,0 +1,6 @@
+args 1
+exit 1
+stdout
+stderr neo: trap: byte write bounds at main:1\n
+=== input.neo
+fn main(offset:i64) -> Arr u8 _ = byte_write_le("abc",offset,65793,3)

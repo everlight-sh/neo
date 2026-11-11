@@ -1,0 +1,8 @@
+check branches.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/branches.neo 1:20 branches differ: i64 vs bool
+exit 1
+stdout (error <dir>/branches.neo 1:20 branches differ: i64 vs bool)\n
+=== branches.neo
+fn main() -> i64 = if true then 1 else false

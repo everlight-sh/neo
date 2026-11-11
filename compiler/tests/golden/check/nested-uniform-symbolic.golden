@@ -1,0 +1,8 @@
+check nested-uniform-symbolic.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== nested-uniform-symbolic.neo
+fn f(n:i64{n>0}) -> i64 = let a=arr(i in 0..2) arr(j in 0..n) u8(j) in i64(a[0][0])
+fn main() -> i64 = f(2)

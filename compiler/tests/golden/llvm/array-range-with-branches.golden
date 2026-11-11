@@ -1,0 +1,5 @@
+exit 0
+stdout abc
+stderr
+=== input.neo
+fn main() -> Arr u8 _ = arr(i in 0..3) if i==0 then 'a' else u8(i+97)

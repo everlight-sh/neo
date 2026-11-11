@@ -1,0 +1,6 @@
+exit 0
+stdout abab!
+stderr
+=== input.neo
+type Text = { bytes:Arr u8 _ }
+fn main() -> Arr u8 _ = let a=Text { bytes=concat("a","b") } in let b=a with { bytes=push(a.bytes,'!') } in concat(a.bytes,b.bytes)

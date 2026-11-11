@@ -1,0 +1,9 @@
+check record-unknown-field.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-unknown-field.neo 2:44 __me90cc07ce9acc404_Point has no field y
+exit 1
+stdout (error <dir>/record-unknown-field.neo 2:44 __me90cc07ce9acc404_Point has no field y)\n
+=== record-unknown-field.neo
+type Point = { x:i64 }
+fn main() -> i64 = let p=Point { x=1 } in p.y

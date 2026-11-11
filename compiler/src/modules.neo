@@ -456,8 +456,10 @@ effect(fs,unsafe) fn md_load_program(borrow root:Arr u8 _, borrow entry:Arr u8 _
   = md_load_overlay(root,entry,target,package_root,md_no_overlays())
 
 ; ---------------------------------------------------------------- dump
-; The canonical text of a loaded program; compiler/tests/modules_dump.py
-; prints the same from neoc/modules.py. Names are sorted as Python sorts str.
+; The canonical text of a loaded program. compiler/tests/golden/modules_dump holds
+; it as the Python reference loader printed it (Neo 0.2.3), checked by
+; compiler/tests/modules_dump.neo. Names are sorted by code point, as Python
+; sorted str.
 type Merge = { out:Arr i64 _, i:i64, j:i64 }
 fn md_merge_step(borrow m:Mods, borrow a:Arr i64 _, move st:Merge, mid:i64, hi:i64) -> Merge
   = let left=st.j>=hi || (st.i<mid && !tx_less(md_str(m,tx_at(a,st.j)),md_str(m,tx_at(a,st.i)))) in

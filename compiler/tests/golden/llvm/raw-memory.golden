@@ -1,0 +1,5 @@
+exit 0
+stdout 139\n
+stderr
+=== input.neo
+effect(unsafe) fn main() -> i64 = let p=stack_alloc(16) in let a=store_i64(p,0,42) in let b=volatile_store_u8(p,8,'a') in load_i64(ptr_from_i64(ptr_to_i64(p)),0)+i64(volatile_load_u8(ptr_add(p,8),0))

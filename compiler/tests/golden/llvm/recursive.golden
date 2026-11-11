@@ -1,0 +1,6 @@
+args 5
+exit 0
+stdout 120\n
+stderr
+=== input.neo
+fn main(x:i64) -> i64 = if x<=1 then 1 else x*main(x-1)

@@ -1,0 +1,9 @@
+check result-bare-propagation.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/result-bare-propagation.neo 2:36 error propagation requires a let binding: let value = result()? in ...
+exit 1
+stdout (error <dir>/result-bare-propagation.neo 2:36 error propagation requires a let binding: let value = result()? in ...)\n
+=== result-bare-propagation.neo
+enum Result<T,E> { Ok(T), Err(E) }
+fn main() -> i64 = Ok::<i64,i64>(1)?

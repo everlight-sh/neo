@@ -1,0 +1,7 @@
+check quotient-postcondition.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== quotient-postcondition.neo
+fn main(x:i64{x>=10,x<20}) -> i64{result==1} = x/10

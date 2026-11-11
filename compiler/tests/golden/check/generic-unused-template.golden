@@ -1,0 +1,9 @@
+check generic-unused-template.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-unused-template.neo
+type Box<T> = {value:T}
+fn broken<T>(x:T) -> i64 = true
+fn main() -> i64 = 42

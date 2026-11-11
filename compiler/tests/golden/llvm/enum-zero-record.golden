@@ -1,0 +1,7 @@
+exit 0
+stdout ok
+stderr
+=== input.neo
+type Box = {bytes:Arr u8 _}
+enum Choice { Empty, Present(Box) }
+fn main() -> Arr u8 _ = match Empty() { Empty => "ok", Present(value) => value.bytes }

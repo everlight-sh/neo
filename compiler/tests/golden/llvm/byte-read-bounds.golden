@@ -1,0 +1,6 @@
+args 2
+exit 1
+stdout
+stderr neo: trap: byte read bounds at main:1\n
+=== input.neo
+fn main(offset:i64) -> i64 = byte_read_le("abc",offset,2)

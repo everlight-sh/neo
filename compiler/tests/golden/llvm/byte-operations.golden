@@ -1,0 +1,6 @@
+exit 0
+stdout bczc
+stderr
+=== input.neo
+fn slice() -> Arr u8 _ = byte_slice(concat("ab","cd"),1,3)
+fn main() -> Arr u8 _ = let a=slice() in let b=byte_copy(a,0,"z") in if byte_equal(a,"bc") && byte_read_le(b,0,2)==25466 then concat(a,b) else "mismatch"

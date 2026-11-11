@@ -1,0 +1,6 @@
+args 10
+exit 0
+stdout 55\n
+stderr
+=== input.neo
+fn main(n:i64) -> i64 = sum(i in 0..n) (i+1)

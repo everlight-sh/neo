@@ -1,0 +1,9 @@
+check nested-push-length.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/nested-push-length.neo 1:53 push value does not match array element type
+reference-error type <dir>/nested-push-length.neo 1:49 len of a non-array
+exit 1
+stdout (error <dir>/nested-push-length.neo 1:53 push value does not match array element type)\n
+=== nested-push-length.neo
+fn main() -> i64 = let a=arr(i in 0..2) "hi" in len(push(a,"x"))

@@ -1,0 +1,8 @@
+check atomic-store-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/atomic-store-type.neo 1:36 atomic_store_i32 expects (ptr, i64, i32)
+exit 1
+stdout (error <dir>/atomic-store-type.neo 1:36 atomic_store_i32 expects (ptr, i64, i32))\n
+=== atomic-store-type.neo
+effect(unsafe) fn main() -> unit = atomic_store_i32(null(),0,1)

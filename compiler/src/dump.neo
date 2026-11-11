@@ -1,5 +1,6 @@
-; Canonical text of a parsed file. compiler/tests/ast_dump.py prints the same
-; text from neoc's parser; the two are compared byte for byte.
+; Canonical text of a parsed file. compiler/tests/golden/ast_dump holds this text
+; as the Python reference parser printed it (Neo 0.2.3), checked byte for byte
+; by compiler/tests/ast_dump.neo.
 import "std:strings"
 import "text.neo"
 import "lex.neo"

@@ -1,0 +1,7 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+type Outer = { inner:Inner }
+type Inner = { text:Arr u8 _ }
+fn main() -> Arr u8 _ = let a=Outer { inner=Inner { text=concat("a","b") } } in a.inner.text

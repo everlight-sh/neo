@@ -1,0 +1,6 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+import "std:option"
+fn main() -> Arr u8 _ = option_or(Some(concat("a","b")),"missing")

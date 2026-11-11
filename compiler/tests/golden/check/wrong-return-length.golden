@@ -1,0 +1,8 @@
+check wrong-return-length.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/wrong-return-length.neo 1:27 body has type Arr u8 (…), declared Arr u8 (…)
+exit 1
+stdout (error <dir>/wrong-return-length.neo 1:27 body has type Arr u8 (\xe2\x80\xa6), declared Arr u8 (\xe2\x80\xa6))\n
+=== wrong-return-length.neo
+fn main() -> Arr u8 (1) = "hi"

@@ -1,0 +1,6 @@
+exit 0
+stdout 10\n
+stderr
+=== input.neo
+type Point = { x:i64,y:i64 }
+fn main() -> i64 = let p=Point { y=3,x=7 } in p.x+p.y

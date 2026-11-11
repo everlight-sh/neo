@@ -1,0 +1,10 @@
+check result-propagation.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== result-propagation.neo
+enum Result<T,E> { Err(E), Ok(T) }
+fn source() -> Result<i64,i64> = Err::<i64,i64>(-1)
+fn convert() -> Result<Arr u8 _,i64> = let x=source()? in Ok::<Arr u8 _,i64>(arr(i in 0..1) u8(x))
+fn main() -> i64 = match convert() { Err(code) => code, Ok(text) => len(text) }

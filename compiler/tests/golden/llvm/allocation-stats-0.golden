@@ -1,0 +1,6 @@
+build-env NEO_ALLOC_STATS=0
+exit 0
+stdout 0\n
+stderr
+=== input.neo
+effect(unsafe) fn main() -> i64 = let before=load_i64(runtime_state(),64) in let a=byte_uninit(37) in let p=data(a) in let written=store_u8(p,0,'x') in let after=load_i64(runtime_state(),64) in if allocation_stats_enabled() && after>before && load_u8(p,0)=='x' then 1 else 0

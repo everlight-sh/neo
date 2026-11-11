@@ -1,0 +1,13 @@
+check entry.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/entry.neo 2:34 sealed type Token can only be updated in its declaring module
+reference-error type <dir>/entry.neo 2:49 field access on None
+exit 1
+stdout (error <dir>/entry.neo 2:34 sealed type Token can only be updated in its declaring module)\n
+=== entry.neo
+import "lib.neo" as lib
+fn main() -> i64 = (lib::token() with {value=1}).value
+=== lib.neo
+pub sealed type Token = {value:i64}
+pub fn token() -> Token = Token {value=42} with {value=43}

@@ -1,0 +1,7 @@
+check guarded-quotient-invariant.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== guarded-quotient-invariant.neo
+fn main() -> i64 = loop(i=0,d:i64{d>=1}=1000) while i<6 next(i+1,if d>=10 then d/10 else 1) yield d

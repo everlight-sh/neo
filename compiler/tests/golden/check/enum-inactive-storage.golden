@@ -1,0 +1,9 @@
+check enum-inactive-storage.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== enum-inactive-storage.neo
+type Box = {bytes:Arr u8 _}
+enum Choice { Empty, Present(Box) }
+fn main() -> i64 = match Empty() { Empty => 0, Present(value) => len(value.bytes) }

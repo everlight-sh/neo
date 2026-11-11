@@ -1,0 +1,12 @@
+check resource-move.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== resource-move.neo
+resource type Owner = {value:i64} drop dispose
+fn make() -> Owner = Owner {value=42}
+effect(process) fn dispose(x:Owner) -> unit = noop()
+fn observe(x:Owner) -> i64 = x.value
+effect(process) fn take(move x:Owner) -> i64 = observe(x)
+effect(process) fn main() -> i64 = using x=make() in using y=x in take(y)

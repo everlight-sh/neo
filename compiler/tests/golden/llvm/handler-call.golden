@@ -1,0 +1,6 @@
+exit 0
+stdout hello!
+stderr
+=== input.neo
+fn handle(bytes:Arr u8 n) -> Arr u8 (n+1) = concat(bytes,"!")
+effect(unsafe) fn main() -> Arr u8 _ = handler_call(addr(handle),data("hello"),5)

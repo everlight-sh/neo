@@ -1,0 +1,13 @@
+check resource-branch-move.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/resource-branch-move.neo 6:106 resource x used after move or outside its scope
+exit 1
+stdout (error <dir>/resource-branch-move.neo 6:106 resource x used after move or outside its scope)\n
+=== resource-branch-move.neo
+resource type Owner = {value:i64} drop dispose
+fn make() -> Owner = Owner {value=42}
+effect(process) fn dispose(x:Owner) -> unit = noop()
+fn observe(x:Owner) -> i64 = x.value
+effect(process) fn take(move x:Owner) -> i64 = observe(x)
+effect(process) fn main(n:i64) -> i64 = using x=make() in let done=if n>0 then take(x) else 0 in observe(x)

@@ -1,0 +1,203 @@
+; Replaces compiler/tests/package_commands_differential.py. An application
+; depends on "Core é🦊" (a neo.toml package with a 128 KiB binary file, a
+; nested manifest, a suffix-only ".neo" file, an ignored target/ and a
+; node_modules symlink) directly and through utils (an axon.toml package
+; reaching it through a symlinked path). `neo pkg lock`, `verify` and
+; `vendor` run under umask 027 with an empty PATH through the reference's
+; sequence of edits: lock and verify from other directories, root source and
+; extra manifest field changes, changed locked sources, four malformed
+; lockfiles, a lockfile with foreign fields, vendoring, verifying and
+; re-vendoring with the originals deleted, a tampered vendored source, then
+; version mismatch, a dependency cycle, an invalid name, a package symlink,
+; two roots of one package, the legacy axon.lock name and a changed existing
+; vendor source. golden/package_commands/steps.txt holds, per command, the
+; reference's exit status, its stdout when it succeeded, and the lockfile
+; (name, mode, bytes) it left; vendor-LABEL-N.txt the vendor tree after each
+; successful vendor (modes, SHA-256 of contents); foreign.lock the lockfile
+; with foreign fields. Each native command must match its step, and a failing
+; one must name the reference's diagnostic on stderr. Live checks: a vendor
+; under a 2048-byte file size limit fails with "write failed" leaving the
+; lock and an empty vendor directory, the vendored application checks, and no
+; .stage-* directory is left behind. Steps listed (as LABEL-N) in
+; golden/package_commands/skip.txt are run but not compared.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:strings"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type PcPair = { tools:DvTools, label:Arr u8 _, base:Arr u8 _, app:Arr u8 _, environment:Arr Arr u8 _ _,
+                steps:Arr Arr u8 _ _, skips:Arr Arr u8 _ _ }
+
+fn pc_core_name() -> Arr u8 _ = "Core \xc3\xa9\xf0\x9f\xa6\x8a"
+fn pc_core_manifest() -> Arr u8 _ = "[package]\nname = \"core\"\nversion = \"1.0.0-dev.2\"\n"
+fn pc_main() -> Arr u8 _ = "import \"pkg:helper\" as h\nfn main() -> i64 = h::answer()\n"
+fn pc_manifest() -> Arr u8 _
+  = concat("[package]\nname = \"app\"\nversion = \"0.1.0\"\nentry = \"src/main.neo\"\n[dependencies]\n",
+      "helper = { path = \"../utils\", version = \"2.5.0\" }\n[dependencies.core]\n",
+      "path = \"../",pc_core_name(),"\"\nversion = \"1.0.0-dev.2\"\n")
+
+effect fn pc_write(borrow path:Arr u8 _, borrow text:Arr u8 _) -> unit
+  = let made=pf_mkdirs(pt_parent(path)) in ru_write(path,text)
+
+effect fn pc_setup(borrow base:Arr u8 _) -> Arr u8 _
+  = let app=pt_join(base,"app") in let core=pt_join(base,pc_core_name()) in let utils=pt_join(base,"utils") in
+    let a=pc_write(pt_join(app,"neo.toml"),pc_manifest()) in
+    let b=pc_write(pt_join(app,"src/main.neo"),pc_main()) in
+    let c=pc_write(pt_join(core,"neo.toml"),pc_core_manifest()) in
+    let d=pc_write(pt_join(core,"src/lib.neo"),"fn base_value() -> i64 = 40\n") in
+    let e=pc_write(pt_join(core,"a/x.neo"),arr(x in 0..131074) u8(if x%2==0 then 255 else 0)) in
+    let f=pc_write(pt_join(core,"a.neo"),"fn other() -> i64 = 1\n") in
+    let g=pc_write(pt_join(core,"nested/neo.toml"),"ignored nested manifest") in
+    let h=pc_write(pt_join(core,".neo"),"ignored suffix-only filename") in
+    let i=pc_write(pt_join(core,"target/ignore.neo"),"ignored directory") in
+    let j=ru_link("target",pt_join(core,"node_modules")) in
+    let k=pc_write(pt_join(utils,"axon.toml"),concat("package = { name = \"utils\", version = \"2.5.0\", entry = \"src/lib.ax\" }\n",
+      "dependencies.core.path = \"../core-link\"\ndependencies.core.version = \"1.0.0-dev.2\"\n")) in
+    let l=pc_write(pt_join(utils,"src/lib.ax"),"import \"pkg:core\" as c\nfn answer() -> i64 = c::base_value()+2\n") in
+    let m=ru_link(pc_core_name(),pt_join(base,"core-link")) in app
+
+effect fn pc_pair(borrow tools:DvTools, borrow label:Arr u8 _, borrow dir:Arr u8 _, borrow environment:Arr Arr u8 _ _) -> PcPair
+  = let base=pt_join(dir,label) in let made=fs_mkdir(base) in
+    PcPair { tools=tools, label=pt_copy(label), base=base, app=pc_setup(base), environment=pc_words(environment),
+      steps=tg_lines(tg_golden(tools,"package_commands","steps.txt")), skips=tg_skips(tools,"package_commands") }
+
+fn pc_words(borrow words:Arr Arr u8 _ _) -> Arr Arr u8 _ _ = nt_extend(md_words(),words,0)
+
+; The lockfile the reference's step recorded: name TAB mode TAB escaped bytes,
+; neo.lock before axon.lock, "- TAB - TAB" when there is none.
+effect fn pc_lock(borrow app:Arr u8 _) -> Arr u8 _
+  = let name=if pf_kind(pt_join(app,"neo.lock"),false)==8 then "neo.lock" else if pf_kind(pt_join(app,"axon.lock"),false)==8 then "axon.lock" else "-" in
+    if tx_equal(name,"-") then "-\t-\t" else
+    concat(name,"\t",md_word(tg_modes(app,tg_a1(name)),0),"\t",tg_escape(dv_read(pt_join(app,name))))
+
+fn pc_joined(borrow args:Arr Arr u8 _ _) -> Arr u8 _
+  = if len(args)==0 then "-" else
+    loop (i=1, out=pt_copy(md_word(args,0))) while i<len(args) next (i+1,concat(out," ",md_word(args,i))) yield out
+
+effect fn pc_run(borrow p:PcPair, borrow cwd:Arr u8 _, borrow action:Arr u8 _, borrow args:Arr Arr u8 _ _, blocks:i64) -> NtProcess
+  = tg_run(if len(cwd)==0 then p.app else concat(p.app,"/",cwd),p.tools.compiler,nt_extend(tg_a2("pkg",action),args,0),p.environment,"027",blocks)
+
+; Runs step k (pkg ACTION ARGS in app/CWD) and compares it with the golden
+; step; error is the diagnostic a failing step must print. Returns k+1.
+effect fn pc_both(borrow p:PcPair, k:i64, borrow action:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow cwd:Arr u8 _, borrow error:Arr u8 _) -> i64
+  = let id=concat(p.label,"-",int_text(k+1)) in
+    let fields=tg_split(md_word(p.steps,k),9) in
+    let aligned=dv_expect(k<len(p.steps) && tx_equal(md_word(fields,0),p.label) && tx_equal(md_word(fields,1),action) &&
+      tx_equal(md_word(fields,2),pc_joined(args)) && tx_equal(md_word(fields,3),if len(cwd)==0 then "-" else cwd),
+      concat("step ",id," (pkg ",action,") is not the golden step ",tx_repr(tg_clip(md_word(p.steps,k),80),true))) in
+    let run=pc_run(p,cwd,action,args,-1) in
+    if tg_has(p.skips,id) then k+1 else
+    let what=concat("step ",id," (pkg ",action," ",pc_joined(args),")") in
+    let status=dv_expect(tx_equal(int_text(run.code),md_word(fields,4)),
+      concat(what," exited ",int_text(run.code),", the reference ",md_word(fields,4),": ",tg_status(run))) in
+    let output=if len(error)==0 then dv_expect(tx_equal(run.output,tg_unescape(md_word(fields,5))) && len(run.errors)==0,
+        concat(what," printed ",tg_status(run),", the reference ",tx_repr(tg_unescape(md_word(fields,5)),true)))
+      else dv_expect(ru_contains(run.errors,error),concat(what," did not report ",error,": ",tg_status(run))) in
+    let lock=pc_lock(p.app) in
+    let locked=tg_same(concat(md_word(fields,6),"\t",md_word(fields,7),"\t",md_word(fields,8)),lock,concat("the lockfile after ",what)) in
+    let tree=if len(error)>0 || !tx_equal(action,"vendor") then noop() else
+      tg_same(tg_golden(p.tools,"package_commands",concat("vendor-",id,".txt")),tg_tree(pt_join(p.app,".neo/vendor"),true,true),
+        concat("the vendor tree after ",what)) in k+1
+
+fn pc_replace_first(borrow text:Arr u8 _, borrow needle:Arr u8 _, borrow other:Arr u8 _) -> Arr u8 _
+  = let found=str_find(text,needle) in if !found.present then pt_copy(text) else
+    concat(pt_slice(text,0,found.value),other,pt_slice(text,found.value+len(needle),len(text)))
+
+effect fn pc_vendored(borrow app:Arr u8 _, borrow prefix:Arr u8 _) -> Arr u8 _
+  = let names=ru_names(pt_join(app,".neo/vendor")) in
+    let found=loop (n=0, out=tx_empty()) while n<len(names) next (n+1,if str_starts(md_word(names,n),prefix) then md_word(names,n) else out) yield out in
+    let ok=dv_expect(len(found)>0,concat("no vendored ",prefix," package")) in pt_join(app,concat(".neo/vendor/",found))
+
+effect fn pc_compare(borrow p:PcPair) -> i64
+  = let app=p.app in let lock=pt_join(app,"neo.lock") in let core=pt_join(p.base,pc_core_name()) in
+    let k1=pc_both(p,0,"verify",md_words(),"","missing or invalid neo.lock") in
+    let k2=pc_both(p,k1,"lock",tg_a1("src/main.neo"),"src/..","") in
+    let initial=dv_read(lock) in
+    let k3=pc_both(p,k2,"lock",md_words(),"","") in
+    let exchanged=ru_write(lock,initial) in
+    let k4=pc_both(p,k3,"verify",tg_a1(".."),"src","") in
+    let a=ru_write(pt_join(app,"src/main.neo"),"; root sources may change\n") in
+    let k5=pc_both(p,k4,"verify",md_words(),"","") in
+    let b=ru_write(pt_join(app,"neo.toml"),concat(pc_manifest(),"note = \"only lock checks extra fields\"\n")) in
+    let k6=pc_both(p,k5,"verify",md_words(),"","") in
+    let k7=pc_both(p,k6,"lock",md_words(),"","requires only path and exact version") in
+    let c=ru_write(pt_join(app,"neo.toml"),pc_manifest()) in
+    let d=ru_write(pt_join(core,"a.neo"),"changed") in
+    let k8=pc_both(p,k7,"verify",md_words(),"","locked source changed") in
+    let k9=pc_both(p,k8,"vendor",md_words(),"","locked source changed") in
+    let e=dv_expect(tx_equal(dv_read(lock),initial) && pf_kind(pt_join(app,".neo"),false)<0,"a refused vendor changed the lock or left .neo") in
+    let f=ru_write(pt_join(core,"a.neo"),"fn other() -> i64 = 1\n") in
+    let g=ru_write(lock,"{") in
+    let k10=pc_both(p,k9,"verify",md_words(),"","missing or invalid neo.lock") in
+    let h=ru_write(lock,"{\"format\": 7}") in
+    let k11=pc_both(p,k10,"verify",md_words(),"","unsupported package lock format") in
+    let i=ru_write(lock,pc_replace_first(initial,"\"sha256\": \"","\"sha256\": \"X")) in
+    let k12=pc_both(p,k11,"verify",md_words(),"","invalid locked source hash") in
+    let j=ru_write(lock,nt_replace(initial,"\"path\": \".\"","\"path\": \"../utils\"")) in
+    let k13=pc_both(p,k12,"verify",md_words(),"","locked root must be the current project") in
+    let foreign=tg_golden(p.tools,"package_commands","foreign.lock") in
+    let l=ru_write(lock,foreign) in
+    let limited=pc_run(p,"","vendor",md_words(),4) in
+    let m=dv_expect(limited.ok && limited.code==1 && ru_contains(limited.errors,"write failed"),
+      concat("pkg vendor under a 2048-byte file size limit: ",tg_status(limited))) in
+    let vendor=pt_join(app,".neo/vendor") in
+    let n=dv_expect(tx_equal(dv_read(lock),foreign) && pf_kind(vendor,false)==4 && len(ru_names(vendor))==0,
+      "a failed vendor changed the lock or left vendored files") in
+    let k14=pc_both(p,k13,"vendor",md_words(),"","") in
+    let vendored=dv_read(lock) in
+    let o=dv_clean(pt_join(p.base,"utils")) in let q=dv_clean(core) in
+    let k15=pc_both(p,k14,"verify",md_words(),"","") in
+    let k16=pc_both(p,k15,"vendor",md_words(),"","") in
+    let r=dv_expect(tx_equal(dv_read(lock),vendored),"vendoring again changed the lock") in
+    let s=ru_write(pt_join(app,"src/main.neo"),pc_main()) in
+    let checked=tg_run(app,p.tools.compiler,tg_a2("check","src/main.neo"),tg_env(p.tools,tg_toolchain(p.base)),"",-1) in
+    let t=dv_expect(checked.ok && checked.code==0,concat("the vendored application does not check: ",tg_status(checked))) in
+    let u=ru_write(pt_join(pc_vendored(app,"core-"),"a.neo"),"tampered") in
+    pc_both(p,k16,"verify",md_words(),"","locked source changed")
+
+effect fn pc_errors(borrow p:PcPair, k:i64) -> i64
+  = let app=p.app in let core=pt_join(p.base,pc_core_name()) in let manifest=pt_join(core,"neo.toml") in
+    let a=ru_write(manifest,nt_replace(pc_core_manifest(),"1.0.0-dev.2","1.1.0")) in
+    let k1=pc_both(p,k,"lock",md_words(),"","version mismatch") in
+    let b=ru_write(manifest,concat(pc_core_manifest(),"[dependencies.app]\npath = \"../app\"\nversion = \"0.1.0\"\n")) in
+    let k2=pc_both(p,k1,"lock",md_words(),"","cyclic package dependencies") in
+    let c=ru_write(manifest,nt_replace(pc_core_manifest(),"\"core\"","42")) in
+    let k3=pc_both(p,k2,"lock",md_words(),"","invalid package name") in
+    let d=ru_write(manifest,pc_core_manifest()) in
+    let e=ru_link("a.neo",pt_join(core,"alias.txt")) in
+    let k4=pc_both(p,k3,"lock",md_words(),"","package symlinks are not supported") in
+    let f=fs_remove(pt_join(core,"alias.txt")) in
+    let g=ru_tool_output("cp",tg_a3("-a",core,pt_join(p.base,"duplicate"))) in
+    let h=ru_write(pt_join(app,"neo.toml"),concat(pc_manifest(),"[dependencies.duplicate]\npath=\"../duplicate\"\nversion=\"1.0.0-dev.2\"\n")) in
+    let k5=pc_both(p,k4,"lock",md_words(),"","multiple source roots") in
+    let i=ru_write(pt_join(app,"neo.toml"),pc_manifest()) in
+    let j=fs_rename(pt_join(app,"neo.toml"),pt_join(app,"axon.toml")) in
+    let l=ru_write(pt_join(app,"axon.lock"),"{}") in
+    let k6=pc_both(p,k5,"lock",md_words(),"","") in
+    let m=dv_expect(pf_kind(pt_join(app,"neo.lock"),false)<0,"pkg lock wrote neo.lock beside axon.lock") in
+    let lock=pt_join(app,"axon.lock") in let before=dv_read(lock) in
+    let parsed=json_parse(before) in let n=dv_expect(parsed.ok,"axon.lock is not JSON") in
+    let digest=json_text(json_get(json_get(json_get(parsed.value,"packages").value,"core@1.0.0-dev.2").value,"sha256").value) in
+    let o=dv_expect(digest.ok && len(digest.value)>=12,"axon.lock has no core digest") in
+    let q=pc_write(pt_join(app,concat(".neo/vendor/core-1.0.0-dev.2-",tg_clip(digest.value,12),"/extra.neo")),"wrong hash") in
+    let k7=pc_both(p,k6,"vendor",md_words(),"","existing vendor source changed") in
+    let names=ru_names(pt_join(app,".neo/vendor")) in
+    let staged=loop (s=0, count=0) while s<len(names) next (s+1,if str_starts(md_word(names,s),".stage-") then count+1 else count) yield count in
+    let r=dv_expect(tx_equal(dv_read(lock),before) && staged==0,"a refused vendor changed axon.lock or left a .stage- directory") in k7
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=pt_realpath(dv_temp("package-commands")) in
+    let environment=tg_env(tools,tg_empty_path(dir)) in
+    let compared=pc_compare(pc_pair(tools,"compare",dir,environment)) in
+    let finished=pc_errors(pc_pair(tools,"errors",dir,environment),compared) in
+    let steps=tg_lines(tg_golden(tools,"package_commands","steps.txt")) in
+    let a=dv_expect(compared==17 && finished==len(steps),concat("ran ",int_text(finished)," of ",int_text(len(steps))," golden steps")) in
+    let cleaned=dv_clean(dir) in let shown=print_out("package commands OK\n") in noop()

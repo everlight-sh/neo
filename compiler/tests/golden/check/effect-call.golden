@@ -1,0 +1,8 @@
+check effect-call.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== effect-call.neo
+effect(fs) fn work() -> i64 = 7
+effect(fs) fn main() -> i64 = work()

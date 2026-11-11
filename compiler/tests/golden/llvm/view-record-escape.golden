@@ -1,0 +1,6 @@
+exit 0
+stdout a
+stderr
+=== input.neo
+type Text = { bytes:Arr u8 _ }
+effect(unsafe) fn main() -> Arr u8 _ = let p=stack_alloc(1) in let init=store_u8(p,0,'a') in let text=Text { bytes=view(p,1) } in let changed=store_u8(p,0,'z') in text.bytes

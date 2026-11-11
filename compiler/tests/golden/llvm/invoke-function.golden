@@ -1,0 +1,6 @@
+exit 0
+stdout 42\n
+stderr
+=== input.neo
+fn clock(id:i32,p:ptr) -> i32 = if p==null() then id else i32(0)
+effect(unsafe) fn main() -> i64 = i64(invoke_clock_gettime(addr(clock),i32(42),null()))

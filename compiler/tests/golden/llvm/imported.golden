@@ -1,0 +1,8 @@
+exit 0
+stdout 21\n
+stderr
+=== input.neo
+import "../library.neo" as lib
+fn main() -> i64 = lib::triple(7)
+=== ../library.neo
+pub fn triple(x:i64) -> i64 = x*3

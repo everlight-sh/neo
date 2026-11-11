@@ -1,0 +1,7 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+type Box<T> = {value:T}
+fn get<T>(borrow x:Box<T>) -> T = x.value
+fn main() -> Arr u8 _ = get(get(Box::<Box<Arr u8 _>> {value=Box::<Arr u8 _> {value=concat("a","b")}}))

@@ -1,0 +1,9 @@
+check extern-varargs-missing.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/extern-varargs-missing.neo 2:36 foreign takes 1 args
+exit 1
+stdout (error <dir>/extern-varargs-missing.neo 2:36 foreign takes 1 args)\n
+=== extern-varargs-missing.neo
+extern fn foreign(x:i64, ...) -> unit
+effect(unsafe) fn main() -> unit = foreign()

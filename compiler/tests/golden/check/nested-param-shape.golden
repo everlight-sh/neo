@@ -1,0 +1,9 @@
+check nested-param-shape.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/nested-param-shape.neo 2:22 argument 'hi' has type Arr u8 (…), expected Arr Arr u8 _ (…)
+exit 1
+stdout (error <dir>/nested-param-shape.neo 2:22 argument has type Arr u8 (\xe2\x80\xa6), expected Arr Arr u8 _ (\xe2\x80\xa6))\n
+=== nested-param-shape.neo
+fn f(a:Arr Arr u8 _ n) -> i64 = n
+fn main() -> i64 = f("hi")

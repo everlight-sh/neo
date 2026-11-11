@@ -1,0 +1,9 @@
+check record-duplicate-field.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-duplicate-field.neo 1:1 duplicate fields in __m3703c8ac6fb7098b_Point
+exit 1
+stdout (error <dir>/record-duplicate-field.neo 1:1 duplicate fields in __m3703c8ac6fb7098b_Point)\n
+=== record-duplicate-field.neo
+type Point = { x:i64,x:i64 }
+fn main() -> i64 = 0

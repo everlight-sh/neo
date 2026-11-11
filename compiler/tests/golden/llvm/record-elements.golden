@@ -1,0 +1,7 @@
+exit 0
+stdout c1c2c0
+stderr
+=== input.neo
+type Cell = { kind:u8,value:i64,bytes:Arr u8 _ }
+fn cells() -> Arr Cell (3) = arr(i in 0..3) Cell { kind=u8(i),value=i*2,bytes=concat("c",arr(j in 0..1) u8(i+48)) }
+fn main() -> Arr u8 _ = let a=cells() in let b=set(a,1,a[2]) in let c=push(b,b[0]) in concat(a[1].bytes,c[1].bytes,c[3].bytes)

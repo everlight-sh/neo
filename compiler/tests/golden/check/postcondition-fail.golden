@@ -1,0 +1,8 @@
+check postcondition-fail.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:24 postcondition (result > 0)
+exit 1
+stdout (unproven <dir>/postcondition-fail.neo 1:24 postcondition)\n
+=== postcondition-fail.neo
+fn main() -> i64{result>0} = 0

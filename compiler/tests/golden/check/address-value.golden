@@ -1,0 +1,9 @@
+check address-value.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/address-value.neo 1:57 addr takes a function name
+reference-error type <dir>/address-value.neo 1:46 ptr_to_i64 expects (ptr)
+exit 1
+stdout (error <dir>/address-value.neo 1:57 addr takes a function name)\n
+=== address-value.neo
+effect(unsafe) fn main() -> i64 = let v=1 in ptr_to_i64(addr(v))

@@ -1,0 +1,8 @@
+check fiber-init-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/fiber-init-arity.neo 1:36 fiber_init expects (ptr, ptr, ptr, ptr)
+exit 1
+stdout (error <dir>/fiber-init-arity.neo 1:36 fiber_init expects (ptr, ptr, ptr, ptr))\n
+=== fiber-init-arity.neo
+effect(unsafe) fn main() -> unit = fiber_init(null(),null(),null())

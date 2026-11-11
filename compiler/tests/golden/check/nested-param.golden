@@ -1,0 +1,8 @@
+check nested-param.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== nested-param.neo
+fn f(a:Arr Arr u8 _ n) -> i64 = n
+fn main() -> i64 = f(arr(i in 0..2) "hi")

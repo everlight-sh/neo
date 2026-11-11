@@ -1,0 +1,8 @@
+check address-function.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== address-function.neo
+fn f() -> i64 = 42
+effect(unsafe) fn main() -> i64 = ptr_to_i64(addr(f))

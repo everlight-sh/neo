@@ -1,0 +1,8 @@
+check extern-scalar.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== extern-scalar.neo
+extern fn foreign(x:i32,p:ptr) -> f64
+effect(unsafe) fn main() -> f64 = foreign(i32(5),null())

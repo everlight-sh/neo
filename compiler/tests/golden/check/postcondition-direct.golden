@@ -1,0 +1,8 @@
+check postcondition-direct.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== postcondition-direct.neo
+fn index() -> i64{result==1} = 1
+fn main() -> i64 = i64("hi"[index()])

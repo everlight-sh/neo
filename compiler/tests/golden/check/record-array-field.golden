@@ -1,0 +1,8 @@
+check record-array-field.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-array-field.neo
+type Text = { bytes:Arr u8 _ }
+fn main() -> i64 = let t=Text { bytes="hi" } in let a=t.bytes in check len(a)>0 in i64(a[0])

@@ -1,0 +1,6 @@
+exit 0
+stdout 0\n
+stderr
+=== input.neo
+type Pair = { x:i64,y:f64 }
+fn main() -> i64 = let p=sum(i in 2..0) Pair { x=i,y=f64(i) } in p.x+i64(p.y)

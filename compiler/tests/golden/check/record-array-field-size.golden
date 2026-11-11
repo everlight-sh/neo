@@ -1,0 +1,9 @@
+check record-array-field-size.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-array-field-size.neo 1:1 record array fields use existential size _
+exit 1
+stdout (error <dir>/record-array-field-size.neo 1:1 record array fields use existential size _)\n
+=== record-array-field-size.neo
+type Text = { bytes:Arr u8 n }
+fn main() -> i64 = 0

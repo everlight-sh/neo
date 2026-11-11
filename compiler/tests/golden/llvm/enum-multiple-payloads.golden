@@ -1,0 +1,7 @@
+args 1
+exit 0
+stdout abc
+stderr
+=== input.neo
+enum Choice { A(Arr u8 _,i64), B(Arr u8 _,Arr u8 _), C }
+fn main(n:i64) -> Arr u8 _ = let value=if n>0 then B("a",concat("b","c")) else A("d",0) in match value { A(text,_) => text, B(a,b) => concat(a,b), _ => "c" }

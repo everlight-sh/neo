@@ -1,0 +1,6 @@
+args 8
+exit 0
+stdout 35\n
+stderr
+=== input.neo
+fn main(n:i64) -> i64 = loop(i=0,total=0) while i<n next(i+1,if i==0 then 7 else total+i) yield total

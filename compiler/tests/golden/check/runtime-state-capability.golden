@@ -1,0 +1,10 @@
+check runtime-state-capability.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/runtime-state-capability.neo 1:32 missing effect capabilities: unsafe
+reference-error type <dir>/runtime-state-capability.neo 1:43 missing effect capabilities: unsafe
+reference-error type <dir>/runtime-state-capability.neo 1:32 missing effect capabilities: unsafe
+exit 1
+stdout (error <dir>/runtime-state-capability.neo 1:32 missing effect capabilities: unsafe)\n
+=== runtime-state-capability.neo
+effect(env) fn main() -> i64 = ptr_to_i64(runtime_state())

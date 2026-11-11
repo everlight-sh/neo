@@ -1,0 +1,8 @@
+check loop-next-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/loop-next-type.neo 1:45 loop state changes type: i64 -> bool
+exit 1
+stdout (error <dir>/loop-next-type.neo 1:45 loop state changes type: i64 -> bool)\n
+=== loop-next-type.neo
+fn main() -> i64 = loop(i=0) while i<4 next(false) yield i

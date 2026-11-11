@@ -1,0 +1,6 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+fn keep<T>(x:T,n:i64) -> T = if n<=0 then x else keep(x,n-1)
+fn main() -> Arr u8 _ = keep(concat("a","b"),5)

@@ -1,0 +1,7 @@
+check disjunctive-index.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== disjunctive-index.neo
+fn main(i:i64) -> i64 = if i==0 || i==1 then i64("hi"[i]) else 0

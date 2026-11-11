@@ -1,0 +1,9 @@
+check explicit-size-mismatch.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:24 size len('hi') == n
+exit 1
+stdout (unproven <dir>/explicit-size-mismatch.neo 2:24 size)\n
+=== explicit-size-mismatch.neo
+fn f(n:i64,a:Arr u8 n) -> i64 = n
+fn main() -> i64 = f(1,"hi")

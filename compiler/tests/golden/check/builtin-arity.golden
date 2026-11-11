@@ -1,0 +1,8 @@
+check builtin-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/builtin-arity.neo 1:21 noop takes no arguments
+exit 1
+stdout (error <dir>/builtin-arity.neo 1:21 noop takes no arguments)\n
+=== builtin-arity.neo
+fn main() -> unit = noop(1)

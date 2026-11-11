@@ -1,0 +1,8 @@
+check independent-existentials.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== independent-existentials.neo
+fn f(a:Arr u8 _,b:Arr u8 _) -> i64 = len(a)+len(b)
+fn main() -> i64 = f("hi","x")

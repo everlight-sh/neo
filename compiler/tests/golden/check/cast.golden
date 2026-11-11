@@ -1,0 +1,8 @@
+check cast.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/cast.neo 1:20 cannot cast bool to i64
+exit 1
+stdout (error <dir>/cast.neo 1:20 cannot cast bool to i64)\n
+=== cast.neo
+fn main() -> i64 = i64(true)

@@ -1,0 +1,23 @@
+exit 0
+stdout 42\n
+stderr
+=== input.neo
+effect(unsafe) fn task(context:ptr) -> unit =
+    let parent=load_ptr(context,200) in
+    let first=store_i64(context,208,17) in
+    let suspended=fiber_swap(context,parent) in
+    let second=store_i64(context,208,42) in
+    fiber_swap(context,parent)
+
+effect(unsafe) fn main() -> i64 =
+    let parent=stack_alloc(200) in
+    let context=stack_alloc(216) in
+    let stack=stack_alloc(65536) in
+    let cleared=loop (i=0) while i<216
+      next (let reset=store_i64(context,i,0) in i+8) yield i in
+    let saved=store_ptr(context,200,parent) in
+    let ready=fiber_init(context,ptr_add(stack,65536),addr(task),context) in
+    let first=fiber_swap(parent,context) in
+    let observed=load_i64(context,208) in
+    let second=fiber_swap(parent,context) in
+    if observed==17 then load_i64(context,208) else -1

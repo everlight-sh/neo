@@ -1,0 +1,9 @@
+check record-param.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-param.neo
+type Point = { x:i64 }
+fn f(borrow p:Point) -> i64 = p.x
+fn main() -> i64 = f(Point { x=1 })

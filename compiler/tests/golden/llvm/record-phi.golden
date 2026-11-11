@@ -1,0 +1,7 @@
+args 1
+exit 0
+stdout cd
+stderr
+=== input.neo
+type Text = { bytes:Arr u8 _ }
+fn main(x:i64) -> Arr u8 _ = let a=if x==0 then Text { bytes=concat("a","b") } else Text { bytes=concat("c","d") } in a.bytes

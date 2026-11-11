@@ -1,0 +1,8 @@
+check generic-inferred.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-inferred.neo
+fn id<T>(x:T) -> T = x
+fn main() -> i64 = id(42)

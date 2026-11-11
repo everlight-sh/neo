@@ -1,0 +1,7 @@
+check byte-uninit-length.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== byte-uninit-length.neo
+effect(unsafe) fn main() -> Arr u8 (8) = byte_uninit(8)

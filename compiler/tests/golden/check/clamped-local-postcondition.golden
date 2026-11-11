@@ -1,0 +1,7 @@
+check clamped-local-postcondition.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== clamped-local-postcondition.neo
+effect(unsafe) fn main() -> i64{result>=1,result<=256} = let p=runtime_state() in let cached=load_i64(p,1600) in if cached>=1 && cached<=256 then cached else let n=if load_ptr(p,0)==null() then load_i64(p,40) else load_i64(p,64) in let bounded=if n<1 then 1 else if n>256 then 256 else n in let saved=store_i64(p,1600,bounded) in bounded

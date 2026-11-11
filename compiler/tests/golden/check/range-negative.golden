@@ -1,0 +1,8 @@
+check range-negative.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:25 range 2 <= 1
+exit 1
+stdout (unproven <dir>/range-negative.neo 1:25 range)\n
+=== range-negative.neo
+fn main() -> Arr u8 _ = arr(i in 2..1) u8(i)

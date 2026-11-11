@@ -1,0 +1,5 @@
+exit 0
+stdout abab!!!!!
+stderr
+=== input.neo
+fn main() -> Arr u8 _ = let a=concat("a","b") in let b=loop(i=0,b=a) while i<5 next(i+1,push(b,'!')) yield b in concat(a,b)

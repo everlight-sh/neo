@@ -1,0 +1,8 @@
+check implicit-size.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== implicit-size.neo
+fn f(a:Arr u8 n) -> i64 = n
+fn main() -> i64 = f("hi")

@@ -1,0 +1,8 @@
+check main-return.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/main-return.neo 1:1 main must return i64, f64 or Arr u8 (written to stdout)
+exit 1
+stdout (error <dir>/main-return.neo 1:1 main must return i64, f64 or Arr u8 (written to stdout))\n
+=== main-return.neo
+fn main() -> bool = true

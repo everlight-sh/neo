@@ -1,0 +1,6 @@
+args 3
+exit 1
+stdout
+stderr neo: trap: byte read width at main:1\n
+=== input.neo
+fn main(width:i64) -> i64 = byte_read_le("abc",0,width)

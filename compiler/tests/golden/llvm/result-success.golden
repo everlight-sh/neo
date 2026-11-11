@@ -1,0 +1,8 @@
+exit 0
+stdout *
+stderr
+=== input.neo
+import "std:result"
+fn source() -> Result<i64,Arr u8 _> = Ok::<i64,Arr u8 _>(42)
+fn convert() -> Result<Arr u8 _,Arr u8 _> = let x=source()? in Ok::<Arr u8 _,Arr u8 _>(arr(i in 0..1) u8(x))
+fn main() -> Arr u8 _ = match convert() { Ok(value) => value, Err(error) => error }

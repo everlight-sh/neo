@@ -1,0 +1,7 @@
+check view-length.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== view-length.neo
+effect(unsafe) fn main() -> i64 = let a=view(data("abc"),3) in i64(a[2])

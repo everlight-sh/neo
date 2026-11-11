@@ -1,0 +1,8 @@
+check concat-u16.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== concat-u16.neo
+fn f() -> Arr u16 (2) = concat(arr(i in 0..1) u16(i),arr(i in 0..1) u16(i))
+fn main() -> i64 = len(f())

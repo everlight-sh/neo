@@ -1,0 +1,9 @@
+check generic-missing.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/generic-missing.neo 2:20 cannot infer T; supply explicit ::<...> type arguments
+exit 1
+stdout (error <dir>/generic-missing.neo 2:20 cannot infer T; supply explicit ::<...> type arguments)\n
+=== generic-missing.neo
+fn make<T>() -> i64 = 1
+fn main() -> i64 = make()

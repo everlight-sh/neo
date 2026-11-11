@@ -1,0 +1,253 @@
+; Replaces compiler/tests/tooling_differential.py. The argument picks the
+; part; the compiler runs with a PATH of links to clang, ld, ld.lld, as and
+; gzip. Goldens in golden/tooling/ come from the Python reference:
+;   release  two `neo release` archives with SOURCE_DATE_EPOCH=123456789 are
+;            byte-identical and their report matches them (path, SHA-256,
+;            version, epoch, file count); the gzip header and every USTAR
+;            header's fixed fields (owner, mtime, type, magic, names, devices),
+;            the modes of named members, the top directory and the member
+;            order match release.txt; the stream ends in zero blocks on a
+;            10240-byte record; no .neo-release-* file is left;
+;   editor   an LSP session (malformed frame, initialize, didOpen of two files
+;            in a "space é🚀" directory, completion, hover, definition,
+;            symbols, formatting, didChange, didClose, shutdown, exit) from
+;            editor-requests.txt gets exactly the JSON messages of
+;            editor-responses.txt, in order, and leaves the files unchanged;
+;   graph    `neo graph` and `--full` of a small program agree with each other
+;            and give graph.txt's function hashes and user nodes;
+;   driver   check --library with JSON diagnostics, run --dev with NEO_RUNNER
+;            and an argument with spaces, and doctor (live checks);
+;   http     a serve/serve_effect program built with --dev answers a GET with
+;            http.txt's bytes in both modes.
+; @ROOT@, @VERSION@ and @EPOCH@ in the goldens stand for the session root
+; (percent-encoded in URIs), the compiler's version and the epoch.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:process"
+import "std:strings"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type TlTools = { tools:DvTools, dir:Arr u8 _, environment:Arr Arr u8 _ _ }
+
+effect fn tl_ok(borrow t:TlTools, borrow args:Arr Arr u8 _ _, borrow extra:Arr Arr u8 _ _) -> Arr u8 _
+  = let run=tg_run(t.dir,t.tools.compiler,args,nt_extend(nt_extend(md_words(),t.environment,0),extra,0),"",-1) in
+    let ok=dv_expect(run.ok && run.code==0,concat("neo ",ru_joined(args)," failed: ",tg_status(run))) in run.output
+effect fn tl_json(borrow text:Arr u8 _) -> Json
+  = let parsed=json_parse(text) in let ok=dv_expect(parsed.ok,concat("not JSON: ",tg_clip(text,300))) in parsed.value
+fn tl_at(borrow value:Json, borrow name:Arr u8 _) -> Json = json_get(value,name).value
+fn tl_text(borrow value:Json) -> Arr u8 _ = let text=json_text(value) in if text.ok then text.value else tx_empty()
+effect fn tl_version(borrow t:TlTools) -> Arr u8 _
+  = let words=ru_split(str_trim(tl_ok(t,tg_a1("version"),md_words())),32) in md_word(words,len(words)-1)
+; The golden lines whose first field is kind, without it.
+fn tl_golden_lines(borrow lines:Arr Arr u8 _ _, borrow kind:Arr u8 _) -> Arr Arr u8 _ _
+  = loop (i=0, out=md_words()) while i<len(lines)
+      next (i+1,let line=md_word(lines,i) in let prefix=concat(kind,"\t") in
+        if str_starts(line,prefix) then push(out,pt_slice(line,len(prefix),len(line))) else out) yield out
+
+; Release archives.
+fn tl_epoch() -> Arr u8 _ = "123456789"
+fn tl_epoch_le() -> Arr u8 _ = "15cd5b07"   ; 123456789 as four little-endian bytes
+fn tl_epoch_octal() -> Arr u8 _ = "00726746425"   ; 123456789 in a USTAR mtime field
+fn tl_named(borrow inner:Arr u8 _) -> bool
+  = tx_equal(inner,"neo") || tx_equal(inner,"bin/neoc") || tx_equal(inner,"MANIFEST.json") || tx_equal(inner,"README.md") ||
+    tx_equal(inner,"skills.md") || tx_equal(inner,"stdlib/io.neo") || tx_equal(inner,"runtime/core.neo")
+; A header field without its trailing NUL bytes.
+fn tl_field(borrow h:Arr u8 _, start:i64, size:i64) -> Arr u8 _
+  = let end=loop (e=start+size) while e>start && tx_byte(h,e-1)==0 next (e-1) yield e in pt_slice(h,start,end)
+fn tl_octal(borrow text:Arr u8 _) -> i64
+  = loop (i=0, n=0) while i<len(text) next (i+1,let c=tx_byte(text,i) in if c>=48 && c<=55 then n*8+c-48 else n) yield n
+fn tl_zero(borrow bytes:Arr u8 _, start:i64, end:i64) -> bool
+  = loop (i=start, zero=true) while zero && i<end next (i+1,tx_byte(bytes,i)==0) yield zero
+; The fixed fields of a header after its mode: uid, gid, mtime (as @EPOCH@
+; when it is the epoch), type, link name, magic, version (NULs as 0),
+; user, group, device major and minor.
+fn tl_template(borrow h:Arr u8 _) -> Arr u8 _
+  = let mtime=tl_field(h,136,12) in
+    let version=arr(i in 0..2) u8(let c=tx_byte(h,263+i) in if c==0 then 48 else c) in
+    concat(tl_field(h,108,8),"\t",tl_field(h,116,8),"\t",if tx_equal(mtime,tl_epoch_octal()) then "@EPOCH@" else mtime,"\t",
+      tl_field(h,156,1),"\t",tl_field(h,157,100),"\t",tl_field(h,257,6),"\t",version,"\t",tl_field(h,265,32),"\t",
+      tl_field(h,297,32),"\t",tl_field(h,329,8),"\t",tl_field(h,337,8))
+
+type TlTar = { at:i64, count:i64, tops:Arr Arr u8 _ _, members:Arr u8 _, templates:Arr Arr u8 _ _, sorted:bool, last:Arr u8 _ }
+fn tl_tar_step(borrow stream:Arr u8 _, move s:TlTar) -> TlTar
+  = let h=pt_slice(stream,s.at,s.at+512) in
+    let name=tl_field(h,0,100) in let prefix=tl_field(h,345,155) in
+    let full=if len(prefix)>0 then concat(prefix,"/",name) else pt_copy(name) in
+    let slash=str_find(full,"/") in let cut=if slash.present then slash.value else len(full) in
+    let top=pt_slice(full,0,cut) in let inner=pt_slice(full,if cut<len(full) then cut+1 else cut,len(full)) in
+    let size=tl_octal(tl_field(h,124,12)) in let template=tl_template(h) in
+    TlTar { at=s.at+512+(size+511)/512*512, count=s.count+1,
+      tops=if tg_has(s.tops,top) then s.tops else push(s.tops,top),
+      members=if tl_named(inner) then concat(s.members,inner,"\t",tl_field(h,100,8),"\n") else s.members,
+      templates=if tg_has(s.templates,template) then s.templates else push(s.templates,template),
+      sorted=s.sorted && (s.count==0 || tx_less(s.last,inner)), last=pt_copy(inner) }
+
+effect fn tl_release(borrow t:TlTools) -> unit
+  = let golden=tg_lines(tg_golden(t.tools,"tooling","release.txt")) in let version=tl_version(t) in
+    let epoch=concat("SOURCE_DATE_EPOCH=",tl_epoch()) in
+    let first=pt_join(t.dir,"native.tar.gz") in let second=pt_join(t.dir,"native-repeat.tar.gz") in
+    let reports=loop (i=0, out=md_words()) while i<2
+      next (i+1,let target=if i==0 then first else second in
+        push(out,tl_ok(t,tg_a3("release","-o",target),tg_a1(epoch)))) yield out in
+    let archive=dv_read(first) in
+    let a=dv_expect(tx_equal(archive,dv_read(second)),"two releases with one SOURCE_DATE_EPOCH differ") in
+    let leftovers=loop (i=0, n=0, names=ru_names(t.dir)) while i<len(names)
+      next (i+1,if str_starts(md_word(names,i),".neo-release-") then n+1 else n,names) yield n in
+    let b=dv_expect(leftovers==0,"neo release left a .neo-release-* file") in
+    let stream=tg_gunzip(archive) in
+    let tar=loop (s=TlTar { at=0, count=0, tops=md_words(), members=tx_empty(), templates=md_words(), sorted=true, last=tx_empty() })
+      while s.at+512<=len(stream) && !tl_zero(stream,s.at,s.at+512) next (tl_tar_step(stream,s)) yield s in
+    let checked=loop (i=0) while i<2
+      next (let report=tl_json(md_word(reports,i)) in let target=if i==0 then first else second in
+        let files=json_int(tl_at(report,"files")) in let stamp=json_int(tl_at(report,"epoch")) in
+        let c=dv_expect(tx_equal(tl_text(tl_at(report,"archive")),target) && tx_equal(tl_text(tl_at(report,"sha256")),tg_sha(archive)),
+          "the release report does not name the archive and its SHA-256") in
+        let d=dv_expect(tx_equal(tl_text(tl_at(report,"version")),version) && len(tl_text(tl_at(report,"platform")))>0 &&
+          tx_equal(tl_at(report,"ok").raw,"true") && stamp.ok && stamp.value==123456789 && files.ok && files.value==tar.count,
+          concat("the release report does not match the archive: ",md_word(reports,i))) in i+1) yield i in
+    let e=tg_same(md_word(tl_golden_lines(golden,"gzip"),0),nt_replace(tx_hex_bytes(tx_empty(),pt_slice(archive,0,10)),tl_epoch_le(),"@EPOCH@"),
+      "the gzip header") in
+    let members=loop (i=0, out=tx_empty(), lines=tl_golden_lines(golden,"member")) while i<len(lines)
+      next (i+1,concat(out,md_word(lines,i),"\n"),lines) yield out in
+    let f=tg_same(members,tar.members,"the named members' modes") in
+    let g=dv_expect(len(tar.tops)==1 && tx_equal(md_word(tar.tops,0),nt_replace(md_word(tl_golden_lines(golden,"top"),0),"@VERSION@",version)),
+      concat("the archive's top directories are ",ru_joined(tar.tops))) in
+    let templates=tl_golden_lines(golden,"template") in
+    let h=loop (i=0) while i<len(tar.templates)
+      next (let ok=dv_expect(tg_has(templates,md_word(tar.templates,i)),
+        concat("a USTAR header differs from the reference's: ",tx_repr(md_word(tar.templates,i),true))) in i+1) yield i in
+    let ordered=tx_equal(md_word(tl_golden_lines(golden,"order"),0),"sorted") in
+    let j=dv_expect(!ordered || tar.sorted,"the archive's members are not in byte order") in
+    let k=dv_expect(tl_zero(stream,tar.at,len(stream)) && len(stream)%10240==0 && len(stream)-tar.at>=1024,
+      "the USTAR stream does not end in zero blocks on a 10240-byte record") in
+    dv_expect(tar.count>0 && len(tar.members)>0,"the archive has no members")
+
+; Editor sessions.
+fn tl_hexdigit(n:i64) -> u8 = u8(if n<10 then 48+n else 55+n)
+; A path as a file URI percent-encodes it (unreserved bytes and / stay).
+fn tl_quote(borrow path:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(path)
+      next (i+1,let c=tx_byte(path,i) in
+        if (c>=48 && c<=57) || (c>=65 && c<=90) || (c>=97 && c<=122) || c==47 || c==45 || c==46 || c==95 || c==126 then push(out,u8(c))
+        else push(push(push(out,u8(37)),tl_hexdigit(c/16)),tl_hexdigit(c%16))) yield out
+fn tl_frames(borrow bodies:Arr Arr u8 _ _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(bodies)
+      next (i+1,concat(out,"Content-Length: ",int_text(len(md_word(bodies,i))),"\r\n\r\n",md_word(bodies,i))) yield out
+type TlMessages = { at:i64, bodies:Arr Arr u8 _ _, ok:bool }
+fn tl_message_step(borrow data:Arr u8 _, move s:TlMessages) -> TlMessages
+  = let rest=pt_slice(data,s.at,len(data)) in let end=str_find(rest,"\r\n\r\n") in
+    if !end.present then s with { at=len(data), ok=false } else
+    let colon=str_find(rest,":") in
+    let length=int_parse(str_trim(pt_slice(rest,if colon.present then colon.value+1 else 0,end.value))) in
+    if !length.ok || length.value<0 || end.value+4+length.value>len(rest) then s with { at=len(data), ok=false } else
+    TlMessages { at=s.at+end.value+4+length.value, bodies=push(s.bodies,pt_slice(rest,end.value+4,end.value+4+length.value)), ok=s.ok }
+fn tl_messages(borrow data:Arr u8 _) -> TlMessages
+  = loop (s=TlMessages { at=0, bodies=md_words(), ok=true }) while s.at<len(data) next (tl_message_step(data,s)) yield s
+
+effect fn tl_editor(borrow t:TlTools) -> unit
+  = let root=pt_join(t.dir,"editor") in let made=fs_mkdir(root) in
+    let project=pt_join(root,"space \xc3\xa9\xf0\x9f\x9a\x80") in let a=fs_mkdir(project) in
+    let main=pt_join(project,"main.neo") in let helper=pt_join(project,"helper.neo") in
+    let b=ru_write(main,"fn main() -> i64 = 0\n") in let c=ru_write(helper,"fn answer() -> i64 = 40\n") in
+    let base=concat("file://",tl_quote(root)) in let version=tl_version(t) in
+    let requests=tg_lines(tg_golden(t.tools,"tooling","editor-requests.txt")) in
+    let bodies=loop (i=0, out=md_words()) while i<len(requests)
+      next (i+1,push(out,nt_replace(md_word(requests,i),"file://@ROOT@",base))) yield out in
+    let run=tg_run_input(root,t.tools.compiler,tg_a1("lsp"),t.environment,"",-1,tl_frames(bodies),300000) in
+    let d=dv_expect(run.ok && run.code==0,concat("neo lsp failed: ",tg_status(run))) in
+    let got=tl_messages(run.output) in let e=dv_expect(got.ok,concat("neo lsp wrote a malformed frame: ",tx_repr(tg_clip(run.output,400),true))) in
+    let expected=tg_lines(tg_golden(t.tools,"tooling","editor-responses.txt")) in
+    let wanted=loop (i=0, out=tx_empty()) while i<len(expected)
+      next (i+1,concat(out,tg_canon_text(nt_replace(nt_replace(md_word(expected,i),"file://@ROOT@",base),
+        "\"version\": \"@VERSION@\"",concat("\"version\": \"",version,"\""))),"\n")) yield out in
+    let actual=loop (i=0, out=tx_empty()) while i<len(got.bodies) next (i+1,concat(out,tg_canon_text(md_word(got.bodies,i)),"\n")) yield out in
+    let f=tg_same(wanted,actual,"the LSP session's messages") in
+    dv_expect(tx_equal(dv_read(main),"fn main() -> i64 = 0\n") && tx_equal(dv_read(helper),"fn answer() -> i64 = 40\n"),
+      "the LSP session changed files on disk")
+
+; Program graphs.
+effect fn tl_graph(borrow t:TlTools) -> unit
+  = let source=pt_join(t.dir,"graph.neo") in
+    let a=ru_write(source,concat("type Pair = { a: i64, b: i64 }\nfn twice(x:i64) -> i64 = x * 2\n",
+      "fn fraction() -> f64 = 0.1 + 1.0e-5\nfn main() -> i64 = let p = Pair { b=4, a=3 } in ",
+      "let q = p with { b=2, a=21 } in twice(q.a)\n")) in
+    let brief=tl_json(tl_ok(t,tg_a2("graph",source),md_words())) in
+    let full=tl_json(tl_ok(t,tg_a3("graph",source,"--full"),md_words())) in
+    let golden=tg_lines(tg_golden(t.tools,"tooling","graph.txt")) in
+    let functions=tl_golden_lines(golden,"function") in let nodes=tl_golden_lines(golden,"node") in
+    let names=json_object_keys(tl_at(full,"functions")) in
+    let users=loop (i=0, n=0) while i<len(names)
+      next (i+1,let name=md_word(names,i) in if str_starts(name,"__m") || tx_equal(name,"main") then n+1 else n) yield n in
+    let b=dv_expect(users==len(functions),concat("the graph has ",int_text(users)," user functions, the reference ",int_text(len(functions)))) in
+    let c=loop (i=0) while i<len(functions)
+      next (let fields=tg_split(md_word(functions,i),9) in let name=md_word(fields,0) in
+        let hash=tl_text(tl_at(tl_at(full,"functions"),name)) in
+        let ok=dv_expect(tx_equal(hash,md_word(fields,1)) && tx_equal(tl_text(tl_at(tl_at(brief,"functions"),name)),hash),
+          concat("function ",name," hashes to ",hash,", the reference ",md_word(fields,1))) in i+1) yield i in
+    let graph=tl_at(full,"graph") in
+    let d=loop (i=0) while i<len(nodes)
+      next (let fields=tg_split(md_word(nodes,i),9) in let hash=md_word(fields,0) in let node=tl_at(graph,hash) in
+        let same=tg_same(tg_canon_text(md_word(fields,1)),tg_canon(node),concat("graph node ",hash)) in
+        let ok=dv_expect(tx_equal(tl_text(tl_at(tl_at(brief,"graph"),hash)),tl_text(tl_at(node,"op"))),
+          concat("graph node ",hash," has another op without --full")) in i+1) yield i in
+    let count=len(json_object_keys(graph)) in let briefed=json_int(tl_at(brief,"nodes")) in let counted=json_int(tl_at(full,"nodes")) in
+    dv_expect(briefed.ok && counted.ok && briefed.value==count && counted.value==count && len(nodes)>0,"the graph's node counts disagree")
+
+; Driver commands.
+effect fn tl_driver(borrow t:TlTools) -> unit
+  = let library=pt_join(t.dir,"library.neo") in let a=ru_write(library,"fn answer() -> i64 = 42\n") in
+    let checked=tl_json(tl_ok(t,push(tg_a4("check","--library",library,"--diagnostic-format"),"json"),md_words())) in
+    let b=dv_expect(tx_equal(tl_at(checked,"ok").raw,"true"),"check --library --diagnostic-format json is not ok") in
+    let main=pt_join(t.dir,"arguments.neo") in
+    let c=ru_write(main,"import \"std:io\"\neffect fn main() -> Arr u8 _ = cli_arg(1).value\n") in
+    let ran=tl_ok(t,push(tg_a4("run","--dev",main,"--"),"argument with spaces"),
+      tg_a1("NEO_RUNNER=/bin/sh -c 'exec \"$@\"' neo-test")) in
+    let d=dv_expect(tx_equal(ran,"argument with spaces"),concat("neo run printed ",tx_repr(ran,true))) in
+    let doctor=tl_ok(t,tg_a1("doctor"),md_words()) in
+    dv_expect(ru_contains(doctor,"built and ran hello world"),concat("neo doctor printed ",tx_repr(tg_clip(doctor,400),true)))
+
+; Loopback HTTP.
+effect fn tl_response(borrow binary:Arr u8 _, mode:i64) -> Arr u8 _
+  = let port=ru_port() in
+    using server=process_start(binary,tg_a2(int_text(port),int_text(mode)),dv_environment(tg_a2("NEO_THREADS=1","NEO_TEST_BODY=world"))) in
+    let up=ru_wait(server,port) in
+    let reply=ru_exchange(port,"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",10000) in
+    let stopped=ru_kill(server) in
+    let ok=dv_expect(reply.ok,concat("no reply in mode ",int_text(mode))) in if reply.ok then reply.value else tx_empty()
+
+effect fn tl_http(borrow t:TlTools) -> unit
+  = let source=pt_join(t.dir,"serve.neo") in
+    let a=ru_write(source,concat("import \"std:io\"\n",
+      "fn reply(body:Arr u8 _) -> Arr u8 _ = concat(\"HTTP/1.1 200 OK\\r\\nContent-Length: 5\\r\\nConnection: close\\r\\n\\r\\n\", body)\n",
+      "fn pure_handler(request:Arr u8 _) -> Arr u8 _ = reply(\"hello\")\n",
+      "effect(env) fn effect_handler(request:Arr u8 _) -> Arr u8 _ = reply(env_get(\"NEO_TEST_BODY\").value)\n",
+      "effect(env,net) fn main(port:i64,mode:i64) -> i64 = if mode==0 then serve(port,pure_handler) else serve_effect(port,effect_handler)\n")) in
+    let binary=pt_join(t.dir,"native-server") in
+    let built=tl_ok(t,push(tg_a4("build",source,"--dev","-o"),binary),md_words()) in
+    let golden=tg_lines(tg_golden(t.tools,"tooling","http.txt")) in
+    let b=dv_expect(len(golden)==2,"http.txt has no two modes") in
+    loop (mode=0) while mode<len(golden)
+      next (let fields=tg_split(md_word(golden,mode),9) in
+        let same=dv_expect(tx_equal(md_word(fields,0),int_text(mode)),"http.txt is out of order") in
+        let checked=tg_same(tg_unescape(md_word(fields,1)),tl_response(binary,mode),concat("the reply in mode ",int_text(mode))) in mode+1)
+      yield noop()
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let part=cli_arg(1).value in let dir=pt_realpath(dv_temp("tooling")) in
+    let path=ru_tools(pt_join(dir,"toolchain"),push(push(push(push(push(md_words(),"clang"),"ld"),"ld.lld"),"as"),"gzip")) in
+    let t=TlTools { tools=tools, dir=dir, environment=tg_env(tools,path) } in
+    let ran=if tx_equal(part,"release") then tl_release(t)
+      else if tx_equal(part,"editor") then tl_editor(t)
+      else if tx_equal(part,"graph") then tl_graph(t)
+      else if tx_equal(part,"driver") then tl_driver(t)
+      else if tx_equal(part,"http") then tl_http(t)
+      else dv_fail("usage: tooling.neo release|editor|graph|driver|http") in
+    let cleaned=dv_clean(dir) in let shown=print_out(concat("tooling ",part," OK\n")) in noop()

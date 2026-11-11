@@ -1,0 +1,9 @@
+check record-recursion.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-recursion.neo 1:1 recursive value type __me94b33ca34cac883_Link is not finite
+exit 1
+stdout (error <dir>/record-recursion.neo 1:1 recursive value type __me94b33ca34cac883_Link is not finite)\n
+=== record-recursion.neo
+type Link = { next_link:Link }
+fn main() -> i64 = 0

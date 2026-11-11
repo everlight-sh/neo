@@ -1,0 +1,7 @@
+check loop-array-widened-index.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== loop-array-widened-index.neo
+fn main() -> i64 = loop(a="x",i:i64{i>=0}=0) while i<len(a) && i<4 next(push(a,a[i]),i+1) yield len(a)

@@ -1,0 +1,8 @@
+check loop-condition-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/loop-condition-type.neo 1:36 loop condition must be bool
+exit 1
+stdout (error <dir>/loop-condition-type.neo 1:36 loop condition must be bool)\n
+=== loop-condition-type.neo
+fn main() -> i64 = loop(i=0) while i next(i+1) yield i

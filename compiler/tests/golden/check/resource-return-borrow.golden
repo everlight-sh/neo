@@ -1,0 +1,14 @@
+check resource-return-borrow.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/resource-return-borrow.neo 6:28 a resource factory must construct a new owner
+exit 1
+stdout (error <dir>/resource-return-borrow.neo 6:28 a resource factory must construct a new owner)\n
+=== resource-return-borrow.neo
+resource type Owner = {value:i64} drop dispose
+fn make() -> Owner = Owner {value=42}
+effect(process) fn dispose(x:Owner) -> unit = noop()
+fn observe(x:Owner) -> i64 = x.value
+effect(process) fn take(move x:Owner) -> i64 = observe(x)
+fn bad(x:Owner) -> Owner = x
+fn main() -> i64 = 0

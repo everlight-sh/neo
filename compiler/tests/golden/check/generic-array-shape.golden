@@ -1,0 +1,8 @@
+check generic-array-shape.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-array-shape.neo
+fn id<T>(x:T) -> T = x
+fn main() -> i64 = len(id("abc"))

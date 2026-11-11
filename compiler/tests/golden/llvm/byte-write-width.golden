@@ -1,0 +1,6 @@
+args 9
+exit 1
+stdout
+stderr neo: trap: byte write width at main:1\n
+=== input.neo
+fn main(width:i64) -> Arr u8 _ = byte_write_le("abc",1,65793,width)

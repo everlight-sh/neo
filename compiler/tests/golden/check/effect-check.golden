@@ -1,0 +1,9 @@
+check effect-check.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/effect-check.neo 2:33 __mbe08f783970846e1_work requires an effect function and cannot run in a refinement or comprehension
+exit 1
+stdout (error <dir>/effect-check.neo 2:33 __mbe08f783970846e1_work requires an effect function and cannot run in a refinement or comprehension)\n
+=== effect-check.neo
+effect fn work() -> bool = true
+effect fn main() -> i64 = check work() in 7

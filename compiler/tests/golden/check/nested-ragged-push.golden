@@ -1,0 +1,9 @@
+check nested-ragged-push.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/nested-ragged-push.neo 2:37 push value does not match array element type
+exit 1
+stdout (error <dir>/nested-ragged-push.neo 2:37 push value does not match array element type)\n
+=== nested-ragged-push.neo
+fn main() -> i64 = let a=arr(i in 0..2) arr(j in 0..i) u8(j) in
+  let b=arr(i in 0..1) "x" in let c=push(b,a[0]) in i64(c[1][0])

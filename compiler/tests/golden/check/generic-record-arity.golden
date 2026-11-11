@@ -1,0 +1,9 @@
+check generic-record-arity.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/generic-record-arity.neo 1:1 __m067fb1bf5942e154_Box expects 1 type arguments, got 2
+exit 1
+stdout (error <dir>/generic-record-arity.neo 1:1 __m067fb1bf5942e154_Box expects 1 type arguments, got 2)\n
+=== generic-record-arity.neo
+type Box<T> = {value:T}
+fn main() -> i64 = (Box::<i64,bool> {value=1}).value

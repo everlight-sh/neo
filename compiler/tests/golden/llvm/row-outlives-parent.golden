@@ -1,0 +1,6 @@
+exit 0
+stdout row1
+stderr
+=== input.neo
+fn rows() -> Arr Arr u8 _ (2) = arr(i in 0..2) concat("row",arr(j in 0..1) u8(i+48))
+fn main() -> Arr u8 _ = rows()[1]

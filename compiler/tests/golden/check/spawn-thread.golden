@@ -1,0 +1,7 @@
+check spawn-thread.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== spawn-thread.neo
+effect(unsafe) fn main() -> i64 = spawn_thread(null(),null())

@@ -1,0 +1,9 @@
+check enum-binding-arity.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/enum-binding-arity.neo 2:20 match payload arity mismatch for __me76f140041156476_A
+exit 1
+stdout (error <dir>/enum-binding-arity.neo 2:20 match payload arity mismatch for __me76f140041156476_A)\n
+=== enum-binding-arity.neo
+enum Choice { A(i64), B }
+fn main() -> i64 = match A(1) { A => 0, B => 1 }

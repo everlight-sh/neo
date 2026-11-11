@@ -1,0 +1,9 @@
+check data-nested.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/data-nested.neo 1:74 data takes a byte array; its pointer borrows the array's storage
+reference-error type <dir>/data-nested.neo 1:63 ptr_to_i64 expects (ptr)
+exit 1
+stdout (error <dir>/data-nested.neo 1:74 data takes a byte array; its pointer borrows the array's storage)\n
+=== data-nested.neo
+effect(unsafe) fn main() -> i64 = let a=arr(i in 0..1) "x" in ptr_to_i64(data(a))

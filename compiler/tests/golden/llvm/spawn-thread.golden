@@ -1,0 +1,34 @@
+only linux
+exit 0
+stdout 42\n
+stderr
+=== input.neo
+effect(unsafe) fn worker(values:ptr, chunk:i64) -> unit =
+    store_i64(values,chunk*8,chunk+1)
+
+effect(unsafe) fn run_job(pool:ptr, values:ptr, generation:i64) -> i64 =
+    let first=store_i64(pool,24,0) in
+    let pending=atomic_store_i64(pool,40,1) in
+    let published=atomic_store_i64(pool,0,generation) in
+    let woken=syscall6(<syscall:futex>,ptr_to_i64(pool),129,1,0,0,0) in
+    let joined=loop (left=atomic_load_i64(pool,40)) while left!=0
+      next (let waited=syscall6(<syscall:futex>,ptr_to_i64(ptr_add(pool,40)),128,left,0,0,0) in
+            atomic_load_i64(pool,40)) yield left in
+    loop (i=0,total=0) while i<64
+      next (i+1,total+load_i64(values,i*8)) yield total
+
+effect(unsafe) fn main() -> i64 =
+    let pool=stack_alloc(48) in
+    let values=stack_alloc(512) in
+    let stack=stack_alloc(1048576) in
+    let zero=atomic_store_i64(pool,0,0) in
+    let job=store_ptr(pool,8,addr(worker)) in
+    let context=store_ptr(pool,16,values) in
+    let limit=store_i64(pool,32,64) in
+    let pid=spawn_thread(pool,ptr_add(stack,1048576)) in
+    if pid<=0 then -1 else
+    let first=run_job(pool,values,1) in
+    let cleared=loop (i=0) while i<64
+      next (let reset=store_i64(values,i*8,0) in i+1) yield i in
+    let second=run_job(pool,values,2) in
+    if first==2080 && second==2080 then 42 else -2

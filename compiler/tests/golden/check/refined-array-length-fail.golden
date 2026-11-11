@@ -1,0 +1,9 @@
+check refined-array-length-fail.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:22 precondition (len('') >= 1)
+exit 1
+stdout (unproven <dir>/refined-array-length-fail.neo 2:22 precondition)\n
+=== refined-array-length-fail.neo
+fn f(a:Arr u8 _{len(a)>=1}) -> i64 = i64(a[0])
+fn main() -> i64 = f("")

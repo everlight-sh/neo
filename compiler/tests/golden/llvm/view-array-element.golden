@@ -1,0 +1,5 @@
+exit 0
+stdout az
+stderr
+=== input.neo
+effect(unsafe) fn main() -> Arr u8 _ = let p=stack_alloc(1) in let init=store_u8(p,0,'a') in let row=view(p,1) in let a=push(arr(i in 0..1) "x",row) in let changed=store_u8(p,0,'z') in concat(a[1],row)

@@ -1,0 +1,7 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+type Box = {value:Arr u8 _}
+fn choose(x:i64) -> Arr Box (1) = if x>0 then arr(i in 0..1) Box {value=concat("a","b")} else arr(i in 0..1) Box {value="other"}
+fn main() -> Arr u8 _ = choose(42)[0].value

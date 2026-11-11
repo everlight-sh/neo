@@ -1,0 +1,8 @@
+check arithmetic.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/arithmetic.neo 1:22 operator + on i64 and f64
+exit 1
+stdout (error <dir>/arithmetic.neo 1:22 operator + on i64 and f64)\n
+=== arithmetic.neo
+fn main() -> i64 = 1 + 2.0

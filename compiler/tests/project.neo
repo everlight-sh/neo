@@ -1,0 +1,90 @@
+; Replaces compiler/tests/project_differential.py, whose expectations were
+; already the native ones (the Python reference printed the same lines). In
+; a project directory whose path has spaces, with only the toolchain on
+; PATH, a missing NEO_RUNTIME object and a NEO_RUNNER prefix: neo test
+; --unit-only runs manifest cases (args, env, exit, stdout, a rejected
+; file, a 9000-byte expected stdout), paired Markdown examples (neo and
+; legacy axon fences, an unpaired fence skipped) and test functions from the
+; test-globs (tests/**/[ab]*_test.neo, tests/*_test.ax) and prints exactly
+; the expected summary; a second manifest reports a timeout, a stdout
+; difference and a build failure but still runs the following case; with
+; integration hooks enabled, a .py integration entry is skipped with a
+; note. No .neo-test-* directory is left behind.
+import "std:fs"
+import "std:io"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+fn pr_manifest() -> Arr u8 _
+  = concat("[package]\nname = \"test-project\"\nversion = \"0.1.0\"\n\n[tool.neo]\ndoc-tests = [\"docs/*.md\"]\n",
+      "test-globs = [\"tests/**/[ab]*_test.neo\", \"tests/*_test.ax\"]\n\n",
+      "[[test]]\nname = \"args-and-env\"\nfile = \"args.neo\"\nargs = [41]\nexit = 7\nstdout = \"42:hello:2\\n\"\n",
+      "[test.env]\nCASE_WORD = \"hello\"\nNEO_THREADS = \"2\"\n\n",
+      "[[test]]\nname = \"rejected\"\nfile = \"reject.neo\"\nreject = true\ndiagnostic = \"division\"\n\n",
+      "[[test]]\nname = \"large-output\"\nfile = \"large.neo\"\nstdout = \"",arr(i in 0..9000) 'x',"\"\n")
+
+fn pr_failing() -> Arr u8 _
+  = concat("[tool.neo]\ntest-globs = []\nintegration = \"must-not-run.py\"\n\n",
+      "[[test]]\nname = \"timeout\"\nfile = \"sleep.neo\"\ntimeout = 0.05\n\n",
+      "[[test]]\nname = \"stdout\"\nfile = \"large.neo\"\nstdout = \"wrong\"\n\n",
+      "[[test]]\nname = \"compile\"\nfile = \"reject.neo\"\n\n",
+      "[[test]]\nname = \"following\"\nfile = \"large.neo\"\n")
+
+effect fn pr_setup(borrow project:Arr u8 _) -> Arr u8 _
+  = let a=pf_mkdirs(pt_join(project,"docs")) in let b=pf_mkdirs(pt_join(project,"tests/nested")) in
+    let manifest=pt_join(project,"neo.toml") in let c=ru_write(manifest,pr_manifest()) in
+    let d=ru_write(pt_join(project,"args.neo"),concat("import \"std:io\"\nimport \"std:strings\"\n",
+      "effect fn main(n:i64) -> unit = let wrote=print_out(concat(int_text(n+1),\":\",",
+      "env_get(\"CASE_WORD\").value,\":\",env_get(\"NEO_THREADS\").value,\"\\n\")) in process_exit(7)\n")) in
+    let e=ru_write(pt_join(project,"reject.neo"),"fn main(n:i64) -> i64 = 42/n\n") in
+    let f=ru_write(pt_join(project,"large.neo"),"fn main() -> Arr u8 _ = arr(i in 0..9000) 'x'\n") in
+    let g=ru_write(pt_join(project,"docs/a.md"),concat("```neo\nfn main() -> i64 = 42\n```\n\n```text\n42\n```\n",
+      "\n```axon\nfn main() -> Arr u8 _ = \"legacy\\n\"\n```\n```text\nlegacy\n```\n",
+      "\n```neo\nThis unpaired fence is skipped.\n```\n")) in
+    let h=ru_write(pt_join(project,"tests/nested/b_test.neo"),"fn test_two() -> bool = true\n") in
+    let i=ru_write(pt_join(project,"tests/a_test.neo"),"fn test_one() -> bool = true\nfn test_also() -> bool = 1<2\n") in
+    let j=ru_write(pt_join(project,"tests/legacy_test.ax"),"fn test_legacy() -> bool = true\n") in
+    let k=ru_write(pt_join(project,"tests/ignored_test.neo"),"fn test_ignored() -> bool = false\n") in
+    let l=ru_write(pt_join(project,"tests/b_empty_test.neo"),"fn helper() -> bool = false\n") in
+    let entries=nt_process("/bin/sh",push(push(push(push(md_words(),"-c"),
+      "cd \"$1\" && i=0 && while [ $i -lt 1000 ]; do : > \"$(printf 'ignored-directory-entry-%04d.txt' $i)\"; i=$((i+1)); done"),"sh"),
+      pt_join(project,"tests")),bd_environment(),60000,65536) in
+    let m=dv_expect(entries.ok && entries.code==0,concat("cannot create the ignored entries: ",nt_diagnostic(entries))) in manifest
+
+effect fn pr_clean(borrow project:Arr u8 _) -> unit
+  = let left=loop (i=0, names=ru_names(project), found=false) while i<len(names) && !found
+      next (i+1,names,str_starts(md_word(names,i),".neo-test-")) yield found in
+    dv_expect(!left,"neo test left a .neo-test-* directory behind")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let root=pt_realpath(dv_temp("project-tests")) in
+    let project=pt_join(root,"project with spaces") in let made=pf_mkdirs(project) in
+    let manifest=pr_setup(project) in let toolchain=tg_toolchain(root) in
+    let environment=push(push(push(tg_env(tools,toolchain),concat("NEO_RUNTIME=",pt_join(root,"missing.o"))),"NEO_THREADS=9"),
+      "NEO_RUNNER=/bin/sh -c 'exec \"$@\"' native-runner") in
+    let first=tg_run(root,tools.compiler,tg_a3("test",manifest,"--unit-only"),environment,"",-1) in
+    let expected=concat("PASS args-and-env\nPASS rejected\nPASS large-output\nPASS doc-a-0\nPASS doc-a-1\n",
+      "PASS tests/a_test.neo\nPASS tests/nested/b_test.neo\nPASS tests/legacy_test.ax\nneo test: 8 native cases, 0 failed\n") in
+    let a=dv_expect(first.ok && first.code==0 && len(first.errors)==0 && tx_equal(first.output,expected),
+      concat("neo test --unit-only: ",tg_status(first))) in
+    let b=pr_clean(project) in
+    let c=ru_write(manifest,pr_failing()) in
+    let d=ru_write(pt_join(project,"sleep.neo"),"import \"std:time\"\neffect fn main() -> unit = let waited=sleep_ms(1000) in noop()\n") in
+    let second=tg_run(project,tools.compiler,tg_a2("test","--unit-only"),environment,"",-1) in
+    let e=dv_expect(second.ok && second.code==1 && tx_equal(second.output,"PASS following\nneo test: 4 native cases, 3 failed\n"),
+      concat("neo test with failing cases: ",tg_status(second))) in
+    let f=dv_expect(ru_contains(second.errors,"FAIL timeout timed out after 50 ms") && ru_contains(second.errors,"FAIL stdout stdout differs")
+      && ru_contains(second.errors,"FAIL compile build failed") && !ru_contains(second.errors,"skipped integration hook"),
+      concat("neo test failure reports: ",tg_status(second))) in
+    let g=pr_clean(project) in
+    let third=tg_run(project,tools.compiler,tg_a1("test"),environment,"",-1) in
+    let h=dv_expect(third.ok && third.code==1 && ru_contains(third.errors,"skipped integration hook must-not-run.py"),
+      concat("neo test with a .py integration entry: ",tg_status(third))) in
+    let i=pr_clean(project) in
+    let cleaned=dv_clean(root) in let shown=print_out("project tests OK\n") in noop()

@@ -1,0 +1,7 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+type Text = { bytes:Arr u8 _ }
+fn keep(borrow text:Text) -> Text = text
+fn main() -> Arr u8 _ = keep(Text { bytes=concat("a","b") }).bytes

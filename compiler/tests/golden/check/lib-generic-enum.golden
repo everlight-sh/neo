@@ -1,0 +1,11 @@
+check entry.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== entry.neo
+import "lib.neo" as lib
+fn main() -> i64 = match lib::make(42) { lib::Missing => 0, lib::Present(x) => x }
+=== lib.neo
+pub enum Choice<T> { Missing, Present(T) }
+pub fn make<T>(x:T) -> Choice<T> = Present(x)

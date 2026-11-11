@@ -1,0 +1,8 @@
+check unary.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/unary.neo 1:20 unary - on bool
+exit 1
+stdout (error <dir>/unary.neo 1:20 unary - on bool)\n
+=== unary.neo
+fn main() -> i64 = -true

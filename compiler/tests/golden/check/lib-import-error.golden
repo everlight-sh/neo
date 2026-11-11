@@ -1,0 +1,11 @@
+check entry.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/lib.neo 1:32 operator + on i64 and bool
+exit 1
+stdout (error <dir>/lib.neo 1:32 operator + on i64 and bool)\n
+=== entry.neo
+import "lib.neo" as lib
+fn main() -> i64 = lib::twice(2)
+=== lib.neo
+pub fn twice(x:i64) -> i64 = x + false

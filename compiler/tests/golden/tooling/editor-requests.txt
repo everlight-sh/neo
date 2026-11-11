@@ -1,0 +1,15 @@
+{
+{"jsonrpc": "2.0", "id": 1, "method": "initialize"}
+{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "text": "fn answer() -> i64 = 42\n"}}}
+{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 1, "text": "; 🚀\nimport \"helper.neo\" as m\nfn main()->i64=m::answer()\n"}}}
+{"jsonrpc": "2.0", "id": 2, "method": "textDocument/completion", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}, "position": {"line": 2, "character": 24}}}
+{"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}, "position": {"line": 2, "character": 24}}}
+{"jsonrpc": "2.0", "id": 4, "method": "textDocument/definition", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}, "position": {"line": 2, "character": 24}}}
+{"jsonrpc": "2.0", "id": 5, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}}}
+{"jsonrpc": "2.0", "id": 6, "method": "textDocument/formatting", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}}}
+{"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 2}, "contentChanges": [{"text": "; 🚀\nimport \"helper.neo\" as m\nfn main()->i64=m::"}]}}
+{"jsonrpc": "2.0", "id": 7, "method": "textDocument/completion", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}, "position": {"line": 2, "character": 18}}}
+{"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 3}, "contentChanges": [{"text": "fn main() -> i64 = true\n"}]}}
+{"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {"textDocument": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo"}}}
+{"jsonrpc": "2.0", "id": "shutdown", "method": "shutdown"}
+{"jsonrpc": "2.0", "method": "exit"}

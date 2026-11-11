@@ -1,0 +1,8 @@
+check set-index-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/set-index-type.neo 1:34 set: index must be i64
+exit 1
+stdout (error <dir>/set-index-type.neo 1:34 set: index must be i64)\n
+=== set-index-type.neo
+fn main() -> Arr u8 _ = set("hi",true,'!')

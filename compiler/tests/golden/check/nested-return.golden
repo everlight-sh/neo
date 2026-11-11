@@ -1,0 +1,8 @@
+check nested-return.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== nested-return.neo
+fn f() -> Arr Arr u8 _ (2) = arr(i in 0..2) "hi"
+fn main() -> i64 = let b=f()[0] in check len(b)>1 in i64(b[1])

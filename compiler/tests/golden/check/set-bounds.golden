@@ -1,0 +1,8 @@
+check set-bounds.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:25 bounds 0 <= 2 && 2 < len('hi')
+exit 1
+stdout (unproven <dir>/set-bounds.neo 1:25 bounds)\n
+=== set-bounds.neo
+fn main() -> Arr u8 _ = set("hi",2,'!')

@@ -1,0 +1,9 @@
+check unused-empty-enum.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/unused-empty-enum.neo 1:1 an enum requires at least one alternative
+exit 1
+stdout (error <dir>/unused-empty-enum.neo 1:1 an enum requires at least one alternative)\n
+=== unused-empty-enum.neo
+enum Empty<T> {}
+fn main() -> i64 = 0

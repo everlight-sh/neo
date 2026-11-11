@@ -1,0 +1,8 @@
+check refined-array-parameter.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== refined-array-parameter.neo
+fn f(a:Arr u8 n{n>=1}) -> i64 = i64(a[0])
+fn main() -> i64 = f("hi")

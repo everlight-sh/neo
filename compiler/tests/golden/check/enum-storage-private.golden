@@ -1,0 +1,9 @@
+check enum-storage-private.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/enum-storage-private.neo 2:23 enum storage is private; use exhaustive match
+exit 1
+stdout (error <dir>/enum-storage-private.neo 2:23 enum storage is private; use exhaustive match)\n
+=== enum-storage-private.neo
+enum Choice { A, B }
+fn main() -> i64 = A().__tag

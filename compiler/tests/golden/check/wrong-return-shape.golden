@@ -1,0 +1,9 @@
+check wrong-return-shape.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/wrong-return-shape.neo 1:23 body has type Arr u8 (…), declared Arr i64 _
+exit 1
+stdout (error <dir>/wrong-return-shape.neo 1:23 body has type Arr u8 (\xe2\x80\xa6), declared Arr i64 _)\n
+=== wrong-return-shape.neo
+fn f() -> Arr i64 _ = "hi"
+fn main() -> i64 = 0

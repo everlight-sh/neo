@@ -1,0 +1,9 @@
+check call-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/call-type.neo 2:22 argument false has type bool, expected i64
+exit 1
+stdout (error <dir>/call-type.neo 2:22 argument has type bool, expected i64)\n
+=== call-type.neo
+fn f(x:i64) -> i64 = x
+fn main() -> i64 = f(false)

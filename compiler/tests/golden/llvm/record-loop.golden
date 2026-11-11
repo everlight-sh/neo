@@ -1,0 +1,6 @@
+exit 0
+stdout !!!!!
+stderr
+=== input.neo
+type Text = { bytes:Arr u8 _ }
+fn main() -> Arr u8 _ = let a=loop(i=0,t=Text { bytes="" }) while i<5 next(i+1,t with { bytes=push(t.bytes,'!') }) yield t in a.bytes

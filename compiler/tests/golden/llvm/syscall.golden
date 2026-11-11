@@ -1,0 +1,6 @@
+args <syscall:getpid>
+exit 0
+stdout 1\n
+stderr
+=== input.neo
+effect(unsafe) fn main(n:i64) -> i64 = if syscall6(n,0,0,0,0,0,0)>0 then 1 else 0

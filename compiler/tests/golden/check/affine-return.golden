@@ -1,0 +1,8 @@
+check affine-return.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== affine-return.neo
+fn f(a:Arr u8 n) -> Arr u8 (2*n+1) = concat(a,a,"!")
+fn main() -> Arr u8 (5) = f("hi")

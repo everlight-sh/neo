@@ -1,0 +1,6 @@
+args one two
+exit 0
+stdout 3\n
+stderr
+=== input.neo
+effect(unsafe) fn main() -> i64 = let s=runtime_state() in let count=load_i64(s,40) in let argv=load_ptr(s,48) in let envp=load_ptr(s,0) in if argv!=null() && envp==ptr_add(argv,(count+1)*8) then count else -1

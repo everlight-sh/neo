@@ -1,0 +1,9 @@
+check generic-conflict.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/generic-conflict.neo 2:20 conflicting inference for T
+exit 1
+stdout (error <dir>/generic-conflict.neo 2:20 conflicting inference for T)\n
+=== generic-conflict.neo
+fn pick<T>(x:T,y:T) -> T = x
+fn main() -> i64 = pick(1,false)

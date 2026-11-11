@@ -1,0 +1,9 @@
+check effect-pure-call.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/effect-pure-call.neo 2:20 __mbd495a6527063859_work requires an effect function and cannot run in a refinement or comprehension
+exit 1
+stdout (error <dir>/effect-pure-call.neo 2:20 __mbd495a6527063859_work requires an effect function and cannot run in a refinement or comprehension)\n
+=== effect-pure-call.neo
+effect fn work() -> i64 = 7
+fn main() -> i64 = work()

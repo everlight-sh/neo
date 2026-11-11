@@ -1,0 +1,6 @@
+exit 0
+stdout 42\n
+stderr
+=== input.neo
+type Pair = { first:unit,second:i64 }
+effect(unsafe) fn main() -> i64 = let p=stack_alloc(8) in let initial=store_i64(p,0,0) in let r=Pair { second=load_i64(p,0),first=store_i64(p,0,42) } in r.second

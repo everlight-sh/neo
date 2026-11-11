@@ -1,0 +1,9 @@
+check extern-refinement.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/extern-refinement.neo 1:8 extern signatures support unrefined i64, i32, f64, ptr and unit returns
+exit 1
+stdout (error <dir>/extern-refinement.neo 1:8 extern signatures support unrefined i64, i32, f64, ptr and unit returns)\n
+=== extern-refinement.neo
+extern fn foreign(x:i64{x>0}) -> i64
+fn main() -> i64 = 0

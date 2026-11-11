@@ -1,0 +1,9 @@
+check enum-nonexhaustive.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/enum-nonexhaustive.neo 2:20 non-exhaustive match; missing __m2881383c6aa08f31_B
+exit 1
+stdout (error <dir>/enum-nonexhaustive.neo 2:20 non-exhaustive match; missing __m2881383c6aa08f31_B)\n
+=== enum-nonexhaustive.neo
+enum Choice { A, B }
+fn main() -> i64 = match A() { A => 0 }

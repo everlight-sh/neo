@@ -1,0 +1,8 @@
+check main-export.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/main-export.neo 1:8 main must be a Neo entry point without extern/export
+exit 1
+stdout (error <dir>/main-export.neo 1:8 main must be a Neo entry point without extern/export)\n
+=== main-export.neo
+export fn main() -> i64 = 0

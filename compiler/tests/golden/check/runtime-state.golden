@@ -1,0 +1,7 @@
+check runtime-state.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== runtime-state.neo
+effect(unsafe) fn main() -> i64 = load_i64(runtime_state(),40)

@@ -1,0 +1,11 @@
+check record-distinct.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-distinct.neo 4:22 argument __m3880b38420dd15bd_B {…} has type __m3880b38420dd15bd_B, expected __m3880b38420dd15bd_A
+exit 1
+stdout (error <dir>/record-distinct.neo 4:22 argument has type __m3880b38420dd15bd_B, expected __m3880b38420dd15bd_A)\n
+=== record-distinct.neo
+type A = { x:i64 }
+type B = { x:i64 }
+fn f(a:A) -> i64 = a.x
+fn main() -> i64 = f(B { x=1 })

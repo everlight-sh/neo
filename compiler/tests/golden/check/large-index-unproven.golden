@@ -1,0 +1,8 @@
+check large-index-unproven.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:27 bounds 0 <= 9223372036854775807 && 9223372036854775807 < len('x')
+exit 1
+stdout (unproven <dir>/large-index-unproven.neo 1:27 bounds)\n
+=== large-index-unproven.neo
+fn main() -> i64 = i64("x"[9223372036854775807])

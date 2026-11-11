@@ -1,0 +1,9 @@
+check runtime-state-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/runtime-state-arity.neo 1:46 runtime_state expects ()
+reference-error type <dir>/runtime-state-arity.neo 1:35 ptr_to_i64 expects (ptr)
+exit 1
+stdout (error <dir>/runtime-state-arity.neo 1:46 runtime_state expects ())\n
+=== runtime-state-arity.neo
+effect(unsafe) fn main() -> i64 = ptr_to_i64(runtime_state(1))

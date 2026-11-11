@@ -1,0 +1,8 @@
+check dependent-return.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== dependent-return.neo
+fn f(a:Arr u8 n) -> Arr u8 n = a
+fn main() -> Arr u8 (2) = f("hi")

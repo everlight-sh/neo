@@ -1,0 +1,7 @@
+check loop-scalar.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== loop-scalar.neo
+fn main() -> i64 = loop(i=0) while i<4 next(i+1) yield i

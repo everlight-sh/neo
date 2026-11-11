@@ -1,0 +1,8 @@
+check range-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/range-type.neo 1:25 range bounds must be i64
+exit 1
+stdout (error <dir>/range-type.neo 1:25 range bounds must be i64)\n
+=== range-type.neo
+fn main() -> Arr u8 _ = arr(i in false..1) u8(i)

@@ -1,0 +1,6 @@
+exit 0
+stdout 6\n
+stderr
+=== input.neo
+fn measure(a:Arr u8 n) -> i64 = n + len(a)
+fn main() -> i64 = measure(concat("a","bc"))

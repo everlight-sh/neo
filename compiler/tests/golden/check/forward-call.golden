@@ -1,0 +1,8 @@
+check forward-call.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== forward-call.neo
+fn main() -> i64 = f(1,true)
+fn f(x:i64,b:bool) -> i64 = if b then x else 0

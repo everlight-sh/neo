@@ -1,0 +1,9 @@
+check wrong-size-binder.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/wrong-size-binder.neo 1:13 size variable n must be i64
+exit 1
+stdout (error <dir>/wrong-size-binder.neo 1:13 size variable n must be i64)\n
+=== wrong-size-binder.neo
+fn f(n:bool,a:Arr u8 n) -> i64 = len(a)
+fn main() -> i64 = 0

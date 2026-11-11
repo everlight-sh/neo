@@ -1,0 +1,111 @@
+; Replaces the native half of compiler/tests/differential.py and
+; compiler/tests/modules_differential.py, which compared the parser and the
+; module loader with the Python reference over every source of the
+; repository (their frozen comparisons are ast_dump.neo and
+; modules_dump.neo). The corpus is every .neo file under the repository root,
+; in byte order, leaving out .git, .claude, node_modules, .neo-build,
+; .axon-build, .kernel-build, __pycache__, results, target, build and
+; .neo-test-* directories. The argument picks the check:
+;   parse  `neoc parse FILE` exits 0 with a dump. A file whose dump is an
+;          (error ...) needs the type names of its imports, so `neoc modules
+;          ROOT FILE` must load it, except the two fixtures below that must
+;          keep failing with their diagnostic;
+;   fmt    on a copy of each file, `neoc fmt --check` exits 0 or 1, and when it
+;          is 1, `neoc fmt` succeeds and a second --check finds nothing to
+;          change. The repository is not fmt-clean: how many files --check
+;          would change is reported on stderr, not checked.
+; The compiler runs with a 64 MiB stack soft limit where the hard limit
+; allows it (tests/fixtures/deep_dispatch.neo nests deeply), as `neo` does.
+import "std:io"
+import "std:strings"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+; Fixtures that must fail to load, with the diagnostic they must give.
+fn cp_failing() -> Arr Arr u8 _ _
+  = push(push(push(push(md_words(),
+      "tests/fixtures/test_borrow_parameters/move_and_borrow.neo"),"parameter cannot be both move and borrow"),
+      "tests/fixtures/test_inline_budget/cold_inline.neo"),"a function cannot be both cold and inline")
+fn cp_expected_failure(borrow file:Arr u8 _) -> Arr u8 _
+  = let list=cp_failing() in
+    loop (i=0, found=tx_empty()) while i+1<len(list)
+      next (i+2,if tx_equal(md_word(list,i),file) then md_word(list,i+1) else found) yield found
+
+fn cp_skip(borrow name:Arr u8 _) -> bool
+  = tx_equal(name,".git") || tx_equal(name,".claude") || tx_equal(name,"node_modules") || tx_equal(name,".neo-build") ||
+    tx_equal(name,".axon-build") || tx_equal(name,".kernel-build") || tx_equal(name,"__pycache__") ||
+    tx_equal(name,"results") || tx_equal(name,"target") || tx_equal(name,"build") || str_starts(name,".neo-test-")
+
+; The .neo files under root/relative, as paths relative to root, sorted.
+effect fn cp_walk(borrow root:Arr u8 _, borrow relative:Arr u8 _, move out:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let entries=pf_directory(if len(relative)==0 then root else pt_join(root,relative)) in
+    loop (i=0, found=out) while i<len(entries)
+      next (i+1,let name=pf_dirent(entries,i).name in
+        if tx_equal(name,".") || tx_equal(name,"..") || cp_skip(name) then found else
+        let child=if len(relative)==0 then pt_copy(name) else pt_join(relative,name) in
+        let path=pt_join(root,child) in
+        if pf_kind(path,false)==4 then cp_walk(root,child,found)
+        else if len(name)>4 && tx_equal(pt_slice(name,len(name)-4,len(name)),".neo") && pf_kind(path,true)==8 then tx_insert_word(found,child) else found) yield found
+
+; The compiler with args, under the raised stack limit.
+effect fn cp_neo(borrow tools:DvTools, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = let script=concat("h=$(ulimit -H -s 2>/dev/null) || h=; w=65536; ",
+      "case $h in ''|unlimited) ;; *) [ \"$h\" -ge 65536 ] || w=$h ;; esac; ",
+      "ulimit -S -s \"$w\" 2>/dev/null || :; exec \"$@\"") in
+    let base=push(push(push(push(md_words(),"-c"),script),"sh"),tools.compiler) in
+    nt_process("/bin/sh",nt_extend(base,args,0),tg_env(tools,"/nonexistent"),120000,268435456)
+
+type CpTally = { files:i64, contextual:i64, failing:i64, changed:i64, failed:i64, report:Arr u8 _ }
+fn cp_tally() -> CpTally = CpTally { files=0, contextual=0, failing=0, changed=0, failed=0, report=tx_empty() }
+fn cp_fail(move t:CpTally, borrow file:Arr u8 _, borrow problem:Arr u8 _) -> CpTally
+  = t with { failed=t.failed+1, report=if t.failed<8 then concat(t.report,"  ",file,": ",problem,"\n") else t.report }
+
+effect fn cp_parse(borrow tools:DvTools, borrow file:Arr u8 _, move t:CpTally) -> CpTally
+  = let path=pt_join(tools.root,file) in
+    let run=cp_neo(tools,tg_a2("parse",path)) in
+    if !run.ok || run.code!=0 || !str_starts(run.output,"(") then cp_fail(t,file,concat("neoc parse: ",tg_status(run))) else
+    if !str_starts(run.output,"(error ") then t with { files=t.files+1 } else
+    let loaded=cp_neo(tools,push(tg_a4("modules",tools.root,path,"--target"),"x86_64-unknown-linux-gnu")) in
+    let expected=cp_expected_failure(file) in
+    if len(expected)>0 then
+      (if loaded.ok && str_starts(loaded.output,"(error ") && ru_contains(tg_clip(loaded.output,4096),expected)
+       then t with { files=t.files+1, failing=t.failing+1 }
+       else cp_fail(t,file,concat("expected to fail to load with ",expected,": ",tg_status(loaded))))
+    else if loaded.ok && loaded.code==0 && len(loaded.output)>0 && !str_starts(loaded.output,"(error ")
+      then t with { files=t.files+1, contextual=t.contextual+1 }
+    else cp_fail(t,file,concat("neoc parse and neoc modules both fail: ",tx_repr(tg_clip(loaded.output,300),true),
+      " ",tx_repr(tg_clip(loaded.errors,300),true)))
+
+effect fn cp_fmt(borrow tools:DvTools, borrow copy:Arr u8 _, borrow file:Arr u8 _, move t:CpTally) -> CpTally
+  = let written=ru_write(copy,dv_read(pt_join(tools.root,file))) in
+    let checked=cp_neo(tools,tg_a3("fmt","--check",copy)) in
+    if !checked.ok || (checked.code!=0 && checked.code!=1) then cp_fail(t,file,concat("neoc fmt --check: ",tg_status(checked))) else
+    if checked.code==0 then t with { files=t.files+1 } else
+    let formatted=cp_neo(tools,tg_a2("fmt",copy)) in
+    if !formatted.ok || formatted.code!=0 then cp_fail(t,file,concat("neoc fmt: ",tg_status(formatted))) else
+    let again=cp_neo(tools,tg_a3("fmt","--check",copy)) in
+    if !again.ok || again.code!=0 then cp_fail(t,file,concat("neoc fmt is not idempotent: ",tg_status(again))) else
+    t with { files=t.files+1, changed=t.changed+1 }
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let part=cli_arg(1).value in
+    let files=cp_walk(tools.root,"",md_words()) in
+    let dir=dv_temp("corpus") in let copy=pt_join(dir,"case.neo") in
+    let parse=tx_equal(part,"parse") in let fmt=tx_equal(part,"fmt") in
+    let usage=dv_expect(parse || fmt,"usage: corpus.neo parse|fmt") in
+    let t=loop (i=0, s=cp_tally()) while i<len(files)
+      next (i+1,let file=md_word(files,i) in if parse then cp_parse(tools,file,s) else cp_fmt(tools,copy,file,s)) yield s in
+    let a=dv_expect(t.failed==0,concat(int_text(t.failed)," of ",int_text(len(files))," corpus files failed:\n",t.report)) in
+    let b=dv_expect(len(files)>0 && t.files==len(files),"no corpus files") in
+    let failing=dv_expect(!parse || t.failing*2==len(cp_failing()),"an expected load failure is missing from the corpus") in
+    let noted=print_error(if parse
+      then concat("corpus: ",int_text(t.files)," files parse; ",int_text(t.contextual)," of them need their imports and load with neoc modules; ",
+        int_text(t.failing)," fixtures fail to load as expected\n")
+      else concat("corpus: neoc fmt --check would change ",int_text(t.changed)," of ",int_text(t.files)," files; fmt is idempotent on all of them\n")) in
+    let cleaned=dv_clean(dir) in let shown=print_out(concat("corpus ",part," OK\n")) in noop()

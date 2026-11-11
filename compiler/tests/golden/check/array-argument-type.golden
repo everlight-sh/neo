@@ -1,0 +1,9 @@
+check array-argument-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/array-argument-type.neo 2:22 argument arr(i in 0..2) … has type Arr i64 (…), expected Arr u8 (…)
+exit 1
+stdout (error <dir>/array-argument-type.neo 2:22 argument has type Arr i64 (\xe2\x80\xa6), expected Arr u8 (\xe2\x80\xa6))\n
+=== array-argument-type.neo
+fn f(a:Arr u8 n) -> i64 = n
+fn main() -> i64 = f(arr(i in 0..2) i)

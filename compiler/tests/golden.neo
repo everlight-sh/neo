@@ -1,0 +1,459 @@
+; Frozen outputs of the Python reference compiler for the differential suites
+; compiler/tests/check_differential.py and llvm_differential.py, checked
+; against the native compiler under test. A one-off script, not part of the
+; repository, generated the goldens on x86_64 Linux from the reference
+; (./neoc.sh) at commit e6881b1 of chore/remove-python (v0.2.3-6), whose
+; neoc/ is unchanged from the 0.2.3 release.
+;
+;   golden.neo check [SHARD COUNT]   golden/check/*.golden: neo check verdicts
+;   golden.neo llvm [SHARD COUNT]    golden/llvm/*.golden: programs' output
+;   golden.neo live                  native-only checks (see gd_live)
+;
+; With SHARD and COUNT (default 0 and 1) only the goldens NAME.golden with
+; (sum of the bytes of NAME) mod COUNT = SHARD run, so a slow suite can be
+; split into several cases. A suite prints "golden SUITE SHARD/COUNT: N
+; goldens OK, K known failures skipped" and live prints "golden live checks
+; OK"; compiler/tests/differential.neo.toml holds the cases.
+;
+; Golden files. Header lines "KEY VALUE" (or "KEY" alone for an empty value;
+; blank lines and lines starting with # are comments), then the case's files:
+; each "=== PATH" line (PATH relative to the case directory) is followed by
+; the file's lines verbatim, up to the next "=== " line or the end; every file
+; ends with a newline. Values marked (escaped) spell \ as \\, newline as \n,
+; tab as \t and other bytes outside printable ASCII as \xHH. Placeholders in
+; values and files: <dir> the case directory, <root> the compiler root
+; (NEO_TEST_ROOT), <program> the built program's path, <syscall:NAME> the
+; target's system call number for getpid, exit (exit_group on Linux), wait4,
+; futex, write, mmap or munmap, and <flag:map-private> for MAP_PRIVATE |
+; MAP_ANONYMOUS.
+;
+; check goldens: the files are written to <dir> and `neo check ROOT FILE`
+; must exit as stated with an empty stderr and this stdout.
+;   check FILE          the file to check (the others are its imports)
+;   exit N              the native exit status: 0 accepted, 1 rejected
+;   stdout TEXT         (escaped) the native stdout; several stdout lines
+;                       accept any one of them
+;   reference-exit N, reference-ok BOOL,
+;   reference-error KIND FILE L:C MESSAGE (the reference's first error),
+;   reference-unproven FN L:C KIND GOAL (each unproven obligation)
+;                       what the reference's JSON report said; not checked
+;                       (the report also lists every runtime obligation).
+; The expected stdout follows from the reference report the way
+; check_differential.py compared the two: accepted is (ok); an error is
+; (error FILE L:C MESSAGE), where "argument EXPR has type" reads "argument has
+; type" and "concat: argument EXPR must be" reads "concat: argument must be";
+; only unproven obligations is (unproven FILE L:C KIND) for one of them. Two
+; cases (refined-array-length, boolean-refinement) state exit 0 and (ok):
+; the native checker proves the precondition the reference left unproven.
+; The lib-* goldens are the script's entry.neo + lib.neo programs.
+;
+; llvm goldens: the files are written to <dir>, <dir>/input.neo is built
+; into <dir>/module.ll (an output name that can equal a staged IR name)
+; with PATH holding only clang, ld, as and ld.lld and NEO_CLANG set; no
+; .neo-link-* staging file may remain. The program then runs and must match
+; the reference program exactly.
+;   only linux          a Linux-only case (spawn-thread); skipped elsewhere
+;   args WORDS          the program's arguments, (escaped) words separated by
+;                       spaces (a space inside one is \x20)
+;   build-env NAME=VAL  compiler environment, repeatable
+;   exit N, stdout TEXT, stderr TEXT   the reference program's exit status
+;                       and (escaped) output, its own path written <program>
+; Besides the script's CASES, syscall, fork, allocation-stats-0/1,
+; spawn-thread and fiber-switch are its other comparisons with the reference.
+; llvm_differential.py built its native side with --seed-runtime, linking a
+; runtime object the reference had compiled; these are ordinary builds from
+; the runtime sources.
+;
+; known-failures.txt beside the goldens lists cases (one name per line, #
+; comments) the native compiler gets wrong; they are skipped, and a note on
+; stderr says when one passes again. tests/porting/differential-failures.md
+; describes each.
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:strings"
+import "std:time"
+import "../../tests/support/driver.neo"
+import "../src/build.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+
+; ---------------------------------------------------------------- golden files
+
+fn gd_find(borrow text:Arr u8 _, start:i64, byte:i64) -> i64
+  = loop (i=start) while i<len(text) && tx_byte(text,i)!=byte next (i+1) yield i
+
+type GdLines = { at:i64, lines:Arr Arr u8 _ _ }
+fn gd_lines_step(borrow text:Arr u8 _, move s:GdLines) -> GdLines
+  = let end=gd_find(text,s.at,10) in GdLines { at=end+1, lines=push(s.lines,pt_slice(text,s.at,end)) }
+; The lines of text without their newlines; a final newline adds no line.
+fn gd_lines(borrow text:Arr u8 _) -> Arr Arr u8 _ _
+  = let r=loop (s=GdLines { at=0, lines=md_words() }) while s.at<len(text) next (gd_lines_step(text,s)) yield s in r.lines
+
+type Golden = { keys:Arr Arr u8 _ _, values:Arr Arr u8 _ _, files:Arr Arr u8 _ _, contents:Arr Arr u8 _ _,
+                current:Arr u8 _, open:bool }
+fn gd_empty() -> Golden
+  = Golden { keys=md_words(), values=md_words(), files=md_words(), contents=md_words(), current=tx_empty(), open=false }
+
+fn gd_flush(move g:Golden) -> Golden
+  = if !g.open then g else
+    Golden { keys=g.keys, values=g.values, files=g.files, contents=push(g.contents,g.current), current=tx_empty(), open=false }
+
+fn gd_line(move g:Golden, borrow line:Arr u8 _) -> Golden
+  = if str_starts(line,"=== ") then
+      let f=gd_flush(g) in f with { files=push(f.files,pt_slice(line,4,len(line))), open=true }
+    else if g.open then g with { current=concat(g.current,line,"\n") }
+    else if len(line)==0 || tx_byte(line,0)==35 then g
+    else let space=gd_find(line,0,32) in
+      g with { keys=push(g.keys,pt_slice(line,0,space)),
+               values=push(g.values,pt_slice(line,if space<len(line) then space+1 else space,len(line))) }
+
+fn gd_parse(borrow text:Arr u8 _) -> Golden
+  = let lines=gd_lines(text) in
+    let g=loop (i=0, g=gd_empty()) while i<len(lines) next (i+1,gd_line(g,md_word(lines,i))) yield g in
+    gd_flush(g)
+
+fn gd_values(borrow g:Golden, borrow key:Arr u8 _) -> Arr Arr u8 _ _
+  = loop (i=0, out=md_words()) while i<len(g.keys)
+      next (i+1,if tx_equal(md_word(g.keys,i),key) then push(out,md_word(g.values,i)) else out) yield out
+fn gd_value(borrow g:Golden, borrow key:Arr u8 _) -> Arr u8 _ = md_word(gd_values(g,key),0)
+
+fn gd_known_key(borrow key:Arr u8 _) -> bool
+  = str_find(" check exit stdout stderr args build-env only reference-exit reference-ok reference-error reference-unproven ",
+      concat(" ",key," ")).present
+; The first unknown key, or "".
+fn gd_bad_key(borrow g:Golden) -> Arr u8 _
+  = loop (i=0, bad=tx_empty()) while i<len(g.keys) && len(bad)==0
+      next (i+1,if gd_known_key(md_word(g.keys,i)) then bad else md_word(g.keys,i)) yield bad
+
+fn gd_hex(c:i64) -> i64
+  = if c>=48 && c<=57 then c-48 else if c>=97 && c<=102 then c-87 else if c>=65 && c<=70 then c-55 else 0
+
+type GdDecode = { at:i64, out:Arr u8 _ }
+fn gd_unescape_step(borrow text:Arr u8 _, move s:GdDecode) -> GdDecode
+  = let c=tx_byte(text,s.at) in
+    if c!=92 then GdDecode { at=s.at+1, out=push(s.out,u8(c)) } else
+    let e=tx_byte(text,s.at+1) in
+    if e==110 then GdDecode { at=s.at+2, out=push(s.out,u8(10)) }
+    else if e==116 then GdDecode { at=s.at+2, out=push(s.out,u8(9)) }
+    else if e==120 then GdDecode { at=s.at+4, out=push(s.out,u8(16*gd_hex(tx_byte(text,s.at+2))+gd_hex(tx_byte(text,s.at+3)))) }
+    else GdDecode { at=s.at+2, out=push(s.out,u8(e)) }
+fn gd_unescape(borrow text:Arr u8 _) -> Arr u8 _
+  = let r=loop (s=GdDecode { at=0, out=tx_empty() }) while s.at<len(text) next (gd_unescape_step(text,s)) yield s in r.out
+
+; ---------------------------------------------------------------- platform
+
+fn gd_darwin(borrow target:Arr u8 _) -> bool = str_find(target,"-apple-").present
+fn gd_arm(borrow target:Arr u8 _) -> bool = str_starts(target,"aarch64") || str_starts(target,"arm64")
+fn gd_number(borrow target:Arr u8 _, darwin:i64, arm:i64, x86:i64) -> Arr u8 _
+  = int_text(if gd_darwin(target) then darwin else if gd_arm(target) then arm else x86)
+
+; text with the <syscall:NAME> and <flag:map-private> placeholders filled in.
+fn gd_platform(borrow target:Arr u8 _, borrow text:Arr u8 _) -> Arr u8 _
+  = let a=nt_replace(text,"<syscall:getpid>",gd_number(target,20,172,39)) in
+    let b=nt_replace(a,"<syscall:exit>",gd_number(target,1,94,231)) in
+    let c=nt_replace(b,"<syscall:wait4>",gd_number(target,7,260,61)) in
+    let d=nt_replace(c,"<syscall:futex>",gd_number(target,-1,98,202)) in
+    let e=nt_replace(d,"<syscall:write>",gd_number(target,4,64,1)) in
+    let f=nt_replace(e,"<syscall:mmap>",gd_number(target,197,222,9)) in
+    let g=nt_replace(f,"<syscall:munmap>",gd_number(target,73,215,11)) in
+    nt_replace(g,"<flag:map-private>",gd_number(target,4098,34,34))
+
+; ---------------------------------------------------------------- shared steps
+
+effect fn gd_write(borrow path:Arr u8 _, borrow contents:Arr u8 _) -> unit
+  = let wrote=fs_write(path,contents) in dv_expect(wrote.ok,concat("cannot write ",path))
+
+effect fn gd_mkdir(borrow path:Arr u8 _) -> unit
+  = let made=fs_mkdir(path) in dv_expect(made.ok,concat("cannot create ",path))
+
+; Writes the golden's files into dir.
+effect fn gd_files(borrow g:Golden, borrow dir:Arr u8 _, borrow target:Arr u8 _) -> unit
+  = loop (i=0) while i<len(g.files)
+      next (let wrote=gd_write(pt_join(dir,md_word(g.files,i)),gd_platform(target,md_word(g.contents,i))) in i+1) yield noop()
+
+fn gd_prefixed(borrow name:Arr u8 _, borrow prefix:Arr u8 _) -> bool
+  = len(name)>=len(prefix) && tx_equal(pt_slice(name,0,len(prefix)),prefix)
+fn gd_suffixed(borrow name:Arr u8 _, borrow suffix:Arr u8 _) -> bool
+  = len(name)>=len(suffix) && tx_equal(pt_slice(name,len(name)-len(suffix),len(name)),suffix)
+
+; Whether a .neo-link-* staging file is left in dir.
+effect fn gd_staged(borrow dir:Arr u8 _) -> bool
+  = let entries=pf_directory(dir) in
+    loop (i=0, found=false) while i<len(entries) && !found
+      next (i+1,gd_prefixed(pf_dirent(entries,i).name,".neo-link-")) yield found
+
+fn gd_tool_names() -> Arr Arr u8 _ _ = push(push(push(push(md_words(),"clang"),"ld"),"as"),"ld.lld")
+
+; A directory of links to clang, ld, as and ld.lld, and the compiler
+; environment that puts only it on PATH and names clang in NEO_CLANG (the
+; environment llvm_differential.py built with).
+effect fn gd_toolchain(borrow temp:Arr u8 _) -> Arr Arr u8 _ _
+  = let dir=pt_join(temp,"toolchain") in let made=gd_mkdir(dir) in
+    let clang=bd_clang() in let found=dv_expect(len(clang)>0,"clang is required") in
+    let ln=bd_find_tool("ln") in let linker=dv_expect(len(ln)>0,"ln is required") in
+    let names=gd_tool_names() in
+    let linked=loop (i=0) while i<len(names)
+      next (let name=md_word(names,i) in let path=bd_find_tool(name) in
+        let done=if len(path)==0 then noop() else
+          let made=nt_process(ln,push(push(push(md_words(),"-s"),path),pt_join(dir,name)),bd_environment(),30000,65536) in
+          dv_expect(made.ok && made.code==0,concat("cannot link ",name,": ",nt_diagnostic(made))) in i+1) yield i in
+    push(push(md_words(),concat("PATH=",dir)),concat("NEO_CLANG=",clang))
+
+; ---------------------------------------------------------------- check goldens
+
+fn gd_expected(borrow escaped:Arr u8 _, borrow root:Arr u8 _, borrow dir:Arr u8 _) -> Arr u8 _
+  = nt_replace(nt_replace(gd_unescape(escaped),"<dir>",dir),"<root>",root)
+
+fn gd_matches(borrow wanted:Arr Arr u8 _ _, borrow actual:Arr u8 _, borrow root:Arr u8 _, borrow dir:Arr u8 _) -> bool
+  = loop (i=0, found=false) while i<len(wanted) && !found
+      next (i+1,tx_equal(gd_expected(md_word(wanted,i),root,dir),actual)) yield found
+
+; "" when the checker answers as the golden says, otherwise what differs.
+effect fn gd_check_case(borrow tools:DvTools, borrow g:Golden, borrow dir:Arr u8 _) -> Arr u8 _
+  = let result=dv_check(tools,pt_join(dir,gd_value(g,"check"))) in
+    let wanted=gd_values(g,"stdout") in let code=int_parse(gd_value(g,"exit")) in
+    if len(gd_value(g,"check"))==0 || len(wanted)==0 || !code.ok then "the golden needs check, exit and stdout"
+    else if !result.ok || result.timeout then concat("check did not finish: ",nt_diagnostic(result))
+    else if result.code!=code.value then
+      concat("exit ",int_text(result.code),", expected ",int_text(code.value),": ",nt_excerpt(result.output),nt_excerpt(result.errors))
+    else if len(result.errors)>0 then concat("stderr ",nt_excerpt(result.errors))
+    else if !gd_matches(wanted,result.output,tools.root,dir) then
+      concat("stdout ",nt_excerpt(result.output),", expected ",nt_excerpt(gd_expected(md_word(wanted,0),tools.root,dir)))
+    else tx_empty()
+
+; ---------------------------------------------------------------- llvm goldens
+
+fn gd_args(borrow target:Arr u8 _, borrow value:Arr u8 _) -> Arr Arr u8 _ _
+  = let words=gd_lines(nt_replace(value," ","\n")) in
+    loop (i=0, out=md_words()) while i<len(words)
+      next (i+1,let word=md_word(words,i) in if len(word)==0 then out else push(out,gd_platform(target,gd_unescape(word)))) yield out
+
+; "" when the native program behaves as the reference program did.
+effect fn gd_llvm_case(borrow tools:DvTools, borrow g:Golden, borrow dir:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> Arr u8 _
+  = let source=pt_join(dir,"input.neo") in let binary=pt_join(dir,"module.ll") in
+    let code=int_parse(gd_value(g,"exit")) in
+    if !code.ok then "the golden needs exit" else
+    let built=dv_build_with(tools,source,binary,md_words(),nt_extend(nt_extend(md_words(),toolchain,0),gd_values(g,"build-env"),0)) in
+    if !built.ok || built.code!=0 then concat("build failed: ",nt_diagnostic(built)) else
+    if gd_staged(dir) then "the build left a .neo-link-* staging file" else
+    let run=dv_run(binary,gd_args(tools.target,gd_value(g,"args")),md_words(),"",120000,16777216) in
+    let out=nt_replace(run.output,binary,"<program>") in let err=nt_replace(run.errors,binary,"<program>") in
+    let want_out=gd_unescape(gd_value(g,"stdout")) in let want_err=gd_unescape(gd_value(g,"stderr")) in
+    if run.timeout then "the program timed out"
+    else if !run.ok then concat("could not run: ",nt_diagnostic(run))
+    else if run.overflow then "too much output"
+    else if run.code!=code.value then concat("exit ",int_text(run.code),", expected ",int_text(code.value),": ",nt_diagnostic(run))
+    else if !tx_equal(out,want_out) then concat("stdout ",nt_excerpt(out),", expected ",nt_excerpt(want_out))
+    else if !tx_equal(err,want_err) then concat("stderr ",nt_excerpt(err),", expected ",nt_excerpt(want_err))
+    else tx_empty()
+
+; ---------------------------------------------------------------- suites
+
+fn gd_shard(borrow name:Arr u8 _, count:i64) -> i64
+  = let total=loop (i=0, s=0) while i<len(name) next (i+1,s+tx_byte(name,i)) yield s in
+    if count<=0 then 0 else total%count
+
+; The case names in known-failures.txt, if there is one.
+effect fn gd_known(borrow dir:Arr u8 _) -> Arr Arr u8 _ _
+  = let read=fs_read(pt_join(dir,"known-failures.txt")) in
+    if !read.ok then md_words() else
+    let lines=gd_lines(read.value) in
+    loop (i=0, out=md_words()) while i<len(lines)
+      next (i+1,let line=str_trim(md_word(lines,i)) in if len(line)==0 || tx_byte(line,0)==35 then out else push(out,line)) yield out
+
+fn gd_member(borrow names:Arr Arr u8 _ _, borrow name:Arr u8 _) -> bool
+  = loop (i=0, found=false) while i<len(names) && !found next (i+1,tx_equal(md_word(names,i),name)) yield found
+
+type GdTally = { passed:i64, skipped:i64, failed:i64 }
+
+; One golden: "" when it passes or does not apply here, otherwise the problem.
+effect fn gd_case(borrow tools:DvTools, borrow suite:Arr u8 _, borrow name:Arr u8 _, borrow text:Arr u8 _,
+                  borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> Arr u8 _
+  = let g=gd_parse(text) in let bad=gd_bad_key(g) in
+    if len(bad)>0 then concat("unknown key ",bad)
+    else if len(g.files)==0 then "the golden has no files"
+    else if tx_equal(gd_value(g,"only"),"linux") && !dv_linux(tools) then
+      let noted=print_error(concat("golden ",suite," ",name,": skipped, Linux only\n")) in tx_empty() else
+    let dir=pt_join(temp,name) in let made=gd_mkdir(dir) in let wrote=gd_files(g,dir,tools.target) in
+    if tx_equal(suite,"check") then gd_check_case(tools,g,dir) else gd_llvm_case(tools,g,dir,toolchain)
+
+effect fn gd_entry(borrow tools:DvTools, borrow suite:Arr u8 _, borrow dir:Arr u8 _, borrow file:Arr u8 _,
+                   borrow known:Arr Arr u8 _ _, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _, move t:GdTally) -> GdTally
+  = let name=pt_slice(file,0,len(file)-7) in
+    let problem=gd_case(tools,suite,name,dv_read(pt_join(dir,file)),temp,toolchain) in
+    if gd_member(known,name) then
+      let noted=if len(problem)==0 then print_error(concat("golden ",suite," ",name,": passes now; remove it from known-failures.txt\n")) else int_ok(0) in
+      t with { skipped=t.skipped+1 }
+    else if len(problem)==0 then t with { passed=t.passed+1 } else
+    let shown=print_error(concat("golden ",suite," ",name,": ",problem,"\n")) in t with { failed=t.failed+1 }
+
+effect fn gd_suite(borrow tools:DvTools, borrow suite:Arr u8 _, shard:i64, count:i64) -> unit
+  = let dir=pt_join(tools.here,concat("golden/",suite)) in
+    let entries=pf_directory(dir) in let known=gd_known(dir) in
+    let temp=pt_realpath(dv_temp(concat("golden-",suite))) in
+    let toolchain=if tx_equal(suite,"llvm") then gd_toolchain(temp) else md_words() in
+    let tally=loop (i=0, t=GdTally { passed=0, skipped=0, failed=0 }) while i<len(entries)
+      next (i+1,let file=pf_dirent(entries,i).name in
+        if !gd_suffixed(file,".golden") || gd_shard(pt_slice(file,0,len(file)-7),count)!=shard then t
+        else gd_entry(tools,suite,dir,file,known,temp,toolchain,t)) yield t in
+    let cleaned=dv_clean(temp) in
+    let label=concat("golden ",suite," ",int_text(shard),"/",int_text(count)) in
+    let found=dv_expect(tally.passed+tally.skipped+tally.failed>0,concat(label,": no goldens in ",dir)) in
+    let checked=dv_expect(tally.failed==0,concat(label,": ",int_text(tally.failed)," goldens failed")) in
+    let shown=print_out(concat(label,": ",int_text(tally.passed)," goldens OK, ",int_text(tally.skipped)," known failures skipped\n")) in
+    noop()
+
+; ---------------------------------------------------------------- live checks
+
+; Two identical builds at once, both of which must succeed.
+effect fn gd_concurrent(borrow tools:DvTools, borrow args:Arr Arr u8 _ _, borrow environment:Arr Arr u8 _ _) -> unit
+  = let empty=NtProcess { output=tx_empty(),errors=tx_empty(),code=127,ok=false,timeout=false,overflow=false,pending=true } in
+    let end=deadline_after(300000) in let started=dv_expect(end.ok,"no deadline") in
+    let full=nt_env_merge(bd_environment(),environment) in
+    using a=process_start(tools.compiler,args,full) in
+    using b=process_start(tools.compiler,args,full) in
+    let both=loop (ra=empty, rb=empty) while ra.pending || rb.pending
+      next (if ra.pending then nt_process_step(a,ra,end.value,1048576) else ra,
+            if rb.pending then nt_process_step(b,rb,end.value,1048576) else rb)
+      yield concat(if ra.ok && !ra.timeout && ra.code==0 then "" else concat("first: ",nt_diagnostic(ra)," "),
+                   if rb.ok && !rb.timeout && rb.code==0 then "" else concat("second: ",nt_diagnostic(rb))) in
+    dv_expect(len(both)==0,concat("concurrent builds into one output failed: ",both))
+
+fn gd_failing_clang() -> Arr u8 _
+  = "#!/bin/sh\nwhile [ \"$1\" != -o ]; do shift; done\nprintf partial > \"$2\"\nprintf \"test link failure\\n\" >&2\nexit 42\n"
+
+; Atomic link staging: concurrent builds into one output both succeed, and a
+; failing link leaves the previous output and no .neo-link-* file behind.
+effect fn gd_staging(borrow tools:DvTools, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> unit
+  = let dir=pt_join(temp,"staging") in let made=gd_mkdir(dir) in
+    let source=pt_join(dir,"constant.neo") in let wrote=gd_write(source,"fn main() -> i64 = 42\n") in
+    let output=pt_join(dir,"shared") in
+    let args=push(push(push(push(push(md_words(),"build"),tools.root),source),"-o"),output) in
+    let args=if len(tools.target)>0 then push(push(args,"--target"),tools.target) else args in
+    let both=gd_concurrent(tools,args,toolchain) in
+    let before=dv_read(output) in
+    let failing=pt_join(dir,"failing clang") in
+    let script=fs_atomic_replace_mode(failing,gd_failing_clang(),448) in
+    let saved=dv_expect(script.ok,concat("cannot write ",failing)) in
+    let refused=nt_process(tools.compiler,args,nt_env_merge(bd_environment(),push(toolchain,concat("NEO_CLANG=",failing))),300000,1048576) in
+    let a=dv_expect(refused.ok && refused.code!=0 && str_find(refused.errors,"test link failure").present,
+      concat("a failing link was not reported: ",nt_diagnostic(refused))) in
+    let b=dv_expect(tx_equal(dv_read(output),before),"a failing link changed the previous output") in
+    dv_expect(!gd_staged(dir),"a failing link left a .neo-link-* staging file")
+
+fn gd_runtime_files() -> Arr u8 _
+  = "http handles http_async async events timers frame_cache http_linux http_uring platform_macos platform_linux_x86_64 platform_linux"
+
+; A root whose runtime/core.neo provides the runtime entry points: the program
+; links and runs with no bootstrap runtime object, and a core that does not
+; export ax_runtime_init is refused without touching the previous output.
+effect fn gd_source_runtime(borrow tools:DvTools, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> unit
+  = let root=pt_join(temp,"source-runtime") in let made=gd_mkdir(root) in
+    let runtime=pt_join(root,"runtime") in let made_runtime=gd_mkdir(runtime) in
+    let names=gd_lines(nt_replace(gd_runtime_files()," ","\n")) in
+    let touched=loop (i=0) while i<len(names)
+      next (let wrote=gd_write(pt_join(runtime,concat(md_word(names,i),".neo")),"") in i+1) yield i in
+    let core=gd_platform(tools.target,dv_read(pt_join(tools.here,"golden/llvm/live/runtime-core.src"))) in
+    let saved=gd_write(pt_join(runtime,"core.neo"),core) in
+    let entry=pt_join(root,"source-runtime.neo") in
+    let wrote=gd_write(entry,"fn main() -> Arr u8 _ = concat(rt_word(255),\" runtime\\n\")\n") in
+    let output=pt_join(root,"source-runtime") in
+    let args=push(push(push(push(push(md_words(),"build"),root),entry),"-o"),output) in
+    let args=if len(tools.target)>0 then push(push(args,"--target"),tools.target) else args in
+    let environment=push(nt_extend(md_words(),toolchain,0),concat("NEO_RUNTIME=",pt_join(root,"missing-seed.o"))) in
+    let built=nt_process(tools.compiler,args,nt_env_merge(bd_environment(),environment),300000,1048576) in
+    let a=dv_expect(built.ok && built.code==0,concat("the source runtime build failed: ",nt_diagnostic(built))) in
+    let ran=dv_run(output,md_words(),environment,"",60000,65536) in
+    let b=dv_expect(ran.ok && ran.code==0 && tx_equal(ran.output,"neo runtime\n") && len(ran.errors)==0,
+      concat("the source runtime program exited ",int_text(ran.code),": ",nt_excerpt(ran.output)," ",nt_excerpt(ran.errors))) in
+    let previous=dv_read(output) in
+    let hidden=gd_write(pt_join(runtime,"core.neo"),nt_replace(core,"export effect fn ax_runtime_init","effect fn ax_runtime_init")) in
+    let rejected=nt_process(tools.compiler,args,nt_env_merge(bd_environment(),environment),300000,1048576) in
+    let c=dv_expect(rejected.ok && rejected.code==1 && str_find(rejected.output,"runtime must export ax_runtime_init").present,
+      concat("a runtime without ax_runtime_init was not refused: ",nt_diagnostic(rejected))) in
+    dv_expect(tx_equal(dv_read(output),previous),"the refused build changed the previous output")
+
+fn gd_foreign_source() -> Arr u8 _
+  = "extern fn add_foreign(base:i64, ...) -> i64\nexport fn c_entry(x:i64) -> i64 = x+1\neffect(unsafe) fn main() -> i64 = add_foreign(c_entry(37),i32(2),2.0,null())\n"
+
+; Native LLVM IR linked with a C caller (main) and a C variadic callee.
+effect fn gd_foreign(borrow tools:DvTools, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> unit
+  = let dir=pt_join(temp,"foreign") in let made=gd_mkdir(dir) in
+    let source=pt_join(dir,"foreign.neo") in let wrote=gd_write(source,gd_foreign_source()) in
+    let checked=dv_check(tools,source) in
+    let a=dv_expect(checked.ok && checked.code==0 && tx_equal(checked.output,"(ok)\n"),
+      concat("the variadic extern was not accepted: ",nt_diagnostic(checked))) in
+    let environment=nt_env_merge(bd_environment(),toolchain) in
+    let emitted=nt_process(tools.compiler,push(push(push(md_words(),"emit-llvm"),tools.root),source),environment,300000,67108864) in
+    let b=dv_expect(emitted.ok && emitted.code==0,concat("emit-llvm failed: ",nt_diagnostic(emitted))) in
+    let ir=pt_join(dir,"foreign.ll") in let saved=gd_write(ir,emitted.output) in
+    let companion=pt_join(dir,"foreign.c") in
+    let copied=gd_write(companion,dv_read(pt_join(tools.here,"golden/llvm/live/foreign.c"))) in
+    let output=pt_join(dir,"foreign") in
+    let linked=nt_process(bd_clang(),push(push(push(push(push(md_words(),"-Wno-override-module"),ir),companion),"-o"),output),
+      environment,300000,1048576) in
+    let c=dv_expect(linked.ok && linked.code==0,concat("clang could not link the IR with the C companion: ",nt_diagnostic(linked))) in
+    let ran=dv_run(output,md_words(),toolchain,"",60000,65536) in
+    dv_expect(ran.ok && ran.code==0,concat("the C caller exited ",int_text(ran.code),": ",nt_diagnostic(ran)))
+
+; emit-llvm needs no tools on PATH and leaves main to the caller; it refuses
+; an entry that makes a raw system call.
+effect fn gd_emit(borrow tools:DvTools, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> unit
+  = let dir=pt_join(temp,"emit") in let made=gd_mkdir(dir) in
+    let constant=pt_join(dir,"constant.neo") in let wrote=gd_write(constant,"fn main() -> i64 = 42\n") in
+    let raw=nt_process(tools.compiler,push(push(push(md_words(),"emit-llvm"),tools.root),constant),
+      push(md_words(),"PATH=/nonexistent"),300000,67108864) in
+    let a=dv_expect(raw.ok && raw.code==0 && str_find(raw.output,"define i64 @neo_entry()").present && !str_find(raw.output,"@main(").present,
+      concat("emit-llvm with no PATH: ",nt_diagnostic(raw))) in
+    let syscall=pt_join(dir,"syscall-ir.neo") in
+    let saved=gd_write(syscall,"effect(unsafe) fn main() -> i64 = syscall6(0,0,0,0,0,0,0)\n") in
+    let refused=nt_process(tools.compiler,push(push(push(md_words(),"emit-llvm"),tools.root),syscall),
+      nt_env_merge(bd_environment(),toolchain),300000,1048576) in
+    dv_expect(refused.ok && refused.code==2 && gd_prefixed(refused.output,"(unsupported "),
+      concat("emit-llvm of a raw system call: ",nt_diagnostic(refused)))
+
+; The cycle counter on ARM64, where llvm_differential.py expected 1.
+effect fn gd_counter(borrow tools:DvTools, borrow temp:Arr u8 _, borrow toolchain:Arr Arr u8 _ _) -> unit
+  = if !gd_arm(tools.target) then noop() else
+    let dir=pt_join(temp,"counter") in let made=gd_mkdir(dir) in
+    let source=pt_join(dir,"counter.neo") in
+    let wrote=gd_write(source,"effect(unsafe) fn main() -> i64 = if counter_frequency()>0 && counter_ticks()>0 then 1 else 0\n") in
+    let binary=pt_join(dir,"counter") in
+    let built=dv_build_with(tools,source,binary,md_words(),toolchain) in
+    let a=dv_expect(built.ok && built.code==0,concat("counter build failed: ",nt_diagnostic(built))) in
+    let out=dv_output(binary,md_words(),md_words(),"") in
+    dv_expect(tx_equal(out,"1\n"),concat("counter printed ",nt_excerpt(out)))
+
+; llvm_differential.py's checks of the native compiler alone. The script had
+; the reference check foreign.neo; here the native checker must accept it.
+effect fn gd_live(borrow tools:DvTools) -> unit
+  = let temp=dv_temp("golden-live") in let toolchain=gd_toolchain(temp) in
+    let a=gd_staging(tools,temp,toolchain) in
+    let b=gd_source_runtime(tools,temp,toolchain) in
+    let c=gd_foreign(tools,temp,toolchain) in
+    let d=gd_emit(tools,temp,toolchain) in
+    let e=gd_counter(tools,temp,toolchain) in
+    let cleaned=dv_clean(temp) in
+    let shown=print_out("golden live checks OK\n") in noop()
+
+fn gd_usage() -> Arr u8 _ = "usage: golden.neo check|llvm [SHARD COUNT], or golden.neo live"
+
+; Argument index as an integer, or fallback when there are no shard arguments.
+effect fn gd_int_arg(index:i64, fallback:i64) -> i64
+  = let arg=cli_arg(index) in if !cli_arg(2).present then fallback else
+    let parsed=int_parse(if arg.present then arg.value else "") in
+    let ok=dv_expect(parsed.ok,gd_usage()) in parsed.value
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let mode=cli_arg(1) in
+    let suite=if mode.present then mode.value else tx_empty() in
+    if tx_equal(suite,"live") then gd_live(tools)
+    else if tx_equal(suite,"check") || tx_equal(suite,"llvm") then
+      let shard=gd_int_arg(2,0) in let count=gd_int_arg(3,1) in
+      let valid=dv_expect(count>0 && shard>=0 && shard<count,"SHARD must be in 0..COUNT-1") in
+      gd_suite(tools,suite,shard,count)
+    else dv_fail(gd_usage())

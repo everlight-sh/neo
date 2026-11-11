@@ -1,0 +1,9 @@
+check concat-mixed.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/concat-mixed.neo 1:52 concat: argument 'a' must be Arr u8 or Arr u16 like the first part
+exit 1
+stdout (error <dir>/concat-mixed.neo 1:52 concat: argument must be Arr u8 or Arr u16 like the first part)\n
+=== concat-mixed.neo
+fn f() -> Arr u16 _ = concat(arr(i in 0..1) u16(i),"a")
+fn main() -> i64 = 0

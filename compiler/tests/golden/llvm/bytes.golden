@@ -1,0 +1,5 @@
+exit 0
+stdout \xc3\xa9\x00\xff\n
+stderr
+=== input.neo
+fn main() -> Arr u8 _ = "é\x00\xff\n"

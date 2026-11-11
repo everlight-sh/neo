@@ -1,0 +1,146 @@
+# Native tooling suites ported from compiler/tests/*_differential.py (fmt, init,
+# project, packages, build options, tooling) and the parse/modules dumps.
+# See tests/porting/README.md.
+[tool.neo]
+test-globs = []
+
+# formatter_differential.py: neo fmt and --check on the 19 samples against
+# the reference's frozen results and trees (golden/formatter/).
+[[test]]
+name = "formatter-samples"
+file = "formatter.neo"
+stdout = "formatter OK\n"
+timeout = 120
+
+# init_differential.py: neo init on paths with nesting, Unicode, symlinks and
+# dashes under umask 027 against the reference's frozen tree
+# (golden/init/tree.txt); rollback, race, usage and starter checks are live.
+[[test]]
+name = "init-projects"
+file = "init.neo"
+stdout = "init OK\n"
+timeout = 300
+
+# project_differential.py: neo test discovery, execution, failure reports and
+# cleanup in a project path with spaces and a toolchain-only PATH.
+[[test]]
+name = "project-tests"
+file = "project.neo"
+stdout = "project tests OK\n"
+timeout = 600
+
+# build_options_differential.py: build reports, --allow-unproven and prepared
+# library caches (native properties; the reference half is dropped).
+[[test]]
+name = "build-options-report"
+file = "build_options.neo"
+args = ["report"]
+stdout = "build options report OK\n"
+timeout = 600
+
+[[test]]
+name = "build-options-experimental"
+file = "build_options.neo"
+args = ["experimental"]
+stdout = "build options experimental OK\n"
+timeout = 600
+
+[[test]]
+name = "build-options-prepared"
+file = "build_options.neo"
+args = ["prepared"]
+stdout = "build options prepared OK\n"
+timeout = 600
+
+# ast_dump.py: `neoc parse` on frozen inputs against the reference's dumps,
+# including differential.py's truncated and mutated copies of the examples
+# (golden/ast_dump/).
+[[test]]
+name = "ast-dumps"
+file = "ast_dump.neo"
+stdout = "ast dumps OK\n"
+timeout = 600
+
+# modules_dump.py and modules_differential.py's changed copies: `neoc modules`
+# against a frozen root and corpus (golden/modules_dump/).
+[[test]]
+name = "module-dumps"
+file = "modules_dump.neo"
+stdout = "module dumps OK\n"
+timeout = 600
+
+# package_import_differential.py: module graphs of a package app (unlocked,
+# locked, vendored, invalid imports, outside the lock) against the reference
+# (golden/package_import/); offline builds and refusals are live.
+[[test]]
+name = "package-imports"
+file = "package_import.neo"
+stdout = "package imports OK\n"
+timeout = 600
+
+# package_commands_differential.py: neo pkg lock/verify/vendor through the
+# reference's edits, malformed and foreign lockfiles and rejections, against
+# its exit codes, outputs, lock bytes and vendor trees (golden/package_commands/).
+[[test]]
+name = "package-commands"
+file = "package_commands.neo"
+stdout = "package commands OK\n"
+timeout = 600
+
+# tooling_differential.py, split by part: reproducible release archives against
+# the reference's gzip and USTAR header fields (golden/tooling/release.txt).
+[[test]]
+name = "tooling-release"
+file = "tooling.neo"
+args = ["release"]
+stdout = "tooling release OK\n"
+timeout = 600
+
+# An LSP session against the reference's messages (golden/tooling/editor-*.txt).
+[[test]]
+name = "tooling-editor"
+file = "tooling.neo"
+args = ["editor"]
+stdout = "tooling editor OK\n"
+timeout = 600
+
+# neo graph and --full against the reference's user graph (golden/tooling/graph.txt).
+[[test]]
+name = "tooling-graph"
+file = "tooling.neo"
+args = ["graph"]
+stdout = "tooling graph OK\n"
+timeout = 600
+
+# check --library with JSON diagnostics, run with NEO_RUNNER, doctor (live).
+[[test]]
+name = "tooling-driver"
+file = "tooling.neo"
+args = ["driver"]
+stdout = "tooling driver OK\n"
+timeout = 600
+
+# serve and serve_effect replies against the reference's (golden/tooling/http.txt).
+[[test]]
+name = "tooling-http"
+file = "tooling.neo"
+args = ["http"]
+stdout = "tooling http OK\n"
+timeout = 600
+
+# differential.py and modules_differential.py, native half: every .neo file of
+# the repository parses (or loads with its imports), and neo fmt is idempotent
+# on a copy of each (the count fmt --check would change goes to stderr).
+[[test]]
+name = "corpus-parse"
+file = "corpus.neo"
+args = ["parse"]
+stdout = "corpus parse OK\n"
+timeout = 900
+
+[[test]]
+name = "corpus-fmt"
+file = "corpus.neo"
+args = ["fmt"]
+stdout = "corpus fmt OK\n"
+timeout = 900

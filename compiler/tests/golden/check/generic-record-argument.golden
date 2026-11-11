@@ -1,0 +1,9 @@
+check generic-record-argument.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-record-argument.neo
+type Box<T> = {value:T}
+fn get<T>(x:Box<T>) -> T = x.value
+fn main() -> i64 = get(Box::<i64> {value=42})

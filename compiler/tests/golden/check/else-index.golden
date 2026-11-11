@@ -1,0 +1,8 @@
+check else-index.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== else-index.neo
+fn f(a:Arr u8 n,i:i64) -> i64 = if i<0 || i>=n then 0 else i64(a[i])
+fn main() -> i64 = f("hi",1)

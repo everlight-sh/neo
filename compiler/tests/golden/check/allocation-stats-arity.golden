@@ -1,0 +1,9 @@
+check allocation-stats-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/allocation-stats-arity.neo 1:23 allocation_stats_enabled takes no arguments
+reference-error type <dir>/allocation-stats-arity.neo 1:23 if condition must be bool
+exit 1
+stdout (error <dir>/allocation-stats-arity.neo 1:23 allocation_stats_enabled takes no arguments)\n
+=== allocation-stats-arity.neo
+fn main() -> i64 = if allocation_stats_enabled(1) then 1 else 0

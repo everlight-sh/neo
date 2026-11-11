@@ -1,0 +1,9 @@
+check logic.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/logic.neo 1:28 && needs bool operands
+reference-error type <dir>/logic.neo 1:28 if condition must be bool
+exit 1
+stdout (error <dir>/logic.neo 1:28 && needs bool operands)\n
+=== logic.neo
+fn main() -> i64 = if true && 1 then 1 else 0

@@ -1,0 +1,5 @@
+exit 0
+stdout row0row1row0
+stderr
+=== input.neo
+fn main() -> Arr u8 _ = let a=arr(i in 0..2) concat("row",arr(j in 0..1) u8(i+48)) in let b=push(set(a,0,a[1]),a[0]) in concat(a[0],b[0],b[2])

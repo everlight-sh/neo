@@ -1,0 +1,8 @@
+check condition.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/condition.neo 1:23 if condition must be bool
+exit 1
+stdout (error <dir>/condition.neo 1:23 if condition must be bool)\n
+=== condition.neo
+fn main() -> i64 = if 1 then 2 else 3

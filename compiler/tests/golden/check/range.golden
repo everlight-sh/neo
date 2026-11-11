@@ -1,0 +1,8 @@
+check range.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== range.neo
+fn f(a:Arr u8 n) -> Arr u8 n = arr(i in 0..n) a[i]
+fn main() -> Arr u8 (2) = f("hi")

@@ -1,0 +1,7 @@
+check loop-array-preserved.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== loop-array-preserved.neo
+fn main() -> Arr u8 (2) = loop(i:i64{i>=0}=0,a="hi") while i<len(a) next(i+1,set(a,i,'!')) yield a

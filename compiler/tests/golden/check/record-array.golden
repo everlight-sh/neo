@@ -1,0 +1,8 @@
+check record-array.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-array.neo
+type Point = { x:i64 }
+fn main() -> i64 = let a=arr(i in 0..3) Point { x=i } in a[1].x

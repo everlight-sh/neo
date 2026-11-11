@@ -1,0 +1,9 @@
+check index-wrong-branch.neo
+reference-exit 1
+reference-ok false
+reference-unproven f 1:65 bounds 0 <= i && i < len(a)
+exit 1
+stdout (unproven <dir>/index-wrong-branch.neo 1:65 bounds)\n
+=== index-wrong-branch.neo
+fn f(a:Arr u8 n,i:i64) -> i64 = if 0<=i && i<n then 0 else i64(a[i])
+fn main() -> i64 = f("hi",1)

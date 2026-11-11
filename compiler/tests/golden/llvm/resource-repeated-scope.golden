@@ -1,0 +1,9 @@
+exit 0
+stdout 123\n
+stderr
+=== input.neo
+resource type Owner = {counter:ptr,digit:i64} drop dispose
+fn make(p:ptr,n:i64) -> Owner = Owner {counter=p,digit=n}
+effect(unsafe) fn dispose(x:Owner) -> unit = store_i64(x.counter,0,load_i64(x.counter,0)*10+x.digit)
+effect(unsafe) fn take(move x:Owner) -> i64 = x.digit
+effect(unsafe) fn main() -> i64 = let p=stack_alloc(8) in let init=store_i64(p,0,0) in let done=loop(i=1) while i<4 next(using x=make(p,i) in i+1) yield i in load_i64(p,0)

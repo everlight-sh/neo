@@ -1,0 +1,7 @@
+check large-divisor.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== large-divisor.neo
+fn main() -> i64 = if 9223372036854775807 > 0 then 12 / 9223372036854775807 else 0

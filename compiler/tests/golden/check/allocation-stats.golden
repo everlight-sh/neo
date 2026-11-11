@@ -1,0 +1,7 @@
+check allocation-stats.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== allocation-stats.neo
+fn main() -> i64 = if allocation_stats_enabled() then 1 else 0

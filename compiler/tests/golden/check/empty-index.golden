@@ -1,0 +1,8 @@
+check empty-index.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:26 bounds 0 <= 0 && 0 < len('')
+exit 1
+stdout (unproven <dir>/empty-index.neo 1:26 bounds)\n
+=== empty-index.neo
+fn main() -> i64 = i64(""[0])

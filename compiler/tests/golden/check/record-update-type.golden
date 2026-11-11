@@ -1,0 +1,10 @@
+check record-update-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-update-type.neo 2:55 field x has type bool, expected i64
+reference-error type <dir>/record-update-type.neo 2:63 field access on None
+exit 1
+stdout (error <dir>/record-update-type.neo 2:55 field x has type bool, expected i64)\n
+=== record-update-type.neo
+type Point = { x:i64 }
+fn main() -> i64 = let p=Point { x=1 } in (p with { x=false }).x

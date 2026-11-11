@@ -1,0 +1,44 @@
+# Frozen outputs of the Python reference compiler's differential suites (check,
+# LLVM build-and-run, cancellation), checked against the native compiler.
+# See tests/porting/README.md.
+[tool.neo]
+test-globs = []
+
+# check_differential.py: 236 snippets and 6 programs importing lib.neo. neo
+# check must give the verdict, exit status and (error ...)/(unproven ...)
+# line the reference checker's report implies (golden/check/*.golden; the
+# format is in golden.neo).
+[[test]]
+name = "golden-check"
+file = "golden.neo"
+args = ["check"]
+stdout = "golden check 0/1: 242 goldens OK, 0 known failures skipped\n"
+timeout = 900
+
+# llvm_differential.py: 113 programs built natively and run, matching the
+# reference programs' exit status, stdout and stderr (golden/llvm/*.golden).
+[[test]]
+name = "golden-llvm"
+file = "golden.neo"
+args = ["llvm"]
+stdout = "golden llvm 0/1: 113 goldens OK, 0 known failures skipped\n"
+timeout = 900
+
+# llvm_differential.py's checks without the reference: atomic link staging
+# (concurrent builds, a failing clang), a runtime built from a root's own
+# runtime sources, IR linked with a C caller and variadic callee, emit-llvm
+# with no PATH and its refusal of raw system calls, the ARM64 cycle counter.
+[[test]]
+name = "golden-live"
+file = "golden.neo"
+args = ["live"]
+stdout = "golden live checks OK\n"
+timeout = 600
+
+# cancellation_differential.py: Cancellation ownership, idempotent cancel and
+# runtime handle cleanup; the reference build printed 42.
+[[test]]
+name = "cancellation"
+file = "golden/cancellation.neo"
+stdout = "42\n"
+timeout = 300

@@ -1,0 +1,18 @@
+{"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "invalid JSON"}}
+{"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"positionEncoding": "utf-16", "textDocumentSync": 1, "completionProvider": {"triggerCharacters": [":"]}, "hoverProvider": true, "definitionProvider": true, "documentSymbolProvider": true, "documentFormattingProvider": true}, "serverInfo": {"name": "neo", "version": "@VERSION@"}}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "id": 2, "result": [{"label": "m::answer", "kind": 3, "detail": "fn answer() -> i64"}]}
+{"jsonrpc": "2.0", "id": 3, "result": {"contents": {"kind": "markdown", "value": "```neo\nfn answer() -> i64\n```"}}}
+{"jsonrpc": "2.0", "id": 4, "result": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}}}
+{"jsonrpc": "2.0", "id": 5, "result": [{"name": "main", "kind": 12, "range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}}, "selectionRange": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}}}]}
+{"jsonrpc": "2.0", "id": 6, "result": [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 3, "character": 0}}, "newText": "; 🚀\nimport \"helper.neo\" as m\nfn main() -> i64 = m::answer()\n"}]}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 2, "diagnostics": [{"range": {"start": {"line": 2, "character": 16}, "end": {"line": 2, "character": 17}}, "severity": 1, "code": "source", "source": "neo", "message": "3:17: expected 'fn', got '::'"}]}}
+{"jsonrpc": "2.0", "id": 7, "result": [{"label": "m::answer", "kind": 3, "detail": "fn answer() -> i64"}]}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "version": 3, "diagnostics": [{"range": {"start": {"line": 0, "character": 19}, "end": {"line": 0, "character": 20}}, "severity": 1, "code": "type", "source": "neo", "message": "body has type bool, declared i64"}]}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/main.neo", "diagnostics": []}}
+{"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": "file://@ROOT@/space%20%C3%A9%F0%9F%9A%80/helper.neo", "version": 1, "diagnostics": []}}
+{"jsonrpc": "2.0", "id": "shutdown", "result": null}

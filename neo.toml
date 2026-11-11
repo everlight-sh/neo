@@ -5,7 +5,7 @@ entry = "examples/hello.neo"
 
 [tool.neo]
 doc-tests = ["docs/getting-started.md", "docs/language-v01.md"]
-integration = ["tests/integration.neo.toml", "tests/language.neo.toml", "tests/network.neo.toml", "tests/runtime.neo.toml"]
+integration = ["tests/integration.neo.toml", "tests/language.neo.toml", "tests/network.neo.toml", "tests/runtime.neo.toml", "compiler/tests/differential.neo.toml", "compiler/tests/tooling.neo.toml"]
 
 [[test]]
 name = "language-generics-results"

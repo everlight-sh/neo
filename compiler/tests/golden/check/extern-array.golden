@@ -1,0 +1,9 @@
+check extern-array.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/extern-array.neo 1:8 extern signatures support unrefined i64, i32, f64, ptr and unit returns
+exit 1
+stdout (error <dir>/extern-array.neo 1:8 extern signatures support unrefined i64, i32, f64, ptr and unit returns)\n
+=== extern-array.neo
+extern fn foreign(a:Arr u8 _) -> i64
+fn main() -> i64 = 0

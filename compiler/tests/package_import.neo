@@ -1,0 +1,133 @@
+; Replaces compiler/tests/package_import_differential.py. An application
+; imports pkg:common (a neo.toml package), pkg:common/bonus (a .neo module
+; beside a .ax one), pkg:bridge (with its own entry and a dependency on a
+; legacy axon.toml package of the same name) and pkg:bridge/more/delta (.ax),
+; plus a local module that imports pkg:bridge too. The module graph `neoc
+; modules` prints before locking, once locked, once vendored with the
+; originals deleted, for eight invalid package imports and for a module
+; outside the lock must equal the Python reference's, frozen in
+; golden/package_import/expected.bundle (golden form as in modules_dump.neo,
+; against the frozen root of golden/modules_dump/root.bundle.gz). Live
+; checks: the vendored application builds and runs offline (42); a generated
+; main outside the project needs --package-root (both spellings, 14); a
+; changed vendored source is refused (locked source changed:
+; legacy@1.2.3); a package entry outside its source root is refused
+; (package import escapes source root).
+import "std:fs"
+import "std:io"
+import "std:strings"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type PiCase = { tools:DvTools, base:Arr u8 _, environment:Arr Arr u8 _ _, expected:TgBundle, skips:Arr Arr u8 _ _ }
+
+fn pi_main() -> Arr u8 _
+  = concat("import \"pkg:common\" as math\nimport \"pkg:common/bonus\" as bonus\nimport \"pkg:bridge\" as bridge\n",
+      "import \"pkg:bridge/more/delta\" as deep\nimport \"local.neo\" as local\n",
+      "fn main() -> i64 = math::value()+bonus::amount()+bridge::joined()+deep::offset()+local::value()\n")
+
+effect fn pi_write(borrow path:Arr u8 _, borrow text:Arr u8 _) -> unit
+  = let made=pf_mkdirs(pt_parent(path)) in ru_write(path,text)
+
+effect fn pi_project(borrow base:Arr u8 _) -> Arr u8 _
+  = let app=pt_join(base,"app") in
+    let a=pi_write(pt_join(app,"neo.toml"),concat("[package]\nname=\"app\"\nversion=\"0.1.0\"\nentry=\"src/main.neo\"\n",
+      "[dependencies]\ncommon={path=\"../modern\",version=\"1.0.0\"}\nbridge={path=\"../bridge\",version=\"2.0.0\"}\n")) in
+    let b=pi_write(pt_join(app,"src/main.neo"),pi_main()) in
+    let c=pi_write(pt_join(app,"src/local.neo"),"import \"pkg:bridge\" as b\nfn value() -> i64 = b::joined()+1\n") in
+    let d=pi_write(pt_join(base,"modern/neo.toml"),"[package]\nname=\"modern\"\nversion=\"1.0.0\"\n") in
+    let e=pi_write(pt_join(base,"modern/src/lib.neo"),"fn value() -> i64 = 7\n") in
+    let f=pi_write(pt_join(base,"modern/src/bonus.neo"),"fn amount() -> i64 = 5\n") in
+    let g=pi_write(pt_join(base,"modern/src/bonus.ax"),"fn amount() -> i64 = 99\n") in
+    let h=pi_write(pt_join(base,"bridge/neo.toml"),concat("[package]\nname=\"bridge\"\nversion=\"2.0.0\"\nentry=\"api/public.neo\"\n",
+      "[dependencies.common]\npath=\"../legacy\"\nversion=\"1.2.3\"\n")) in
+    let i=pi_write(pt_join(base,"bridge/api/public.neo"),"import \"pkg:common\" as c\nfn joined() -> i64 = c::value()+2\n") in
+    let j=pi_write(pt_join(base,"bridge/src/more/delta.ax"),"fn offset() -> i64 = 3\n") in
+    let k=pi_write(pt_join(base,"legacy/axon.toml"),"[package]\nname=\"legacy\"\nversion=\"1.2.3\"\n") in
+    let l=pi_write(pt_join(base,"legacy/src/lib.ax"),"fn value() -> i64 = 11\n") in app
+
+effect fn pi_neo(borrow c:PiCase, borrow cwd:Arr u8 _, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = tg_run(cwd,c.tools.compiler,args,c.environment,"",-1)
+effect fn pi_ok(borrow c:PiCase, borrow cwd:Arr u8 _, borrow args:Arr Arr u8 _ _) -> Arr u8 _
+  = let run=pi_neo(c,cwd,args) in
+    let ok=dv_expect(run.ok && run.code==0 && len(run.errors)==0,concat("neo ",md_word(args,0)," ",md_word(args,1)," failed: ",tg_status(run))) in run.output
+
+; The module graph of entry against the frozen golden step.
+effect fn pi_modules(borrow c:PiCase, borrow step:Arr u8 _, borrow entry:Arr u8 _) -> unit
+  = if tg_has(c.skips,step) then noop() else
+    let problem=tg_modules(c.tools,c.base,entry,tg_record(c.expected,step)) in
+    dv_expect(len(problem)==0,concat("the module graph (",step,") differs from the reference, ",problem))
+
+; Builds with args in cwd and runs the binary, which must print expected.
+effect fn pi_build(borrow c:PiCase, borrow cwd:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow expected:Arr u8 _) -> unit
+  = let output=pt_join(cwd,"native-bin") in
+    let built=pi_ok(c,cwd,nt_extend(tg_a1("build"),push(push(args,"-o"),output),0)) in
+    let run=nt_process(output,md_words(),md_words(),10000,65536) in
+    dv_expect(run.ok && run.code==0 && tx_equal(run.output,expected) && len(run.errors)==0,
+      concat("the package build printed: ",tg_status(run)))
+
+effect fn pi_refused(borrow c:PiCase, borrow cwd:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow error:Arr u8 _) -> unit
+  = let output=pt_join(cwd,"must-not-build") in
+    let run=pi_neo(c,cwd,nt_extend(tg_a1("build"),push(push(push(args,"--dev"),"-o"),output),0)) in
+    let a=dv_expect(run.ok && run.code==1 && ru_contains(concat(run.output,run.errors),error),
+      concat("the build did not fail with ",error,": ",tg_status(run))) in
+    dv_expect(pf_kind(output,false)<0,"a refused build left an output")
+
+effect fn pi_compare(borrow c:PiCase) -> unit
+  = let base=c.base in let app=pi_project(base) in let entry=pt_join(app,"src/main.neo") in
+    let a=pi_modules(c,"unlocked",entry) in
+    let b=pi_ok(c,app,tg_a2("pkg","lock")) in let d=pi_modules(c,"locked",entry) in
+    let e=pi_ok(c,app,tg_a2("pkg","vendor")) in
+    let f=dv_clean(pt_join(base,"modern")) in let g=dv_clean(pt_join(base,"bridge")) in let h=dv_clean(pt_join(base,"legacy")) in
+    let vendored=pi_modules(c,"vendored",entry) in
+    let j=pi_build(c,app,md_words(),"42\n") in
+    let ran=pi_ok(c,app,tg_a2("run","--dev")) in
+    let k=dv_expect(tx_equal(ran,"42\n"),concat("neo run --dev printed ",tx_repr(ran,true))) in
+    let generated=pt_join(base,"generated/main.neo") in
+    let l=pi_write(generated,"import \"../app/src/local.neo\" as local\nfn main() -> i64 = local::value()\n") in
+    let m=pi_refused(c,base,tg_a1(generated),"package requires an ancestor neo.toml") in
+    let n=pi_build(c,base,tg_a4(generated,"--package-root",app,"--dev"),"14\n") in
+    let o=pi_build(c,base,tg_a3(generated,concat("--package-root=",app),"--dev"),"14\n") in
+    let imports=loop (i=0, count=0) while i<len(c.expected.names)
+      next (i+1,let step=md_word(c.expected.names,i) in if !str_starts(step,"import ") then count else
+        let written=ru_write(entry,concat("import \"",pt_slice(step,7,len(step)),"\"\nfn main() -> i64 = 0\n")) in
+        let checked=pi_modules(c,step,entry) in count+1) yield count in
+    let p=dv_expect(imports==8,"the golden has no eight invalid imports") in
+    let q=pi_write(pt_join(base,"other/neo.toml"),"[package]\nname=\"other\"\nversion=\"1.0.0\"\n") in
+    let r=pi_write(pt_join(base,"other/lib.neo"),"import \"pkg:common\" as c\nfn value() -> i64 = c::value()\n") in
+    let s=ru_write(entry,"import \"../../other/lib.neo\" as outside\nfn main() -> i64 = outside::value()\n") in
+    let t=pi_modules(c,"outside",entry) in
+    let u=ru_write(entry,pi_main()) in
+    let vendor=pt_join(app,".neo/vendor") in let names=ru_names(vendor) in
+    let legacy=loop (n=0, found=tx_empty()) while n<len(names) next (n+1,if str_starts(md_word(names,n),"legacy-") then md_word(names,n) else found) yield found in
+    let v=dv_expect(len(legacy)>0,"no vendored legacy package") in
+    let w=ru_write(pt_join(vendor,concat(legacy,"/src/lib.ax")),"fn value() -> i64 = 123\n") in
+    pi_refused(c,app,md_words(),"locked source changed: legacy@1.2.3")
+
+effect fn pi_escape(borrow c:PiCase) -> unit
+  = let base=c.base in let app=pt_join(base,"app") in
+    let a=pi_write(pt_join(app,"neo.toml"),"[package]\nname=\"app\"\nversion=\"0.1.0\"\n[dependencies]\ndep={path=\"../dep\",version=\"1.0.0\"}\n") in
+    let b=pi_write(pt_join(app,"src/main.neo"),"import \"pkg:dep\" as d\nfn main() -> i64 = d::value()\n") in
+    let d=pi_write(pt_join(base,"dep/neo.toml"),"[package]\nname=\"dep\"\nversion=\"1.0.0\"\nentry=\"../outside.neo\"\n") in
+    let e=pi_ok(c,app,tg_a2("pkg","lock")) in let f=pi_ok(c,app,tg_a2("pkg","vendor")) in
+    let g=dv_clean(pt_join(base,"dep")) in
+    let h=pi_write(pt_join(app,".neo/vendor/outside.neo"),"fn value() -> i64 = 42\n") in
+    pi_refused(c,app,md_words(),"package import escapes source root")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=pt_realpath(dv_temp("package-import")) in
+    let toolchain=tg_toolchain(dir) in
+    let environment=push(tg_env(tools,toolchain),concat("NEO_RUNTIME=",pt_join(dir,"missing-runtime.o"))) in
+    let compare=pt_join(dir,"compare") in let made=fs_mkdir(compare) in
+    let frozen=tg_extract(tg_bundle(tg_golden(tools,"modules_dump","root.bundle")),"root/",compare) in
+    let expected=tg_bundle(tg_golden(tools,"package_import","expected.bundle")) in
+    let a=pi_compare(PiCase { tools=tools, base=compare, environment=environment, expected=expected, skips=tg_skips(tools,"package_import") }) in
+    let escape=pt_join(dir,"escape") in let b=fs_mkdir(escape) in
+    let c=pi_escape(PiCase { tools=tools, base=escape, environment=environment, expected=expected, skips=md_words() }) in
+    let cleaned=dv_clean(dir) in let shown=print_out("package imports OK\n") in noop()

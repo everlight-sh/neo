@@ -1,0 +1,9 @@
+check data-temporary.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/data-temporary.neo 1:46 data takes a byte array; its pointer borrows the array's storage
+reference-error type <dir>/data-temporary.neo 1:35 ptr_to_i64 expects (ptr)
+exit 1
+stdout (error <dir>/data-temporary.neo 1:46 data takes a byte array; its pointer borrows the array's storage)\n
+=== data-temporary.neo
+effect(unsafe) fn main() -> i64 = ptr_to_i64(data(concat("a","b")))

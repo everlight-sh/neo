@@ -1,0 +1,9 @@
+check record-array-branches.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-array-branches.neo
+type Box = {value:i64}
+fn choose(x:i64) -> Arr Box (1) = if x>0 then arr(i in 0..1) Box {value=x} else arr(i in 0..1) Box {value=0}
+fn main() -> i64 = choose(42)[0].value

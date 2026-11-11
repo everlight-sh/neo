@@ -1,0 +1,6 @@
+args <syscall:exit> <syscall:wait4>
+exit 0
+stdout 1\n
+stderr
+=== input.neo
+effect(unsafe) fn main(exit_nr:i64,wait_nr:i64) -> i64 = let pid=fork_syscall() in if pid==0 then let exited=syscall6(exit_nr,17,0,0,0,0,0) in -1 else if pid<0 then -2 else let slot=stack_alloc(8) in let joined=syscall6(wait_nr,pid,ptr_to_i64(slot),0,0,0,0) in if joined==pid && load_i32(slot,0)==i32(4352) then 1 else -3

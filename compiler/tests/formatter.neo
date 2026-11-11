@@ -1,0 +1,71 @@
+; Replaces compiler/tests/formatter_differential.py. neo fmt and neo fmt
+; --check run with an empty PATH on the 19 samples (nested and legacy .ax
+; files, a name with a space, CRLF, comments, Unicode, a multi-line literal,
+; ignored build directories, a file and a directory symlink). Their exit
+; status, stdout and the trees they leave must equal the Python reference's,
+; frozen in golden/formatter/ (samples.txt, results.txt, formatted.txt,
+; explicit.txt). Live checks: --check changes no file or mtime and writes no
+; stderr; formatting again and --check are silent no-ops; explicit paths
+; (./notes.txt, --, -dash.neo); a syntax error is reported as bad.neo:1:...
+; and changes nothing.
+import "std:io"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+; The frozen exit status and stdout of a step of results.txt.
+effect fn fm_expect(borrow tools:DvTools, borrow step:Arr u8 _, borrow result:NtProcess) -> unit
+  = let lines=tg_lines(tg_golden(tools,"formatter","results.txt")) in
+    let at=loop (i=0) while i<len(lines) && !tx_equal(tg_field(md_word(lines,i),0),step) next (i+1) yield i in
+    let line=md_word(lines,at) in
+    let a=dv_expect(at<len(lines),concat("results.txt has no step ",step)) in
+    let code=int_parse(tg_field(line,1)) in
+    dv_expect(result.ok && code.ok && result.code==code.value && tx_equal(result.output,tg_unescape(tg_field(line,2))) && len(result.errors)==0,
+      concat("neo fmt (",step,") differs from the reference: expected exit ",tg_field(line,1)," and stdout ",
+        tx_repr(tg_unescape(tg_field(line,2)),true),", got ",tg_status(result)))
+
+effect fn fm_unchanged(borrow project:Arr u8 _, borrow stamp:Arr u8 _, borrow what:Arr u8 _) -> unit
+  = let newer=tg_newer(project,stamp) in dv_expect(len(newer)==0,concat(what," rewrote ",newer))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("fmt-golden") in let empty=tg_empty_path(dir) in
+    let project=pt_join(dir,"tree") in let made=fs_mkdir(project) in
+    let samples=tg_golden(tools,"formatter","samples.txt") in
+    let built=tg_build_tree(project,samples) in
+    let stamp=tg_stamp(dir) in
+    let checking=tg_neo(tools,project,empty,tg_a2("fmt","--check")) in
+    let a=fm_expect(tools,"check",checking) in
+    let b=fm_unchanged(project,stamp,"neo fmt --check") in
+    let c=tg_same(samples,tg_tree(project,false,false),"the tree after neo fmt --check") in
+    let formatted=tg_neo(tools,project,empty,tg_a1("fmt")) in
+    let d=fm_expect(tools,"format",formatted) in
+    let e=tg_same(tg_golden(tools,"formatter","formatted.txt"),tg_tree(project,false,false),"the formatted tree") in
+    let stamp=tg_stamp(dir) in
+    let again=tg_neo(tools,project,empty,tg_a1("fmt")) in
+    let f=dv_expect(again.ok && again.code==0 && len(again.output)==0 && len(again.errors)==0,
+      concat("formatting a formatted tree was not a no-op: ",tg_status(again))) in
+    let clean=tg_neo(tools,project,empty,tg_a2("fmt","--check")) in
+    let g=dv_expect(clean.ok && clean.code==0 && len(clean.output)==0 && len(clean.errors)==0,
+      concat("neo fmt --check on a formatted tree: ",tg_status(clean))) in
+    let h=fm_unchanged(project,stamp,"formatting a formatted tree") in
+    let wrote=loop (i=0, names=push(push(push(md_words(),"notes.txt"),"extra.neo"),"-dash.neo")) while i<len(names)
+      next (let w=ru_write(pt_join(project,md_word(names,i)),"fn main ()->i64=  42\n") in i+1,names) yield i in
+    let paths=push(push(push(push(md_words(),"./notes.txt"),"extra.neo"),"--"),"-dash.neo") in
+    let explicit_check=tg_neo(tools,project,empty,nt_extend(tg_a2("fmt","--check"),paths,0)) in
+    let i=fm_expect(tools,"explicit-check",explicit_check) in
+    let explicit=tg_neo(tools,project,empty,nt_extend(tg_a1("fmt"),paths,0)) in
+    let j=fm_expect(tools,"explicit-format",explicit) in
+    let k=tg_same(tg_golden(tools,"formatter","explicit.txt"),tg_tree(project,false,false),"the tree after explicit paths") in
+    let bad=ru_write(pt_join(project,"bad.neo"),"fn main() -> i64 = @\n") in
+    let stamp=tg_stamp(dir) in
+    let rejected=loop (n=0) while n<2
+      next (let args=if n==0 then tg_a3("fmt","--check","bad.neo") else tg_a2("fmt","bad.neo") in
+        let run=tg_neo(tools,project,empty,args) in
+        let l=dv_expect(run.ok && run.code==1 && ru_contains(run.errors,"bad.neo:1:") && len(run.output)==0,
+          concat("neo fmt did not reject bad.neo: ",tg_status(run))) in n+1) yield n in
+    let m=fm_unchanged(project,stamp,"neo fmt on a syntax error") in
+    let cleaned=dv_clean(dir) in let shown=print_out("formatter OK\n") in noop()

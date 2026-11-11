@@ -1,0 +1,276 @@
+; Helpers for the drivers in compiler/tests/ that replace the Python tooling
+; suites (cases in tooling.neo.toml): golden files frozen from the Python
+; reference compiler, escaped byte lines, bundles, directory snapshots,
+; commands run in a directory, and a canonical JSON form.
+;
+; The goldens in golden/{formatter,init,ast_dump,modules_dump,package_import,
+; package_commands,tooling}/ are outputs of the Python reference (neoc.sh and
+; neoc/) of chore/remove-python at e6881b1 (Neo 0.2.3), recorded on x86_64
+; Linux by a one-off generator that ran each *_differential.py scenario and
+; was not committed. Inputs are frozen with them where the outputs depend on
+; them, so editing examples/, stdlib/ or runtime/ does not change a golden.
+; Placeholders: @ROOT@ a session's root, @T@ a driver's temporary base,
+; @VERSION@ the compiler's version, @EPOCH@ the release epoch. The native
+; compiler matched every golden when they were frozen; a case it later gets
+; wrong keeps its golden, goes into the suite's skip.txt (ast_dump,
+; modules_dump, package_import, package_commands) and gets an entry in
+; tests/porting/tooling-failures.md.
+;
+; Escaped bytes (one line): \\, \n, \t, \r and \xHH; other printable ASCII
+; stands for itself. A bundle is a sequence of records "NAME TAB SIZE LF",
+; then SIZE bytes and LF. Golden files over 64 KiB are gzip-compressed
+; (NAME.gz).
+import "std:deflate"
+import "std:fs"
+import "std:io"
+import "std:json"
+import "std:sha256"
+import "std:strings"
+import "std:time"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+
+fn tg_a1(borrow a:Arr u8 _) -> Arr Arr u8 _ _ = push(md_words(),a)
+fn tg_a2(borrow a:Arr u8 _, borrow b:Arr u8 _) -> Arr Arr u8 _ _ = push(push(md_words(),a),b)
+fn tg_a3(borrow a:Arr u8 _, borrow b:Arr u8 _, borrow c:Arr u8 _) -> Arr Arr u8 _ _ = push(tg_a2(a,b),c)
+fn tg_a4(borrow a:Arr u8 _, borrow b:Arr u8 _, borrow c:Arr u8 _, borrow d:Arr u8 _) -> Arr Arr u8 _ _ = push(tg_a3(a,b,c),d)
+fn tg_has(borrow words:Arr Arr u8 _ _, borrow word:Arr u8 _) -> bool
+  = loop (i=0, found=false) while i<len(words) && !found next (i+1,tx_equal(md_word(words,i),word)) yield found
+fn tg_sha(borrow bytes:Arr u8 _) -> Arr u8 _ = tx_hex_bytes(tx_empty(),sha256(bytes))
+fn tg_clip(borrow text:Arr u8 _, limit:i64) -> Arr u8 _ = pt_slice(text,0,if len(text)<limit then len(text) else limit)
+
+; Every part of text between separators, keeping empty parts.
+fn tg_end(borrow text:Arr u8 _, start:i64, byte:i64) -> i64
+  = loop (j=start) while j<len(text) && tx_byte(text,j)!=byte next (j+1) yield j
+fn tg_split(borrow text:Arr u8 _, byte:i64) -> Arr Arr u8 _ _
+  = let r=loop (at=0, out=md_words(), done=false) while !done
+      next (tg_end(text,at,byte)+1,push(out,pt_slice(text,at,tg_end(text,at,byte))),tg_end(text,at,byte)>=len(text))
+      yield out in r
+; The lines of text; a final newline ends the last line.
+fn tg_lines(borrow text:Arr u8 _) -> Arr Arr u8 _ _ = ru_split(text,10)
+fn tg_field(borrow line:Arr u8 _, k:i64) -> Arr u8 _ = md_word(tg_split(line,9),k)
+
+fn tg_hex(c:i64) -> i64 = if c>=48 && c<=57 then c-48 else if c>=97 && c<=102 then c-87 else if c>=65 && c<=70 then c-55 else 0
+type TgDecode = { at:i64, out:Arr u8 _ }
+fn tg_unescape_step(borrow text:Arr u8 _, move s:TgDecode) -> TgDecode
+  = let c=tx_byte(text,s.at) in
+    if c!=92 then TgDecode { at=s.at+1, out=push(s.out,u8(c)) } else
+    let e=tx_byte(text,s.at+1) in
+    if e==110 then TgDecode { at=s.at+2, out=push(s.out,u8(10)) }
+    else if e==116 then TgDecode { at=s.at+2, out=push(s.out,u8(9)) }
+    else if e==114 then TgDecode { at=s.at+2, out=push(s.out,u8(13)) }
+    else if e==120 then TgDecode { at=s.at+4, out=push(s.out,u8(16*tg_hex(tx_byte(text,s.at+2))+tg_hex(tx_byte(text,s.at+3)))) }
+    else TgDecode { at=s.at+2, out=push(s.out,u8(e)) }
+fn tg_unescape(borrow text:Arr u8 _) -> Arr u8 _
+  = let r=loop (s=TgDecode { at=0, out=tx_empty() }) while s.at<len(text) next (tg_unescape_step(text,s)) yield s in r.out
+fn tg_escape_byte(move out:Arr u8 _, b:i64) -> Arr u8 _
+  = if b==92 then concat(out,"\\\\") else if b==10 then concat(out,"\\n") else if b==9 then concat(out,"\\t")
+    else if b==13 then concat(out,"\\r") else if b>=32 && b<127 then push(out,u8(b))
+    else tx_hex_bytes(concat(out,"\\x"),arr(i in 0..1) u8(b))
+fn tg_escape(borrow bytes:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(bytes) next (i+1,tg_escape_byte(out,tx_byte(bytes,i))) yield out
+
+; Where the first lines of two texts differ, for messages.
+fn tg_difference(borrow expected:Arr u8 _, borrow actual:Arr u8 _) -> Arr u8 _
+  = let a=tg_lines(expected) in let b=tg_lines(actual) in
+    let i=loop (i=0) while i<len(a) && i<len(b) && tx_equal(md_word(a,i),md_word(b,i)) next (i+1) yield i in
+    concat("line ",int_text(i+1),": expected ",if i<len(a) then tx_repr(tg_clip(md_word(a,i),300),true) else "<end>",
+      ", got ",if i<len(b) then tx_repr(tg_clip(md_word(b,i),300),true) else "<end>")
+effect fn tg_same(borrow expected:Arr u8 _, borrow actual:Arr u8 _, borrow what:Arr u8 _) -> unit
+  = dv_expect(tx_equal(expected,actual),concat(what," differs from the reference, ",tg_difference(expected,actual)))
+
+; Golden files, in golden/SUITE/ beside the drivers.
+effect fn tg_gunzip(borrow bytes:Arr u8 _) -> Arr u8 _
+  = if !(tx_byte(bytes,0)==31 && tx_byte(bytes,1)==139) then pt_copy(bytes) else
+    let expanded=gzip_decode(bytes,268435456) in let ok=dv_expect(expanded.ok,"cannot expand a gzip golden file") in
+    if expanded.ok then expanded.value else tx_empty()
+effect fn tg_golden_path(borrow tools:DvTools, borrow suite:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = pt_join(tools.here,concat("golden/",suite,"/",name))
+; A golden file, expanded; NAME.gz stands in for NAME.
+effect fn tg_golden(borrow tools:DvTools, borrow suite:Arr u8 _, borrow name:Arr u8 _) -> Arr u8 _
+  = let path=tg_golden_path(tools,suite,name) in
+    tg_gunzip(dv_read(if pf_kind(path,true)==8 then path else concat(path,".gz")))
+; The cases the suite's skip.txt lists (native differs from the reference; see
+; tests/porting/tooling-failures.md).
+effect fn tg_skips(borrow tools:DvTools, borrow suite:Arr u8 _) -> Arr Arr u8 _ _
+  = let path=tg_golden_path(tools,suite,"skip.txt") in
+    if pf_kind(path,true)!=8 then md_words() else
+    let lines=tg_lines(dv_read(path)) in
+    loop (i=0, out=md_words()) while i<len(lines)
+      next (i+1,let line=md_word(lines,i) in if len(line)==0 || tx_byte(line,0)==35 then out else push(out,line)) yield out
+
+type TgBundle = { names:Arr Arr u8 _ _, data:Arr Arr u8 _ _ }
+type TgUnpack = { at:i64, names:Arr Arr u8 _ _, data:Arr Arr u8 _ _ }
+fn tg_unpack_step(borrow bytes:Arr u8 _, move s:TgUnpack) -> TgUnpack
+  = let tab=tg_end(bytes,s.at,9) in let newline=tg_end(bytes,tab,10) in
+    let size=int_parse(pt_slice(bytes,tab+1,newline)) in
+    let count=if size.ok && size.value>=0 then size.value else len(bytes) in
+    TgUnpack { at=newline+1+count+1, names=push(s.names,pt_slice(bytes,s.at,tab)),
+      data=push(s.data,pt_slice(bytes,newline+1,newline+1+count)) }
+fn tg_bundle(borrow bytes:Arr u8 _) -> TgBundle
+  = let r=loop (s=TgUnpack { at=0, names=md_words(), data=md_words() }) while s.at<len(bytes)
+      next (tg_unpack_step(bytes,s)) yield s in TgBundle { names=r.names, data=r.data }
+fn tg_record(borrow b:TgBundle, borrow name:Arr u8 _) -> Arr u8 _
+  = let i=loop (i=0) while i<len(b.names) && !tx_equal(md_word(b.names,i),name) next (i+1) yield i in md_word(b.data,i)
+; Writes every record whose name starts with prefix under dir (at its full name).
+effect fn tg_extract(borrow b:TgBundle, borrow prefix:Arr u8 _, borrow dir:Arr u8 _) -> i64
+  = loop (i=0, n=0) while i<len(b.names)
+      next (i+1,let name=md_word(b.names,i) in if !str_starts(name,prefix) then n else
+        let path=pt_join(dir,name) in let made=pf_mkdirs(pt_parent(path)) in
+        let written=ru_write(path,md_word(b.data,i)) in n+1) yield n
+
+; Environments and commands. The compiler runs with only these variables:
+; PATH as given, NEO_ROOT, and HOME, TMPDIR and NEO_CACHE_DIR from the
+; driver's own environment when set.
+effect fn tg_keep(move out:Arr Arr u8 _ _, borrow name:Arr u8 _) -> Arr Arr u8 _ _
+  = let value=env_get(name) in if value.present then push(out,concat(name,"=",value.value)) else out
+effect fn tg_env(borrow tools:DvTools, borrow path:Arr u8 _) -> Arr Arr u8 _ _
+  = tg_keep(tg_keep(tg_keep(tg_a2(concat("PATH=",path),concat("NEO_ROOT=",tools.root)),"HOME"),"TMPDIR"),"NEO_CACHE_DIR")
+; An empty directory to use as PATH.
+effect fn tg_empty_path(borrow dir:Arr u8 _) -> Arr u8 _
+  = let path=pt_join(dir,"empty-path") in let made=fs_mkdir(path) in path
+; A directory of links to the toolchain (clang, ld, ld.lld, as) to use as PATH.
+effect fn tg_toolchain(borrow dir:Arr u8 _) -> Arr u8 _
+  = ru_tools(pt_join(dir,"toolchain"),push(push(push(push(md_words(),"clang"),"ld"),"ld.lld"),"as"))
+
+; Runs executable with args in directory with exactly environment, through
+; /bin/sh: umask MASK first when mask is not empty, and with blocks>=0 a file
+; size limit of that many 512-byte blocks with SIGXFSZ ignored.
+effect fn tg_run_input(borrow directory:Arr u8 _, borrow executable:Arr u8 _, borrow args:Arr Arr u8 _ _,
+                       borrow environment:Arr Arr u8 _ _, borrow mask:Arr u8 _, blocks:i64, borrow input:Arr u8 _, timeout:i64) -> NtProcess
+  = let script=concat(if len(mask)>0 then concat("umask ",mask,"; ") else "",
+      if blocks>=0 then concat("trap '' XFSZ; ulimit -f ",int_text(blocks),"; ") else "","cd \"$1\" && shift && exec \"$@\"") in
+    let base=push(push(push(push(push(md_words(),"-c"),script),"sh"),directory),executable) in
+    nt_process_input("/bin/sh",nt_extend(base,args,0),environment,input,timeout,16777216)
+effect fn tg_run(borrow directory:Arr u8 _, borrow executable:Arr u8 _, borrow args:Arr Arr u8 _ _,
+                 borrow environment:Arr Arr u8 _ _, borrow mask:Arr u8 _, blocks:i64) -> NtProcess
+  = tg_run_input(directory,executable,args,environment,mask,blocks,"",300000)
+; The compiler under test in directory with PATH=path.
+effect fn tg_neo(borrow tools:DvTools, borrow directory:Arr u8 _, borrow path:Arr u8 _, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = tg_run(directory,tools.compiler,args,tg_env(tools,path),"",-1)
+fn tg_status(borrow result:NtProcess) -> Arr u8 _
+  = concat("exit ",int_text(result.code),if result.timeout then " (timed out)" else "",", stdout ",
+      tx_repr(tg_clip(result.output,400),true),", stderr ",tx_repr(tg_clip(result.errors,400),true))
+
+; Directory snapshots: every entry under dir, sorted by relative path in byte
+; order, one line each (names escaped):
+;   NAME TAB d [TAB MODE]
+;   NAME TAB f [TAB MODE] TAB CONTENT   (escaped bytes, or SHA-256 when hashed)
+;   NAME TAB l TAB TARGET
+; MODE is octal permission bits, as stat prints them.
+effect fn tg_walk(borrow dir:Arr u8 _, borrow relative:Arr u8 _, move out:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = let entries=pf_directory(if len(relative)==0 then dir else pt_join(dir,relative)) in
+    loop (i=0, found=out) while i<len(entries)
+      next (i+1,let name=pf_dirent(entries,i).name in
+        if tx_equal(name,".") || tx_equal(name,"..") then found else
+        let child=if len(relative)==0 then pt_copy(name) else pt_join(relative,name) in
+        let added=tx_insert_word(found,child) in
+        if pf_kind(pt_join(dir,child),false)==4 then tg_walk(dir,child,added) else added) yield found
+effect fn tg_modes(borrow dir:Arr u8 _, borrow names:Arr Arr u8 _ _) -> Arr Arr u8 _ _
+  = if len(names)==0 then md_words() else
+    let script="cd \"$1\" && shift && for p; do stat -c %a -- \"$p\" 2>/dev/null || stat -f %Lp -- \"$p\"; done" in
+    let base=push(push(push(push(md_words(),"-c"),script),"sh"),dir) in
+    let run=nt_process("/bin/sh",nt_extend(base,names,0),bd_environment(),60000,1048576) in
+    let ok=dv_expect(run.ok && run.code==0,concat("stat failed: ",nt_diagnostic(run))) in tg_lines(run.output)
+effect fn tg_tree(borrow dir:Arr u8 _, modes:bool, hashed:bool) -> Arr u8 _
+  = let names=tg_walk(dir,"",md_words()) in
+    let shown=if modes then tg_modes(dir,names) else md_words() in
+    loop (i=0, out=tx_empty()) while i<len(names)
+      next (i+1,let name=md_word(names,i) in let path=pt_join(dir,name) in let kind=pf_kind(path,false) in
+        let mode=if modes then concat("\t",md_word(shown,i)) else tx_empty() in
+        concat(out,tg_escape(name),
+          if kind==10 then concat("\tl\t",tg_escape(fs_readlink(path).value))
+          else if kind==4 then concat("\td",mode)
+          else concat("\tf",mode,"\t",if hashed then tg_sha(dv_read(path)) else tg_escape(dv_read(path))),"\n")) yield out
+
+; Creates the entries of a snapshot without modes (directories, files with
+; their bytes, symbolic links) under dir.
+effect fn tg_build_tree(borrow dir:Arr u8 _, borrow snapshot:Arr u8 _) -> unit
+  = let lines=tg_lines(snapshot) in
+    let made=loop (i=0) while i<len(lines)
+      next (let fields=tg_split(md_word(lines,i),9) in let path=pt_join(dir,tg_unescape(md_word(fields,0))) in
+        let kind=md_word(fields,1) in
+        let parent=pf_mkdirs(pt_parent(path)) in
+        let done=if tx_equal(kind,"d") then let m=pf_mkdirs(path) in noop()
+          else if tx_equal(kind,"l") then ru_link(tg_unescape(md_word(fields,2)),path)
+          else ru_write(path,tg_unescape(md_word(fields,2))) in i+1) yield i in noop()
+
+; Regular files under dir modified after stamp (find -newer).
+effect fn tg_newer(borrow dir:Arr u8 _, borrow stamp:Arr u8 _) -> Arr u8 _
+  = ru_tool_output("find",push(push(push(push(push(md_words(),dir),"-type"),"f"),"-newer"),stamp))
+; A fresh stamp file, then a pause so that later writes are strictly newer.
+effect fn tg_stamp(borrow dir:Arr u8 _) -> Arr u8 _
+  = let stamp=pt_join(dir,"stamp") in let written=ru_write(stamp,"stamp") in
+    let touched=ru_tool_output("touch",push(md_words(),stamp)) in let paused=sleep_ms(50) in stamp
+
+; JSON in a canonical form: objects with keys sorted and compact
+; separators, strings re-quoted after decoding, numbers and literals as
+; written. Two JSON texts with equal values have equal canonical forms.
+fn tg_canon_items(borrow items:Arr Json _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(items)
+      next (i+1,check i>=0 && i<len(items) in concat(out,if i==0 then "" else ",",tg_canon(items[i]))) yield out
+fn tg_canon(borrow value:Json) -> Arr u8 _
+  = if value.kind==6 then
+      let keys=json_object_keys(value) in
+      let sorted=loop (i=0, out=md_words()) while i<len(keys) next (i+1,tx_insert_word(out,md_word(keys,i))) yield out in
+      let body=loop (i=0, out=tx_empty()) while i<len(sorted)
+        next (i+1,let key=md_word(sorted,i) in
+          concat(out,if i==0 then "" else ",",json_quote(key),":",tg_canon(json_get(value,key).value))) yield out in
+      concat("{",body,"}")
+    else if value.kind==5 then concat("[",tg_canon_items(json_array_values(value)),"]")
+    else if value.kind==4 then let text=json_text(value) in json_quote(if text.ok then text.value else tx_empty())
+    else str_trim(value.raw)
+; The canonical form of a JSON text, or "!" and the text when it is not JSON.
+fn tg_canon_text(borrow text:Arr u8 _) -> Arr u8 _
+  = let parsed=json_parse(text) in if parsed.ok then tg_canon(parsed.value) else concat("!",text)
+
+; The golden form of a `neoc modules ROOT FILE` dump (golden/modules_dump/,
+; golden/package_import/): with base written @T@,
+;   (sha256 HEX)                  of the whole dump
+;   every line, except each (decl @T@/root/...) line and the declaration
+;   line after it, which are left out, and at the end, for every such source
+;   in order of first appearance,
+;   (digest SOURCE SHA256 COUNT)  of the left-out lines and their number.
+; ROOT is base/root, so its runtime and stdlib declarations are digested.
+type TgCondense = { i:i64, total:Sha256Stream, kept:Arr u8 _, sources:Arr Arr u8 _ _, streams:Arr Sha256Stream _, counts:Arr i64 _ }
+fn tg_bucket(borrow c:TgCondense, borrow source:Arr u8 _) -> i64
+  = loop (k=0) while k<len(c.sources) && !tx_equal(md_word(c.sources,k),source) next (k+1) yield k
+fn tg_add_to(move c:TgCondense, k:i64, borrow source:Arr u8 _, borrow text:Arr u8 _) -> TgCondense
+  = let fresh=k>=len(c.sources) in
+    let streams=if fresh then push(c.streams,sha256_stream_start()) else c.streams in
+    let counts=if fresh then push(c.counts,0) else c.counts in
+    let sources=if fresh then push(c.sources,source) else c.sources in
+    if k<0 || k>=len(streams) || k>=len(counts) then c else
+    c with { streams=set(streams,k,sha256_stream_add(streams[k],text)), counts=set(counts,k,counts[k]+1), sources=sources }
+fn tg_condense_step(borrow lines:Arr Arr u8 _ _, move c:TgCondense) -> TgCondense
+  = let line=md_word(lines,c.i) in let following=md_word(lines,c.i+1) in
+    let total=sha256_stream_add(sha256_stream_add(c.total,line),"\n") in
+    if str_starts(line,"(decl @T@/root/") && c.i+1<len(lines) then
+      let source=md_word(tg_split(line,32),1) in let k=tg_bucket(c,source) in
+      let added=tg_add_to(c,k,source,concat(line,"\n",following,"\n")) in
+      added with { i=c.i+2, total=sha256_stream_add(sha256_stream_add(total,following),"\n") }
+    else c with { i=c.i+1, total=total, kept=concat(c.kept,line,"\n") }
+fn tg_condense(borrow dump:Arr u8 _, borrow base:Arr u8 _) -> Arr u8 _
+  = let raw=tg_lines(dump) in
+    let lines=loop (i=0, out=md_words()) while i<len(raw) next (i+1,push(out,nt_replace(md_word(raw,i),base,"@T@"))) yield out in
+    let start=TgCondense { i=0, total=sha256_stream_start(), kept=tx_empty(), sources=md_words(),
+      streams=arr(i in 0..0) sha256_stream_start(), counts=tx_ints() } in
+    let c=loop (c=start) while c.i<len(lines) next (tg_condense_step(lines,c)) yield c in
+    let digests=loop (k=0, out=tx_empty()) while k<len(c.sources) && k<len(c.streams)
+      next (k+1,check k>=0 && k<len(c.streams) in
+        concat(out,"(digest ",md_word(c.sources,k)," ",tx_hex_bytes(tx_empty(),sha256_stream_finish(c.streams[k]))," ",
+          int_text(tx_at(c.counts,k)),")\n")) yield out in
+    concat("(sha256 ",tx_hex_bytes(tx_empty(),sha256_stream_finish(c.total)),")\n",c.kept,digests)
+; Runs `neoc modules base/root ENTRY --target x86_64-unknown-linux-gnu` and
+; returns "" when its golden form is expected, or what differs.
+effect fn tg_modules(borrow tools:DvTools, borrow base:Arr u8 _, borrow entry:Arr u8 _, borrow expected:Arr u8 _) -> Arr u8 _
+  = let args=push(push(push(push(push(md_words(),"modules"),pt_join(base,"root")),entry),"--target"),"x86_64-unknown-linux-gnu") in
+    let run=nt_process(tools.compiler,args,tg_env(tools,"/nonexistent"),120000,67108864) in
+    if !run.ok || run.code!=0 || run.overflow then concat("neoc modules failed: ",tg_status(run)) else
+    let actual=tg_condense(run.output,base) in
+    if tx_equal(actual,expected) then tx_empty() else tg_difference(expected,actual)

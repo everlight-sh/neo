@@ -1,0 +1,8 @@
+check export-refinement.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== export-refinement.neo
+export fn exported(x:i64{x>0}) -> i64{result>0} = x
+fn main() -> i64 = exported(2)

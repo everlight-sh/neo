@@ -1,0 +1,10 @@
+check record-projection-distinct.neo
+reference-exit 1
+reference-ok false
+reference-unproven f 2:65 bounds 0 <= 0 && 0 < len(b.bytes)
+exit 1
+stdout (unproven <dir>/record-projection-distinct.neo 2:65 bounds)\n
+=== record-projection-distinct.neo
+type Text = { bytes:Arr u8 _ }
+fn f(a:Text,b:Text) -> i64 = check len(a.bytes)>0 in i64(b.bytes[0])
+fn main() -> i64 = f(Text { bytes="hi" },Text { bytes="" })

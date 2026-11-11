@@ -1,0 +1,8 @@
+check range-symbolic.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:30 range 0 <= n
+exit 1
+stdout (unproven <dir>/range-symbolic.neo 1:30 range)\n
+=== range-symbolic.neo
+fn main(n:i64) -> Arr u8 _ = arr(i in 0..n) u8(i)

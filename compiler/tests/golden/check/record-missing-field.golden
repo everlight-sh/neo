@@ -1,0 +1,9 @@
+check record-missing-field.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-missing-field.neo 2:26 __m42e357aacd18fe6d_Point literal must set exactly the fields ['x', 'y']
+exit 1
+stdout (error <dir>/record-missing-field.neo 2:26 __m42e357aacd18fe6d_Point literal must set exactly the fields ['x', 'y'])\n
+=== record-missing-field.neo
+type Point = { x:i64,y:i64 }
+fn main() -> i64 = let p=Point { x=1 } in p.x

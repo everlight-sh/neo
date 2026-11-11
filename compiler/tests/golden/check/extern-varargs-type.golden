@@ -1,0 +1,9 @@
+check extern-varargs-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/extern-varargs-type.neo 2:36 variadic arguments must use ABI scalar types (promote small integers to i32)
+exit 1
+stdout (error <dir>/extern-varargs-type.neo 2:36 variadic arguments must use ABI scalar types (promote small integers to i32))\n
+=== extern-varargs-type.neo
+extern fn foreign(x:i64, ...) -> unit
+effect(unsafe) fn main() -> unit = foreign(1,true)

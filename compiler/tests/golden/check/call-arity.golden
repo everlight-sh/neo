@@ -1,0 +1,9 @@
+check call-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/call-arity.neo 2:20 __m21783696bd0f61ce_f takes 1 args
+exit 1
+stdout (error <dir>/call-arity.neo 2:20 __m21783696bd0f61ce_f takes 1 args)\n
+=== call-arity.neo
+fn f(x:i64) -> i64 = x
+fn main() -> i64 = f()

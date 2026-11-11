@@ -1,0 +1,9 @@
+check shared-size-mismatch.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:27 size len('x') == n
+exit 1
+stdout (unproven <dir>/shared-size-mismatch.neo 2:27 size)\n
+=== shared-size-mismatch.neo
+fn f(a:Arr u8 n,b:Arr u8 n) -> i64 = n
+fn main() -> i64 = f("hi","x")

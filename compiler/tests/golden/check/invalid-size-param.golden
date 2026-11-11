@@ -1,0 +1,9 @@
+check invalid-size-param.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/invalid-size-param.neo 1:6 array parameter sizes must be variables
+exit 1
+stdout (error <dir>/invalid-size-param.neo 1:6 array parameter sizes must be variables)\n
+=== invalid-size-param.neo
+fn f(a:Arr u8 (1)) -> i64 = len(a)
+fn main() -> i64 = 0

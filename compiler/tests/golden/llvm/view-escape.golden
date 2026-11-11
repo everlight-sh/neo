@@ -1,0 +1,6 @@
+exit 0
+stdout a
+stderr
+=== input.neo
+effect(unsafe) fn copy() -> Arr u8 (1) = let p=stack_alloc(1) in let init=store_u8(p,0,'a') in view(p,1)
+effect(unsafe) fn main() -> Arr u8 _ = copy()

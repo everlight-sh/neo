@@ -1,0 +1,8 @@
+check loop-invariant-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/loop-invariant-type.neo 1:31 invariant must be bool
+exit 1
+stdout (error <dir>/loop-invariant-type.neo 1:31 invariant must be bool)\n
+=== loop-invariant-type.neo
+fn main() -> i64 = loop(i:i64{1}=0) while i<4 next(i+1) yield i

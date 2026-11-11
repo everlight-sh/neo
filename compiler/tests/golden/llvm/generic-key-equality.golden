@@ -1,0 +1,6 @@
+exit 0
+stdout 1\n
+stderr
+=== input.neo
+fn equals<T>(a:T,b:T) -> bool = key_equal(a,b)
+fn main() -> i64 = if equals(u16(42),u16(42)) && !equals(true,false) then 1 else 0

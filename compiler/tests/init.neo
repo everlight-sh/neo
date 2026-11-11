@@ -1,0 +1,108 @@
+; Replaces compiler/tests/init_differential.py. neo init runs with an empty
+; PATH under umask 027 on Sample_app-2, ./nested//more/Example/, an existing
+; empty directory with a Unicode name, a symlink to a directory, -- -dash and
+; "." in an empty working directory. The tree left behind (names, kinds,
+; modes, file bytes and link targets, including the refused calls and one
+; winner of a race) must equal the Python reference's, frozen in
+; golden/init/tree.txt. Live checks: each success prints the resolved path;
+; a directory that is not empty, a regular file and a dangling symlink are
+; refused without changes; a 50-byte file size limit makes the manifest write
+; fail and rolls the project back; of two concurrent inits of one path
+; exactly one succeeds; a usage error exits 2; the starter project runs and
+; prints Hello, Neo! with only the toolchain on PATH.
+import "std:fs"
+import "std:io"
+import "std:process"
+import "std:time"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/project_fs.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+effect fn in_init(borrow tools:DvTools, borrow cwd:Arr u8 _, borrow empty:Arr u8 _, borrow args:Arr Arr u8 _ _) -> NtProcess
+  = tg_run(cwd,tools.compiler,nt_extend(tg_a1("init"),args,0),tg_env(tools,empty),"027",-1)
+
+effect fn in_created(borrow tools:DvTools, borrow cwd:Arr u8 _, borrow empty:Arr u8 _, borrow args:Arr Arr u8 _ _, borrow path:Arr u8 _) -> unit
+  = let run=in_init(tools,cwd,empty,args) in
+    let expected=concat("Created ",pt_realpath(pt_join(cwd,path)),"\n") in
+    dv_expect(run.ok && run.code==0 && len(run.errors)==0 && tx_equal(run.output,expected),
+      concat("neo init ",path,": expected ",tx_repr(expected,true),", got ",tg_status(run)))
+
+effect fn in_refused(borrow tools:DvTools, borrow root:Arr u8 _, borrow empty:Arr u8 _, borrow name:Arr u8 _, needs_empty:bool) -> unit
+  = let before=tg_tree(root,true,false) in
+    let run=in_init(tools,root,empty,tg_a1(name)) in
+    let a=dv_expect(run.ok && run.code==1 && len(run.output)==0 && (!needs_empty || ru_contains(run.errors,"init requires an empty directory")),
+      concat("neo init ",name," was not refused: ",tg_status(run))) in
+    tg_same(before,tg_tree(root,true,false),concat("the tree after the refused neo init ",name))
+
+effect fn in_chmod(borrow mode:Arr u8 _, borrow path:Arr u8 _) -> unit
+  = let changed=ru_tool_output("chmod",tg_a2(mode,path)) in noop()
+
+; Sets the soft RLIMIT_FSIZE that children started next inherit; returns the old one.
+effect fn in_file_limit(borrow tools:DvTools, soft:i64) -> i64
+  = let linux=dv_linux(tools) in let arm=ru_aarch64(tools) in
+    let get=if !linux then 194 else if arm then 163 else 97 in let put=if !linux then 195 else if arm then 164 else 160 in
+    let limits=stack_alloc(16) in let read=syscall6(get,1,ptr_to_i64(limits),0,0,0,0) in
+    let ok=dv_expect(read==0,"getrlimit failed") in let old=load_i64(limits,0) in
+    let stored=store_i64(limits,0,soft) in let set=syscall6(put,1,ptr_to_i64(limits),0,0,0,0) in
+    let changed=dv_expect(set==0,"setrlimit failed") in old
+
+effect fn in_wait(child:Process) -> NtProcess
+  = let end=deadline_after(300000) in
+    let empty=NtProcess { output=tx_empty(),errors=tx_empty(),code=127,ok=false,timeout=false,overflow=false,pending=true } in
+    loop (r=empty) while r.pending next (nt_process_step(child,r,end.value,1048576)) yield r
+
+fn in_shell(borrow root:Arr u8 _, borrow compiler:Arr u8 _, borrow name:Arr u8 _) -> Arr Arr u8 _ _
+  = push(push(push(push(push(push(push(md_words(),"-c"),"trap '' XFSZ; umask 027; cd \"$1\" && shift && exec \"$@\""),"sh"),root),compiler),"init"),name)
+
+; neo init under a 50-byte file size limit: src/main.neo fits, neo.toml does not.
+effect fn in_rollback(borrow tools:DvTools, borrow root:Arr u8 _, borrow empty:Arr u8 _) -> unit
+  = let old=in_file_limit(tools,50) in
+    using child=process_start("/bin/sh",in_shell(root,tools.compiler,"rollback"),tg_env(tools,empty)) in
+    let restored=in_file_limit(tools,old) in let run=in_wait(child) in
+    let a=dv_expect(run.ok && run.code==1 && ru_contains(run.errors,"neo.toml") && ru_contains(run.errors,"write failed"),
+      concat("a failed manifest write was not reported: ",tg_status(run))) in
+    dv_expect(pf_kind(pt_join(root,"rollback"),false)<0,"a failed neo init left the project directory behind")
+
+effect fn in_race(borrow tools:DvTools, borrow root:Arr u8 _, borrow empty:Arr u8 _) -> unit
+  = let environment=tg_env(tools,empty) in
+    using first=process_start("/bin/sh",in_shell(root,tools.compiler,"race"),environment) in
+    using second=process_start("/bin/sh",in_shell(root,tools.compiler,"race"),environment) in
+    let a=in_wait(first) in let b=in_wait(second) in
+    dv_expect(a.ok && b.ok && ((a.code==0 && b.code==1) || (a.code==1 && b.code==0)),
+      concat("two concurrent inits of one path: ",tg_status(a)," and ",tg_status(b)))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=pt_realpath(dv_temp("init-golden")) in let empty=tg_empty_path(dir) in
+    let root=pt_join(dir,"tree") in let made=fs_mkdir(root) in
+    let unicode=pt_join(root,"42 Caf\xc3\xa9+\xf0\x9f\xa6\x8a") in let target=pt_join(root,"Actual Target") in
+    let a=fs_mkdir(unicode) in let b=fs_mkdir(target) in let c=in_chmod("755",unicode) in let d=in_chmod("755",target) in
+    let e=ru_link("Actual Target",pt_join(root,"alias")) in
+    let f=in_created(tools,root,empty,tg_a1("Sample_app-2"),"Sample_app-2") in
+    let g=in_created(tools,root,empty,tg_a1("./nested//more/Example/"),"nested/more/Example") in
+    let h=in_created(tools,root,empty,tg_a1("42 Caf\xc3\xa9+\xf0\x9f\xa6\x8a"),"42 Caf\xc3\xa9+\xf0\x9f\xa6\x8a") in
+    let i=in_created(tools,root,empty,tg_a1("alias"),"alias") in
+    let j=in_created(tools,root,empty,tg_a2("--","-dash"),"-dash") in
+    let cwd=pt_join(root,"cwd") in let occupied=pt_join(root,"occupied") in let regular=pt_join(root,"regular") in
+    let k=fs_mkdir(cwd) in let l=fs_mkdir(occupied) in let m=in_chmod("755",cwd) in let n=in_chmod("755",occupied) in
+    let o=ru_write(pt_join(occupied,".keep"),"keep me") in let p=ru_write(regular,"keep me too") in
+    let q=in_chmod("644",pt_join(occupied,".keep")) in let r=in_chmod("644",regular) in
+    let s=ru_link("missing",pt_join(root,"dangling")) in
+    let t=in_created(tools,cwd,empty,tg_a1("."),".") in
+    let u=in_refused(tools,root,empty,"Sample_app-2",true) in let v=in_refused(tools,root,empty,"occupied",true) in
+    let w=in_refused(tools,root,empty,"regular",false) in let x=in_refused(tools,root,empty,"dangling",false) in
+    let y=in_rollback(tools,root,empty) in
+    let z=in_race(tools,root,empty) in
+    let frozen=tg_same(tg_golden(tools,"init","tree.txt"),tg_tree(root,true,false),"the tree neo init left") in
+    let usage=loop (attempt=0) while attempt<2
+      next (let run=in_init(tools,root,empty,if attempt==0 then md_words() else tg_a2("first","second")) in
+        let checked=dv_expect(run.ok && run.code==2 && ru_contains(run.errors,"neo init PATH"),concat("a neo init usage error: ",tg_status(run))) in attempt+1) yield attempt in
+    let toolchain=tg_toolchain(dir) in
+    let greeting=tg_neo(tools,pt_join(root,"Sample_app-2"),toolchain,tg_a1("run")) in
+    let ran=dv_expect(greeting.ok && greeting.code==0 && tx_equal(greeting.output,"Hello, Neo!\n") && len(greeting.errors)==0,
+      concat("the starter project: ",tg_status(greeting))) in
+    let cleaned=dv_clean(dir) in let shown=print_out("init OK\n") in noop()

@@ -1,0 +1,9 @@
+check record-projection.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-projection.neo
+type Text = { bytes:Arr u8 _ }
+fn f(t:Text) -> i64 = if len(t.bytes)>0 then i64(t.bytes[0]) else 0
+fn main() -> i64 = f(Text { bytes="hi" })

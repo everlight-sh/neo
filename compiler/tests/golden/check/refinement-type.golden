@@ -1,0 +1,8 @@
+check refinement-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/refinement-type.neo 1:15 refinement must be bool
+exit 1
+stdout (error <dir>/refinement-type.neo 1:15 refinement must be bool)\n
+=== refinement-type.neo
+fn main(x:i64{1}) -> i64 = x

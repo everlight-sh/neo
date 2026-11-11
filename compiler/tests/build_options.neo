@@ -1,0 +1,123 @@
+; Replaces compiler/tests/build_options_differential.py, whose checks were
+; already properties of each compiler rather than comparisons of outputs. The
+; argument picks the part (each builds with only the toolchain on PATH and
+; NEO_OPT_LEVEL=0):
+;   report        neo build --report at -O0 and -O2: ok, llvm-ir backend, the
+;                 level, binary and source SHA-256 digests, positive stage and
+;                 compile/link timings, LLVM pass remarks, and the program runs;
+;   experimental  bounds, division and precondition proofs fail a build and
+;                 pass with --allow-unproven (the programs then run), while type,
+;                 effect and ownership errors still fail with --allow-unproven;
+;   prepared      --library-cache/--library-root: a cold build misses, a warm
+;                 one hits with an identical binary, another application reuses
+;                 the object, the cached objects hold no application code, a
+;                 corrupt object is rebuilt under the same key, and a changed
+;                 dependency gets a new key.
+import "std:fs"
+import "std:io"
+import "std:json"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type BoTools = { tools:DvTools, path:Arr u8 _ }
+
+effect fn bo_build(borrow t:BoTools, borrow source:Arr u8 _, borrow binary:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> NtProcess
+  = let args=nt_extend(push(push(push(push(push(md_words(),"build"),source),"-o"),binary),"--dev"),flags,0) in
+    tg_run(t.tools.root,t.tools.compiler,args,push(tg_env(t.tools,t.path),"NEO_OPT_LEVEL=0"),"",-1)
+effect fn bo_built(borrow t:BoTools, borrow source:Arr u8 _, borrow binary:Arr u8 _, borrow flags:Arr Arr u8 _ _) -> Arr u8 _
+  = let run=bo_build(t,source,binary,flags) in
+    let ok=dv_expect(run.ok && run.code==0,concat("build of ",source," failed: ",tg_status(run))) in run.output
+effect fn bo_execute(borrow binary:Arr u8 _, borrow arg:Arr u8 _) -> Arr u8 _
+  = let run=nt_process(binary,tg_a1(arg),tg_a1("PATH=/nonexistent"),30000,1048576) in
+    let ok=dv_expect(run.ok && run.code==0,concat(binary," ",arg,": ",tg_status(run))) in run.output
+
+fn bo_at(borrow value:Json, borrow name:Arr u8 _) -> Json = json_get(value,name).value
+fn bo_text(borrow value:Json) -> Arr u8 _ = let text=json_text(value) in if text.ok then text.value else tx_empty()
+fn bo_positive(borrow value:Json) -> bool = let number=json_float(value) in number.ok && number.value>0.0
+effect fn bo_json(borrow text:Arr u8 _) -> Json
+  = let parsed=json_parse(text) in let ok=dv_expect(parsed.ok,concat("the report is not JSON: ",tg_clip(text,300))) in parsed.value
+
+effect fn bo_report(borrow t:BoTools, borrow dir:Arr u8 _) -> unit
+  = let source=pt_join(dir,"report.neo") in let a=ru_write(source,"fn main(n:i64)->i64=2*n+1\n") in
+    let binary=pt_join(dir,"report-bin") in
+    let levels=loop (level=0) while level<=2
+      next (let report=bo_json(bo_built(t,source,binary,tg_a3("--opt-level",int_text(level),"--report"))) in
+        let stages=bo_at(report,"build_stages") in let build=bo_at(report,"build") in let optimization=bo_at(report,"optimization") in
+        let named=json_int(bo_at(optimization,"level")) in
+        let b=dv_expect(tx_equal(bo_at(report,"ok").raw,"true") && tx_equal(bo_text(bo_at(report,"backend")),"llvm-ir"),"the report is not ok with the llvm-ir backend") in
+        let c=dv_expect(named.ok && named.value==level,concat("the report does not name optimization level ",int_text(level))) in
+        let d=dv_expect(tx_equal(bo_text(bo_at(report,"binary_sha256")),tg_sha(dv_read(binary))),"binary_sha256 is not the binary's digest") in
+        let e=dv_expect(tx_equal(bo_text(bo_at(bo_at(report,"sources"),source)),tg_sha(dv_read(source))),"the report lacks the source's digest") in
+        let f=dv_expect(bo_positive(bo_at(stages,"parse_seconds")) && bo_positive(bo_at(stages,"check_seconds")) && bo_positive(bo_at(stages,"lower_seconds")),
+          "a build stage timing is not positive") in
+        let g=dv_expect(bo_positive(bo_at(build,"compile_seconds")) && bo_positive(bo_at(build,"link_seconds")),"compile or link timing is not positive") in
+        let h=dv_expect(bo_at(optimization,"llvm_passes").kind==6,"the report has no llvm_passes object") in
+        let i=dv_expect(tx_equal(bo_execute(binary,"21"),"43\n"),"the report program did not print 43") in level+2) yield level in
+    noop()
+
+effect fn bo_unproven(borrow t:BoTools, borrow dir:Arr u8 _, borrow name:Arr u8 _, borrow text:Arr u8 _, borrow arg:Arr u8 _, borrow expected:Arr u8 _) -> unit
+  = let source=pt_join(dir,concat(name,".neo")) in let binary=pt_join(dir,name) in
+    let a=ru_write(source,concat(text,"\n")) in
+    let refused=bo_build(t,source,binary,md_words()) in
+    let b=dv_expect(refused.ok && refused.code!=0,concat("the unproven ",name," program built without --allow-unproven")) in
+    let built=bo_built(t,source,binary,tg_a1("--allow-unproven")) in
+    dv_expect(tx_equal(bo_execute(binary,arg),expected),concat("the unproven ",name," program printed the wrong value"))
+
+effect fn bo_rejected(borrow t:BoTools, borrow dir:Arr u8 _, borrow text:Arr u8 _) -> unit
+  = let source=pt_join(dir,"invalid.neo") in let a=ru_write(source,concat(text,"\n")) in
+    let run=bo_build(t,source,pt_join(dir,"invalid"),tg_a1("--allow-unproven")) in
+    dv_expect(run.ok && run.code!=0,concat("--allow-unproven accepted ",tx_repr(text,true)))
+
+effect fn bo_experimental(borrow t:BoTools, borrow dir:Arr u8 _) -> unit
+  = let a=bo_unproven(t,dir,"bounds","fn main(n:i64)->i64=i64(\"abc\"[n])","1","98\n") in
+    let b=bo_unproven(t,dir,"division","fn main(n:i64)->i64=42/n","2","21\n") in
+    let c=bo_unproven(t,dir,"precondition","fn f(n:i64{n>0})->i64=n\nfn main(n:i64)->i64=f(n)","9","9\n") in
+    let d=bo_rejected(t,dir,"fn main()->i64=true") in
+    let e=bo_rejected(t,dir,"import \"std:io\"\neffect(net) fn main()->i64=print_out(\"bad\").value") in
+    bo_rejected(t,dir,concat("resource type Item={count:i64} drop dispose\neffect fn dispose(move item:Item)->unit=noop()\n",
+      "effect fn main()->i64=using item=Item {count=1} in let done=dispose(item) in item.count"))
+
+type BoCached = { libraries:Json, digest:Arr u8 _ }
+effect fn bo_cached(borrow t:BoTools, borrow base:Arr u8 _, borrow source:Arr u8 _, borrow expected:Arr u8 _) -> BoCached
+  = let binary=concat(pt_slice(source,0,len(source)-4),".out") in
+    let flags=push(push(push(push(push(md_words(),"--report"),"--library-cache"),pt_join(base,"objects")),"--library-root"),pt_join(base,"dep.neo")) in
+    let report=bo_json(bo_built(t,source,binary,flags)) in
+    let a=dv_expect(tx_equal(bo_execute(binary,"41"),expected),concat(source," printed the wrong value")) in
+    BoCached { libraries=bo_at(report,"native_libraries"), digest=bo_text(bo_at(report,"binary_sha256")) }
+fn bo_cache(borrow c:BoCached) -> Arr u8 _ = bo_text(bo_at(c.libraries,"cache"))
+fn bo_key(borrow c:BoCached) -> Arr u8 _ = bo_text(bo_at(c.libraries,"key"))
+
+effect fn bo_prepared(borrow t:BoTools, borrow base:Arr u8 _) -> unit
+  = let a=ru_write(pt_join(base,"dep.neo"),"fn inc(n:i64)->i64=n+1\n") in
+    let one=pt_join(base,"one.neo") in let two=pt_join(base,"two.neo") in
+    let b=ru_write(one,"import \"dep.neo\"\nfn main(n:i64)->i64=inc(n)\n") in
+    let c=ru_write(two,concat("import \"dep.neo\"\nfn main(n:i64)->i64=inc(n)+delta()\n",
+      "fn delta()->i64=10\nfn marker()->Arr u8 _=\"APPLICATION_SENTINEL\"\n")) in
+    let first=bo_cached(t,base,one,"42\n") in let again=bo_cached(t,base,one,"42\n") in let across=bo_cached(t,base,two,"52\n") in
+    let d=dv_expect(tx_equal(first.digest,again.digest),"a warm prepared build produced a different binary") in
+    let e=dv_expect(tx_equal(bo_cache(first),"miss") && tx_equal(bo_cache(again),"hit") && tx_equal(bo_cache(across),"hit"),
+      concat("prepared caches: ",bo_cache(first),", ",bo_cache(again),", ",bo_cache(across))) in
+    let f=dv_expect(len(bo_key(first))>0 && tx_equal(bo_key(first),bo_key(across)),"another application used a different library key") in
+    let artifacts=bo_text(bo_at(first.libraries,"directory")) in
+    let g=dv_expect(!ru_contains(dv_read(pt_join(artifacts,"library.ll")),"APPLICATION_SENTINEL") &&
+      !ru_contains(dv_read(pt_join(artifacts,"library.o")),"APPLICATION_SENTINEL"),"the prepared library holds application code") in
+    let h=ru_write(pt_join(artifacts,"library.o"),"corrupt") in
+    let repaired=bo_cached(t,base,two,"52\n") in
+    let i=dv_expect(tx_equal(bo_cache(repaired),"miss") && tx_equal(bo_key(repaired),bo_key(first)),"a corrupt prepared object was not rebuilt under its key") in
+    let j=ru_write(pt_join(base,"dep.neo"),"fn inc(n:i64)->i64=n+2\n") in
+    let changed=bo_cached(t,base,two,"53\n") in
+    dv_expect(tx_equal(bo_cache(changed),"miss") && !tx_equal(bo_key(changed),bo_key(first)),"a changed dependency kept its library key")
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let part=cli_arg(1).value in let dir=pt_realpath(dv_temp("build-options")) in
+    let t=BoTools { tools=tools, path=tg_toolchain(dir) } in
+    let ran=if tx_equal(part,"report") then bo_report(t,dir)
+      else if tx_equal(part,"experimental") then bo_experimental(t,dir)
+      else if tx_equal(part,"prepared") then bo_prepared(t,dir)
+      else dv_fail("usage: build_options.neo report|experimental|prepared") in
+    let cleaned=dv_clean(dir) in let shown=print_out(concat("build options ",part," OK\n")) in noop()

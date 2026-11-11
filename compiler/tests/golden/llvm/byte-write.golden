@@ -1,0 +1,6 @@
+args 8
+exit 0
+stdout abcdefghia\x00\x01\x02\x03\x04\x05\x06\x07
+stderr
+=== input.neo
+fn main(width:i64) -> Arr u8 _ = let a=concat("ab","cdefghi") in let b=byte_write_le(a,1,506097522914230528,width) in concat(a,b)

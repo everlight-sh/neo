@@ -1,0 +1,11 @@
+check raw-memory-transitive.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/raw-memory-transitive.neo 3:31 missing effect capabilities: unsafe
+reference-error type <dir>/raw-memory-transitive.neo 3:31 missing effect capabilities: unsafe
+exit 1
+stdout (error <dir>/raw-memory-transitive.neo 3:31 missing effect capabilities: unsafe)\n
+=== raw-memory-transitive.neo
+effect fn leaf() -> i64 = load_i64(null(),0)
+effect fn middle() -> i64 = leaf()
+effect(fs) fn main() -> i64 = middle()

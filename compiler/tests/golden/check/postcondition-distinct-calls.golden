@@ -1,0 +1,9 @@
+check postcondition-distinct-calls.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:60 bounds 0 <= b && b < len('hi')
+exit 1
+stdout (unproven <dir>/postcondition-distinct-calls.neo 2:60 bounds)\n
+=== postcondition-distinct-calls.neo
+fn idx(x:i64) -> i64{result==x} = x
+fn main() -> i64 = let a=idx(0) in let b=idx(2) in i64("hi"[b])

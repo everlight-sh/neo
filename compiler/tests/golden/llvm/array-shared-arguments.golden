@@ -1,0 +1,6 @@
+exit 0
+stdout abab
+stderr
+=== input.neo
+fn join(a:Arr u8 n,b:Arr u8 n) -> Arr u8 (2*n) = concat(a,b)
+fn main() -> Arr u8 _ = let a=concat("a","b") in join(a,a)

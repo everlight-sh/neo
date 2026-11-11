@@ -1,0 +1,8 @@
+check postcondition.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== postcondition.neo
+fn index() -> i64{result==1} = 1
+fn main() -> i64 = let i=index() in i64("hi"[i])

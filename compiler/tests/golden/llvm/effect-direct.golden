@@ -1,0 +1,7 @@
+exit 0
+stdout 7\n
+stderr
+=== input.neo
+effect(fs) fn first() -> i64 = 4
+effect fn second() -> i64 = first()+3
+effect(fs) fn main() -> i64 = second()

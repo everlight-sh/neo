@@ -1,0 +1,8 @@
+check spawn-thread-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/spawn-thread-type.neo 1:35 spawn_thread expects (ptr, ptr)
+exit 1
+stdout (error <dir>/spawn-thread-type.neo 1:35 spawn_thread expects (ptr, ptr))\n
+=== spawn-thread-type.neo
+effect(unsafe) fn main() -> i64 = spawn_thread(null(),0)

@@ -1,0 +1,7 @@
+check bool.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== bool.neo
+fn main(x:i64) -> i64 = if !(x <= 0) && x != 7 || false then 1 else 0

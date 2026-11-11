@@ -1,0 +1,6 @@
+args -1
+exit 3
+stdout
+stderr neo: precondition failed: (x >= 0)\n
+=== input.neo
+fn main(x:i64{x>=0,x<2}) -> i64 = i64("hi"[x])

@@ -1,0 +1,5 @@
+exit 0
+stdout 60\n
+stderr
+=== input.neo
+effect(unsafe) fn main() -> i64 = let p=stack_alloc(16) in let init=atomic_store_i64(p,0,18) in let narrow=atomic_store_i32(p,8,i32(7)) in let fail=atomic_compare_exchange_i64(p,0,99,13) in let ok=atomic_compare_exchange_i64(p,0,18,17) in fail+ok+atomic_load_i64(p,0)+i64(atomic_load_i32(p,8))

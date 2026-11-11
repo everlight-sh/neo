@@ -1,0 +1,7 @@
+check array-expression.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== array-expression.neo
+fn main() -> i64 = let a="hi" in len(a)

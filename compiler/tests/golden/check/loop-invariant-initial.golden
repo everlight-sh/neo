@@ -1,0 +1,8 @@
+check loop-invariant-initial.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:37 invariant (i >= 0) initially (i := -1)
+exit 1
+stdout (unproven <dir>/loop-invariant-initial.neo 1:37 invariant)\n
+=== loop-invariant-initial.neo
+fn main() -> i64 = loop(i:i64{i>=0}=-1) while i<4 next(i+1) yield i

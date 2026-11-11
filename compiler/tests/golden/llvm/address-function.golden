@@ -1,0 +1,6 @@
+exit 0
+stdout 1\n
+stderr
+=== input.neo
+fn f() -> i64 = 42
+effect(unsafe) fn main() -> i64 = if addr(f)==null() then 0 else 1

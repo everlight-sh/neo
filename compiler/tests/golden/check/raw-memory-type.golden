@@ -1,0 +1,8 @@
+check raw-memory-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/raw-memory-type.neo 1:35 load_i64 expects (ptr, i64)
+exit 1
+stdout (error <dir>/raw-memory-type.neo 1:35 load_i64 expects (ptr, i64))\n
+=== raw-memory-type.neo
+effect(unsafe) fn main() -> i64 = load_i64(0,0)

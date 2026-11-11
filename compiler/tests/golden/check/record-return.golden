@@ -1,0 +1,9 @@
+check record-return.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-return.neo
+type Point = { x:i64 }
+fn f() -> Point = Point { x=1 }
+fn main() -> i64 = f().x

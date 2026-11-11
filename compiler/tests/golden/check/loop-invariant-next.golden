@@ -1,0 +1,8 @@
+check loop-invariant-next.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:56 invariant (i >= 0) preserved (i := (i - 1))
+exit 1
+stdout (unproven <dir>/loop-invariant-next.neo 1:56 invariant)\n
+=== loop-invariant-next.neo
+fn main() -> i64 = loop(i:i64{i>=0}=0) while i<4 next(i-1) yield i

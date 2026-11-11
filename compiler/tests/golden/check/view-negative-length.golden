@@ -1,0 +1,8 @@
+check view-negative-length.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:39 size view length >= 0
+exit 1
+stdout (unproven <dir>/view-negative-length.neo 1:39 size)\n
+=== view-negative-length.neo
+effect(unsafe) fn main() -> i64 = len(view(null(),-1))

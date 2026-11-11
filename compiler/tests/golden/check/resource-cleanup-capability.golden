@@ -1,0 +1,15 @@
+check resource-cleanup-capability.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/resource-cleanup-capability.neo 7:31 missing effect capabilities: process
+reference-error type <dir>/resource-cleanup-capability.neo 7:31 missing effect capabilities: process
+exit 1
+stdout (error <dir>/resource-cleanup-capability.neo 7:31 missing effect capabilities: process)\n
+=== resource-cleanup-capability.neo
+resource type Owner = {value:i64} drop dispose
+fn make() -> Owner = Owner {value=42}
+effect(process) fn dispose(x:Owner) -> unit = noop()
+fn observe(x:Owner) -> i64 = x.value
+effect(process) fn take(move x:Owner) -> i64 = observe(x)
+effect fn work() -> i64 = using x=make() in observe(x)
+effect(fs) fn main() -> i64 = work()

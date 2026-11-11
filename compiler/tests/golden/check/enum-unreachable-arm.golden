@@ -1,0 +1,9 @@
+check enum-unreachable-arm.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/enum-unreachable-arm.neo 2:20 unreachable arm after wildcard
+exit 1
+stdout (error <dir>/enum-unreachable-arm.neo 2:20 unreachable arm after wildcard)\n
+=== enum-unreachable-arm.neo
+enum Choice { A, B }
+fn main() -> i64 = match A() { _ => 0, A => 1 }

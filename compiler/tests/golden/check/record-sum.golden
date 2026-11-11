@@ -1,0 +1,8 @@
+check record-sum.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-sum.neo
+type Point = { x:i64,y:f64 }
+fn main() -> i64 = let p=sum(i in 0..3) Point { x=i,y=f64(i) } in p.x

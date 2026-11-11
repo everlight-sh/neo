@@ -1,0 +1,8 @@
+check record.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record.neo
+type Point = { x:i64 }
+fn main() -> i64 = let p=Point { x=1 } in p.x

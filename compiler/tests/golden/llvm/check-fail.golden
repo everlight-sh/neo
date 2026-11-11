@@ -1,0 +1,6 @@
+args -1
+exit 1
+stdout
+stderr neo: trap: check failed: ((x >= 0) && (x < 2)) at 1:25\n
+=== input.neo
+fn main(x:i64) -> i64 = check x>=0 && x<2 in i64("hi"[x])

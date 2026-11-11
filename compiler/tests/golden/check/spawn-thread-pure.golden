@@ -1,0 +1,8 @@
+check spawn-thread-pure.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/spawn-thread-pure.neo 1:20 spawn_thread requires an effect function and cannot run in a refinement or comprehension
+exit 1
+stdout (error <dir>/spawn-thread-pure.neo 1:20 spawn_thread requires an effect function and cannot run in a refinement or comprehension)\n
+=== spawn-thread-pure.neo
+fn main() -> i64 = spawn_thread(null(),null())

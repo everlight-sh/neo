@@ -1,0 +1,9 @@
+check boolean-refinement-fail.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:22 precondition false
+exit 1
+stdout (unproven <dir>/boolean-refinement-fail.neo 2:22 precondition)\n
+=== boolean-refinement-fail.neo
+fn f(b:bool{b}) -> i64 = 1
+fn main() -> i64 = f(false)

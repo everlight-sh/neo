@@ -1,0 +1,45 @@
+; Replaces compiler/tests/modules_dump.py, the Python reference of `neoc
+; modules ROOT FILE`, and the loader half of modules_differential.py. The
+; goldens in golden/modules_dump/ are self-contained, so later stdlib or
+; runtime edits do not touch them:
+;   root.bundle.gz      a frozen root: the x86-64 Linux runtime files and the
+;                       stdlib modules the corpus imports;
+;   corpus.bundle.gz    the entries and what they import locally (examples/,
+;                       tests/fixtures/test_modules/, two fixtures, the
+;                       manifests above them), plus modules_differential.py's
+;                       changed copies of four entries (NAME.noimport.neo,
+;                       .missing, .cycle, .badstd, .alias, .dupdecl, .value,
+;                       .call, .type, one deletion and one insertion);
+;   expected.bundle.gz  per entry, the golden form of the reference's dump
+;                       (see tg_condense): its SHA-256, its lines with the
+;                       root's declarations replaced by per-file digests.
+; Both bundles are unpacked into one directory, and `neoc modules` of each
+; entry against its root must give the reference's dump byte for byte.
+; Entries listed in skip.txt are not run.
+import "std:io"
+import "../../tests/support/driver.neo"
+import "../../tests/support/runtime.neo"
+import "../src/modules.neo"
+import "../src/paths.neo"
+import "../src/test_process.neo"
+import "../src/text.neo"
+import "tooling_support.neo"
+
+type MdTally = { ran:i64, skipped:i64, failed:i64, report:Arr u8 _ }
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let base=pt_realpath(dv_temp("modules-dump")) in
+    let root=tg_extract(tg_bundle(tg_golden(tools,"modules_dump","root.bundle")),"root/",base) in
+    let corpus=tg_extract(tg_bundle(tg_golden(tools,"modules_dump","corpus.bundle")),"corpus/",base) in
+    let expected=tg_bundle(tg_golden(tools,"modules_dump","expected.bundle")) in let skips=tg_skips(tools,"modules_dump") in
+    let tally=loop (i=0, t=MdTally { ran=0, skipped=0, failed=0, report=tx_empty() }) while i<len(expected.names)
+      next (i+1,let name=md_word(expected.names,i) in
+        if tg_has(skips,name) then t with { skipped=t.skipped+1 } else
+        let problem=tg_modules(tools,base,pt_join(base,concat("corpus/",name)),md_word(expected.data,i)) in
+        if len(problem)==0 then t with { ran=t.ran+1 } else
+        MdTally { ran=t.ran+1, skipped=t.skipped, failed=t.failed+1,
+          report=if t.failed<8 then concat(t.report,"  ",name,": ",problem,"\n") else t.report }) yield t in
+    let a=dv_expect(tally.failed==0,concat(int_text(tally.failed)," of ",int_text(tally.ran),
+      " module dumps differ from the reference:\n",tally.report)) in
+    let b=dv_expect(root>0 && corpus>0 && tally.ran>0,"no module cases ran") in
+    let cleaned=dv_clean(base) in let shown=print_out("module dumps OK\n") in noop()

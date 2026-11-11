@@ -1,0 +1,8 @@
+check not-array-index.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/not-array-index.neo 1:21 indexing a non-array
+exit 1
+stdout (error <dir>/not-array-index.neo 1:21 indexing a non-array)\n
+=== not-array-index.neo
+fn main() -> i64 = 2[0]

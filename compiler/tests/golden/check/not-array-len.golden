@@ -1,0 +1,8 @@
+check not-array-len.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/not-array-len.neo 1:20 len of a non-array
+exit 1
+stdout (error <dir>/not-array-len.neo 1:20 len of a non-array)\n
+=== not-array-len.neo
+fn main() -> i64 = len(2)

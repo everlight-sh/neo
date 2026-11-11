@@ -1,0 +1,8 @@
+check negative-index.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:28 bounds 0 <= -1 && -1 < len('hi')
+exit 1
+stdout (unproven <dir>/negative-index.neo 1:28 bounds)\n
+=== negative-index.neo
+fn main() -> i64 = i64("hi"[-1])

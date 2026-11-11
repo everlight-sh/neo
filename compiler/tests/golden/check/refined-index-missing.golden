@@ -1,0 +1,9 @@
+check refined-index-missing.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 2:27 precondition ((0 <= i) && (i < n)) with i := 2
+exit 1
+stdout (unproven <dir>/refined-index-missing.neo 2:27 precondition)\n
+=== refined-index-missing.neo
+fn f(a:Arr u8 n,i:i64{0<=i && i<n}) -> i64 = i64(a[i])
+fn main() -> i64 = f("hi",2)

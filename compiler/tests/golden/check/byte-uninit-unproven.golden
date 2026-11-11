@@ -1,0 +1,8 @@
+check byte-uninit-unproven.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:44 size byte_uninit length >= 0
+exit 1
+stdout (unproven <dir>/byte-uninit-unproven.neo 1:44 size)\n
+=== byte-uninit-unproven.neo
+effect(unsafe) fn main(n:i64) -> i64 = len(byte_uninit(n))

@@ -1,0 +1,9 @@
+check equality.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/equality.neo 1:25 equality on i64 and bool
+reference-error type <dir>/equality.neo 1:25 if condition must be bool
+exit 1
+stdout (error <dir>/equality.neo 1:25 equality on i64 and bool)\n
+=== equality.neo
+fn main() -> i64 = if 0 == true then 1 else 0

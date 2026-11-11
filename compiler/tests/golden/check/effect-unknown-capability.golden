@@ -1,0 +1,8 @@
+check effect-unknown-capability.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/effect-unknown-capability.neo 1:21 unknown effect capabilities: alpha, zebra
+exit 1
+stdout (error <dir>/effect-unknown-capability.neo 1:21 unknown effect capabilities: alpha, zebra)\n
+=== effect-unknown-capability.neo
+effect(zebra,alpha) fn main() -> i64 = 7

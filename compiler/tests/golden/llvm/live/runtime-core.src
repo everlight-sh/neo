@@ -1,0 +1,20 @@
+export effect fn ax_runtime_init(env:ptr) -> unit = store_ptr(runtime_state(),0,env)
+export effect fn ax_exit(code:i64) -> unit = let done=syscall6(<syscall:exit>,code,0,0,0,0,0) in noop()
+export effect fn ax_trap(message:ptr) -> unit = ax_exit(1)
+export effect fn ax_precondition_failed(message:ptr) -> unit = ax_exit(3)
+export effect fn ax_usage(program:ptr,names:ptr) -> unit = noop()
+export fn ax_parse_i64(text:ptr,name:ptr) -> i64 = 0
+export effect fn ax_print_i64(value:i64) -> unit = noop()
+export effect fn ax_print_f64(value:f64) -> unit = noop()
+export effect fn ax_print_bytes(bytes:ptr,n:i64) -> unit = let wrote=syscall6(<syscall:write>,1,ptr_to_i64(bytes),n,0,0,0) in noop()
+export effect fn ax_heap_alloc(bytes:i64) -> ptr = let length=bytes+16 in
+    let address=syscall6(<syscall:mmap>,0,length,3,<flag:map-private>,-1,0) in
+    if address<0 then let done=ax_exit(1) in null() else
+    let base=ptr_from_i64(address) in let count=store_i64(base,0,1) in
+    let stored=store_i64(base,8,length) in ptr_add(base,16)
+export effect fn ax_free(bytes:ptr,n:i64) -> unit =
+    let done=syscall6(<syscall:munmap>,ptr_to_i64(ptr_add(bytes,-16)),load_i64(bytes,-8),0,0,0,0) in noop()
+export effect fn memcpy(dst:ptr,src:ptr,n:i64) -> ptr =
+    loop(i=0) while i<n next(let byte=store_u8(dst,i,load_u8(src,i)) in i+1) yield dst
+fn rt_word(byte:i64) -> Arr u8 _ =
+    if byte*72340172838076673 == -1 then "neo" else "bad byte pattern"

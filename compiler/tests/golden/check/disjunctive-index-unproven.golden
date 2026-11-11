@@ -1,0 +1,8 @@
+check disjunctive-index-unproven.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:54 bounds 0 <= i && i < len('hi')
+exit 1
+stdout (unproven <dir>/disjunctive-index-unproven.neo 1:54 bounds)\n
+=== disjunctive-index-unproven.neo
+fn main(i:i64) -> i64 = if i==0 || i==2 then i64("hi"[i]) else 0

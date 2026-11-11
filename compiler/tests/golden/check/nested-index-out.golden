@@ -1,0 +1,8 @@
+check nested-index-out.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:57 bounds 0 <= 2 && 2 < len(a[1])
+exit 1
+stdout (unproven <dir>/nested-index-out.neo 1:57 bounds)\n
+=== nested-index-out.neo
+fn main() -> i64 = let a=arr(i in 0..2) "hi" in i64(a[1][2])

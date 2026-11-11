@@ -1,0 +1,11 @@
+check extern-capability.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/extern-capability.neo 3:31 missing effect capabilities: unsafe
+reference-error type <dir>/extern-capability.neo 3:31 missing effect capabilities: unsafe
+exit 1
+stdout (error <dir>/extern-capability.neo 3:31 missing effect capabilities: unsafe)\n
+=== extern-capability.neo
+extern fn foreign() -> i64
+effect fn bridge() -> i64 = foreign()
+effect(fs) fn main() -> i64 = bridge()

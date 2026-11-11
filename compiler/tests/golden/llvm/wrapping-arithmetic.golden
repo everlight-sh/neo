@@ -1,0 +1,5 @@
+exit 0
+stdout -9223372036854775808\n
+stderr
+=== input.neo
+fn main() -> i64 = wrapping_mul(wrapping_add(9223372036854775807,1),wrapping_sub(5,2))

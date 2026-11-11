@@ -1,0 +1,10 @@
+check generic-resource.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/generic-resource.neo 1:10 resource types currently require a concrete nongeneric declaration
+exit 1
+stdout (error <dir>/generic-resource.neo 1:10 resource types currently require a concrete nongeneric declaration)\n
+=== generic-resource.neo
+resource type Box<T> = {value:T} drop close
+effect fn close(x:Box<i64>) -> unit = noop()
+fn main() -> i64 = 0

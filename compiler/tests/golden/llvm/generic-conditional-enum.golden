@@ -1,0 +1,7 @@
+args 1
+exit 0
+stdout ab
+stderr
+=== input.neo
+enum Choice<T> { Missing, Present(T) }
+fn main(n:i64) -> Arr u8 _ = let choice=if n==0 then Missing::<Arr u8 _>() else Present(concat("a","b")) in match choice { Present(text) => text, Missing => "missing" }

@@ -1,0 +1,14 @@
+check resource-borrowed-move.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/resource-borrowed-move.neo 6:47 cannot move borrowed resource x
+exit 1
+stdout (error <dir>/resource-borrowed-move.neo 6:47 cannot move borrowed resource x)\n
+=== resource-borrowed-move.neo
+resource type Owner = {value:i64} drop dispose
+fn make() -> Owner = Owner {value=42}
+effect(process) fn dispose(x:Owner) -> unit = noop()
+fn observe(x:Owner) -> i64 = x.value
+effect(process) fn take(move x:Owner) -> i64 = observe(x)
+effect(process) fn bad(x:Owner) -> i64 = take(x)
+fn main() -> i64 = 0

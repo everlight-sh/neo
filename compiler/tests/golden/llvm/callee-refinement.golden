@@ -1,0 +1,6 @@
+exit 0
+stdout 105\n
+stderr
+=== input.neo
+fn take(a:Arr u8 n,i:i64{0<=i,i<n}) -> u8 = a[i]
+fn main() -> i64 = i64(take("hi",1))

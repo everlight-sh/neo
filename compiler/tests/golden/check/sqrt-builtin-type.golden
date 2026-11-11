@@ -1,0 +1,8 @@
+check sqrt-builtin-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/sqrt-builtin-type.neo 1:20 sqrt takes one f64
+exit 1
+stdout (error <dir>/sqrt-builtin-type.neo 1:20 sqrt takes one f64)\n
+=== sqrt-builtin-type.neo
+fn main() -> f64 = sqrt(1)

@@ -1,0 +1,8 @@
+check loop-initial-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/loop-initial-type.neo 1:20 loop state i initialised with i64, declared bool
+exit 1
+stdout (error <dir>/loop-initial-type.neo 1:20 loop state i initialised with i64, declared bool)\n
+=== loop-initial-type.neo
+fn main() -> i64 = loop(i:bool=0) while i next(false) yield 1

@@ -1,0 +1,8 @@
+check sum-array.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== sum-array.neo
+fn f(a:Arr i64 n) -> i64 = sum(i in 0..n) a[i]
+fn main() -> i64 = f(arr(i in 0..5) i)

@@ -1,0 +1,11 @@
+check result-mismatched-error.neo
+reference-exit 1
+reference-ok false
+reference-error language <dir>/result-mismatched-error.neo 3:36 ? error types do not match
+exit 1
+stdout (error <dir>/result-mismatched-error.neo 3:36 ? error types do not match)\n
+=== result-mismatched-error.neo
+enum Result<T,E> { Ok(T), Err(E) }
+fn source() -> Result<i64,i64> = Err::<i64,i64>(-1)
+fn convert() -> Result<i64,bool> = let x=source()? in Ok::<i64,bool>(x)
+fn main() -> i64 = 1

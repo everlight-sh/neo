@@ -1,0 +1,9 @@
+check generic-array-record-argument.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-array-record-argument.neo
+type Box<T> = {value:T}
+fn get<T>(a:Arr Box<T> n) -> i64 = n
+fn main() -> i64 = get(arr(i in 0..3) Box::<i64> {value=i})

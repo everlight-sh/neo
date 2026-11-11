@@ -1,0 +1,8 @@
+check generic-enum.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== generic-enum.neo
+enum Choice<T> { Missing, Present(T) }
+fn main() -> i64 = match Present(42) { Missing => 0, Present(value) => value }

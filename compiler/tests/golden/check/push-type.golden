@@ -1,0 +1,8 @@
+check push-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/push-type.neo 1:25 push value does not match array element type
+exit 1
+stdout (error <dir>/push-type.neo 1:25 push value does not match array element type)\n
+=== push-type.neo
+fn main() -> Arr u8 _ = push("hi",1)

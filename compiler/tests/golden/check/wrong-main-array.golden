@@ -1,0 +1,8 @@
+check wrong-main-array.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/wrong-main-array.neo 1:1 main must return i64, f64 or Arr u8 (written to stdout)
+exit 1
+stdout (error <dir>/wrong-main-array.neo 1:1 main must return i64, f64 or Arr u8 (written to stdout))\n
+=== wrong-main-array.neo
+fn main() -> Arr i64 _ = arr(i in 0..0) i

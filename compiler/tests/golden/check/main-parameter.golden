@@ -1,0 +1,8 @@
+check main-parameter.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/main-parameter.neo 1:9 main parameters must be i64 (parsed from argv)
+exit 1
+stdout (error <dir>/main-parameter.neo 1:9 main parameters must be i64 (parsed from argv))\n
+=== main-parameter.neo
+fn main(x:bool) -> i64 = 0

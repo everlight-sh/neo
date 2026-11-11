@@ -1,0 +1,9 @@
+check enum-literal-private.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/enum-literal-private.neo 2:26 enum storage is private; use its alternative constructors
+exit 1
+stdout (error <dir>/enum-literal-private.neo 2:26 enum storage is private; use its alternative constructors)\n
+=== enum-literal-private.neo
+enum Choice { A, B }
+fn main() -> i64 = let a=Choice { __tag=0 } in 1

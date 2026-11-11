@@ -1,0 +1,6 @@
+exit 0
+stdout ab
+stderr
+=== input.neo
+fn keep(borrow a:Arr u8 n) -> Arr u8 n = a
+fn main() -> Arr u8 _ = let a=concat("a","b") in keep(a)

@@ -1,0 +1,9 @@
+check array-join-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/array-join-type.neo 1:28 branches differ: Arr u8 (…) vs Arr i64 (…)
+exit 1
+stdout (error <dir>/array-join-type.neo 1:28 branches differ: Arr u8 (\xe2\x80\xa6) vs Arr i64 (\xe2\x80\xa6))\n
+=== array-join-type.neo
+fn f(b:bool) -> Arr u8 _ = if b then "x" else arr(i in 0..1) i
+fn main() -> i64 = 0

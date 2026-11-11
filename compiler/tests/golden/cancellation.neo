@@ -1,0 +1,13 @@
+; From compiler/tests/cancellation_differential.py: a Cancellation's ownership,
+; idempotent cancel and runtime handle cleanup. The Python reference compiler
+; (0.2.3) built this program and it printed 42; compiler/tests/differential.neo.toml
+; expects the same from the native build.
+import "std:cancel"
+effect fn exercise() -> i64 =
+  using original = new_cancellation() in using owner = original in
+  let before = is_cancelled(owner) in
+  let stopped = cancel(owner) in let again = cancel(owner) in
+  if !before && is_cancelled(owner) && rt_handle_live() == 1 then 1 else -1
+effect fn main() -> i64 =
+  let before = rt_handle_live() in let result = exercise() in
+  if before == 0 && result == 1 && rt_handle_live() == 0 then 42 else 0

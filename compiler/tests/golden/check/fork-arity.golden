@@ -1,0 +1,8 @@
+check fork-arity.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/fork-arity.neo 1:35 fork_syscall expects ()
+exit 1
+stdout (error <dir>/fork-arity.neo 1:35 fork_syscall expects ())\n
+=== fork-arity.neo
+effect(unsafe) fn main() -> i64 = fork_syscall(0)

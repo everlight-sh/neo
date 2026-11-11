@@ -1,0 +1,9 @@
+check record-nested.neo
+reference-exit 0
+reference-ok true
+exit 0
+stdout (ok)\n
+=== record-nested.neo
+type Inner = { x:i64 }
+type Outer = { value:Inner }
+fn main() -> i64 = let a=Outer { value=Inner { x=1 } } in a.value.x

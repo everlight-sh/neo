@@ -1,0 +1,9 @@
+check record-field-type.neo
+reference-exit 1
+reference-ok false
+reference-error type <dir>/record-field-type.neo 2:36 field x has type bool, expected i64
+exit 1
+stdout (error <dir>/record-field-type.neo 2:36 field x has type bool, expected i64)\n
+=== record-field-type.neo
+type Point = { x:i64 }
+fn main() -> i64 = let p=Point { x=true } in p.x

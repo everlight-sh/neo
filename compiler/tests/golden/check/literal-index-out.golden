@@ -1,0 +1,8 @@
+check literal-index-out.neo
+reference-exit 1
+reference-ok false
+reference-unproven main 1:28 bounds 0 <= 2 && 2 < len('hi')
+exit 1
+stdout (unproven <dir>/literal-index-out.neo 1:28 bounds)\n
+=== literal-index-out.neo
+fn main() -> i64 = i64("hi"[2])
