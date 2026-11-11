@@ -30,7 +30,7 @@ jobs:
         run: |
           tools="$RUNNER_TEMP/neo-tools"
           mkdir -p "$tools"
-          for name in clang ld ld.lld mkdir gzip uname readlink; do
+          for name in clang ld ld.lld mkdir gzip uname readlink nm readelf; do
             if tool=$(command -v "$name"); then ln -s "$tool" "$tools/$name"; fi
           done
           native() { env -i PATH="$tools" HOME="$HOME" SDKROOT="${SDKROOT:-}" "$@"; }
