@@ -122,6 +122,12 @@ effect(fs) fn fs_remove(path:Arr u8 n) -> IntResult
 effect(fs) fn fs_mkdir(path:Arr u8 n) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
     let result=rt_mkdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"mkdir failed",0) else int_ok(0)
+; A directory with permission bits mode (0 to 0o7777), less the umask, as
+; mkdir(2) applies it. fs_mkdir uses 0o700.
+effect(fs) fn fs_mkdir_mode(path:Arr u8 n, mode:i64) -> IntResult
+  = if !io_path_valid(path) then int_error(22,"invalid path",0) else
+    if mode<0 || mode>4095 then int_error(22,"invalid directory mode",0) else let text=concat(path,"\0") in
+    let result=rt_mkdir_mode(data(text),mode) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"mkdir failed",0) else int_ok(0)
 ; A symbolic link at path pointing to target, which need not exist.
 effect(fs) fn fs_symlink(target:Arr u8 n,path:Arr u8 m) -> IntResult
   = if !io_path_valid(target) || !io_path_valid(path) then int_error(22,"invalid path",0) else

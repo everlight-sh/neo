@@ -442,7 +442,8 @@ a high-level communicate API remain absent.
 first. `env_get(name)` reads one variable and `env_list()` returns every
 `NAME=value` entry, to pass on to `process_start`.
 
-`std:fs` adds remove, mkdir, rename, `fs_symlink`, `fs_readlink`, `fs_cwd` and
+`std:fs` adds remove, mkdir (0700; `fs_mkdir_mode(path, mode)` takes permission bits
+from 0 to 0o7777, less the umask), rename, `fs_symlink`, `fs_readlink`, `fs_cwd` and
 `fs_atomic_replace`. `fs_list(path)` returns a directory's entries (name and
 kind, without "." and "..", in no particular order; links are not followed).
 `fs_stat(path, follow)` returns kind, size, permission bits (`mode`) and the

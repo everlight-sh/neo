@@ -1,0 +1,47 @@
+import "std:io"
+import "std:fs"
+import "std:process"
+import "std:random"
+
+; fs_mkdir_mode under umask 022: the program reruns itself through
+; /bin/sh -c 'umask 022; exec ...' with the arguments "umask-022" and a fresh
+; directory, where the checks run; then it removes what the child made.
+
+fn hex(borrow bytes:Arr u8 n) -> Arr u8 _
+  = let digits="0123456789abcdef" in
+    loop(i=0,out="") while i<n next(i+1,let b=str_byte(bytes,i) in
+      concat(out,str_slice(digits,b/16,b/16+1),str_slice(digits,b%16,b%16+1))) yield out
+
+effect fn wait_exit(child:Process) -> ProcessStatus
+  = loop(status=process_status(child),rounds=0) while status.ok && status.running && rounds<10000
+      next(let paused=sleep_ms(1) in process_status(child),rounds+1) yield status
+
+effect fn mode_of(borrow path:Arr u8 n) -> i64
+  = let status=fs_stat(path,false) in if status.ok && status.kind==fs_kind_directory() then status.mode else -1
+
+; The checks, in a process whose umask is 022.
+effect fn checks(borrow root:Arr u8 n) -> unit
+  = let a=fs_mkdir_mode(concat(root,"/a"),493) in let b=fs_mkdir_mode(concat(root,"/b"),511) in
+    let c=fs_mkdir_mode(concat(root,"/c"),448) in let d=fs_mkdir_mode(concat(root,"/d"),0) in let plain=fs_mkdir(concat(root,"/e")) in
+    check a.ok && b.ok && c.ok && d.ok && plain.ok in
+    let ma=mode_of(concat(root,"/a")) in let mb=mode_of(concat(root,"/b")) in let mc=mode_of(concat(root,"/c")) in
+    let md=mode_of(concat(root,"/d")) in let me=mode_of(concat(root,"/e")) in
+    check ma==493 && mb==493 && mc==448 && md==0 && me==448 in
+    let again=fs_mkdir_mode(concat(root,"/a"),493) in let negative=fs_mkdir_mode(concat(root,"/x"),-1) in
+    let large=fs_mkdir_mode(concat(root,"/x"),4096) in let missing=fs_mkdir_mode(concat(root,"/none/x"),493) in
+    check !again.ok && again.error.code==17 && !negative.ok && negative.error.code==22 && !large.ok && large.error.code==22 in
+    let refused=mode_of(concat(root,"/x")) in
+    check !missing.ok && missing.error.code==2 && refused== -1 in noop()
+
+effect fn main() -> unit
+  = let count=cli_count() in let first=cli_arg(1) in let second=cli_arg(2) in
+    if count==3 && first.present && str_equal(first.value,"umask-022") && second.present then checks(second.value) else
+    let self=process_executable_path() in let tag=random_bytes(8) in check self.ok && tag.ok in
+    let root=concat("/tmp/neo-mkdir-mode-",hex(tag.value)) in let made=fs_mkdir(root) in check made.ok in
+    let ended=(using child=process_start_inherit("/bin/sh",arr(i in 0..4) if i==0 then "-c" else if i==1 then "umask 022 && exec \"$0\" umask-022 \"$1\""
+        else if i==2 then self.value else root,env_list()) in wait_exit(child)) in
+    let r1=fs_rmdir(concat(root,"/a")) in let r2=fs_rmdir(concat(root,"/b")) in let r3=fs_rmdir(concat(root,"/c")) in
+    let r4=fs_rmdir(concat(root,"/d")) in let r5=fs_rmdir(concat(root,"/e")) in let r6=fs_rmdir(root) in
+    check ended.ok && !ended.running && ended.exit_code==0 in
+    check r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok in
+    let printed=print_out("fs_mkdir_mode OK\n") in noop()
