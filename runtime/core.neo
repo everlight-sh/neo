@@ -463,9 +463,12 @@ export effect fn ax_par_for_shared(chunks: i64, work: ptr, context: ptr) -> unit
 ; the subprocess API are close-on-exec; only the duplicated stdio survives.
 effect fn rt_cloexec(fd:i64) -> i64
   = if fd<0 then fd else let result=rt_fcntl(fd,2,1) in if result>=0 then fd else let closed=rt_close(fd) in -1
+; A negative stdio or stderr leaves the child's descriptors 0 and 1, or 2,
+; as inherited from this process.
 effect fn rt_spawn_exec(path:ptr,argv:ptr,envp:ptr,stdio:i64,stderr:i64) -> i64
   = let pid=rt_result(fork_syscall()) in if pid!=0 then pid else
-    let input=rt_dup_stdio(stdio,0) in let output=rt_dup_stdio(stdio,1) in let error=rt_dup_stdio(stderr,2) in
+    let input=if stdio<0 then 0 else rt_dup_stdio(stdio,0) in let output=if stdio<0 then 0 else rt_dup_stdio(stdio,1) in
+    let error=if stderr<0 then 0 else rt_dup_stdio(stderr,2) in
     let result=if input<0 || output<0 || error<0 then -1 else rt_exec(path,argv,envp) in
     let exited=ax_exit(127) in -1
 

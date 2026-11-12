@@ -1,0 +1,58 @@
+; tests/fixtures/async_headers.neo: the heads of http_render_start,
+; http_async_start and their _at variants, header-line validation, and the
+; failure replies of http_response_async.
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+fn ah_csp() -> Arr u8 _ = "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n"
+fn ah_plain() -> Arr u8 _
+  = nw_lower(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n",ah_csp(),
+      "Transfer-Encoding: chunked\r\nConnection: close\r\n"))
+fn ah_custom() -> Arr u8 _
+  = nw_lower("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nDate: Sun, 06 Nov 1994 08:49:37 GMT\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'\r\nX-Extra: yes\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n")
+fn ah_replaced() -> Arr u8 _
+  = nw_lower(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n",ah_csp(),
+      "cache-control: max-age=60\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n"))
+
+; A 200 with exactly this head and body, or a problem line.
+effect(net,time) fn ah_is(port:i64, borrow path:Arr u8 _, borrow head:Arr u8 _, borrow body:Arr u8 _) -> Arr u8 _
+  = let r=nw_get(port,path,"") in
+    nw_note("",r.complete && r.status==200 && tx_equal(r.head,head) && tx_equal(r.body,body),
+      concat(path,": ",int_text(r.status)," ",tx_repr(r.head,true)," ",tx_repr(r.body,true)))
+
+effect(net,time) fn ah_failure(port:i64) -> Arr u8 _
+  = let r=nw_get(port,"/fail","") in let date=nw_header(r.head,"date") in
+    nw_note("",r.complete && r.status==503 && tx_equal(r.body,"Async render failed") && len(date)==29 && nw_ends(date," gmt") &&
+      tx_equal(nw_header(r.head,"x-content-type-options"),"nosniff") && nw_contains(r.head,nw_lower(ah_csp())) &&
+      tx_equal(nw_header(r.head,"cache-control"),"no-store") && tx_equal(nw_header(r.head,"content-length"),"19") && tx_equal(nw_header(r.head,"connection"),"close"),
+      concat("/fail: ",int_text(r.status)," ",tx_repr(r.head,true)," ",tx_repr(r.body,true)))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("async-headers") in let binary=pt_join(dir,"async-headers") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/async_headers.neo"),binary,md_words()) in
+    let port=nw_port() in
+    let problems=(using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(md_words())) in
+      let up=nw_await(server,nw_child(),"neo: serving",5000) in
+      if !nw_contains(up.errors,"neo: serving") then concat("server did not start: ",up.errors,up.output) else
+      let p=concat(ah_is(port,"/render",ah_plain(),"SHELLCHILD"),ah_is(port,"/async",ah_plain(),"SHELLTICK")) in
+      let p=concat(p,ah_is(port,"/render-at",ah_custom(),"SHELLCHILDTAIL"),ah_is(port,"/async-at",ah_custom(),"SHELLTICK")) in
+      let p=concat(p,ah_is(port,"/render-replaced",ah_replaced(),"SHELLCHILD")) in
+      let refused=nw_get(port,"/bad","") in
+      let p=nw_note(p,refused.status==200 && tx_equal(refused.body,"REJECTED 10"),concat("/bad: ",int_text(refused.status)," ",refused.body)) in
+      let p=concat(p,ah_failure(port)) in
+      let late=nw_get(port,"/expire","") in
+      let p=nw_note(p,late.complete && late.status==504 && tx_equal(late.body,"Async render expired") && nw_contains(late.head,nw_lower(ah_csp())) &&
+        tx_equal(nw_header(late.head,"x-content-type-options"),"nosniff"),concat("/expire: ",int_text(late.status)," ",tx_repr(late.head,true)," ",tx_repr(late.body,true))) in
+      let p=nw_note(p,nw_get_is(port,"/fast",200,"FAST"),"/fast failed after the async requests") in
+      let done=nw_terminate(server,up,4000) in
+      nw_note(p,!done.running && done.code==0,concat("server exit ",int_text(done.code),": ",done.errors))) in
+    let checked=dv_expect(len(problems)==0,problems) in
+    let shown=print_out("PASS async starts keep their head; _at variants add header lines and Date; invalid lines are refused; failure replies carry the security headers\n") in
+    dv_clean(dir)

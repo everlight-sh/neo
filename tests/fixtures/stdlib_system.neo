@@ -1,0 +1,76 @@
+import "std:io"
+import "std:fs"
+import "std:process"
+import "std:random"
+
+; Command-line arguments, the environment, directory listing, file status,
+; symbolic links, canonical paths, the executable's path and a child that
+; writes straight to this program's stdout. Run with the arguments
+; "alpha" and "b c".
+
+fn kind_of(borrow entries:Arr FsEntry n, borrow name:Arr u8 m) -> i64
+  = loop(i=0,kind= -1) while i<n next(i+1,check i>=0 && i<n in if str_equal(entries[i].name,name) then entries[i].kind else kind) yield kind
+fn hex(borrow bytes:Arr u8 n) -> Arr u8 _
+  = let digits="0123456789abcdef" in
+    loop(i=0,out="") while i<n next(i+1,let b=str_byte(bytes,i) in
+      concat(out,str_slice(digits,b/16,b/16+1),str_slice(digits,b%16,b%16+1))) yield out
+
+effect fn wait_exit(child:Process) -> ProcessStatus
+  = loop(status=process_status(child),rounds=0) while status.ok && status.running && rounds<10000
+      next(let paused=sleep_ms(1) in process_status(child),rounds+1) yield status
+
+effect fn main() -> unit
+  = let args=cli_args() in let count_args=cli_count() in let program=cli_arg(0) in let beyond=cli_arg(3) in
+    check count_args==3 && len(args)==3 && program.present && !beyond.present in
+    check str_equal(args[0],program.value) && str_equal(args[1],"alpha") && str_equal(args[2],"b c") in
+    ; Every environment entry agrees with env_get.
+    let environment=env_list() in let count=len(environment) in
+    let agreed=loop(i=0,ok=true) while ok && i<count next(i+1,check i>=0 && i<count in
+      let entry=environment[i] in let equals=str_find(entry,"=") in
+      ok && equals.present && let found=env_get(str_slice(entry,0,equals.value)) in
+        found.present && str_equal(found.value,str_slice(entry,equals.value+1,len(entry)))) yield ok in
+    check agreed in
+    let tag=random_bytes(8) in check tag.ok in
+    let root=concat("/tmp/neo-stdlib-",hex(tag.value)) in
+    let made=fs_mkdir(root) in check made.ok in
+    let file=concat(root,"/f") in let wrote=fs_atomic_replace_mode(file,"hello",493) in check wrote.ok in
+    let sub=fs_mkdir(concat(root,"/d")) in let link=fs_symlink("f",concat(root,"/l")) in
+    let loop_a=fs_symlink("b",concat(root,"/a")) in let loop_b=fs_symlink("a",concat(root,"/b")) in
+    check sub.ok && link.ok && loop_a.ok && loop_b.ok in
+    ; Listing: no "." or "..", kinds without following links.
+    let listed=fs_list(root) in check listed.ok in
+    check len(listed.entries)==5 && kind_of(listed.entries,"a")==fs_kind_symlink() && kind_of(listed.entries,"b")==fs_kind_symlink() in
+    check kind_of(listed.entries,"d")==fs_kind_directory() && kind_of(listed.entries,"f")==fs_kind_file() && kind_of(listed.entries,"l")==fs_kind_symlink() in
+    let missing=fs_list(concat(root,"/none")) in let not_directory=fs_list(file) in
+    check !missing.ok && missing.error.code==2 && !not_directory.ok && not_directory.error.code==20 in
+    ; Status: size, permission bits, kind with and without following links, mtime.
+    let status=fs_stat(file,true) in let now=time_unix_ms() in check status.ok && now.ok in
+    check status.kind==fs_kind_file() && status.size==5 && status.mode==493 in
+    check status.mtime_ns>(now.value-600000)*1000000 && status.mtime_ns<(now.value+600000)*1000000 in
+    let link_itself=fs_stat(concat(root,"/l"),false) in let link_target=fs_stat(concat(root,"/l"),true) in
+    check link_itself.ok && link_itself.kind==fs_kind_symlink() && link_target.ok && link_target.kind==fs_kind_file() && link_target.size==5 in
+    let directory=fs_stat(concat(root,"/d"),true) in let gone=fs_stat(concat(root,"/none"),false) in
+    check directory.ok && directory.kind==fs_kind_directory() && !gone.ok && gone.error.code==2 in
+    ; Canonical paths: "..", links, the working directory, loops and missing paths.
+    let canonical_root=fs_realpath(root) in check canonical_root.ok && str_starts(canonical_root.value,"/") in
+    let through=fs_realpath(concat(root,"/d/../l")) in check through.ok && str_equal(through.value,concat(canonical_root.value,"/f")) in
+    let here=fs_realpath(".") in let cwd=fs_cwd() in let cwd_real=fs_realpath(cwd.value) in
+    check here.ok && cwd.ok && cwd_real.ok && str_equal(here.value,cwd_real.value) in
+    let top=fs_realpath("/") in let dots=fs_realpath("/..//.") in check top.ok && str_equal(top.value,"/") && dots.ok && str_equal(dots.value,"/") in
+    let looped=fs_realpath(concat(root,"/a")) in let absent=fs_realpath(concat(root,"/none/x")) in let through_file=fs_realpath(concat(file,"/x")) in
+    check !looped.ok && looped.error.code==40 && !absent.ok && absent.error.code==2 && !through_file.ok && through_file.error.code==20 in
+    ; The executable: an absolute path to a regular file, the one argv[0] names.
+    let self=process_executable_path() in check self.ok && str_starts(self.value,"/") in
+    let self_status=fs_stat(self.value,true) in check self_status.ok && self_status.kind==fs_kind_file() in
+    let named=fs_realpath(program.value) in let canonical_self=fs_realpath(self.value) in
+    check !str_find(program.value,"/").present || named.ok && canonical_self.ok && str_equal(named.value,canonical_self.value) in
+    ; A child sharing stdout: its line lands between ours, in order.
+    let before=print_out("before child\n") in
+    using child=process_start_inherit("/bin/sh",arr(i in 0..2) if i==0 then "-c" else "echo child line; exit 3",environment) in
+    let ended=wait_exit(child) in check ended.ok && !ended.running && ended.exit_code==3 in
+    let read=process_try_read(child,1,64) in let wrote_child=process_try_write(child,"x",0) in
+    check !read.ok && read.error.code==9 && !wrote_child.ok && wrote_child.error.code==9 in
+    let r1=fs_remove(concat(root,"/l")) in let r2=fs_remove(concat(root,"/a")) in let r3=fs_remove(concat(root,"/b")) in
+    let r4=fs_remove(file) in let r5=fs_rmdir(concat(root,"/d")) in let r6=fs_rmdir(root) in
+    check r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok in
+    let printed=print_out("stdlib system OK\n") in noop()

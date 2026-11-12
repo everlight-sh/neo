@@ -16,11 +16,40 @@ fn http_async_yield(capture:Arr u8 n,html:WebHtml,wake_ms:i64)->Arr u8 _
   = http_async_packet(capture,http_async_chunk(html.bytes),wake_ms,false)
 fn http_async_finish(html:WebHtml)->Arr u8 _
   = http_async_packet("",concat(http_async_chunk(html.bytes),"0\r\n\r\n"),0,true)
+; Extra header lines are "Name: value\r\n" each, as web_with_header writes them,
+; and are checked the same way (at most 8 KiB; no Content-Length,
+; Transfer-Encoding, Connection or Content-Type).
+private fn http_async_header_line(borrow line:Arr u8 n) -> bool
+  = let colon=str_find(line,":") in colon.present &&
+    let name=str_slice(line,0,colon.value) in let lowered=http_lower(name) in
+    http_token(name) && web_header_safe(str_trim(str_slice(line,colon.value+1,n))) &&
+    !str_equal(lowered,"content-length") && !str_equal(lowered,"transfer-encoding") && !str_equal(lowered,"connection") && !str_equal(lowered,"content-type")
+private fn http_async_headers_valid(borrow headers:Arr u8 n) -> bool
+  = n<=8192 && loop(at=0,ok=true) while ok && at<n
+      next(let end=str_find(str_slice(headers,at,n),"\r\n") in if end.present then at+end.value+2 else n,
+           let end=str_find(str_slice(headers,at,n),"\r\n") in end.present && http_async_header_line(str_slice(headers,at,at+end.value))) yield ok
+private fn http_async_has(borrow lowered:Arr u8 n, borrow name:Arr u8 m) -> bool
+  = n>0 && (str_starts(lowered,name) || str_find(lowered,concat("\n",name)).present)
+; A streamed HTML head with web_encode's defaults. The caller's Cache-Control,
+; Content-Security-Policy and Date replace them; a stamp of 0 or more (Unix ms)
+; adds Date.
+private fn http_async_html_head(borrow headers:Arr u8 n, stamp:i64) -> Arr u8 _
+  = let lowered=if n>0 then http_lower(headers) else "" in
+    concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n",
+      if http_async_has(lowered,"cache-control:") then "" else "Cache-Control: no-store\r\n",
+      if stamp<0 || http_async_has(lowered,"date:") then "" else concat("Date: ",web_http_date(stamp),"\r\n"),
+      "X-Content-Type-Options: nosniff\r\n",
+      if http_async_has(lowered,"content-security-policy:") then "" else "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\n",
+      headers,"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
 effect(net,time,process) fn http_async_start(shell:WebHtml,capture:Arr u8 n,callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,wake_ms:i64,deadline_ms:i64)->BytesResult
+  = http_async_start_at(shell,capture,callback,wake_ms,deadline_ms,"",-1)
+; http_async_start with extra header lines and a Date from stamp (Unix ms; -1 for none).
+effect(net,time,process) fn http_async_start_at(shell:WebHtml,capture:Arr u8 n,callback:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,wake_ms:i64,deadline_ms:i64,headers:Arr u8 m,stamp:i64)->BytesResult
   = if len(shell.bytes)>1048576 then bytes_error(27,"Async shell exceeds its bound",0) else
+    if !http_async_headers_valid(headers) then bytes_error(22,"Invalid response headers",0) else
     let registered=rt_async_register(callback_address(callback),capture,wake_ms,deadline_ms) in
     if registered<0 then bytes_error(0-registered,"Cannot admit async render",0) else
-    bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",http_async_chunk(shell.bytes)))
+    bytes_ok(concat(http_async_html_head(headers,stamp),http_async_chunk(shell.bytes)))
 
 import "std:async"
 ; Callbacks use ordinary synchronous-looking code. All native socket waits
@@ -31,15 +60,22 @@ fn http_deferred(capture:Arr u8 n,render:Effect<fs,net,env,time,process>(Arr u8 
 fn http_deferred_frame(task:HttpDeferred,prefix:Arr u8 n,suffix:Arr u8 m,failure:Arr u8 k,deadline:i64)->HttpDeferred
   = task with {prefix=prefix,suffix=suffix,failure=failure,deadline=deadline}
 effect(fs,net,env,time,process) fn http_render_start_with_tail(shell:WebHtml,tasks:Arr HttpDeferred n,tail:WebHtml,deadline:i64)->BytesResult
+  = http_render_start_with_tail_at(shell,tasks,tail,deadline,"",-1)
+; http_render_start_with_tail with extra header lines and a Date from stamp
+; (Unix ms; -1 for none), as http_async_start_at.
+effect(fs,net,env,time,process) fn http_render_start_with_tail_at(shell:WebHtml,tasks:Arr HttpDeferred n,tail:WebHtml,deadline:i64,headers:Arr u8 m,stamp:i64)->BytesResult
   = if len(shell.bytes)>1048576 || n<1 || n>32 then bytes_error(22,"Invalid deferred render bounds",0) else
+    if !http_async_headers_valid(headers) then bytes_error(22,"Invalid response headers",0) else
     let group=rt_http_render_open(n,deadline,false) in if group==null() then bytes_error(11,"Async render capacity unavailable",0) else
     let admitted=loop(i=0,ok=true) while ok && i<n next(i+1,check i>=0 && i<n in let task=tasks[i] in let token=rt_http_render_add(group,callback_address(task.render),task.capture) in token>0 && rt_http_render_envelope(token,task.prefix,task.suffix,task.failure,task.deadline)) yield ok in
     if !admitted || !rt_http_render_tail(group,tail.bytes) || rt_http_render_commit(group)<0 then let aborted=rt_http_render_abort(group) in bytes_error(11,"Async render capacity unavailable",0) else
-    bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",http_async_chunk(shell.bytes)))
+    bytes_ok(concat(http_async_html_head(headers,stamp),http_async_chunk(shell.bytes)))
 effect(fs,net,env,time,process) fn http_response_async(capture:Arr u8 n,render:Effect<fs,net,env,time,process>(Arr u8 _)->Arr u8 _,deadline:i64)->BytesResult
   = let group=rt_http_render_open(1,deadline,true) in if group==null() then bytes_error(11,"Async response capacity unavailable",0) else
     let token=rt_http_render_add(group,callback_address(render),capture) in
-    let timeout="HTTP/1.1 503 Service Unavailable\r\nContent-Length: 19\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nAsync render failed" in
+    ; The failure reply carries web_encode's headers, dated when the render is admitted.
+    let now=time_unix_ms() in let failed=web_reply(503,"Async render failed","text/plain; charset=utf-8") in
+    let timeout=if now.ok then web_encode_close_at(failed,false,now.value) else web_encode_close(failed,false) in
     if token<0 || !rt_http_render_envelope(token,"","",timeout,0) || rt_http_render_commit(group)<0 then
       let aborted=rt_http_render_abort(group) in bytes_error(11,"Async response capacity unavailable",0) else bytes_ok("")
 ; Flush an intermediate fragment from inside a render task, with bounded
@@ -53,6 +89,8 @@ effect(net,time,process) fn http_render_write(html:WebHtml)->IntResult
 
 effect(fs,net,env,time,process) fn http_render_start(shell:WebHtml,tasks:Arr HttpDeferred n,deadline:i64)->BytesResult
   = http_render_start_with_tail(shell,tasks,web_html(""),deadline)
+effect(fs,net,env,time,process) fn http_render_start_at(shell:WebHtml,tasks:Arr HttpDeferred n,deadline:i64,headers:Arr u8 m,stamp:i64)->BytesResult
+  = http_render_start_with_tail_at(shell,tasks,web_html(""),deadline,headers,stamp)
 
 ; Small recurring callbacks carry owned state without allocating a task stack.
 ; Each callback must return promptly, perform no blocking waits, and emit at

@@ -153,6 +153,14 @@ file = "drivers/http_async.neo"
 stdout = "PASS 1 workers grace 150\nPASS 1 workers grace 2000\nPASS 2 workers grace 150\nPASS 2 workers grace 2000\nPASS 4 workers grace 150\nPASS 4 workers grace 2000\n"
 timeout = 300
 
+# Heads of the async starts, their _at variants with caller header lines and
+# Date, header-line validation, and the async failure replies.
+[[test]]
+name = "async-headers"
+file = "drivers/async_headers.neo"
+stdout = "PASS async starts keep their head; _at variants add header lines and Date; invalid lines are refused; failure replies carry the security headers\n"
+timeout = 120
+
 # prepared_frames.py: the async_frames.neo server under backpressure,
 # eviction, disconnects and shutdown; prepared_frames.neo checks the frame
 # cache itself (keys, bounded storage, eviction, fork ownership).

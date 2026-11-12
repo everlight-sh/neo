@@ -47,11 +47,23 @@ outbound readiness and deadlines.
 - `http_response_async(capture,callback,deadline)` schedules a complete buffered
   HTTP response. Return its successful value (an empty internal placeholder)
   directly from the handler. The callback returns `web_encode_close(...)` wire
-  bytes. Failures before headers return 503, or 504 for a render deadline.
+  bytes. Failures before headers return 503, or 504 for a render deadline. Both
+  carry `web_encode`'s security headers; the 503 is dated when the response is
+  admitted.
 - `http_deferred` and `http_render_start` admit independent callbacks before
   returning chunked headers and the initial shell. `http_deferred_frame` wraps
   each result in an atomic prefix/body/suffix or a safe error fragment.
   `http_render_start_with_tail` appends a final HTML footer.
+- The streamed head has `web_encode`'s defaults (`Cache-Control: no-store`,
+  nosniff and the default Content-Security-Policy). `http_render_start_at`,
+  `http_render_start_with_tail_at` and `http_async_start_at` take two more
+  arguments: `headers` and `stamp`. `headers` holds extra header lines,
+  `"Name: value\r\n"` each, as `web_with_header` writes them. A
+  Cache-Control, Content-Security-Policy or Date line there replaces the
+  default. `stamp` (Unix ms, or -1 for none) adds a Date header. Header lines
+  get the same checks as `web_with_header` (at most 8 KiB in all, no
+  Content-Length, Transfer-Encoding, Connection or Content-Type). An invalid
+  line fails the start with error 22 before anything is admitted.
 - A buffered response callback can first wait for auth/database/network work,
   then return `http_render_start(...)` headers. Its child callbacks remain queued
   until those headers have been enqueued. Partial admission rolls back before

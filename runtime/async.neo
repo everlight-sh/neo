@@ -257,7 +257,7 @@ effect fn rt_http_render_frame(job:ptr,group:ptr)->bool
     let framed=load_i64(group,64)==0 in
     let sent=if load_i64(job,288)!=0 then
       if load_i64(group,64)==1 && load_i64(job,288)==110 then
-        let timeout="HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 20\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nAsync render expired" in
+        let timeout="HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 20\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'\r\nConnection: close\r\n\r\nAsync render expired" in
         rt_http_render_emit(group,data(timeout),len(timeout),false) else
       if failure==0 then let state=rt_http_render_state(group) in let dropped=if state==null() then noop() else rt_drop(state) in false else
       rt_http_render_emit(group,ptr_add(envelope,prefix+suffix),failure,framed) else

@@ -126,6 +126,7 @@ loads the standard library. Declarations are public unless marked `private`.
 |---|---|
 | `std:strings` | Slicing, search, trimming, `int_text`, parsing, UTF-8 |
 | `std:json` | `json_parse`, `json_get`, `json_int`, typed field decoding |
+| `std:toml` | `toml_parse` (a config file as a JSON value) |
 | `std:io`, `std:file` | Files, arguments, environment, clocks |
 | `std:http`, `std:http_client` | Request and response helpers, HTTP client |
 | `std:vec`, `std:hashmap`, `std:collections` | Growable vectors, maps, sorting |

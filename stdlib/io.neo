@@ -137,6 +137,20 @@ effect(env) fn cli_arg (index: i64) -> OptionBytes
     if index < 0 || index >= argc then none_bytes() else
       let pointer = load_ptr(argv, index * 8) in let count = rt_cstrlen(pointer) in
       check count >= 0 in some_bytes(view(pointer, count))
+private fn io_no_words () -> Arr Arr u8 _ _ = arr(i in 0..0) ""
+; The number of command-line arguments, the program name (argv[0]) included.
+effect(env) fn cli_count () -> i64 = let argc = load_i64(runtime_state(), 40) in if argc < 0 then 0 else argc
+; Every command-line argument in order, argv[0] first.
+effect(env) fn cli_args () -> Arr Arr u8 _ _
+  = let count = cli_count() in
+    loop (i = 0, out = io_no_words()) while i < count next (i + 1, push(out, cli_arg(i).value)) yield out
+; The whole environment as the NAME=value entries this process received, in order.
+; process_start takes an explicit environment; pass this to hand it on.
+effect(env) fn env_list () -> Arr Arr u8 _ _
+  = let base = load_ptr(runtime_state(), 0) in if base == null() then io_no_words() else
+    loop (i = 0, out = io_no_words()) while load_ptr(base, i * 8) != null()
+      next (i + 1, let entry = load_ptr(base, i * 8) in let count = rt_cstrlen(entry) in
+            check count >= 0 in push(out, view(entry, count))) yield out
 effect(process) fn process_exit (status: i64) -> unit = ax_exit(status)
 effect(fs) fn print_out (text: Arr u8 n) -> IntResult = file_write(1, text)
 effect(fs) fn print_error (text: Arr u8 n) -> IntResult = file_write(2, text)

@@ -170,6 +170,22 @@ args=[]
 stdout="reactor OK\n"
 
 [[test]]
+name="stdlib-system-paths-and-processes"
+file="tests/fixtures/stdlib_system.neo"
+args=["alpha", "b c"]
+stdout="before child\nchild line\nstdlib system OK\n"
+
+[[test]]
+name="stdlib-toml"
+file="tests/fixtures/toml.neo"
+stdout="toml OK\n"
+
+[[test]]
+name="gzip-encode"
+file="tests/fixtures/gzip_encode.neo"
+stdout="gzip encode OK\n"
+
+[[test]]
 name="scoped-datagram-transport"
 file="tests/fixtures/datagram.neo"
 args=[]

@@ -99,6 +99,19 @@ effect fn rt_map_file(fd: i64, size: i64) -> i64 = syscall6(197, 0, size, 1, 2, 
 effect fn rt_path_kind(path:ptr, follow:bool) -> i64
   = let info=stack_alloc(256) in let status=rt_result(syscall6(if follow then 338 else 340,ptr_to_i64(path),ptr_to_i64(info),0,0,0,0)) in
     if status<0 then -1 else bit_and(shift_right(i64(load_i32(info,4)),12),15)
+; Mode (type and permission bits), size and modification time, from stat64/lstat64:
+; out@0 mode, @8 size, @16 mtime seconds, @24 mtime nanoseconds.
+effect fn rt_path_stat(path:ptr, follow:bool, out:ptr) -> i64
+  = let info=stack_alloc(256) in let status=rt_result(syscall6(if follow then 338 else 340,ptr_to_i64(path),ptr_to_i64(info),0,0,0,0)) in
+    if status<0 then -1 else
+    let a=store_i64(out,0,bit_and(i64(load_i32(info,4)),65535)) in let b=store_i64(out,8,load_i64(info,96)) in
+    let c=store_i64(out,16,load_i64(info,48)) in let d=store_i64(out,24,load_i64(info,56)) in 0
+; The running executable's absolute path (not terminated): its length, or -1
+; with errno. proc_info(PROC_INFO_CALL_PIDINFO, pid, PROC_PIDPATHINFO), as
+; proc_pidpath does.
+effect fn rt_executable_path(out:ptr, n:i64) -> i64
+  = if n<4096 then rt_result(-34) else
+    let r=rt_result(syscall6(336,2,rt_getpid(),11,0,ptr_to_i64(out),n)) in if r<0 then -1 else rt_cstrlen(out)
 effect fn rt_mkdir_mode(path:ptr, mode:i64) -> i64 = rt_result(syscall6(136, ptr_to_i64(path), mode, 0, 0, 0, 0))
 effect fn rt_mkdir(path: ptr) -> i64 = rt_mkdir_mode(path,448)
 ; F_FULLFSYNC (51): on Darwin a full sync must also flush the device cache.
@@ -127,6 +140,7 @@ effect fn rt_file_identity(fd: i64, out: ptr) -> i64
     0
 effect fn rt_rename(old: ptr, new: ptr) -> i64 = rt_result(syscall6(128,ptr_to_i64(old),ptr_to_i64(new),0,0,0,0))
 effect fn rt_unlink(path: ptr) -> i64 = rt_result(syscall6(10,ptr_to_i64(path),0,0,0,0,0))
+effect fn rt_symlink(target: ptr, path: ptr) -> i64 = rt_result(syscall6(57,ptr_to_i64(target),ptr_to_i64(path),0,0,0,0))
 effect fn rt_rmdir(path: ptr) -> i64 = rt_result(syscall6(137,ptr_to_i64(path),0,0,0,0,0))
 effect fn rt_access_exec(path: ptr) -> i64 = rt_result(syscall6(33,ptr_to_i64(path),1,0,0,0,0))
 ; A symbolic link's target bytes (not terminated): their count, or -1 with errno.

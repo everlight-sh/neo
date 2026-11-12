@@ -1,0 +1,450 @@
+import "std:strings"
+import "std:numbers"
+import "std:json"
+import "std:hashmap"
+import "std:option"
+
+; TOML 1.0.0 documents as std:json values.
+;
+; toml_parse(text) reads one whole document and returns a JsonResult whose
+; value is a JSON object, so callers read it with the ordinary JSON accessors
+; (json_get, json_array_get, json_text, json_int, json_bool, json_float, ...).
+;
+; Value mapping:
+;   table, inline table, array-of-tables element  -> object, keys in document order
+;   array, array of tables                         -> array
+;   string (basic, literal, both multi-line forms) -> string, unescaped, valid UTF-8
+;   integer (decimal, 0x, 0o, 0b)                  -> JSON integer, in decimal
+;   boolean                                        -> true or false
+;   float                                          -> JSON number: the TOML text
+;       without a leading '+' and without underscores ("+1_000.5e+3" gives
+;       1000.5e+3); inf and nan, and floats beyond the binary64 range, are
+;       errors because JSON cannot hold them
+;   offset date-time, local date-time, local date, local time
+;                                                  -> JSON string holding the
+;       exact TOML text ("1979-05-27T07:32:00-08:00", "1979-05-27 07:32:00",
+;       "1979-05-27", "07:32:00.999999"); dates and times are validated
+;       (months, days per month with leap years, hours 00-23, minutes 00-59,
+;       seconds 00-60, offsets), and fractional seconds keep every digit
+;
+; On error ok is false, error.code is 1, error.position is the 1-based line
+; and error.message says what is wrong, e.g. duplicate key "name".
+; The input must be valid UTF-8 of at most 16 MiB; CRLF line ends are read as
+; LF (also inside multi-line strings). Tables and arrays nest at most 100 deep.
+; Keys are found through a hash map with fixed seeds.
+
+; The document is a tree of nodes in parallel arrays; node 0 is the root.
+; kinds: 0 root, 1 table created by a header path ([a] for [a.b]), 2 table
+; defined by [header], 3 table created by dotted keys (marks holds the section
+; that created it), 4 element of an array of tables, 5 array of tables,
+; 6 inline table, 7 array value, 8 scalar (raws holds its JSON text).
+; Children are linked in document order through firsts, lasts and nexts; named
+; children are also in index, keyed by the parent and the name.
+; section counts headers; table is the current header's table; node is the
+; result of the last step; keys and text the last key and string read; closed
+; ends an array or inline table.
+private type TomlState = { at:i64, ok:bool, fail:i64, message:Arr u8 _, section:i64, table:i64, node:i64, closed:bool,
+  kinds:Arr i64 _, firsts:Arr i64 _, lasts:Arr i64 _, nexts:Arr i64 _, marks:Arr i64 _, depths:Arr i64 _,
+  names:Arr Arr u8 _ _, raws:Arr Arr u8 _ _, index:HashMap<Arr u8 _,i64>, keys:Arr Arr u8 _ _, text:Arr u8 _ }
+
+private fn toml_at(borrow values:Arr i64 n,index:i64) -> i64 = if index>=0 && index<n then values[index] else -1
+private fn toml_put(move values:Arr i64 n,index:i64,value:i64) -> Arr i64 _ = if index>=0 && index<n then set(values,index,value) else values
+private fn toml_fail(move s:TomlState,at:i64,message:Arr u8 _) -> TomlState
+  = if !s.ok then s else s with { ok=false, fail=at, message=message }
+private fn toml_no_keys() -> Arr Arr u8 _ _ = arr(i in 0..0) ""
+
+; ---------------------------------------------------------------- characters
+private fn toml_bare(c:i64) -> bool = (c>=65 && c<=90) || (c>=97 && c<=122) || (c>=48 && c<=57) || c==95 || c==45
+private fn toml_digit(c:i64) -> bool = c>=48 && c<=57
+private fn toml_control(c:i64) -> bool = (c>=0 && c<32 && c!=9) || c==127
+private fn toml_space(borrow src:Arr u8 n,at:i64) -> i64 = loop(i=at) while str_byte(src,i)==32 || str_byte(src,i)==9 next(i+1) yield i
+; From a '#': the newline or end closing the comment, or -1-position of a
+; control character in it.
+private fn toml_comment_end(borrow src:Arr u8 n,at:i64) -> i64
+  = let end=loop(i=at+1) while i<n && !toml_control(str_byte(src,i)) next(i+1) yield i in
+    if end>=n || str_byte(src,end)==10 then end else -1-end
+; Whitespace, newlines and comments from at (inside arrays): the next other
+; byte, or -1-position of a control character in a comment.
+private fn toml_blank(borrow src:Arr u8 n,at:i64) -> i64
+  = loop(i=at,done=false) while !done && i>=0 next(
+      let c=str_byte(src,i) in if c==32 || c==9 || c==10 then i+1 else if c==35 then toml_comment_end(src,i) else i,
+      let c=str_byte(src,i) in c!=32 && c!=9 && c!=10 && c!=35) yield i
+
+; ---------------------------------------------------------------- strings
+; A string being read. status: 0 reading, 1 closed, 2 unterminated, 3 control
+; character, 4 invalid escape, 5 escape outside the Unicode scalar values,
+; 6 more than five closing quotes.
+private type TomlText = { at:i64, out:Arr u8 _, status:i64 }
+private fn toml_quotes(borrow src:Arr u8 n,at:i64,q:i64) -> i64 = loop(k=0) while str_byte(src,at+k)==q next(k+1) yield k
+; A line-ending backslash in a multi-line basic string at at: where the
+; content resumes after the whitespace and newlines it trims, else -1.
+private fn toml_line_end(borrow src:Arr u8 n,at:i64) -> i64
+  = let after=toml_space(src,at+1) in
+    if str_byte(src,after)!=10 then -1 else
+    loop(i=after) while str_byte(src,i)==32 || str_byte(src,i)==9 || str_byte(src,i)==10 next(i+1) yield i
+private fn toml_hex_value(borrow src:Arr u8 n,at:i64,digits:i64) -> i64
+  = loop(k=0,value=0) while k<digits && value>=0 next(k+1,let d=json_hex(str_byte(src,at+k)) in if d<0 then -1 else value*16+d) yield value
+private fn toml_escape(move t:TomlText,borrow src:Arr u8 _) -> TomlText
+  = let at=t.at in let e=str_byte(src,at+1) in
+    let simple=if e==98 then 8 else if e==116 then 9 else if e==110 then 10 else if e==102 then 12 else if e==114 then 13
+      else if e==34 then 34 else if e==92 then 92 else -1 in
+    if simple>=0 then t with { at=at+2, out=push(t.out,u8(simple)) } else
+    let digits=if e==117 then 4 else if e==85 then 8 else 0 in
+    if digits==0 then t with { status=4 } else
+    let code=toml_hex_value(src,at+2,digits) in
+    if code<0 then t with { status=4 } else
+    let encoded=utf8_encode(code) in
+    if !encoded.ok then t with { status=5 } else t with { at=at+2+digits, out=concat(t.out,encoded.value) }
+; Ordinary content: not the quote, not a backslash in a basic string, not a
+; control character other than tab (and newline in multi-line strings).
+private fn toml_plain(c:i64,q:i64,multi:bool) -> bool
+  = c>=0 && c!=q && (c!=92 || q==39) && (!toml_control(c) || (multi && c==10))
+private fn toml_plain_end(borrow src:Arr u8 n,at:i64,q:i64,multi:bool) -> i64
+  = loop(i=at) while toml_plain(str_byte(src,i),q,multi) next(i+1) yield i
+private fn toml_text_step(move t:TomlText,borrow src:Arr u8 _,q:i64,multi:bool) -> TomlText
+  = let at=t.at in let c=str_byte(src,at) in
+    if c==q then
+      let run=if multi then toml_quotes(src,at,q) else 1 in
+      if multi && run<3 then t with { at=at+run, out=concat(t.out,str_slice(src,at,at+run)) } else
+      if run>5 then t with { status=6 } else
+      let extra=if multi then run-3 else 0 in
+      t with { at=at+run, out=concat(t.out,str_slice(src,at,at+extra)), status=1 }
+    else if c==92 && q==34 then
+      let resume=if multi then toml_line_end(src,at) else -1 in
+      if resume>=0 then t with { at=resume } else toml_escape(t,src)
+    else if c<0 || (c==10 && !multi) then t with { status=2 }
+    else if c!=10 && toml_control(c) then t with { status=3 }
+    else let end=toml_plain_end(src,at,q,multi) in t with { at=end, out=concat(t.out,str_slice(src,at,end)) }
+; Any of the four string forms at s.at, decoded into s.text.
+private fn toml_string(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = if !s.ok then s else let at=s.at in let q=str_byte(src,at) in
+    let multi=str_byte(src,at+1)==q && str_byte(src,at+2)==q in
+    let begin=if !multi then at+1 else if str_byte(src,at+3)==10 then at+4 else at+3 in
+    let read=loop(t=TomlText { at=begin, out="", status=0 }) while t.status==0 next(toml_text_step(t,src,q,multi)) yield t in
+    if read.status==1 then s with { at=read.at, text=read.out } else
+    toml_fail(s,if read.status==2 then at else read.at,
+      if read.status==2 then "unterminated string" else if read.status==3 then "control character in string" else
+      if read.status==4 then "invalid escape sequence in string" else
+      if read.status==5 then "escape is not a Unicode scalar value" else "too many quotes closing a multi-line string")
+
+; ---------------------------------------------------------------- keys
+private fn toml_simple_key(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = if !s.ok then s else let at=s.at in let c=str_byte(src,at) in
+    if c==34 || c==39 then
+      if str_byte(src,at+1)==c && str_byte(src,at+2)==c then toml_fail(s,at,"a key cannot be a multi-line string") else toml_string(s,src)
+    else let end=loop(i=at) while toml_bare(str_byte(src,i)) next(i+1) yield i in
+      if end==at then toml_fail(s,at,"expected a key") else s with { at=end, text=str_slice(src,at,end) }
+private fn toml_key_part(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = let from=toml_space(src,toml_space(src,s.at)+1) in
+    let t=toml_simple_key(s with { at=from },src) in
+    if !t.ok then t else let part=t.text in t with { keys=push(t.keys,part) }
+; A dotted key into s.keys.
+private fn toml_key(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = let first=toml_simple_key(s,src) in
+    let started=if !first.ok then first else let part=first.text in first with { keys=push(toml_no_keys(),part) } in
+    loop(t=started) while t.ok && str_byte(src,toml_space(src,t.at))==46 next(toml_key_part(t,src)) yield t
+; A key part for messages: bare when it can be, else quoted.
+private fn toml_part(borrow name:Arr u8 n) -> Arr u8 _
+  = if n>0 && loop(i=0,ok=true) while ok && i<n next(i+1,toml_bare(str_byte(name,i))) yield ok then str_slice(name,0,n) else json_quote(name)
+; The first count parts of a key, quoted, for messages.
+private fn toml_path(borrow keys:Arr Arr u8 _ n,count:i64) -> Arr u8 _
+  = json_quote(loop(i=0,out="") while i<count && i<n next(i+1,check i>=0 && i<n in concat(out,if i==0 then "" else ".",toml_part(keys[i]))) yield out)
+; Why a key cannot be used. kind is the existing node's; mode: 0 a dotted key,
+; 1 a header path, 2 a [table] header, 3 an [[array]] header.
+private fn toml_conflict(kind:i64,borrow shown:Arr u8 _,mode:i64) -> Arr u8 _
+  = if kind==8 then concat("key ",shown," is a value, not a table") else
+    if kind==6 then concat("cannot extend inline table ",shown) else
+    if kind==7 then (if mode==3 then concat("cannot append to static array ",shown) else
+      if mode==2 then concat("table ",shown," is already a static array") else concat("cannot add keys to static array ",shown)) else
+    if mode==0 then (if kind==5 then concat("cannot add keys to array of tables ",shown," with dotted keys") else
+      concat("cannot add keys to table ",shown," with dotted keys after it was defined")) else
+    if mode==3 then concat("table ",shown," is not an array of tables") else
+    if kind==5 then concat("table ",shown," is already an array of tables") else
+    if kind==3 then concat("table ",shown," was already defined by dotted keys") else
+    concat("table ",shown," is defined more than once")
+
+; ---------------------------------------------------------------- nodes
+private fn toml_slot(parent:i64,borrow name:Arr u8 m) -> Arr u8 _
+  = check m>=0 in byte_copy(byte_write_le(arr(i in 0..m+8) u8(0),0,parent,8),8,name)
+private fn toml_find(borrow s:TomlState,parent:i64,borrow name:Arr u8 _) -> i64
+  = match hashmap_get(s.index,toml_slot(parent,name)) { None => -1, Some(id) => id }
+; Add a child of parent, named (and indexed) unless it is an array element,
+; and make it s.node.
+private fn toml_add(move s:TomlState,parent:i64,borrow name:Arr u8 _,kind:i64,indexed:bool,at:i64) -> TomlState
+  = if !s.ok then s else
+    let id=len(s.kinds) in let depth=toml_at(s.depths,parent)+1 in let section=s.section in
+    if depth>100 then toml_fail(s,at,"tables and arrays are nested more than 100 levels deep") else
+    let previous=toml_at(s.lasts,parent) in
+    s with { node=id,
+      kinds=push(s.kinds,kind),
+      firsts=push(if previous<0 then toml_put(s.firsts,parent,id) else s.firsts,-1),
+      lasts=push(toml_put(s.lasts,parent,id),-1),
+      nexts=push(toml_put(s.nexts,previous,id),-1),
+      marks=push(s.marks,section),
+      depths=push(s.depths,depth),
+      names=push(s.names,name),
+      raws=push(s.raws,""),
+      index=if indexed then hashmap_put(s.index,toml_slot(parent,name),id) else s.index }
+private fn toml_scalar(move s:TomlState,node:i64,raw:Arr u8 _) -> TomlState
+  = if !s.ok || node<0 || node>=len(s.raws) then s else s with { raws=set(s.raws,node,raw) }
+
+; ---------------------------------------------------------------- scalars
+; A number or boolean: its JSON text, or the error message in raw.
+private type TomlNumber = { ok:bool, raw:Arr u8 _ }
+private fn toml_bad(message:Arr u8 _) -> TomlNumber = TomlNumber { ok=false, raw=message }
+private fn toml_word_is(borrow src:Arr u8 n,start:i64,end:i64,borrow word:Arr u8 m) -> bool = end-start==m && bytes_match_at(src,start,word)
+private fn toml_digit_value(c:i64,base:i64) -> i64 = let d=json_hex(c) in if d>=0 && d<base then d else -1
+; The end of DIGIT *( DIGIT / "_" DIGIT ) from first, before end, or -1 when
+; there is no digit or an underscore is not between two digits.
+private fn toml_group_end(borrow src:Arr u8 n,first:i64,end:i64,base:i64) -> i64
+  = if first>=end || toml_digit_value(str_byte(src,first),base)<0 then -1 else
+    loop(i=first+1,bad=false) while !bad && i<end && (toml_digit_value(str_byte(src,i),base)>=0 || str_byte(src,i)==95)
+      next(i+1,str_byte(src,i)==95 && (i+1>=end || toml_digit_value(str_byte(src,i+1),base)<0)) yield if bad then -1 else i
+; Validated digits (with underscores) from first to end as an i64.
+private fn toml_integer(borrow src:Arr u8 n,first:i64,end:i64,base:i64{base>=2,base<=16},negative:bool) -> TomlNumber
+  = if toml_group_end(src,first,end,base)!=end then toml_bad("invalid integer") else
+    let limit=if negative then -9223372036854775808 else -9223372036854775807 in
+    let value=loop(i=first,number=0,fits=true) while fits && i<end next(i+1,
+      let d=toml_digit_value(str_byte(src,i),base) in if d<0 || number<(limit+d)/base then number else number*base-d,
+      let d=toml_digit_value(str_byte(src,i),base) in d<0 || number>=(limit+d)/base) yield if fits then number else 1 in
+    if value>0 then toml_bad("integer does not fit in 64 bits") else TomlNumber { ok=true, raw=int_text(if negative then value else 0-value) }
+private fn toml_decimal(borrow src:Arr u8 n,first:i64,end:i64,negative:bool) -> TomlNumber
+  = if toml_group_end(src,first,end,10)!=end then toml_bad(if toml_digit(str_byte(src,first)) then "invalid number" else "invalid value") else
+    if str_byte(src,first)==48 && end-first>1 then toml_bad("leading zeros are not allowed") else toml_integer(src,first,end,10,negative)
+private fn toml_plain_number(borrow src:Arr u8 n,start:i64,end:i64) -> Arr u8 _
+  = let from=if str_byte(src,start)==43 then start+1 else start in
+    loop(i=from,out="") while i<end next(i+1,let c=str_byte(src,i) in if c==95 || c<0 then out else push(out,u8(c))) yield out
+private fn toml_float(borrow src:Arr u8 n,start:i64,first:i64,end:i64) -> TomlNumber
+  = let whole=toml_group_end(src,first,end,10) in
+    if whole<0 then toml_bad("invalid float") else
+    if str_byte(src,first)==48 && whole-first>1 then toml_bad("leading zeros are not allowed") else
+    let point=str_byte(src,whole)==46 in
+    let fraction=if point then toml_group_end(src,whole+1,end,10) else whole in
+    if fraction<0 then toml_bad("invalid float") else
+    let e=str_byte(src,fraction) in let exponent=e==101 || e==69 in
+    let sign=str_byte(src,fraction+1) in
+    let digits=fraction+(if sign==43 || sign==45 then 2 else 1) in
+    let close=if exponent then toml_group_end(src,digits,end,10) else fraction in
+    if close!=end || (!point && !exponent) then toml_bad("invalid float") else
+    let plain=toml_plain_number(src,start,end) in
+    if len(plain)>4096 then toml_bad("float has more than 4096 digits") else
+    let parsed=float_parse(plain) in
+    if !parsed.ok then toml_bad("float is out of the binary64 range") else TomlNumber { ok=true, raw=plain }
+; A boolean, integer or float spelled from start to end.
+private fn toml_number(borrow src:Arr u8 n,start:i64,end:i64) -> TomlNumber
+  = if toml_word_is(src,start,end,"true") then TomlNumber { ok=true, raw="true" } else
+    if toml_word_is(src,start,end,"false") then TomlNumber { ok=true, raw="false" } else
+    let c=str_byte(src,start) in let signed=c==43 || c==45 in let first=if signed then start+1 else start in
+    if toml_word_is(src,first,end,"inf") || toml_word_is(src,first,end,"nan") then toml_bad("inf and nan floats cannot be represented in JSON") else
+    let prefix=if str_byte(src,first)!=48 then 0 else str_byte(src,first+1) in
+    if prefix==120 || prefix==111 || prefix==98 then
+      (if signed then toml_bad("hexadecimal, octal and binary integers cannot have a sign") else
+        if prefix==120 then toml_integer(src,first+2,end,16,false) else
+        if prefix==111 then toml_integer(src,first+2,end,8,false) else toml_integer(src,first+2,end,2,false))
+    else if loop(i=first,found=false) while !found && i<end next(i+1,let b=str_byte(src,i) in b==46 || b==101 || b==69) yield found then
+      toml_float(src,start,first,end)
+    else toml_decimal(src,first,end,c==45)
+private fn toml_two(borrow src:Arr u8 n,at:i64) -> i64
+  = let a=str_byte(src,at) in let b=str_byte(src,at+1) in if toml_digit(a) && toml_digit(b) then (a-48)*10+b-48 else -1
+private fn toml_month_days(year:i64,month:i64) -> i64
+  = if month==2 then (if year%4==0 && (year%100!=0 || year%400==0) then 29 else 28)
+    else if month==4 || month==6 || month==9 || month==11 then 30 else 31
+; HH:MM:SS with an optional fraction at at: its end, or -1.
+private fn toml_clock(borrow src:Arr u8 n,at:i64) -> i64
+  = let hour=toml_two(src,at) in let minute=toml_two(src,at+3) in let second=toml_two(src,at+6) in
+    if hour<0 || hour>23 || str_byte(src,at+2)!=58 || minute<0 || minute>59 || str_byte(src,at+5)!=58 || second<0 || second>60 then -1 else
+    if str_byte(src,at+8)!=46 then at+8 else
+    let end=loop(i=at+9) while toml_digit(str_byte(src,i)) next(i+1) yield i in if end==at+9 then -1 else end
+; A local time, local date, local date-time or offset date-time at at: its
+; end, or -1.
+private fn toml_moment(borrow src:Arr u8 n,at:i64) -> i64
+  = if str_byte(src,at+2)==58 then toml_clock(src,at) else
+    let century=toml_two(src,at) in let years=toml_two(src,at+2) in
+    let month=toml_two(src,at+5) in let day=toml_two(src,at+8) in
+    if century<0 || years<0 || str_byte(src,at+4)!=45 || month<1 || month>12 || str_byte(src,at+7)!=45 ||
+      day<1 || day>toml_month_days(century*100+years,month) then -1 else
+    let d=str_byte(src,at+10) in
+    let timed=d==84 || d==116 || (d==32 && toml_two(src,at+11)>=0 && str_byte(src,at+13)==58) in
+    if !timed then at+10 else
+    let clock=toml_clock(src,at+11) in
+    if clock<0 then -1 else
+    let z=str_byte(src,clock) in
+    if z==90 || z==122 then clock+1 else
+    if z!=43 && z!=45 then clock else
+    let hour=toml_two(src,clock+1) in let minute=toml_two(src,clock+4) in
+    if hour<0 || hour>23 || str_byte(src,clock+3)!=58 || minute<0 || minute>59 then -1 else clock+6
+private fn toml_word(c:i64) -> bool = toml_bare(c) || c==43 || c==46
+private fn toml_atom(move s:TomlState,borrow src:Arr u8 _,node:i64) -> TomlState
+  = let at=s.at in
+    if toml_digit(str_byte(src,at)) && toml_digit(str_byte(src,at+1)) &&
+      (str_byte(src,at+2)==58 || (toml_digit(str_byte(src,at+2)) && toml_digit(str_byte(src,at+3)) && str_byte(src,at+4)==45)) then
+      let end=toml_moment(src,at) in
+      if end<0 then toml_fail(s,at,"invalid date or time") else toml_scalar(s with { at=end },node,json_quote(str_slice(src,at,end)))
+    else let end=loop(i=at) while toml_word(str_byte(src,i)) next(i+1) yield i in
+      if end==at then toml_fail(s,at,"expected a value") else
+      let number=toml_number(src,at,end) in
+      if !number.ok then toml_fail(s,at,number.raw) else toml_scalar(s with { at=end },node,number.raw)
+
+; ---------------------------------------------------------------- values
+private fn toml_value_kind(c:i64) -> i64 = if c==91 then 7 else if c==123 then 6 else 8
+; The value at s.at into node, which toml_add created with toml_value_kind.
+private fn toml_value(move s:TomlState,borrow src:Arr u8 _,node:i64) -> TomlState
+  = if !s.ok then s else let c=str_byte(src,s.at) in
+    if c==34 || c==39 then let read=toml_string(s,src) in let raw=json_quote(read.text) in toml_scalar(read,node,raw)
+    else if c==91 then toml_array(s,src,node)
+    else if c==123 then toml_inline(s,src,node)
+    else toml_atom(s,src,node)
+; One array element and the separator after it; open is the array's '['.
+private fn toml_element(move s:TomlState,borrow src:Arr u8 _,array:i64,open:i64) -> TomlState
+  = let at=s.at in
+    if str_byte(src,at)<0 then toml_fail(s,open,"unterminated array") else
+    let added=toml_add(s,array,"",toml_value_kind(str_byte(src,at)),false,at) in
+    let id=added.node in let read=toml_value(added,src,id) in
+    if !read.ok then read else
+    let after=toml_blank(src,read.at) in
+    if after<0 then toml_fail(read,-1-after,"control character in comment") else
+    let c=str_byte(src,after) in
+    if c==93 then read with { at=after+1, closed=true } else
+    if c<0 then toml_fail(read,open,"unterminated array") else
+    if c!=44 then toml_fail(read,after,"expected ',' or ']' after an array value") else
+    let following=toml_blank(src,after+1) in
+    if following<0 then toml_fail(read,-1-following,"control character in comment") else
+    if str_byte(src,following)==93 then read with { at=following+1, closed=true } else read with { at=following, closed=false }
+private fn toml_array(move s:TomlState,borrow src:Arr u8 _,node:i64) -> TomlState
+  = let open=s.at in let first=toml_blank(src,open+1) in
+    if first<0 then toml_fail(s,-1-first,"control character in comment") else
+    if str_byte(src,first)==93 then s with { at=first+1 } else
+    loop(t=s with { at=first, closed=false }) while t.ok && !t.closed next(toml_element(t,src,node,open)) yield t with { closed=false }
+; One inline table member and the separator after it.
+private fn toml_member(move s:TomlState,borrow src:Arr u8 _,table:i64) -> TomlState
+  = let read=toml_keyval(s,src,table) in
+    if !read.ok then read else
+    let after=toml_space(src,read.at) in let c=str_byte(src,after) in
+    if c==125 then read with { at=after+1, closed=true } else
+    if c==10 || c<0 then toml_fail(read,after,"an inline table must be closed on the same line") else
+    if c!=44 then toml_fail(read,after,"expected ',' or '}' in an inline table") else
+    let following=toml_space(src,after+1) in
+    if str_byte(src,following)==125 then toml_fail(read,following,"an inline table cannot end with a comma") else read with { at=following, closed=false }
+private fn toml_inline(move s:TomlState,borrow src:Arr u8 _,node:i64) -> TomlState
+  = let first=toml_space(src,s.at+1) in
+    if str_byte(src,first)==125 then s with { at=first+1 } else
+    loop(t=s with { at=first, closed=false }) while t.ok && !t.closed next(toml_member(t,src,node)) yield t with { closed=false }
+
+; ---------------------------------------------------------------- statements
+; Walk a dotted key's next part from s.node. Tables the key creates, and
+; tables a header path created, belong to the current section; other tables
+; are closed to dotted keys.
+private fn toml_dotted(move s:TomlState,borrow keys:Arr Arr u8 _ n,i:i64,at:i64) -> TomlState
+  = if !s.ok || i<0 || i>=n then s else let name=keys[i] in let parent=s.node in let found=toml_find(s,parent,name) in
+    if found<0 then toml_add(s,parent,name,3,true,at) else
+    let kind=toml_at(s.kinds,found) in let section=s.section in
+    if kind==1 then s with { node=found, kinds=toml_put(s.kinds,found,3), marks=toml_put(s.marks,found,section) } else
+    if kind==3 && toml_at(s.marks,found)==section then s with { node=found } else
+    toml_fail(s,at,toml_conflict(kind,toml_path(keys,i+1),0))
+; key = value into table (the current header's table, or an inline table).
+private fn toml_keyval(move s:TomlState,borrow src:Arr u8 _,table:i64) -> TomlState
+  = let at=s.at in let read=toml_key(s,src) in
+    if !read.ok then read else
+    let equals=toml_space(src,read.at) in
+    if str_byte(src,equals)!=61 then toml_fail(read,equals,"expected '=' after a key") else
+    let keys=read.keys in let count=len(keys) in
+    let walked=loop(t=read with { node=table },i=0) while t.ok && i<count-1 next(toml_dotted(t,keys,i,at),i+1) yield t in
+    if !walked.ok || count<1 then walked else
+    let stem=keys[count-1] in let parent=walked.node in
+    if toml_find(walked,parent,stem)>=0 then toml_fail(walked,at,concat("duplicate key ",toml_path(keys,count))) else
+    let start=toml_space(src,equals+1) in
+    let added=toml_add(walked,parent,stem,toml_value_kind(str_byte(src,start)),true,at) in
+    let id=added.node in toml_value(added with { at=start },src,id)
+; A header path's next part from s.node; an array of tables leads to its
+; last element.
+private fn toml_descend(move s:TomlState,borrow keys:Arr Arr u8 _ n,i:i64,at:i64) -> TomlState
+  = if !s.ok || i<0 || i>=n then s else let name=keys[i] in let parent=s.node in let found=toml_find(s,parent,name) in
+    if found<0 then toml_add(s,parent,name,1,true,at) else
+    let kind=toml_at(s.kinds,found) in
+    if kind==5 then s with { node=toml_at(s.lasts,found) } else
+    if kind>=1 && kind<=4 then s with { node=found } else
+    toml_fail(s,at,toml_conflict(kind,toml_path(keys,i+1),1))
+private fn toml_define(move s:TomlState,borrow keys:Arr Arr u8 _ n,at:i64) -> TomlState
+  = if !s.ok || n<1 then s else let name=keys[n-1] in let parent=s.node in let found=toml_find(s,parent,name) in
+    if found<0 then let t=toml_add(s,parent,name,2,true,at) in let id=t.node in t with { table=id } else
+    let kind=toml_at(s.kinds,found) in
+    if kind==1 then s with { node=found, table=found, kinds=toml_put(s.kinds,found,2) } else
+    toml_fail(s,at,toml_conflict(kind,toml_path(keys,n),2))
+private fn toml_append(move s:TomlState,borrow keys:Arr Arr u8 _ n,at:i64) -> TomlState
+  = if !s.ok || n<1 then s else let name=keys[n-1] in let parent=s.node in let found=toml_find(s,parent,name) in
+    let kind=toml_at(s.kinds,found) in
+    if found>=0 && kind!=5 then toml_fail(s,at,toml_conflict(kind,toml_path(keys,n),3)) else
+    let listed=if found>=0 then s with { node=found } else toml_add(s,parent,name,5,true,at) in
+    let list=listed.node in
+    let element=toml_add(listed,list,"",4,false,at) in let id=element.node in element with { table=id }
+; [table] or [[array.of.tables]].
+private fn toml_header(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = let at=s.at in let many=str_byte(src,at+1)==91 in
+    let read=toml_key(s with { at=toml_space(src,at+(if many then 2 else 1)) },src) in
+    if !read.ok then read else
+    let close=toml_space(src,read.at) in
+    if str_byte(src,close)!=93 || (many && str_byte(src,close+1)!=93) then
+      toml_fail(read,close,if many then "expected ']]' to close an array of tables header" else "expected ']' to close a table header") else
+    let keys=read.keys in let count=len(keys) in let section=read.section+1 in
+    let walked=loop(t=read with { at=close+(if many then 2 else 1), node=0, section=section },i=0) while t.ok && i<count-1
+      next(toml_descend(t,keys,i,at),i+1) yield t in
+    if many then toml_append(walked,keys,at) else toml_define(walked,keys,at)
+; After a statement: whitespace, an optional comment, then a newline or the end.
+private fn toml_end_line(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = if !s.ok then s else let at=toml_space(src,s.at) in let c=str_byte(src,at) in
+    if c==10 then s with { at=at+1 } else if c<0 then s with { at=at } else
+    if c==35 then (let end=toml_comment_end(src,at) in if end<0 then toml_fail(s,-1-end,"control character in comment") else s with { at=end })
+    else toml_fail(s,at,"expected the end of the line")
+private fn toml_line(move s:TomlState,borrow src:Arr u8 _) -> TomlState
+  = let at=toml_space(src,s.at) in let c=str_byte(src,at) in
+    if c==10 then s with { at=at+1 } else
+    if c<0 then s with { at=at } else
+    if c==35 then (let end=toml_comment_end(src,at) in if end<0 then toml_fail(s,-1-end,"control character in comment") else s with { at=end }) else
+    if c==91 then toml_end_line(toml_header(s with { at=at },src),src) else
+    let table=s.table in toml_end_line(toml_keyval(s with { at=at },src,table),src)
+private fn toml_start() -> TomlState
+  = TomlState { at=0, ok=true, fail=0, message="", section=0, table=0, node=0, closed=false,
+      kinds=arr(i in 0..1) 0, firsts=arr(i in 0..1) -1, lasts=arr(i in 0..1) -1, nexts=arr(i in 0..1) -1,
+      marks=arr(i in 0..1) 0, depths=arr(i in 0..1) 0, names=arr(i in 0..1) "", raws=arr(i in 0..1) "",
+      index=hashmap_empty::<Arr u8 _,i64>(6149212342958196419,-4069860470618370613), keys=toml_no_keys(), text="" }
+private fn toml_read(borrow src:Arr u8 n) -> TomlState
+  = loop(s=toml_start()) while s.ok && s.at<n next(toml_line(s,src)) yield s
+
+; ---------------------------------------------------------------- output
+private fn toml_emit(borrow s:TomlState,node:i64,move out:Arr u8 _) -> Arr u8 _
+  = let kind=toml_at(s.kinds,node) in
+    if kind==8 then (if node>=0 && node<len(s.raws) then concat(out,s.raws[node]) else out) else
+    let list=kind==5 || kind==7 in
+    let body=loop(child=toml_at(s.firsts,node),first=true,text=concat(out,if list then "[" else "{")) while child>=0
+      next(toml_at(s.nexts,child),false,toml_emit_member(s,child,text,first,list)) yield text in
+    concat(body,if list then "]" else "}")
+private fn toml_emit_member(borrow s:TomlState,child:i64,move out:Arr u8 _,first:bool,list:bool) -> Arr u8 _
+  = let separated=if first then out else concat(out,",") in
+    let named=if list || child<0 || child>=len(s.names) then separated else concat(separated,json_quote(s.names[child]),":") in
+    toml_emit(s,child,named)
+
+; ---------------------------------------------------------------- entry
+private fn toml_error(line:i64,message:Arr u8 _) -> JsonResult
+  = JsonResult { ok=false, value=json_none().value, error=Error { code=1, message=message, position=line } }
+private fn toml_line_of(borrow src:Arr u8 n,at:i64) -> i64
+  = loop(i=0,line=1) while i<at && i<n next(i+1,if str_byte(src,i)==10 then line+1 else line) yield line
+; The first byte that does not start a well-formed UTF-8 sequence.
+private fn toml_utf8_bad(borrow text:Arr u8 n) -> i64
+  = loop(i=0,bad= -1) while bad<0 && i<n next(
+      let c=str_byte(text,i) in if c<128 then i+1 else let w=json_utf8_width(text,i) in if w>0 then i+w else i,
+      let c=str_byte(text,i) in if c<128 || json_utf8_width(text,i)>0 then -1 else i) yield bad
+; CRLF becomes LF; a lone CR stays and is rejected where it appears.
+private fn toml_crlf(borrow text:Arr u8 n) -> Arr u8 _
+  = let pairs=loop(i=0,count=0) while i<n next(i+1,count+(if str_byte(text,i)==13 && str_byte(text,i+1)==10 then 1 else 0)) yield count in
+    let size=n-pairs in check size>=0 in
+    loop(i=0,at=0,out=arr(j in 0..size) u8(0)) while i<n next(i+1,
+      if str_byte(text,i)==13 && str_byte(text,i+1)==10 then at else at+1,
+      if str_byte(text,i)==13 && str_byte(text,i+1)==10 then out else
+        if at>=0 && at<len(out) && i>=0 && i<n then set(out,at,text[i]) else out) yield out
+private fn toml_finish(borrow src:Arr u8 _) -> JsonResult
+  = let s=toml_read(src) in
+    if !s.ok then toml_error(toml_line_of(src,s.fail),s.message) else json_parse(toml_emit(s,0,""))
+fn toml_parse(borrow text:Arr u8 n) -> JsonResult
+  = if n>16777216 then toml_error(1,"TOML document is larger than 16 MiB") else
+    if !utf8_valid(text) then toml_error(toml_line_of(text,toml_utf8_bad(text)),"TOML document is not valid UTF-8") else
+    if str_find(text,"\r").present then toml_finish(toml_crlf(text)) else toml_finish(text)

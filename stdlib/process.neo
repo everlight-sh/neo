@@ -9,6 +9,13 @@ private fn process_arguments_valid(values:Arr Arr u8 _ n) -> bool
 ; Explicit environment and absolute executable path. No shell or PATH lookup.
 ; Failed exec is reported as child exit 127. Streams use full-duplex socketpairs.
 effect(process,fs,env) fn process_start(path:Arr u8 n,args:Arr Arr u8 _ m,environment:Arr Arr u8 _ k) -> Process
+  = process_launch(path,args,environment,false)
+; Like process_start, but the child shares this process's stdin, stdout and
+; stderr (a terminal, pipe or file), so its output goes straight there.
+; process_try_read, process_try_write and process_close_input report EBADF.
+effect(process,fs,env) fn process_start_inherit(path:Arr u8 n,args:Arr Arr u8 _ m,environment:Arr Arr u8 _ k) -> Process
+  = process_launch(path,args,environment,true)
+private effect(process,fs,env) fn process_launch(path:Arr u8 n,args:Arr Arr u8 _ m,environment:Arr Arr u8 _ k,inherit:bool) -> Process
   = if !io_path_valid(path) || !str_starts(path,"/") || !process_arguments_valid(args) || !process_arguments_valid(environment) then Process { token= -22 } else
     check m>=0 && k>=0 in
     let executable=concat(path,"\0") in
@@ -27,15 +34,15 @@ effect(process,fs,env) fn process_start(path:Arr u8 n,args:Arr Arr u8 _ m,enviro
       check i>=0 && i<k in let saved=store_ptr(env_ptr,i*8,ptr_add(env_bytes,offset)) in offset+len(environment[i])+1) yield offset in
     let ee=store_ptr(env_ptr,k*8,null()) in
     let pair=stack_alloc(32) in let clear=memset(pair,i32(255),32) in
-    let io=rt_socketpair(pair) in let err=if io<0 then -1 else rt_socketpair(ptr_add(pair,8)) in
+    let io=if inherit then 0 else rt_socketpair(pair) in let err=if io<0 then -1 else if inherit then 0 else rt_socketpair(ptr_add(pair,8)) in
     let parent=i64(load_i32(pair,0)) in let child=i64(load_i32(pair,4)) in let errors=i64(load_i32(pair,8)) in let child_error=i64(load_i32(pair,12)) in
-    let ready=if io<0 || err<0 then -1 else let a=rt_cloexec(parent) in let b=rt_cloexec(child) in let c=rt_cloexec(errors) in let d=rt_cloexec(child_error) in
+    let ready=if io<0 || err<0 then -1 else if inherit then 0 else let a=rt_cloexec(parent) in let b=rt_cloexec(child) in let c=rt_cloexec(errors) in let d=rt_cloexec(child_error) in
       if a<0 || b<0 || c<0 || d<0 then -1 else 0 in
     let pid=if ready<0 then -1 else rt_spawn_exec(arg_bytes,argv_ptr,env_ptr,child,child_error) in
     let unmapped=rt_munmap(argv_ptr,allocation) in
     let closed=if child>=0 then rt_close(child) else 0 in let closed=if child_error>=0 then rt_close(child_error) else 0 in
     if pid<0 then let closed=if parent>=0 then rt_close(parent) else 0 in let closed=if errors>=0 then rt_close(errors) else 0 in Process { token= -5 } else
-      let input_mode=rt_nonblock(parent) in let error_mode=rt_nonblock(errors) in
+      let input_mode=if inherit then 0 else rt_nonblock(parent) in let error_mode=if inherit then 0 else rt_nonblock(errors) in
       let address=if input_mode<0 || error_mode<0 then -1 else rt_private_map(64) in
       if address<0 then let stopped=rt_kill(pid,9) in let waited=rt_wait(pid) in let a=rt_close(parent) in let b=rt_close(errors) in Process { token= -12 } else
         let p=ptr_from_i64(address) in let clear=memset(p,i32(0),64) in let a=store_i64(p,0,64) in let b=store_i64(p,8,pid) in let c=store_i64(p,16,parent) in let d=store_i64(p,24,errors) in
@@ -54,9 +61,10 @@ effect(process) fn process_status(process:Process) -> ProcessStatus
       error=if waited<0 then Error { code=i64(load_i32(rt_errno(),0)),message="wait failed",position=0 } else no_error() }
 effect(process,fs) fn process_try_read(process:Process,stream:i64,limit:i64) -> BytesResult
   = let address=rt_handle_fd(process.token,10) in
-    if address<0 || stream<1 || stream>2 then bytes_error(9,"invalid process stream",0) else file_read_chunk(load_i64(ptr_from_i64(address),if stream==1 then 16 else 24),limit)
+    if address<0 || stream<1 || stream>2 || load_i64(ptr_from_i64(address),16)<0 then bytes_error(9,"invalid process stream",0) else file_read_chunk(load_i64(ptr_from_i64(address),if stream==1 then 16 else 24),limit)
 effect(process,fs) fn process_try_write(process:Process,bytes:Arr u8 n,offset:i64) -> IntResult
   = let address=rt_handle_fd(process.token,10) in if address<0 then int_error(9,"invalid process owner",0) else
+    if load_i64(ptr_from_i64(address),16)<0 then int_error(9,"process input is inherited",0) else
     if offset<0 || offset>n then int_error(22,"invalid write offset",0) else
       let count=rt_send(load_i64(ptr_from_i64(address),16),ptr_add(data(bytes),offset),n-offset) in
       if count<0 then int_error(i64(load_i32(rt_errno(),0)),"child write failed",offset) else int_ok(count)
@@ -71,13 +79,21 @@ private effect(process,fs) fn process_release(process:Process) -> unit
     let p=ptr_from_i64(address) in let status=process_status(process) in let pid=load_i64(p,8) in
     let stopped=if pid>0 then rt_kill(pid,9) else 0 in
     let waited=if pid>0 then rt_wait(pid) else 0 in
-    let a=rt_close(load_i64(p,16)) in let b=rt_close(load_i64(p,24)) in rt_handle_drop(process.token,10)
+    let a=if load_i64(p,16)>=0 then rt_close(load_i64(p,16)) else 0 in let b=if load_i64(p,24)>=0 then rt_close(load_i64(p,24)) else 0 in rt_handle_drop(process.token,10)
 
 fn process_identity(process:Process) -> i64 = process.token
 ; Half-close stdin without closing stdout: useful for EOF-driven child tools.
 effect(process) fn process_close_input(process:Process) -> IntResult
   = let address=rt_handle_fd(process.token,10) in if address<0 then int_error(9,"invalid process owner",0) else
-    let p=ptr_from_i64(address) in if load_i64(p,40)!=0 then int_ok(0) else
+    let p=ptr_from_i64(address) in if load_i64(p,16)<0 then int_error(9,"process input is inherited",0) else if load_i64(p,40)!=0 then int_ok(0) else
     let result=rt_shutdown_write(load_i64(p,16)) in
     if result<0 then int_error(i64(load_i32(rt_errno(),0)),"child stdin half-close failed",0) else
       let closed=store_i64(p,40,1) in int_ok(0)
+
+; The running program's executable as an absolute path. Linux reads
+; /proc/self/exe, so /proc must be mounted; macOS asks the kernel (proc_pidpath).
+effect(process,fs) fn process_executable_path() -> BytesResult
+  = let buffer=ax_alloc(4096) in let count=rt_executable_path(buffer,4096) in
+    let result=if count<0 then bytes_error(i64(load_i32(rt_errno(),0)),"executable path unavailable",0)
+      else if count>=4096 then bytes_error(36,"executable path too long",0) else check count>=0 in bytes_ok(view(buffer,count)) in
+    let released=ax_release(buffer) in result

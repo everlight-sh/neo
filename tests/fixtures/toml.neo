@@ -1,0 +1,227 @@
+; std:toml: TOML 1.0 documents read as std:json values. Prints "toml OK";
+; otherwise lists the failing cases on stderr and exits 1.
+import "std:toml"
+import "std:json"
+import "std:numbers"
+import "std:strings"
+import "std:io"
+
+; A valid document whose JSON text is expected; "" when it matches.
+fn tt_valid(borrow name:Arr u8 _,borrow doc:Arr u8 _,borrow expected:Arr u8 _) -> Arr u8 _
+  = let parsed=toml_parse(doc) in
+    if !parsed.ok then concat(name,": line ",int_text(parsed.error.position),": ",parsed.error.message,"\n") else
+    let text=json_encode(parsed.value) in
+    if str_equal(text,expected) then "" else concat(name,": got ",text,"\n")
+; A valid document whose member key decodes to expected.
+fn tt_string(borrow name:Arr u8 _,borrow doc:Arr u8 _,borrow key:Arr u8 _,borrow expected:Arr u8 _) -> Arr u8 _
+  = let parsed=toml_parse(doc) in
+    if !parsed.ok then concat(name,": line ",int_text(parsed.error.position),": ",parsed.error.message,"\n") else
+    let member=json_get(parsed.value,key) in let text=json_text(member.value) in
+    if member.present && text.ok && str_equal(text.value,expected) then "" else concat(name,": got ",json_encode(parsed.value),"\n")
+; An invalid document: the error must be on line and its message contain fragment.
+fn tt_invalid(borrow name:Arr u8 _,borrow doc:Arr u8 _,line:i64,borrow fragment:Arr u8 _) -> Arr u8 _
+  = let parsed=toml_parse(doc) in
+    if parsed.ok then concat(name,": accepted ",json_encode(parsed.value),"\n") else
+    if parsed.error.position==line && parsed.error.code==1 && str_find(parsed.error.message,fragment).present then "" else
+    concat(name,": line ",int_text(parsed.error.position),": ",parsed.error.message,"\n")
+
+fn tt_basics() -> Arr u8 _
+  = concat(
+      tt_valid("empty","","{}"),
+      tt_valid("comments","# only\n\n   # comments\n\t\n","{}"),
+      tt_valid("no final newline","# end","{}"),
+      tt_valid("scalars","a = 1\nb = \"two\"\nc = true\nd = false","{\"a\":1,\"b\":\"two\",\"c\":true,\"d\":false}"),
+      tt_valid("keys","bare_key-1 = 1\n\"quoted key\" = 2\n'literal key' = 3\n\"\" = 4\nsite . \"google.com\" . x = 5\n3.14 = 6\n\"a\\u0062c\" = 7\n",
+        "{\"bare_key-1\":1,\"quoted key\":2,\"literal key\":3,\"\":4,\"site\":{\"google.com\":{\"x\":5}},\"3\":{\"14\":6},\"abc\":7}"),
+      tt_valid("literal keys keep backslashes","'\\u0061' = 1\na = 2\n","{\"\\\\u0061\":1,\"a\":2}"),
+      tt_valid("keyword keys","true = 1\nfalse = 2\n1234 = 3\ninf = 4\n-_- = 5\n","{\"true\":1,\"false\":2,\"1234\":3,\"inf\":4,\"-_-\":5}"),
+      tt_valid("whitespace","\ta\t=\t1\t\n  [ b ]  # c\n  y = 2 # c\n","{\"a\":1,\"b\":{\"y\":2}}"),
+      tt_valid("hash in strings","s = \"a # not a comment\" # comment\nt = 'b # c'\n","{\"s\":\"a # not a comment\",\"t\":\"b # c\"}"),
+      tt_valid("crlf","a = 1\r\nb = \"\"\"x\r\ny\"\"\"\r\n[t]\r\nc = 2 # c\r\n","{\"a\":1,\"b\":\"x\\u000ay\",\"t\":{\"c\":2}}"),
+      tt_valid("unicode","\"ключ\" = \"значение\"\nemoji = \"😀\"\n","{\"ключ\":\"значение\",\"emoji\":\"😀\"}"))
+
+fn tt_strings() -> Arr u8 _
+  = concat(
+      tt_string("escapes","s = \"tab\\there \\\"q\\\" back\\\\slash \\b\\f\\n\\r \\u00e9 \\U0001F680\"\n","s","tab\there \"q\" back\\slash \x08\x0c\n\r é 🚀"),
+      tt_valid("escapes as JSON","s = \"\\t\\\"\\\\\\u007f\"\n","{\"s\":\"\\u0009\\\"\\\\\x7f\"}"),
+      tt_string("literal","p = 'C:\\Users\\nodejs\\templates'\n","p","C:\\Users\\nodejs\\templates"),
+      tt_string("literal quotes","q = 'Tom \"Dubs\" Preston-Werner'\n","q","Tom \"Dubs\" Preston-Werner"),
+      tt_string("multi-line basic","m = \"\"\"\nRoses are red\nViolets are blue\"\"\"\n","m","Roses are red\nViolets are blue"),
+      tt_string("line-ending backslash","m = \"\"\"\nThe quick brown \\\n\n\n  fox jumps over \\\n    the lazy dog.\"\"\"\n","m","The quick brown fox jumps over the lazy dog."),
+      tt_string("backslash before spaces","m = \"\"\"a \\   \n \t  b\"\"\"\n","m","a b"),
+      tt_string("two quotes","m = \"\"\"Here are two quotation marks: \"\". Simple enough.\"\"\"\n","m","Here are two quotation marks: \"\". Simple enough."),
+      tt_string("escaped quote","m = \"\"\"Here are three quotation marks: \"\"\\\".\"\"\"\n","m","Here are three quotation marks: \"\"\"."),
+      tt_string("closing quotes","m = \"\"\"\"This,\" she said, \"is just a pointless statement.\"\"\"\"\n","m","\"This,\" she said, \"is just a pointless statement.\""),
+      tt_string("five closing quotes","m = \"\"\"a\"\"\"\"\"\n","m","a\"\""),
+      tt_string("multi-line escapes","m = \"\"\"\\u0041\\tB\"\"\"\n","m","A\tB"),
+      tt_string("multi-line literal","re = '''I [dw]on't need \\d{2} apples'''\n","re","I [dw]on't need \\d{2} apples"),
+      tt_string("multi-line literal lines","l = '''\nThe first newline is\ntrimmed in raw strings.\n   All other whitespace\n   is preserved.\n'''\n","l",
+        "The first newline is\ntrimmed in raw strings.\n   All other whitespace\n   is preserved.\n"),
+      tt_string("literal closing quotes","q = ''''That,' she said, 'is still pointless.''''\n","q","'That,' she said, 'is still pointless.'"),
+      tt_string("tab","t = \"a\tb\"\n","t","a\tb"),
+      tt_valid("empty strings","a = \"\"\nb = ''\nc = \"\"\"\"\"\"\nd = ''''''\n","{\"a\":\"\",\"b\":\"\",\"c\":\"\",\"d\":\"\"}"))
+
+fn tt_numbers() -> Arr u8 _
+  = concat(
+      tt_valid("integers","a = +99\nb = 42\nc = 0\nd = -17\ne = 1_000\nf = 5_349_221\ng = 53_49_221\nh = 1_2_3_4_5\ni = 0xDEADBEEF\nj = 0xdead_beef\nk = 0o01234567\nl = 0o755\nm = 0b11010110\nn = 9223372036854775807\no = -9223372036854775808\np = -0\nq = +0\nr = 0x7FFFFFFFFFFFFFFF\ns = 0b0\n",
+        "{\"a\":99,\"b\":42,\"c\":0,\"d\":-17,\"e\":1000,\"f\":5349221,\"g\":5349221,\"h\":12345,\"i\":3735928559,\"j\":3735928559,\"k\":342391,\"l\":493,\"m\":214,\"n\":9223372036854775807,\"o\":-9223372036854775808,\"p\":0,\"q\":0,\"r\":9223372036854775807,\"s\":0}"),
+      tt_valid("floats","a = +1.0\nb = 3.1415\nc = -0.01\nd = 5e+22\ne = 1e06\nf = -2E-2\ng = 6.626e-34\nh = 224_617.445_991_228\ni = -0.0\nj = +0.0\nk = 0e0\nl = 1e1_0\n",
+        "{\"a\":1.0,\"b\":3.1415,\"c\":-0.01,\"d\":5e+22,\"e\":1e06,\"f\":-2E-2,\"g\":6.626e-34,\"h\":224617.445991228,\"i\":-0.0,\"j\":0.0,\"k\":0e0,\"l\":1e10}"),
+      tt_valid("dates","odt1 = 1979-05-27T07:32:00Z\nodt2 = 1979-05-27T00:32:00-07:00\nodt3 = 1979-05-27T00:32:00.999999+07:30\nodt4 = 1979-05-27 07:32:00Z\nldt1 = 1979-05-27T07:32:00\nldt2 = 1979-05-27T00:32:00.999999\nld1 = 1979-05-27\nlt1 = 07:32:00\nlt2 = 00:32:00.999999\nleap = 2024-02-29\nlower = 1979-05-27t07:32:00z\nd2 = 1979-05-27 # date then comment\narr = [1979-05-27, 07:32:00]\n",
+        "{\"odt1\":\"1979-05-27T07:32:00Z\",\"odt2\":\"1979-05-27T00:32:00-07:00\",\"odt3\":\"1979-05-27T00:32:00.999999+07:30\",\"odt4\":\"1979-05-27 07:32:00Z\",\"ldt1\":\"1979-05-27T07:32:00\",\"ldt2\":\"1979-05-27T00:32:00.999999\",\"ld1\":\"1979-05-27\",\"lt1\":\"07:32:00\",\"lt2\":\"00:32:00.999999\",\"leap\":\"2024-02-29\",\"lower\":\"1979-05-27t07:32:00z\",\"d2\":\"1979-05-27\",\"arr\":[\"1979-05-27\",\"07:32:00\"]}"))
+
+fn tt_containers() -> Arr u8 _
+  = concat(
+      tt_valid("arrays","integers = [ 1, 2, 3 ]\ncolors = [ \"red\", \"yellow\", \"green\" ]\nnested = [ [ 1, 2 ], [3, 4, 5] ]\nmixed = [ [ 1, 2 ], [\"a\", \"b\"] ]\nstrings = [ \"all\", 'strings', \"\"\"are the same\"\"\", '''type''' ]\nnumbers = [ 0.1, 0.2, 0.5, 1, 2, 5 ]\ncontributors = [\n  \"Foo Bar <foo@example.com>\",\n  { name = \"Baz Qux\", email = \"bazqux@example.com\" }\n]\nmulti = [\n  1,\n  2, # this is ok\n]\nempty = []\nempty2 = [ # comment\n]\nany = [1, \"a\", 2.5, true, [], {}]\n",
+        "{\"integers\":[1,2,3],\"colors\":[\"red\",\"yellow\",\"green\"],\"nested\":[[1,2],[3,4,5]],\"mixed\":[[1,2],[\"a\",\"b\"]],\"strings\":[\"all\",\"strings\",\"are the same\",\"type\"],\"numbers\":[0.1,0.2,0.5,1,2,5],\"contributors\":[\"Foo Bar <foo@example.com>\",{\"name\":\"Baz Qux\",\"email\":\"bazqux@example.com\"}],\"multi\":[1,2],\"empty\":[],\"empty2\":[],\"any\":[1,\"a\",2.5,true,[],{}]}"),
+      tt_valid("tables","[table-1]\nkey1 = \"some string\"\nkey2 = 123\n\n[table-2]\nkey1 = \"another string\"\nkey2 = 456\n",
+        "{\"table-1\":{\"key1\":\"some string\",\"key2\":123},\"table-2\":{\"key1\":\"another string\",\"key2\":456}}"),
+      tt_valid("quoted header","[dog.\"tater.man\"]\ntype.name = \"pug\"\n","{\"dog\":{\"tater.man\":{\"type\":{\"name\":\"pug\"}}}}"),
+      tt_valid("header spacing","[a.b.c]\n[ d.e.f ]\n[ g .  h  . i ]\n[ j . \"ʞ\" . 'l' ]\n","{\"a\":{\"b\":{\"c\":{}}},\"d\":{\"e\":{\"f\":{}}},\"g\":{\"h\":{\"i\":{}}},\"j\":{\"ʞ\":{\"l\":{}}}}"),
+      tt_valid("implicit then defined","[x.y.z.w]\n[x]\n","{\"x\":{\"y\":{\"z\":{\"w\":{}}}}}"),
+      tt_valid("out of order","[fruit.apple]\n[animal]\n[fruit.orange]\n","{\"fruit\":{\"apple\":{},\"orange\":{}},\"animal\":{}}"),
+      tt_valid("dotted then sub-table","[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple.texture]\nsmooth = true\n",
+        "{\"fruit\":{\"apple\":{\"color\":\"red\",\"taste\":{\"sweet\":true},\"texture\":{\"smooth\":true}}}}"),
+      tt_valid("root dotted","name = \"Orange\"\nphysical.color = \"orange\"\nphysical.shape = \"round\"\nsite.\"google.com\" = true\n",
+        "{\"name\":\"Orange\",\"physical\":{\"color\":\"orange\",\"shape\":\"round\"},\"site\":{\"google.com\":true}}"),
+      tt_valid("dotted into implicit","[a.b.c]\nz = 1\n[a]\nb.d = 2\n","{\"a\":{\"b\":{\"c\":{\"z\":1},\"d\":2}}}"),
+      tt_valid("inline tables","name = { first = \"Tom\", last = \"Preston-Werner\" }\npoint = {x=1,y=2}\nanimal = { type.name = \"pug\" }\nempty = {}\nnested = { a = { b = [1, { c = 2 }] }, d.e = 3, d.f = 4 }\n",
+        "{\"name\":{\"first\":\"Tom\",\"last\":\"Preston-Werner\"},\"point\":{\"x\":1,\"y\":2},\"animal\":{\"type\":{\"name\":\"pug\"}},\"empty\":{},\"nested\":{\"a\":{\"b\":[1,{\"c\":2}]},\"d\":{\"e\":3,\"f\":4}}}"),
+      tt_valid("multi-line values in inline table","t = { a = [\n 1,\n 2\n], b = \"\"\"x\ny\"\"\" }\n","{\"t\":{\"a\":[1,2],\"b\":\"x\\u000ay\"}}"),
+      tt_valid("arrays of tables","[[products]]\nname = \"Hammer\"\nsku = 738594937\n\n[[products]]  # empty table within the array\n\n[[products]]\nname = \"Nail\"\nsku = 284758393\n\ncolor = \"gray\"\n",
+        "{\"products\":[{\"name\":\"Hammer\",\"sku\":738594937},{},{\"name\":\"Nail\",\"sku\":284758393,\"color\":\"gray\"}]}"),
+      tt_valid("nested arrays of tables","[[fruits]]\nname = \"apple\"\n\n[fruits.physical]  # subtable\ncolor = \"red\"\nshape = \"round\"\n\n[[fruits.varieties]]  # nested array of tables\nname = \"red delicious\"\n\n[[fruits.varieties]]\nname = \"granny smith\"\n\n\n[[fruits]]\nname = \"banana\"\n\n[[fruits.varieties]]\nname = \"plantain\"\n",
+        "{\"fruits\":[{\"name\":\"apple\",\"physical\":{\"color\":\"red\",\"shape\":\"round\"},\"varieties\":[{\"name\":\"red delicious\"},{\"name\":\"granny smith\"}]},{\"name\":\"banana\",\"varieties\":[{\"name\":\"plantain\"}]}]}"),
+      tt_valid("sub-table per element","[[a]]\n[a.b]\nx = 1\n[[a]]\n[a.b]\nx = 2\n","{\"a\":[{\"b\":{\"x\":1}},{\"b\":{\"x\":2}}]}"),
+      tt_valid("array of inline tables","points = [ { x = 1, y = 2, z = 3 },\n           { x = 7, y = 8, z = 9 },\n           { x = 2, y = 4, z = 8 } ]\n",
+        "{\"points\":[{\"x\":1,\"y\":2,\"z\":3},{\"x\":7,\"y\":8,\"z\":9},{\"x\":2,\"y\":4,\"z\":8}]}"))
+
+fn tt_neokit_doc() -> Arr u8 _
+  = "# NeoKit site configuration\ntitle = \"My Site\"\nbase_url = \"https://example.com/\"\nport = 8080\ndebug = false\nratio = 0.75\n\n[site]\nname = \"NeoKit Docs\"\ndescription = \"\"\"\nA static site \\\nbuilt with NeoKit.\"\"\"\nlanguages = [\"en\", \"fr\", 'de']\nauthors = [\n  { name = \"Ada\", email = \"ada@example.com\" },\n  { name = \"Linus\" },   # trailing comma ok\n]\n\n[build]\noutput = 'public'\nminify = true\nexclude = []\n\n[[redirects]]\nfrom = \"/old\"\nto = \"/new\"\nstatus = 301\n\n[[redirects]]\nfrom = \"/blog/*\"\nto = \"/posts/:splat\"\nstatus = 302\nforce = true\n\n[metadata]\nversion = \"1.2.0\"\nupdated = 2026-11-12T09:30:00Z\n\n[metadata.props]\ntheme.color = \"#0af\"\ntheme.dark = true\nmax_items = 1_000\nheaders = { \"X-Frame-Options\" = \"DENY\", cache = { max_age = 3600 } }\n"
+fn tt_neokit() -> Arr u8 _
+  = let doc=tt_neokit_doc() in
+    let whole=tt_valid("neokit",doc,
+      "{\"title\":\"My Site\",\"base_url\":\"https://example.com/\",\"port\":8080,\"debug\":false,\"ratio\":0.75,\"site\":{\"name\":\"NeoKit Docs\",\"description\":\"A static site built with NeoKit.\",\"languages\":[\"en\",\"fr\",\"de\"],\"authors\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\"},{\"name\":\"Linus\"}]},\"build\":{\"output\":\"public\",\"minify\":true,\"exclude\":[]},\"redirects\":[{\"from\":\"/old\",\"to\":\"/new\",\"status\":301},{\"from\":\"/blog/*\",\"to\":\"/posts/:splat\",\"status\":302,\"force\":true}],\"metadata\":{\"version\":\"1.2.0\",\"updated\":\"2026-11-12T09:30:00Z\",\"props\":{\"theme\":{\"color\":\"#0af\",\"dark\":true},\"max_items\":1000,\"headers\":{\"X-Frame-Options\":\"DENY\",\"cache\":{\"max_age\":3600}}}}}") in
+    let parsed=toml_parse(doc) in let root=parsed.value in
+    let site=json_get(root,"site").value in let name=json_text(json_get(site,"name").value) in
+    let description=json_text(json_get(site,"description").value) in
+    let redirects=json_get(root,"redirects").value in let second=json_array_get(redirects,1).value in
+    let status=json_int(json_get(second,"status").value) in let force=json_bool(json_get(second,"force").value) in
+    let target=json_text(json_get(second,"to").value) in
+    let minify=json_bool(json_get(json_get(root,"build").value,"minify").value) in
+    let ratio=json_float(json_get(root,"ratio").value) in let port=json_int(json_get(root,"port").value) in
+    let props=json_get(json_get(root,"metadata").value,"props").value in
+    let color=json_text(json_get(json_get(props,"theme").value,"color").value) in
+    let items=json_int(json_get(props,"max_items").value) in
+    let age=json_int(json_get(json_get(json_get(props,"headers").value,"cache").value,"max_age").value) in
+    let first_key=json_object_key_at(root,0) in let sixth_key=json_object_key_at(root,5) in
+    let languages=json_get(site,"languages").value in let third=json_text(json_array_get(languages,2).value) in
+    let read=parsed.ok && name.ok && str_equal(name.value,"NeoKit Docs") && description.ok && str_equal(description.value,"A static site built with NeoKit.") &&
+      json_array_len(redirects)==2 && status.ok && status.value==302 && force.ok && force.value && target.ok && str_equal(target.value,"/posts/:splat") &&
+      minify.ok && minify.value && ratio.ok && ratio.value==0.75 && port.ok && port.value==8080 && color.ok && str_equal(color.value,"#0af") &&
+      items.ok && items.value==1000 && age.ok && age.value==3600 && first_key.ok && str_equal(first_key.value,"title") &&
+      sixth_key.ok && str_equal(sixth_key.value,"site") && json_array_len(languages)==3 && third.ok && str_equal(third.value,"de") in
+    concat(whole,if read then "" else "neokit: accessors disagree\n")
+
+fn tt_redefinitions() -> Arr u8 _
+  = concat(
+      tt_invalid("duplicate key","a = 1\nb = 2\na = 3\n",3,"duplicate key \"a\""),
+      tt_invalid("duplicate dotted key","a.b.c = 1\na.b = 2\n",2,"duplicate key \"a.b\""),
+      tt_invalid("duplicate after multi-line string","a = \"\"\"\nx\ny\"\"\"\nb = 1\nb = 2\n",5,"duplicate key \"b\""),
+      tt_invalid("table twice","[a]\nb = 1\n\n[a]\n",4,"table \"a\" is defined more than once"),
+      tt_invalid("header after dotted keys","[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple]\n",5,"already defined by dotted keys"),
+      tt_invalid("nested header after dotted keys","[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple.taste]\n",5,"already defined by dotted keys"),
+      tt_invalid("root dotted then header","a.b = 1\n[a]\n",2,"table \"a\" was already defined by dotted keys"),
+      tt_invalid("dotted key into header table","[a.b]\nx = 1\n[a]\nb.y = 2\n",4,"cannot add keys to table \"b\" with dotted keys"),
+      tt_invalid("dotted key into nested header table","[a.b.c]\nz = 1\n[a]\nb.c.t = 2\n",4,"cannot add keys to table \"b.c\" with dotted keys"),
+      tt_invalid("dotted key into array of tables","[[a.b]]\n[a]\nb.c = 1\n",3,"array of tables \"b\""),
+      tt_invalid("append to static array","a = [1, 2]\n[[a]]\n",2,"cannot append to static array \"a\""),
+      tt_invalid("header into static array","a = [{b = 1}]\n[a.c]\n",2,"static array \"a\""),
+      tt_invalid("dotted key into inline table","[product]\ntype = { name = \"Nail\" }\ntype.edible = false\n",3,"cannot extend inline table \"type\""),
+      tt_invalid("header into inline table","a = { b = 1 }\n[a.c]\n",2,"cannot extend inline table \"a\""),
+      tt_invalid("header for inline table","a = { b = 1 }\n[a]\n",2,"cannot extend inline table \"a\""),
+      tt_invalid("inline table over dotted table","[product]\ntype.name = \"Nail\"\ntype = { edible = false }\n",3,"duplicate key \"type\""),
+      tt_invalid("table over value","a = 1\n[a]\n",2,"key \"a\" is a value, not a table"),
+      tt_invalid("quoted key equals bare key","a = 1\n\"a\" = 2\n",2,"duplicate key \"a\""),
+      tt_invalid("escaped key equals bare key","a = 1\n'b' = 2\n\"\\u0061\" = 3\n",3,"duplicate key \"a\""),
+      tt_invalid("dotted key over value","a = 1\na.b = 2\n",2,"key \"a\" is a value"),
+      tt_invalid("header path over value","[a]\nb = 1\n[a.b.c]\n",3,"key \"a.b\" is a value"),
+      tt_invalid("array of tables over table","[a]\n[[a]]\n",2,"table \"a\" is not an array of tables"),
+      tt_invalid("table over array of tables","[[a]]\n[a]\n",2,"table \"a\" is already an array of tables"),
+      tt_invalid("inline duplicate","a = { b = 1, b = 2 }\n",1,"duplicate key \"b\""),
+      tt_invalid("inline dotted then value","a = { b.c = 1, b = 2 }\n",1,"duplicate key \"b\""),
+      tt_invalid("inline value then dotted","a = { b = {}, b.c = 1 }\n",1,"cannot extend inline table \"b\""))
+
+fn tt_syntax() -> Arr u8 _
+  = concat(
+      tt_invalid("inline trailing comma","a = { b = 1, }\n",1,"cannot end with a comma"),
+      tt_invalid("inline newline","a = { b = 1\n}\n",1,"closed on the same line"),
+      tt_invalid("unterminated string","x = 1\na = \"unterminated\nb = 1\n",2,"unterminated string"),
+      tt_invalid("unterminated multi-line","a = 1\nb = \"\"\"never closed\n\n",2,"unterminated string"),
+      tt_invalid("unterminated literal","a = 'multi\nline'\n",1,"unterminated string"),
+      tt_invalid("invalid escape","a = \"bad \\q escape\"\n",1,"invalid escape"),
+      tt_invalid("surrogate escape","a = \"\\uD800\"\n",1,"Unicode scalar"),
+      tt_invalid("escape too large","a = \"\\U00110000\"\n",1,"Unicode scalar"),
+      tt_invalid("short escape","a = \"\\u12\"\n",1,"invalid escape"),
+      tt_invalid("too many quotes","a = \"\"\"too many\"\"\"\"\"\"\n",1,"too many quotes"),
+      tt_invalid("multi-line key","\"\"\"key\"\"\" = 1\n",1,"multi-line string"),
+      tt_invalid("control in string","a = \"x\x7fy\"\n",1,"control character in string"),
+      tt_invalid("control in literal","a = 'x\x00y'\n",1,"control character in string"),
+      tt_invalid("control in comment","a = 1\nb = 2\n# bad \x01 comment\n",3,"control character in comment"),
+      tt_invalid("control in array comment","a = [ # \x01\n 1]\n",1,"control character in comment"),
+      tt_invalid("lone CR","a = 1\rb = 2\n",1,"expected the end of the line"),
+      tt_invalid("CR in comment","# a\rb\n",1,"control character in comment"),
+      tt_invalid("invalid UTF-8","a = 1\nb = \"\xff\"\n",2,"not valid UTF-8"),
+      tt_invalid("truncated UTF-8","a = 1\n\nb = \"\xe2\x82\"\n",3,"not valid UTF-8"),
+      tt_invalid("two values","a = 1 2\n",1,"expected the end of the line"),
+      tt_invalid("text after inline table","a = { b = 1 } c\n",1,"expected the end of the line"),
+      tt_invalid("two strings","k = \"a\" \"b\"\n",1,"expected the end of the line"),
+      tt_invalid("unclosed header","[a\nb = 1\n",1,"expected ']'"),
+      tt_invalid("unclosed array header","[[a]\n",1,"expected ']]'"),
+      tt_invalid("empty header","[]\n",1,"expected a key"),
+      tt_invalid("trailing dot","[a.]\n",1,"expected a key"),
+      tt_invalid("unclosed array","a = [1, 2\n",1,"unterminated array"),
+      tt_invalid("unclosed array after comma","x = 1\na = [1,\n# c\n",2,"unterminated array"),
+      tt_invalid("unclosed empty array","a = [\n\n",1,"unterminated array"),
+      tt_invalid("missing comma","a = [1 2]\n",1,"expected ',' or ']'"),
+      tt_invalid("empty array element","a = [1,,2]\n",1,"expected a value"),
+      tt_invalid("missing key","= 1\n",1,"expected a key"),
+      tt_invalid("missing value","a =\nb = 1\n",1,"expected a value"),
+      tt_invalid("missing equals","a 1\n",1,"expected '='"),
+      tt_valid("100 levels",concat("a = ",arr(i in 0..100) u8(91),arr(i in 0..100) u8(93)),concat("{\"a\":",arr(i in 0..100) u8(91),arr(i in 0..100) u8(93),"}")),
+      tt_invalid("long float",concat("a = 1.",arr(i in 0..5000) u8(48)),1,"more than 4096 digits"),
+      tt_invalid("deep nesting",concat("a = ",arr(i in 0..101) u8(91)),1,"nested more than 100 levels"),
+      tt_invalid("too large",arr(i in 0..16777217) u8(10),1,"larger than 16 MiB"))
+
+fn tt_values() -> Arr u8 _
+  = concat(
+      tt_invalid("leading zero","a = 0123\n",1,"leading zeros"),
+      tt_invalid("float leading zero","a = 01.5\n",1,"leading zeros"),
+      tt_invalid("double underscore","a = 1__0\n",1,"invalid number"),
+      tt_invalid("trailing underscore","a = 10_\n",1,"invalid number"),
+      tt_invalid("integer overflow","a = 9223372036854775808\n",1,"does not fit in 64 bits"),
+      tt_invalid("negative overflow","a = -9223372036854775809\n",1,"does not fit in 64 bits"),
+      tt_invalid("hex overflow","a = 0x8000000000000000\n",1,"does not fit in 64 bits"),
+      tt_invalid("signed hex","a = +0x10\n",1,"cannot have a sign"),
+      tt_invalid("bad binary","a = 0b102\n",1,"invalid integer"),
+      tt_invalid("empty hex","a = 0x\n",1,"invalid integer"),
+      tt_invalid("uppercase prefix","a = 0X10\n",1,"invalid"),
+      tt_invalid("inf","a = inf\n",1,"inf and nan"),
+      tt_invalid("signed nan","x = 1\na = -nan\n",2,"inf and nan"),
+      tt_invalid("float overflow","a = 1e400\n",1,"binary64"),
+      tt_invalid("no integer part","a = .5\n",1,"invalid float"),
+      tt_invalid("no fraction digits","a = 5.\n",1,"invalid float"),
+      tt_invalid("exponent after point","a = 1.e5\n",1,"invalid float"),
+      tt_invalid("underscore before point","a = 1_.0\n",1,"invalid float"),
+      tt_invalid("bare word","a = tru\n",1,"invalid value"),
+      tt_invalid("not a leap year","a = 1979-02-29\n",1,"invalid date or time"),
+      tt_invalid("month 13","a = 1979-13-01\n",1,"invalid date or time"),
+      tt_invalid("hour 24","a = 24:00:00\n",1,"invalid date or time"),
+      tt_invalid("no seconds","a = 1979-05-27T07:32\n",1,"invalid date or time"),
+      tt_invalid("offset without colon","a = 1979-05-27T07:32:00+0100\n",1,"invalid date or time"),
+      tt_invalid("text after date-time","a = 1979-05-27 07:32:00 extra\n",1,"expected the end of the line"))
+
+effect(fs,process) fn main() -> unit
+  = let failures=concat(tt_basics(),tt_strings(),tt_numbers(),tt_containers(),tt_neokit(),tt_redefinitions(),tt_syntax(),tt_values()) in
+    if len(failures)==0 then let written=print_out("toml OK\n") in noop() else
+      let written=print_error(failures) in process_exit(1)

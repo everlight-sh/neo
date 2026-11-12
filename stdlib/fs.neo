@@ -18,12 +18,115 @@ effect(fs) fn fs_cwd() -> BytesResult
     let result=if count<=0 then bytes_error(i64(load_i32(rt_errno(),0)),"getcwd failed",0)
       else check size>=0 in bytes_ok(view(buffer,size)) in
     let released=ax_release(buffer) in result
+
+; File kinds, numbered like directory entries. fs_list and fs_stat report
+; these, or another number for devices, pipes and sockets.
+fn fs_kind_directory() -> i64 = 4
+fn fs_kind_file() -> i64 = 8
+fn fs_kind_symlink() -> i64 = 10
+
+type FsEntry = { name:Arr u8 _, kind:i64 }
+type FsList = { ok:bool, entries:Arr FsEntry _, error:Error }
+private type FsDirScan = { entries:Arr FsEntry _, at:i64 }
+private type FsDirRead = { entries:Arr FsEntry _, size:i64 }
+private fn fs_no_entries() -> Arr FsEntry _ = arr(i in 0..0) FsEntry { name="", kind=0 }
+private effect fn fs_dir_step(move scan:FsDirScan, buffer:ptr, size:i64, header:i64) -> FsDirScan
+  = let record=ptr_add(buffer,scan.at) in
+    let step=i64(load_u8(record,16))+256*i64(load_u8(record,17)) in
+    if step<=header || step>size-scan.at then scan with { at=size } else
+    let name=ptr_add(record,header) in
+    let count=loop(i=0) while i<step-header && load_u8(name,i)!=u8(0) next(i+1) yield i in
+    let at=scan.at+step in
+    if count<=0 || count==step-header then scan with { at=at } else
+    let word=concat("",view(name,count)) in
+    if str_equal(word,".") || str_equal(word,"..") then scan with { at=at } else
+    FsDirScan { entries=push(scan.entries,FsEntry { name=word, kind=i64(load_u8(record,header-1)) }), at=at }
+private effect fn fs_dir_batch(move entries:Arr FsEntry _, buffer:ptr, size:i64) -> Arr FsEntry _
+  = let header=rt_directory_name_offset() in
+    let read=loop(scan=FsDirScan { entries=entries, at=0 }) while scan.at<=size-header-1
+      next(fs_dir_step(scan,buffer,size,header)) yield scan in read.entries
+private effect(fs) fn fs_dir_read(fd:i64, buffer:ptr) -> i64
+  = loop(count=rt_read_directory(fd,buffer,32768)) while count<0 && load_i32(rt_errno(),0)==i32(4)
+      next(rt_read_directory(fd,buffer,32768)) yield count
+; Some file systems leave an entry's kind unknown (0); ask for it then.
+private effect(fs) fn fs_entry_known(borrow directory:Arr u8 n, entry:FsEntry) -> FsEntry
+  = if entry.kind!=0 then entry else let text=concat(directory,"/",entry.name,"\0") in
+    let kind=rt_path_kind(data(text),false) in if kind<0 then entry else entry with { kind=kind }
+; A directory's entries without "." and "..", in no particular order. Each
+; kind is fs_kind_directory, fs_kind_file, fs_kind_symlink or another type;
+; a symbolic link is reported as a link, not followed.
+effect(fs) fn fs_list(path:Arr u8 n) -> FsList
+  = if !io_path_valid(path) then FsList { ok=false, entries=fs_no_entries(), error=Error { code=22, message="invalid path", position=0 } } else
+    let text=concat(path,"\0") in let fd=rt_open_directory(data(text)) in
+    if fd<0 then FsList { ok=false, entries=fs_no_entries(), error=Error { code=i64(load_i32(rt_errno(),0)), message="cannot open directory", position=0 } } else
+    let buffer=stack_alloc(32768) in
+    let read=loop(r=FsDirRead { size=fs_dir_read(fd,buffer), entries=fs_no_entries() }) while r.size>0 && r.size<=32768
+      next(let saved=fs_dir_batch(r.entries,buffer,r.size) in FsDirRead { entries=saved, size=fs_dir_read(fd,buffer) }) yield r in
+    let code=if read.size<0 then i64(load_i32(rt_errno(),0)) else 0 in
+    let closed=rt_close(fd) in
+    if read.size!=0 then FsList { ok=false, entries=fs_no_entries(), error=Error { code=if code>0 then code else 5, message="cannot read directory", position=0 } } else
+    let count=len(read.entries) in
+    let entries=loop(i=0,out=fs_no_entries()) while i<count
+      next(i+1,check i>=0 && i<count in push(out,fs_entry_known(path,read.entries[i]))) yield out in
+    FsList { ok=true, entries=entries, error=no_error() }
+
+; mode holds the permission bits (0o7777); mtime_ns is the modification time
+; in nanoseconds since the Unix epoch.
+type FsStat = { ok:bool, kind:i64, size:i64, mode:i64, mtime_ns:i64, error:Error }
+; A path's kind, size, permission bits and modification time. With follow
+; false, a symbolic link is described itself (kind fs_kind_symlink).
+effect(fs) fn fs_stat(path:Arr u8 n, follow:bool) -> FsStat
+  = if !io_path_valid(path) then FsStat { ok=false, kind= -1, size=0, mode=0, mtime_ns=0, error=Error { code=22, message="invalid path", position=0 } } else
+    let text=concat(path,"\0") in let out=stack_alloc(32) in let status=rt_path_stat(data(text),follow,out) in
+    if status<0 then FsStat { ok=false, kind= -1, size=0, mode=0, mtime_ns=0, error=Error { code=i64(load_i32(rt_errno(),0)), message="stat failed", position=0 } } else
+    let mode=load_i64(out,0) in
+    FsStat { ok=true, kind=bit_and(shift_right(mode,12),15), size=load_i64(out,8), mode=bit_and(mode,4095),
+      mtime_ns=load_i64(out,16)*1000000000+load_i64(out,24), error=no_error() }
+
+private type FsResolve = { resolved:Arr u8 _, rest:Arr u8 _, links:i64, steps:i64, error:i64 }
+private fn fs_skip_slashes(borrow path:Arr u8 n, start:i64) -> i64 = loop(i=start) while i<n && str_byte(path,i)==47 next(i+1) yield i
+private fn fs_part_end(borrow path:Arr u8 n, start:i64) -> i64 = loop(i=start) while i<n && str_byte(path,i)!=47 next(i+1) yield i
+; resolved is "" for the root and otherwise has no trailing slash.
+private fn fs_physical_parent(borrow path:Arr u8 n) -> Arr u8 _
+  = let slash=loop(i=0,last=0) while i<n next(i+1,if str_byte(path,i)==47 then i else last) yield last in str_slice(path,0,slash)
+private effect(fs) fn fs_resolve_step(state:FsResolve) -> FsResolve
+  = let n=len(state.rest) in let begin=fs_skip_slashes(state.rest,0) in
+    if begin>=n then state with { rest="" } else
+    let end=fs_part_end(state.rest,begin) in let part=str_slice(state.rest,begin,end) in let after=str_slice(state.rest,end,n) in
+    if str_equal(part,".") then state with { rest=after, steps=state.steps+1 } else
+    if str_equal(part,"..") then state with { resolved=fs_physical_parent(state.resolved), rest=after, steps=state.steps+1 } else
+    let candidate=concat(state.resolved,"/",part) in let text=concat(candidate,"\0") in
+    let kind=rt_path_kind(data(text),false) in
+    if kind<0 then state with { error=i64(load_i32(rt_errno(),0)) } else
+    if kind==10 then
+      (if state.links>=40 then state with { error=40 } else
+       let target=fs_readlink(candidate) in if !target.ok then state with { error=target.error.code } else
+       FsResolve { resolved=if str_starts(target.value,"/") then "" else state.resolved, rest=concat(target.value,"/",after),
+         links=state.links+1, steps=state.steps+1, error=0 })
+    else if kind!=4 && fs_skip_slashes(after,0)<len(after) then state with { error=20 }
+    else state with { resolved=candidate, rest=after, steps=state.steps+1 }
+; The canonical absolute path: relative paths start at the working directory,
+; and ".", ".." and every symbolic link are resolved. The path must exist.
+effect(fs) fn fs_realpath(path:Arr u8 n) -> BytesResult
+  = if !io_path_valid(path) then bytes_error(22,"invalid path",0) else
+    let cwd=if str_starts(path,"/") then bytes_ok("") else fs_cwd() in
+    if !cwd.ok then cwd else
+    let done=loop(state=FsResolve { resolved="", rest=if str_starts(path,"/") then path else concat(cwd.value,"/",path), links=0, steps=0, error=0 })
+      while state.error==0 && len(state.rest)>0 && state.steps<65536 next(fs_resolve_step(state)) yield state in
+    if done.error!=0 then bytes_error(done.error,"cannot resolve path",0) else
+    if len(done.rest)>0 then bytes_error(40,"path too long to resolve",0) else
+    bytes_ok(if len(done.resolved)==0 then "/" else done.resolved)
 effect(fs) fn fs_remove(path:Arr u8 n) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
     let result=rt_unlink(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"unlink failed",0) else int_ok(0)
 effect(fs) fn fs_mkdir(path:Arr u8 n) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
     let result=rt_mkdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"mkdir failed",0) else int_ok(0)
+; A symbolic link at path pointing to target, which need not exist.
+effect(fs) fn fs_symlink(target:Arr u8 n,path:Arr u8 m) -> IntResult
+  = if !io_path_valid(target) || !io_path_valid(path) then int_error(22,"invalid path",0) else
+    let to=concat(target,"\0") in let at=concat(path,"\0") in let result=rt_symlink(data(to),data(at)) in
+    if result<0 then int_error(i64(load_i32(rt_errno(),0)),"symlink failed",0) else int_ok(0)
 effect(fs) fn fs_rmdir(path:Arr u8 n) -> IntResult
   = if !io_path_valid(path) then int_error(22,"invalid path",0) else let text=concat(path,"\0") in
     let result=rt_rmdir(data(text)) in if result<0 then int_error(i64(load_i32(rt_errno(),0)),"rmdir failed",0) else int_ok(0)

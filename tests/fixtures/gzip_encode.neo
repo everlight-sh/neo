@@ -1,0 +1,179 @@
+; std:deflate's encoders. At every level, deflate_raw, zlib_encode and
+; gzip_encode round-trip through inflate_raw, zlib_decode and gzip_decode
+; (empty input, one byte, all byte values, a repetitive pattern, mixed text,
+; pseudo-random bytes, long runs, literals with no repeats); they agree on the
+; raw stream and repeat exactly. Small inputs match zlib 1.3's bytes (the
+; gzip header is ours: MTIME 0, XFL 2/4 only at levels 9/1, OS 255). Invalid
+; levels fail with error 22.
+; Prints "gzip encode OK"; any failure traps.
+import "std:deflate"
+import "std:io"
+import "std:strings"
+
+; glibc's 31-bit linear congruential generator.
+fn ge_next(x: i64) -> i64 = (x * 1103515245 + 12345) % 2147483648
+fn ge_random(count: i64, seed: i64) -> Arr u8 _
+  = loop(i = 0, x = seed, out = arr(j in 0..(if count > 0 then count else 0)) u8(0)) while i < count
+      next(i + 1, ge_next(x), byte_write_le(out, i, shift_right(ge_next(x), 16), 1)) yield out
+
+; `count` bytes repeating `pattern`.
+fn ge_repeat(borrow pattern: Arr u8 m, count: i64) -> Arr u8 _
+  = loop(i = 0, out = arr(j in 0..(if count > 0 then count else 0)) u8(0)) while i < count && m > 0
+      next(i + 1, byte_write_le(out, i, str_byte(pattern, i % m), 1)) yield out
+fn ge_run(byte: i64, count: i64) -> Arr u8 _ = arr(j in 0..(if count > 0 then count else 0)) u8(byte)
+
+; Byte 0 at even positions and 1..255 in turn at odd ones: no 3-byte string
+; repeats, so there are no matches, but literal frequencies are skewed.
+fn ge_skewed() -> Arr u8 _ = arr(i in 0..510) u8(if i % 2 == 0 then 0 else i / 2 + 1)
+
+; Overlong codes: 16383 pseudo-random bytes (a block of literals), then 11823
+; copies of earlier bytes, 4160 to 32160 back. Their lengths fall on 16 length
+; symbols (269-284) with counts growing by about 1.7 (4869 of length 20, 2864
+; of length 24, ..., two of length 240), each in the middle of its symbol's
+; range, so a match that grows or shrinks by a byte keeps its symbol. The
+; second block's literal/length code would then be 16 or more levels deep, so
+; levels 6 and 9 must limit it to 15 bits; level 1, which hashes fewer
+; positions, needs more than 7 bits for its code-length code instead.
+type GeDeep = { at: i64, x: i64, out: Arr u8 _ }
+fn ge_copy(move t: GeDeep, length: i64) -> GeDeep
+  = let x = ge_next(t.x) in let at = t.at in
+    let span = if at - 4160 < 28000 then at - 4160 else 28000 in
+    let from = at - 4160 - shift_right(x, 8) % (if span > 0 then span else 1) in
+    let out = loop(i = 0, out = t.out) while i < length
+      next(i + 1, let v = byte_read_le(out, from + i, 1) in byte_write_le(out, at + i, v, 1)) yield out in
+    GeDeep { at = at + length, x = x, out = out }
+fn ge_copies(move t: GeDeep, length: i64, count: i64) -> GeDeep
+  = loop(c = 0, t = t) while c < count next(c + 1, ge_copy(t, length)) yield t
+fn ge_deep() -> Arr u8 _
+  = let counts = "\x05\x13\x30\x0b\x95\x06\xdf\x03\x47\x02\x57\x01\xca\x00\x77\x00\x46\x00\x29\x00\x18\x00\x0e\x00\x08\x00\x05\x00\x03\x00\x02\x00" in
+    let lengths = "\x14\x18\x1c\x20\x26\x2e\x36\x3e\x4a\x5a\x6a\x7a\x92\xb2\xd2\xf0" in
+    let start = GeDeep { at = 16383, x = 99, out = concat(ge_random(16383, 4242), arr(i in 0..317600) u8(0)) } in
+    let t = loop(s = 0, t = start) while s < 16
+      next(s + 1, ge_copies(t, str_byte(lengths, s), byte_read_le(counts, 2 * s, 2))) yield t in
+    let at = t.at in byte_slice(t.out, 0, at)
+
+; Text from a 512-word dictionary of generated words, picked with a skew
+; towards the first ones, with numbers, punctuation and markup between them.
+fn ge_word(w: i64) -> Arr u8 _
+  = let x = ge_next(ge_next(w * 7919 + 17)) in let size = 2 + shift_right(x, 16) % 8 in
+    loop(i = 0, y = ge_next(x), out = arr(j in 0..(if size > 0 then size else 0)) u8(97)) while i < size
+      next(i + 1, ge_next(y),
+        let r = shift_right(y, 8) in byte_write_le(out, i, str_byte("etaoinshrdlcumwfgypbvkjxqz", (r % 26) * (shift_right(r, 5) % 26) / 25), 1))
+      yield out
+fn ge_sep(k: i64) -> Arr u8 _
+  = if k < 7 then " " else if k == 7 then ", " else if k == 8 then ".\n" else if k == 9 then "();\n  "
+    else if k == 10 then " = " else if k == 11 then "<div class=\"" else if k == 12 then "\">\n" else if k == 13 then " && "
+    else if k == 14 then "</span> " else "\n"
+type GeText = { at: i64, x: i64, out: Arr u8 _ }
+fn ge_text_step(move t: GeText, borrow words: Arr Arr u8 _ k) -> GeText
+  = let x1 = ge_next(t.x) in let x2 = ge_next(x1) in let x3 = ge_next(x2) in
+    let index = (shift_right(x1, 8) % 512) * (shift_right(x2, 8) % 512) / 512 in
+    let word = if shift_right(x3, 8) % 23 == 0 then int_text(shift_right(x3, 4) % 100000)
+      else check index >= 0 && index < k in words[index] in
+    let sep = ge_sep(shift_right(x3, 12) % 16) in
+    let at = t.at in let out = t.out in
+    let out = byte_copy(out, at, word) in let out = byte_copy(out, at + len(word), sep) in
+    GeText { at = at + len(word) + len(sep), x = x3, out = out }
+fn ge_text(size: i64{size >= 0}, seed: i64) -> Arr u8 _
+  = let words = arr(w in 0..512) ge_word(w) in
+    let t = loop(t = GeText { at = 0, x = seed, out = arr(j in 0..size + 64) u8(0) }) while t.at < size
+      next(ge_text_step(t, words)) yield t in
+    byte_slice(t.out, 0, size)
+
+; ---- Checks -------------------------------------------------------------------
+
+fn ge_hex(borrow bytes: Arr u8 n) -> Arr u8 _
+  = arr(i in 0..2 * n) u8(str_byte("0123456789abcdef", bit_and(shift_right(str_byte(bytes, i / 2), if i % 2 == 0 then 4 else 0), 15)))
+effect(fs) fn ge_fail(borrow what: Arr u8 n, level: i64, size: i64) -> bool
+  = let written = print_out(concat("FAIL ", what, " level ", int_text(level), " size ", int_text(size), "\n")) in false
+
+fn ge_inflates(borrow stream: Arr u8 s, borrow data: Arr u8 n) -> bool
+  = let back = inflate_raw(stream, n) in back.ok && str_equal(back.value, data)
+fn ge_zlib_ok(borrow stream: Arr u8 s, borrow data: Arr u8 n) -> bool
+  = let back = zlib_decode(stream, n) in back.ok && str_equal(back.value, data)
+fn ge_gzip_ok(borrow stream: Arr u8 s, borrow data: Arr u8 n) -> bool
+  = let back = gzip_decode(stream, n) in back.ok && str_equal(back.value, data)
+; The zlib and gzip streams wrap exactly the raw stream.
+fn ge_wraps(borrow raw: Arr u8 r, borrow z: Arr u8 s, borrow g: Arr u8 t) -> bool
+  = s == r + 6 && t == r + 18 && str_equal(str_slice(z, 2, s - 4), raw) && str_equal(str_slice(g, 10, t - 8), raw)
+; Stored overhead bounds every level: 5 bytes per stored block plus one. A
+; block holds at most 65535 bytes, and blocks end after 16383 symbols.
+fn ge_bounded(borrow raw: Arr u8 r, n: i64) -> bool = r <= n + 5 * (n / 16383 + n / 65535 + 2) + 1
+
+; All three encoders at one level: decodable, consistent, repeatable, bounded.
+effect(fs) fn ge_level(borrow data: Arr u8 n, level: i64) -> bool
+  = let raw = deflate_raw(data, level) in let z = zlib_encode(data, level) in let g = gzip_encode(data, level) in
+    if !raw.ok || !z.ok || !g.ok then ge_fail("encode", level, n)
+    else if !ge_inflates(raw.value, data) then ge_fail("inflate_raw", level, n)
+    else if !ge_zlib_ok(z.value, data) then ge_fail("zlib_decode", level, n)
+    else if !ge_gzip_ok(g.value, data) then ge_fail("gzip_decode", level, n)
+    else if !ge_wraps(raw.value, z.value, g.value) then ge_fail("container payload", level, n)
+    else if !ge_bounded(raw.value, n) then ge_fail("size bound", level, n) else
+    let again = deflate_raw(data, level) in
+    if !again.ok || !str_equal(again.value, raw.value) then ge_fail("determinism", level, n) else true
+; Raw streams only, for the large inputs at the costlier levels.
+effect(fs) fn ge_raw_level(borrow data: Arr u8 n, level: i64) -> bool
+  = let raw = deflate_raw(data, level) in
+    if !raw.ok then ge_fail("encode", level, n)
+    else if !ge_inflates(raw.value, data) then ge_fail("inflate_raw", level, n)
+    else if !ge_bounded(raw.value, n) then ge_fail("size bound", level, n) else true
+effect(fs) fn ge_levels(borrow data: Arr u8 n) -> bool
+  = loop(level = 0, ok = true) while ok && level <= 9 next(level + 1, ge_level(data, level)) yield ok
+; The raw size at `level`, or -1.
+fn ge_size(borrow data: Arr u8 n, level: i64) -> i64 = let raw = deflate_raw(data, level) in if raw.ok then len(raw.value) else -1
+
+effect(fs) fn ge_exact(borrow actual: BytesResult, borrow expected: Arr u8 n, borrow what: Arr u8 m) -> bool
+  = if actual.ok && str_equal(actual.value, expected) then true else
+    let written = print_out(concat("FAIL exact ", what, ": ", if actual.ok then ge_hex(actual.value) else "error", "\n")) in false
+fn ge_rejects(borrow result: BytesResult) -> bool = !result.ok && result.error.code == 22
+fn ge_invalid(level: i64) -> bool
+  = ge_rejects(deflate_raw("abc", level)) && ge_rejects(zlib_encode("abc", level)) && ge_rejects(gzip_encode("abc", level))
+
+effect(fs) fn ge_small() -> bool
+  = let empty = "" in let one = "A" in
+    let all = arr(i in 0..256) u8(i) in
+    let runs = concat(ge_run(97, 5000), ge_run(98, 300), ge_run(99, 1), ge_run(0, 70000), ge_run(120, 259), ge_run(121, 258), ge_run(122, 257),
+      ge_repeat("ab", 1001), ge_run(255, 259)) in
+    ge_levels(empty) && ge_levels(one) && ge_levels(all) && ge_levels(runs) && ge_levels(ge_skewed()) &&
+    ge_levels(ge_repeat("abc", 100)) && ge_levels(ge_random(1000, 99))
+
+; Exact streams. The deflate and zlib bytes are Python zlib.compress's (zlib
+; 1.3); the gzip headers carry OS 255 and XFL 0 except at levels 1 and 9.
+effect(fs) fn ge_vectors() -> bool
+  = ge_exact(gzip_encode("", 6), "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00", "gzip empty 6")
+    && ge_exact(gzip_encode("", 9), "\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00", "gzip empty 9")
+    && ge_exact(gzip_encode("", 1), "\x1f\x8b\x08\x00\x00\x00\x00\x00\x04\xff\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00", "gzip empty 1")
+    && ge_exact(gzip_encode("", 0), "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\x01\x00\x00\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00", "gzip empty 0")
+    && ge_exact(gzip_encode("hello", 6), "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff\xcb\x48\xcd\xc9\xc9\x07\x00\x86\xa6\x10\x36\x05\x00\x00\x00", "gzip hello 6")
+    && ge_exact(zlib_encode("hello", 6), "\x78\x9c\xcb\x48\xcd\xc9\xc9\x07\x00\x06\x2c\x02\x15", "zlib hello 6")
+    && ge_exact(zlib_encode("hello", 0), "\x78\x01\x01\x05\x00\xfa\xff\x68\x65\x6c\x6c\x6f\x06\x2c\x02\x15", "zlib hello 0")
+    && ge_exact(zlib_encode("hello", 1), "\x78\x01\xcb\x48\xcd\xc9\xc9\x07\x00\x06\x2c\x02\x15", "zlib hello 1")
+    && ge_exact(zlib_encode("hello", 3), "\x78\x5e\xcb\x48\xcd\xc9\xc9\x07\x00\x06\x2c\x02\x15", "zlib hello 3")
+    && ge_exact(zlib_encode("hello", 9), "\x78\xda\xcb\x48\xcd\xc9\xc9\x07\x00\x06\x2c\x02\x15", "zlib hello 9")
+    ; zlib writes 4b 4c 84 01 00 here: it never matches against position 0.
+    ; These bytes are literal 'a' then length 9 at distance 1 (Python's
+    ; zlib.decompress accepts them).
+    && ge_exact(deflate_raw("aaaaaaaaaa", 6), "\x4b\x84\x03\x00", "raw run 6")
+
+effect(fs) fn ge_large() -> bool
+  = let pattern = ge_repeat("The quick brown fox jumps over the lazy dog. 0123456789\n", 102400) in
+    let text = ge_text(1048576, 7) in
+    let noise = ge_random(300000, 12345) in
+    let deep = ge_deep() in
+    ge_levels(pattern) && ge_levels(noise) &&
+    ge_level(deep, 0) && ge_level(deep, 1) && ge_level(deep, 6) && ge_level(deep, 9) &&
+    ge_level(text, 0) && ge_level(text, 1) && ge_level(text, 6) && ge_level(text, 9) &&
+    loop(level = 2, ok = true) while ok && level <= 8
+      next(level + 1, if level == 6 then true else ge_raw_level(text, level)) yield ok &&
+    ; Compression happens: the pattern shrinks below 1 KB at every level from
+    ; 1, text below 60%, and level 9 is no larger than level 1.
+    ge_size(pattern, 1) < 1024 && ge_size(pattern, 6) < 1024 && ge_size(text, 6) * 10 < 1048576 * 6 &&
+    ge_size(text, 9) <= ge_size(text, 1) && ge_size(noise, 0) <= 300000 + 5 * 5
+
+effect(fs) fn main() -> unit
+  = let invalid = ge_invalid(0 - 1) && ge_invalid(10) && ge_invalid(9223372036854775807) && ge_invalid(0 - 9223372036854775807) in
+    check invalid in
+    let vectors = ge_vectors() in check vectors in
+    let small = ge_small() in check small in
+    let large = ge_large() in check large in
+    let output = print_out("gzip encode OK\n") in noop()

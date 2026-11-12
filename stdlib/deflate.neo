@@ -1,9 +1,10 @@
 import "std:strings"
 
-; Inflate (decompression only) for raw DEFLATE (RFC 1951), zlib (RFC 1950) and
-; gzip (RFC 1952), plus the HTTP Content-Encoding values gzip, x-gzip, deflate
-; and identity. Every decoder takes an output limit: producing more than
-; `limit` bytes fails with error 27 instead of allocating further.
+; Inflate for raw DEFLATE (RFC 1951), zlib (RFC 1950) and gzip (RFC 1952),
+; plus the HTTP Content-Encoding values gzip, x-gzip, deflate and identity.
+; Every decoder takes an output limit: producing more than `limit` bytes fails
+; with error 27 instead of allocating further. The encoders (deflate_raw,
+; zlib_encode, gzip_encode) are at the end of this file.
 ;
 ; Errors: 5 truncated input, 22 malformed input, 27 output limit exceeded,
 ; 74 checksum mismatch, 95 unsupported feature (zlib preset dictionary,
@@ -12,8 +13,8 @@ import "std:strings"
 ; Huffman codes decode through a lookup table indexed by the next 10 (literal/
 ; length) or 9 (distance) bits; longer codes fall back to a canonical walk.
 ; The output buffer grows geometrically and keeps 16 bytes of slack, so
-; back-references copy eight bytes at a time. Compression and preset
-; dictionaries are not implemented.
+; back-references copy eight bytes at a time. Preset dictionaries are not
+; implemented.
 
 ; ---- Bit input --------------------------------------------------------------
 
@@ -542,3 +543,457 @@ fn http_content_decode(borrow encoding: Arr u8 n, borrow body: Arr u8 m, limit: 
     let s = loop(s = DflCodings { end = n, more = true, result = bytes_ok(body) }) while s.more && s.result.ok
       next(dfl_http_step(s, encoding, limit)) yield s in
     s.result
+
+; ---- Compression ------------------------------------------------------------
+;
+; LZ77 over a 32 KiB window with hash chains (matches of 3..258 bytes), then
+; Huffman coding. Levels follow zlib's table: 0 writes stored blocks only;
+; 1-3 take the first acceptable match greedily; 4-9 defer each match by one
+; byte and keep the next one when it is longer (lazy matching). Higher levels
+; walk longer chains. Each block of up to 16383 symbols is written stored, with
+; the fixed code or with its own length-limited code (15 bits, 7 for the
+; code-length code), whichever is smallest. The output is a pure function of
+; the input and the level. Errors: 22 for a level outside 0..9 or input over
+; 1 GiB.
+
+private fn gz_get(borrow a: Arr i64 n, i: i64) -> i64 = if i >= 0 && i < n then a[i] else 0
+private fn gz_put(move a: Arr i64 _, i: i64, v: i64) -> Arr i64 _ = if i >= 0 && i < len(a) then set(a, i, v) else a
+private fn gz_min(a: i64, b: i64) -> i64 = if a < b then a else b
+private fn gz_zeros(count: i64) -> Arr i64 _ = arr(j in 0..(if count > 0 then count else 0)) 0
+
+; ---- Bit output -------------------------------------------------------------
+
+; Bits are packed least significant first; fewer than 32 are pending in `acc`.
+private type GzOut = { out: Arr u8 _, olen: i64, acc: i64, nbits: i64 }
+
+; Appends `count` <= 31 bits.
+private fn gz_bits(move w: GzOut, bits: i64, count: i64) -> GzOut
+  = let nbits = w.nbits in let acc = bit_or(w.acc, shift_left(bits, nbits)) in
+    if nbits + count < 32 then w with { acc = acc, nbits = nbits + count } else
+    let olen = w.olen in let out = w.out in
+    GzOut { out = byte_write_le(out, olen, acc, 4), olen = olen + 4, acc = shift_right(acc, 32), nbits = nbits + count - 32 }
+; A code table entry: the bit-reversed code plus its length shifted left by 32.
+private fn gz_code(move w: GzOut, entry: i64) -> GzOut = gz_bits(w, bit_and(entry, 4294967295), shift_right(entry, 32))
+; Pads the pending bits to a byte boundary and writes them.
+private fn gz_align(move w: GzOut) -> GzOut
+  = let nbits = w.nbits in if nbits == 0 then w else
+    let olen = w.olen in let out = w.out in let acc = w.acc in let size = shift_right(nbits + 7, 3) in
+    GzOut { out = byte_write_le(out, olen, acc, size), olen = olen + size, acc = 0, nbits = 0 }
+; Guarantees `need` more bytes plus 16 of slack, growing geometrically.
+private fn gz_room(move w: GzOut, need: i64) -> GzOut
+  = if w.olen + need + 16 <= len(w.out) then w else gz_grow(w, need)
+private cold fn gz_grow(move w: GzOut, need: i64) -> GzOut
+  = let out = w.out in let olen = w.olen in let acc = w.acc in let nbits = w.nbits in
+    let size = len(out) in let want = olen + need + 16 in
+    let target = if size * 2 > want then size * 2 else want in let extra = target - size in
+    GzOut { out = if extra > 0 then concat(out, arr(i in 0..extra) u8(0)) else out, olen = olen, acc = acc, nbits = nbits }
+
+; ---- Code construction ------------------------------------------------------
+
+; Insertion sort; alphabets have at most 286 symbols.
+private fn gz_sift(move keys: Arr i64 _, i: i64) -> Arr i64 _
+  = let x = gz_get(keys, i) in
+    loop(j = i, keys = keys) while j > 0 && gz_get(keys, j - 1) > x
+      next(j - 1, let v = gz_get(keys, j - 1) in gz_put(keys, j, v)) yield gz_put(keys, j, x)
+private fn gz_sort(move keys: Arr i64 _) -> Arr i64 _
+  = loop(i = 1, keys = keys) while i < len(keys) next(i + 1, gz_sift(keys, i)) yield keys
+
+; Huffman tree by the two-queue method over leaves sorted by weight. Keys are
+; weight * 1024 + symbol. Nodes 0..k-1 are the leaves, k.. the merged nodes,
+; each created after its children.
+private type GzTree = { leaf: i64, node: i64, made: i64, weight: Arr i64 _, parent: Arr i64 _ }
+private fn gz_weight(borrow keys: Arr i64 k, at: i64) -> i64 = shift_right(gz_get(keys, at), 10)
+; The next leaf is lighter than (or as light as) the next merged node.
+private fn gz_take_leaf(borrow keys: Arr i64 k, leaf: i64, node: i64, made: i64, borrow weight: Arr i64 m) -> bool
+  = leaf < k && (node >= made || gz_weight(keys, leaf) <= gz_get(weight, node))
+private fn gz_merge(move t: GzTree, borrow keys: Arr i64 k) -> GzTree
+  = let leaf = t.leaf in let node = t.node in let made = t.made in let weight = t.weight in let parent = t.parent in
+    let first = gz_take_leaf(keys, leaf, node, made, weight) in
+    let a = if first then leaf else k + node in
+    let wa = if first then gz_weight(keys, leaf) else gz_get(weight, node) in
+    let leaf = if first then leaf + 1 else leaf in let node = if first then node else node + 1 in
+    let second = gz_take_leaf(keys, leaf, node, made, weight) in
+    let b = if second then leaf else k + node in
+    let wb = if second then gz_weight(keys, leaf) else gz_get(weight, node) in
+    let leaf = if second then leaf + 1 else leaf in let node = if second then node else node + 1 in
+    let parent = gz_put(parent, a, k + made) in let parent = gz_put(parent, b, k + made) in
+    GzTree { leaf = leaf, node = node, made = made + 1, weight = gz_put(weight, made, wa + wb), parent = parent }
+
+; Drops one code of length `limit` and splits the longest shorter code into
+; two codes one bit longer: as many codes as before, and a Kraft sum lower by
+; 2^-limit.
+private fn gz_kraft(move counts: Arr i64 _, limit: i64) -> Arr i64 _
+  = let top = gz_get(counts, limit) in let counts = gz_put(counts, limit, top - 1) in
+    let l = loop(l = limit - 1) while l > 1 && gz_get(counts, l) == 0 next(l - 1) yield l in
+    let c = gz_get(counts, l) in let counts = gz_put(counts, l, c - 1) in
+    let d = gz_get(counts, l + 1) in gz_put(counts, l + 1, d + 2)
+
+; Lengths go to the leaves from the heaviest down, shortest first.
+private type GzFit = { j: i64, l: i64, left: i64, lens: Arr i64 _ }
+private fn gz_fit(move f: GzFit, borrow keys: Arr i64 k, borrow counts: Arr i64 c) -> GzFit
+  = let j = f.j in let l = f.l in let left = f.left in let lens = f.lens in
+    if left <= 0 then GzFit { j = j, l = l + 1, left = gz_get(counts, l + 1), lens = lens }
+    else GzFit { j = j - 1, l = l, left = left - 1, lens = gz_put(lens, bit_and(gz_get(keys, j), 1023), l) }
+
+private fn gz_counted(borrow freq: Arr i64 m, i: i64, pad0: bool, pad1: bool) -> bool
+  = gz_get(freq, i) > 0 || i == 0 && pad0 || i == 1 && pad1
+private fn gz_key(borrow freq: Arr i64 m, i: i64) -> i64
+  = let f = gz_get(freq, i) in shift_left(if f > 0 then f else 1, 10) + i
+
+; Code lengths of at most `limit` bits for the symbols with nonzero frequency.
+; Like zlib, fewer than two used symbols are padded with symbols 0 and 1 so
+; that every code is complete (decoders reject incomplete code-length codes).
+; Overlong codes are clamped and the Kraft sum is restored by lengthening the
+; deepest shorter codes, as miniz does.
+private fn gz_lengths(borrow freq: Arr i64 m, limit: i64) -> Arr i64 _
+  = let used = loop(i = 0, c = 0) while i < m next(i + 1, if gz_get(freq, i) > 0 then c + 1 else c) yield c in
+    let pad0 = used < 2 && gz_get(freq, 0) <= 0 in
+    let pad1 = used == 0 || used == 1 && !pad0 in
+    let k = used + (if pad0 then 1 else 0) + (if pad1 then 1 else 0) in
+    let keys = loop(i = 0, at = 0, keys = gz_zeros(k)) while i < m
+      next(i + 1, if gz_counted(freq, i, pad0, pad1) then at + 1 else at,
+        if gz_counted(freq, i, pad0, pad1) then gz_put(keys, at, gz_key(freq, i)) else keys) yield keys in
+    let keys = gz_sort(keys) in
+    let tree = loop(t = GzTree { leaf = 0, node = 0, made = 0, weight = gz_zeros(k), parent = gz_zeros(k + k) })
+      while t.made < k - 1 next(gz_merge(t, keys)) yield t in
+    let parent = tree.parent in
+    let depth = loop(x = 2 * k - 3, depth = gz_zeros(k + k)) while x >= 0
+      next(x - 1, let d = gz_get(depth, gz_get(parent, x)) + 1 in gz_put(depth, x, d)) yield depth in
+    let counts = loop(j = 0, counts = arr(l in 0..16) 0) while j < k
+      next(j + 1, let d = gz_get(depth, j) in let l = if d > limit then limit else d in
+        let c = gz_get(counts, l) in gz_put(counts, l, c + 1)) yield counts in
+    let total = loop(l = 1, t = 0) while l <= limit next(l + 1, t + shift_left(gz_get(counts, l), limit - l)) yield t in
+    let counts = loop(t = total, counts = counts) while t > shift_left(1, limit) next(t - 1, gz_kraft(counts, limit)) yield counts in
+    let fit = loop(f = GzFit { j = k - 1, l = 1, left = gz_get(counts, 1), lens = arr(i in 0..m) 0 }) while f.j >= 0 && f.l <= 15
+      next(gz_fit(f, keys, counts)) yield f in
+    fit.lens
+
+; Canonical codes (RFC 1951 3.2.2), bit-reversed for LSB-first output.
+private type GzCanon = { i: i64, firsts: Arr i64 _, codes: Arr i64 _ }
+private fn gz_canon(move c: GzCanon, borrow lens: Arr i64 m) -> GzCanon
+  = let i = c.i in let firsts = c.firsts in let codes = c.codes in
+    let l = dfl_length_at(lens, i) in
+    if l == 0 then GzCanon { i = i + 1, firsts = firsts, codes = codes } else
+    let code = dfl_count_at(firsts, l) in
+    GzCanon { i = i + 1, firsts = gz_put(firsts, l, code + 1), codes = gz_put(codes, i, dfl_reverse(code, l) + shift_left(l, 32)) }
+private fn gz_codes(borrow lens: Arr i64 m) -> Arr i64 _
+  = let done = loop(c = GzCanon { i = 0, firsts = dfl_first_codes(dfl_counts(lens, 0, m)), codes = arr(j in 0..m) 0 }) while c.i < m
+      next(gz_canon(c, lens)) yield c in
+    done.codes
+
+; ---- Static tables ----------------------------------------------------------
+
+; lens[L]: length symbol + extra bit count * 512 + extra value * 4096.
+; dists[x]: distance symbol for distance x + 1 below 257, else for 256 + x / 128.
+; dinfo[s]: distance base - 1 + extra bit count * 65536.
+private type GzTabs = { lens: Arr i64 _, dists: Arr i64 _, dinfo: Arr i64 _, fixlit: Arr i64 _, fixdist: Arr i64 _ }
+; The symbol for `length` (or distance - 1 = `x`), searching up from s.
+private fn gz_len_symbol(s: i64, length: i64) -> i64
+  = loop(s = s) while s < 285 && shift_right(dfl_lit_template(s + 1), 12) <= length next(s + 1) yield s
+private fn gz_len_entry(s: i64, length: i64) -> i64
+  = let t = dfl_lit_template(s) in
+    s + shift_left(bit_and(shift_right(t, 5), 15), 9) + shift_left(length - shift_right(t, 12), 12)
+private fn gz_dist_symbol(s: i64, x: i64) -> i64
+  = loop(s = s) while s < 29 && shift_right(dfl_dist_template(s + 1), 12) - 1 <= x next(s + 1) yield s
+private fn gz_dist_index(i: i64) -> i64 = if i < 256 then i else shift_left(i - 256, 7)
+private fn gz_dist_info(s: i64) -> i64
+  = let t = dfl_dist_template(s) in shift_right(t, 12) - 1 + shift_left(bit_and(shift_right(t, 5), 15), 16)
+private fn gz_fixed_length(s: i64) -> i64 = if s < 144 then 8 else if s < 256 then 9 else if s < 280 then 7 else 8
+private fn gz_tables() -> GzTabs
+  = let lens = loop(l = 3, s = 257, t = arr(i in 0..259) 0) while l < 259
+      next(l + 1, gz_len_symbol(s, l), gz_put(t, l, gz_len_entry(gz_len_symbol(s, l), l))) yield t in
+    let dists = loop(i = 0, s = 0, t = arr(j in 0..512) 0) while i < 512
+      next(i + 1, gz_dist_symbol(s, gz_dist_index(i)), gz_put(t, i, gz_dist_symbol(s, gz_dist_index(i)))) yield t in
+    let dinfo = loop(s = 0, t = arr(i in 0..30) 0) while s < 30 next(s + 1, gz_put(t, s, gz_dist_info(s))) yield t in
+    let fixlit = gz_codes(arr(i in 0..288) gz_fixed_length(i)) in
+    let fixdist = gz_codes(arr(i in 0..30) 5) in
+    GzTabs { lens = lens, dists = dists, dinfo = dinfo, fixlit = fixlit, fixdist = fixdist }
+private fn gz_dsym(borrow tabs: GzTabs, dist: i64) -> i64
+  = let x = dist - 1 in gz_get(tabs.dists, if x < 256 then x else 256 + shift_right(x, 7))
+
+; ---- Blocks -----------------------------------------------------------------
+
+; A symbol is a literal byte (below 256) or length * 65536 + distance.
+private type GzFreq = { lit: Arr i64 _, dist: Arr i64 _, extra: i64 }
+private fn gz_count(move f: GzFreq, tok: i64, borrow tabs: GzTabs) -> GzFreq
+  = let lit = f.lit in let dist = f.dist in let extra = f.extra in
+    if tok < 256 then let c = gz_get(lit, tok) in GzFreq { lit = gz_put(lit, tok, c + 1), dist = dist, extra = extra } else
+    let le = gz_get(tabs.lens, shift_right(tok, 16)) in let ls = bit_and(le, 511) in
+    let ds = gz_dsym(tabs, bit_and(tok, 65535)) in
+    let c = gz_get(lit, ls) in let d = gz_get(dist, ds) in
+    GzFreq { lit = gz_put(lit, ls, c + 1), dist = gz_put(dist, ds, d + 1),
+      extra = extra + bit_and(shift_right(le, 9), 7) + shift_right(gz_get(tabs.dinfo, ds), 16) }
+
+private fn gz_cost(borrow freq: Arr i64 m, borrow lens: Arr i64 k) -> i64
+  = loop(i = 0, bits = 0) while i < m next(i + 1, bits + gz_get(freq, i) * gz_get(lens, i)) yield bits
+private fn gz_fixed_cost(borrow freq: Arr i64 m) -> i64
+  = loop(i = 0, bits = 0) while i < m next(i + 1, bits + gz_get(freq, i) * gz_fixed_length(i)) yield bits
+private fn gz_sum(borrow freq: Arr i64 m) -> i64 = loop(i = 0, total = 0) while i < m next(i + 1, total + gz_get(freq, i)) yield total
+; Symbols up to the last nonzero length, at least `least`.
+private fn gz_used(borrow lens: Arr i64 m, least: i64) -> i64
+  = loop(k = m) while k > least && gz_get(lens, k - 1) == 0 next(k - 1) yield k
+
+; Code-length symbols (0-18) with their extra values, run-length coded.
+private type GzRle = { toks: Arr i64 _, count: i64, freq: Arr i64 _ }
+private fn gz_cl_extra(sym: i64) -> i64 = if sym == 16 then 2 else if sym == 17 then 3 else if sym == 18 then 7 else 0
+private fn gz_cl_order(k: i64) -> i64 = str_byte("\x10\x11\x12\x00\x08\x07\x09\x06\x0a\x05\x0b\x04\x0c\x03\x0d\x02\x0e\x01\x0f", k)
+private fn gz_rle_emit(move r: GzRle, sym: i64, extra: i64) -> GzRle
+  = let toks = r.toks in let count = r.count in let freq = r.freq in let f = gz_get(freq, sym) in
+    GzRle { toks = gz_put(toks, count, sym + extra * 32), count = count + 1, freq = gz_put(freq, sym, f + 1) }
+; Lengths taken by the next symbol of a run of `left` copies of `value`.
+private fn gz_rle_take(value: i64, left: i64, first: bool) -> i64
+  = if value == 0 then (if left >= 11 then gz_min(left, 138) else if left >= 3 then left else 1)
+    else if first then 1 else if left >= 3 then gz_min(left, 6) else 1
+private fn gz_rle_symbol(value: i64, take: i64) -> i64
+  = if value == 0 then (if take >= 11 then 18 else if take >= 3 then 17 else 0)
+    else if take >= 3 then 16 else value
+private fn gz_rle_run(move r: GzRle, value: i64, run: i64) -> GzRle
+  = loop(left = run, first = true, r = r) while left > 0
+      next(left - gz_rle_take(value, left, first), false,
+        let take = gz_rle_take(value, left, first) in let sym = gz_rle_symbol(value, take) in
+        gz_rle_emit(r, sym, if sym == 18 then take - 11 else if sym >= 16 then take - 3 else 0)) yield r
+private fn gz_run_length(borrow lens: Arr i64 m, i: i64, count: i64) -> i64
+  = let value = gz_get(lens, i) in loop(j = i + 1) while j < count && gz_get(lens, j) == value next(j + 1) yield j - i
+private fn gz_rle(move r: GzRle, borrow lens: Arr i64 m, count: i64) -> GzRle
+  = loop(i = 0, r = r) while i < count
+      next(i + gz_run_length(lens, i, count), gz_rle_run(r, gz_get(lens, i), gz_run_length(lens, i, count))) yield r
+private fn gz_rle_bits(borrow r: GzRle, borrow clens: Arr i64 m) -> i64
+  = loop(i = 0, bits = 0) while i < r.count
+      next(i + 1, let sym = bit_and(gz_get(r.toks, i), 31) in bits + gz_get(clens, sym) + gz_cl_extra(sym)) yield bits
+private fn gz_hclen(borrow clens: Arr i64 m) -> i64
+  = loop(k = 19) while k > 4 && gz_get(clens, gz_cl_order(k - 1)) == 0 next(k - 1) yield k
+
+; The dynamic block header after its three type bits.
+private fn gz_tree(move w: GzOut, hlit: i64, hdist: i64, borrow r: GzRle, borrow clens: Arr i64 m, hclen: i64) -> GzOut
+  = let w = gz_bits(w, hlit - 257 + shift_left(hdist - 1, 5) + shift_left(hclen - 4, 10), 14) in
+    let w = loop(k = 0, w = w) while k < hclen next(k + 1, gz_bits(w, gz_get(clens, gz_cl_order(k)), 3)) yield w in
+    let cc = gz_codes(clens) in
+    loop(i = 0, w = w) while i < r.count
+      next(i + 1, let t = gz_get(r.toks, i) in let sym = bit_and(t, 31) in
+        gz_bits(gz_code(w, gz_get(cc, sym)), shift_right(t, 5), gz_cl_extra(sym))) yield w
+
+; lenc[L]: the code of match length L with its extra bits, as one entry.
+private fn gz_len_code(borrow lc: Arr i64 a, le: i64) -> i64
+  = let c = gz_get(lc, bit_and(le, 511)) in let cl = shift_right(c, 32) in
+    bit_and(c, 4294967295) + shift_left(shift_right(le, 12), cl) + shift_left(cl + bit_and(shift_right(le, 9), 7), 32)
+private fn gz_len_codes(borrow lc: Arr i64 a, borrow tabs: GzTabs) -> Arr i64 _
+  = loop(l = 3, t = arr(i in 0..259) 0) while l < 259 next(l + 1, gz_put(t, l, gz_len_code(lc, gz_get(tabs.lens, l)))) yield t
+private fn gz_emit(move w: GzOut, tok: i64, borrow lc: Arr i64 a, borrow lenc: Arr i64 b, borrow dc: Arr i64 c, borrow tabs: GzTabs) -> GzOut
+  = if tok < 256 then gz_code(w, gz_get(lc, tok)) else
+    let dist = bit_and(tok, 65535) in let ds = gz_dsym(tabs, dist) in let info = gz_get(tabs.dinfo, ds) in
+    let dcode = gz_get(dc, ds) in let dl = shift_right(dcode, 32) in
+    let w = gz_code(w, gz_get(lenc, shift_right(tok, 16))) in
+    gz_bits(w, bit_and(dcode, 4294967295) + shift_left(dist - 1 - bit_and(info, 65535), dl), dl + shift_right(info, 16))
+private fn gz_body(move w: GzOut, borrow toks: Arr i64 t, count: i64, borrow lc: Arr i64 a, borrow dc: Arr i64 b, borrow tabs: GzTabs) -> GzOut
+  = let lenc = gz_len_codes(lc, tabs) in
+    let w = loop(i = 0, w = w) while i < count next(i + 1, gz_emit(w, gz_get(toks, i), lc, lenc, dc, tabs)) yield w in
+    gz_code(w, gz_get(lc, 256))
+
+; Stored blocks hold at most 65535 bytes; an empty range is one empty block.
+; gz_stored_bits is their size in bits after `nbits` pending bits.
+private fn gz_stored_bits(nbits: i64, size: i64) -> i64
+  = let chunks = if size == 0 then 1 else (size + 65534) / 65535 in
+    chunks * 35 + bit_and(0 - nbits - 3, 7) + (chunks - 1) * 5 + size * 8
+private fn gz_stored_chunk(move w: GzOut, borrow bytes: Arr u8 n, at: i64, size: i64, final: bool) -> GzOut
+  = let w = gz_align(gz_bits(w, if final then 1 else 0, 3)) in
+    let olen = w.olen in let out = w.out in
+    let out = byte_write_le(out, olen, size + shift_left(bit_xor(size, 65535), 16), 4) in
+    GzOut { out = byte_copy(out, olen + 4, byte_slice(bytes, at, at + size)), olen = olen + 4 + size, acc = 0, nbits = 0 }
+private fn gz_stored(move w: GzOut, borrow bytes: Arr u8 n, start: i64, end: i64, last: bool) -> GzOut
+  = loop(at = start, first = true, w = w) while first || at < end
+      next(at + gz_min(65535, end - at), false,
+        let size = gz_min(65535, end - at) in gz_stored_chunk(w, bytes, at, size, last && at + size >= end)) yield w
+; Worst-case bytes for a block covering `size` input bytes (never more than stored).
+private fn gz_block_room(size: i64) -> i64 = size + 5 * (size / 65535 + 1) + 8
+
+; Writes the symbols toks[0..count), which cover bytes[start..end), as the
+; smallest of a stored, fixed-code or dynamic-code block.
+private fn gz_block(move w: GzOut, borrow toks: Arr i64 t, count: i64, borrow bytes: Arr u8 n, start: i64, end: i64, last: bool, borrow tabs: GzTabs) -> GzOut
+  = let f = loop(i = 0, f = GzFreq { lit = arr(j in 0..286) (if j == 256 then 1 else 0), dist = arr(j in 0..30) 0, extra = 0 }) while i < count
+      next(i + 1, gz_count(f, gz_get(toks, i), tabs)) yield f in
+    let lfreq = f.lit in let dfreq = f.dist in let extra = f.extra in
+    let llens = gz_lengths(lfreq, 15) in let dlens = gz_lengths(dfreq, 15) in
+    let hlit = gz_used(llens, 257) in let hdist = gz_used(dlens, 1) in
+    let rle = gz_rle(gz_rle(GzRle { toks = arr(j in 0..320) 0, count = 0, freq = arr(j in 0..19) 0 }, llens, hlit), dlens, hdist) in
+    let clens = gz_lengths(rle.freq, 7) in let hclen = gz_hclen(clens) in
+    let dynamic = 17 + 3 * hclen + gz_rle_bits(rle, clens) + gz_cost(lfreq, llens) + gz_cost(dfreq, dlens) + extra in
+    let fixed = 3 + gz_fixed_cost(lfreq) + 5 * gz_sum(dfreq) + extra in
+    let stored = gz_stored_bits(w.nbits, end - start) in
+    let w = gz_room(w, gz_block_room(end - start)) in
+    if stored <= fixed && stored <= dynamic then gz_stored(w, bytes, start, end, last)
+    else if fixed <= dynamic then gz_body(gz_bits(w, if last then 3 else 2, 3), toks, count, tabs.fixlit, tabs.fixdist, tabs)
+    else
+      let w = gz_tree(gz_bits(w, if last then 5 else 4, 3), hlit, hdist, rle, clens, hclen) in
+      gz_body(w, toks, count, gz_codes(llens), gz_codes(dlens), tabs)
+
+; ---- LZ77 -------------------------------------------------------------------
+
+; zlib's per-level parameters: chains shorten by 4 once the previous match
+; reaches `good`; lazy matching stops at `lazy` (levels 1-3: matches up to
+; `lazy` have all their positions hashed); a match of `nice` ends the search.
+private type GzCfg = { good: i64, lazy: i64, nice: i64, chain: i64 }
+private fn gz_config(level: i64) -> GzCfg
+  = if level == 1 then GzCfg { good = 4, lazy = 4, nice = 8, chain = 4 }
+    else if level == 2 then GzCfg { good = 4, lazy = 5, nice = 16, chain = 8 }
+    else if level == 3 then GzCfg { good = 4, lazy = 6, nice = 32, chain = 32 }
+    else if level == 4 then GzCfg { good = 4, lazy = 4, nice = 16, chain = 16 }
+    else if level == 5 then GzCfg { good = 8, lazy = 16, nice = 32, chain = 32 }
+    else if level == 6 then GzCfg { good = 8, lazy = 16, nice = 128, chain = 128 }
+    else if level == 7 then GzCfg { good = 8, lazy = 32, nice = 128, chain = 256 }
+    else if level == 8 then GzCfg { good = 32, lazy = 128, nice = 258, chain = 1024 }
+    else GzCfg { good = 32, lazy = 258, nice = 258, chain = 4096 }
+
+; head[hash]: the latest position with that 3-byte hash; prev[pos % 32768]:
+; the position before it on the same chain, or -1.
+private type GzChains = { head: Arr i64 _, prev: Arr i64 _ }
+private fn gz_hash(borrow bytes: Arr u8 n, pos: i64) -> i64
+  = let v = if pos + 4 <= n then bit_and(byte_read_le(bytes, pos, 4), 16777215)
+      else byte_read_le(bytes, pos, 2) + shift_left(byte_read_le(bytes, pos + 2, 1), 16) in
+    bit_and(shift_right(wrapping_mul(v, 2654435761), 17), 32767)
+private fn gz_link(move t: GzChains, h: i64, pos: i64, old: i64) -> GzChains
+  = let head = t.head in let prev = t.prev in
+    GzChains { head = gz_put(head, h, pos), prev = gz_put(prev, bit_and(pos, 32767), old) }
+; Hashes positions [from, to) that have three bytes.
+private fn gz_insert(move t: GzChains, borrow bytes: Arr u8 n, from: i64, to: i64) -> GzChains
+  = let end = if to < n - 2 then to else n - 2 in
+    loop(p = from, t = t) while p < end
+      next(p + 1, let h = gz_hash(bytes, p) in let old = gz_get(t.head, h) in gz_link(t, h, p, old)) yield t
+
+; One step of comparing bytes from a and b (a < b) at offset k, eight at a
+; time: twice the equal count so far, plus one once a difference is found.
+private fn gz_compare(borrow bytes: Arr u8 n, a: i64, b: i64, k: i64) -> i64
+  = if b + k + 8 <= n then
+      let x = bit_xor(byte_read_le(bytes, a + k, 8), byte_read_le(bytes, b + k, 8)) in
+      if x == 0 then shift_left(k + 8, 1) else shift_left(k + shift_right(count_trailing_zeros(x), 3), 1) + 1
+    else if byte_read_le(bytes, a + k, 1) == byte_read_le(bytes, b + k, 1) then shift_left(k + 1, 1) else shift_left(k, 1) + 1
+private fn gz_match_length(borrow bytes: Arr u8 n, a: i64, b: i64, most: i64) -> i64
+  = let s = loop(s = 0) while bit_and(s, 1) == 0 && shift_right(s, 1) < most next(gz_compare(bytes, a, b, shift_right(s, 1))) yield s in
+    gz_min(shift_right(s, 1), most)
+; found = length + distance * 512. A candidate must first match the two bytes
+; ending one past the current best.
+private fn gz_try(borrow bytes: Arr u8 n, c: i64, pos: i64, found: i64, most: i64) -> i64
+  = let best = bit_and(found, 511) in
+    if byte_read_le(bytes, c + best - 1, 2) != byte_read_le(bytes, pos + best - 1, 2) then found else
+    let l = gz_match_length(bytes, c, pos, most) in
+    if l > best then l + shift_left(pos - c, 9) else found
+; The longest match for `pos` along the chain from `cand` that beats `best`
+; (at least 2), as length + distance * 512; `best` itself when none does.
+private fn gz_longest(borrow bytes: Arr u8 n, borrow prev: Arr i64 m, cand: i64, pos: i64, best: i64, chain: i64, nice: i64) -> i64
+  = let most = gz_min(258, n - pos) in let enough = gz_min(nice, most) in let limit = pos - 32767 in
+    loop(c = cand, left = chain, found = best) while c >= limit && c >= 0 && c < pos && left > 0 && bit_and(found, 511) < enough
+      next(gz_get(prev, bit_and(c, 32767)), left - 1, gz_try(bytes, c, pos, found, most)) yield found
+
+private type GzLz = { pos: i64, plen: i64, pdist: i64, avail: bool, ntok: i64, start: i64, chains: GzChains, toks: Arr i64 _, w: GzOut }
+private fn gz_store(move toks: Arr i64 _, at: i64, tok: i64) -> Arr i64 _ = check at >= 0 && at < len(toks) in set(toks, at, tok)
+; Appends a symbol that ends at input byte `cur`; a full buffer becomes a block.
+private fn gz_push(move s: GzLz, tok: i64, cur: i64, borrow bytes: Arr u8 n, borrow tabs: GzTabs) -> GzLz
+  = let pos = s.pos in let plen = s.plen in let pdist = s.pdist in let avail = s.avail in
+    let ntok = s.ntok in let start = s.start in let chains = s.chains in let w = s.w in
+    let toks = gz_store(s.toks, ntok, tok) in
+    if ntok + 1 < len(toks) then
+      GzLz { pos = pos, plen = plen, pdist = pdist, avail = avail, ntok = ntok + 1, start = start, chains = chains, toks = toks, w = w }
+    else let w = gz_block(w, toks, ntok + 1, bytes, start, cur, false, tabs) in
+      GzLz { pos = pos, plen = plen, pdist = pdist, avail = avail, ntok = 0, start = cur, chains = chains, toks = toks, w = w }
+
+; Levels 1-3 (zlib's deflate_fast): emit the match found at pos, if any.
+private fn gz_fast(move s: GzLz, borrow bytes: Arr u8 n, cfg: GzCfg, borrow tabs: GzTabs) -> GzLz
+  = let pos = s.pos in let ntok = s.ntok in let start = s.start in
+    let chains = s.chains in let toks = s.toks in let w = s.w in
+    let can = pos + 3 <= n in
+    let h = if can then gz_hash(bytes, pos) else 0 in
+    let cand = if can then gz_get(chains.head, h) else 0 - 1 in
+    let chains = if can then gz_link(chains, h, pos, cand) else chains in
+    let found = if cand >= 0 && pos - cand <= 32767 then gz_longest(bytes, chains.prev, cand, pos, 2, cfg.chain, cfg.nice) else 2 in
+    let flen = bit_and(found, 511) in
+    if flen >= 3 then
+      let end = pos + flen in
+      let chains = if flen <= cfg.lazy then gz_insert(chains, bytes, pos + 1, end) else chains in
+      gz_push(GzLz { pos = end, plen = 2, pdist = 0, avail = false, ntok = ntok, start = start, chains = chains, toks = toks, w = w },
+        shift_left(flen, 16) + shift_right(found, 9), end, bytes, tabs)
+    else gz_push(GzLz { pos = pos + 1, plen = 2, pdist = 0, avail = false, ntok = ntok, start = start, chains = chains, toks = toks, w = w },
+      byte_read_le(bytes, pos, 1), pos + 1, bytes, tabs)
+
+; Levels 4-9 (zlib's deflate_slow): the match found at pos - 1 (plen, pdist)
+; is emitted unless pos has a longer one; then pos - 1 becomes a literal.
+; A 3-byte match more than 4096 bytes back is not worth it (zlib's TOO_FAR).
+private fn gz_lazy(move s: GzLz, borrow bytes: Arr u8 n, cfg: GzCfg, borrow tabs: GzTabs) -> GzLz
+  = let pos = s.pos in let plen = s.plen in let pdist = s.pdist in let avail = s.avail in
+    let ntok = s.ntok in let start = s.start in
+    let chains = s.chains in let toks = s.toks in let w = s.w in
+    let can = pos + 3 <= n in
+    let h = if can then gz_hash(bytes, pos) else 0 in
+    let cand = if can then gz_get(chains.head, h) else 0 - 1 in
+    let chains = if can then gz_link(chains, h, pos, cand) else chains in
+    let found = if cand >= 0 && pos - cand <= 32767 && plen < cfg.lazy then
+        gz_longest(bytes, chains.prev, cand, pos, plen, if plen >= cfg.good then shift_right(cfg.chain, 2) else cfg.chain, cfg.nice)
+      else 2 in
+    let flen = bit_and(found, 511) in let fdist = shift_right(found, 9) in
+    let mlen = if flen == 3 && fdist > 4096 then 2 else flen in
+    if plen >= 3 && mlen <= plen then
+      let end = pos - 1 + plen in
+      let chains = gz_insert(chains, bytes, pos + 1, end) in
+      gz_push(GzLz { pos = end, plen = 2, pdist = 0, avail = false, ntok = ntok, start = start, chains = chains, toks = toks, w = w },
+        shift_left(plen, 16) + pdist, end, bytes, tabs)
+    else if avail then
+      gz_push(GzLz { pos = pos + 1, plen = mlen, pdist = fdist, avail = true, ntok = ntok, start = start, chains = chains, toks = toks, w = w },
+        byte_read_le(bytes, pos - 1, 1), pos, bytes, tabs)
+    else GzLz { pos = pos + 1, plen = mlen, pdist = fdist, avail = true, ntok = ntok, start = start, chains = chains, toks = toks, w = w }
+
+private fn gz_lz(move w: GzOut, borrow bytes: Arr u8 n, level: i64) -> GzOut
+  = let cfg = gz_config(level) in let tabs = gz_tables() in
+    let window = if n < 32768 then n + 1 else 32768 in
+    let syms = if n < 16383 then n + 1 else 16383 in
+    let init = GzLz { pos = 0, plen = 2, pdist = 0, avail = false, ntok = 0, start = 0,
+      chains = GzChains { head = arr(i in 0..32768) (0 - 1), prev = arr(i in 0..window) (0 - 1) }, toks = arr(i in 0..syms) 0, w = w } in
+    let s = if level <= 3 then loop(s = init) while s.pos < n next(gz_fast(s, bytes, cfg, tabs)) yield s
+      else loop(s = init) while s.pos < n next(gz_lazy(s, bytes, cfg, tabs)) yield s in
+    let s = if s.avail then gz_push(s, byte_read_le(bytes, n - 1, 1), n, bytes, tabs) else s in
+    let toks = s.toks in let ntok = s.ntok in let start = s.start in let w = s.w in
+    gz_block(w, toks, ntok, bytes, start, n, true, tabs)
+
+; ---- Encoders ---------------------------------------------------------------
+
+private fn gz_invalid(n: i64, level: i64) -> bool = level < 0 || level > 9 || n > 1073741824
+private cold fn gz_reject(level: i64) -> BytesResult
+  = if level < 0 || level > 9 then bytes_error(22, "compression level must be 0 to 9", 0)
+    else bytes_error(22, "input larger than 1 GiB", 0)
+; An output buffer holding a header of `size` <= 10 bytes (`low` holds the
+; first eight, little-endian, and `high` the rest).
+private fn gz_open(n: i64, level: i64, size: i64, low: i64, high: i64) -> GzOut
+  = let guess = if level == 0 then gz_block_room(n) else n / 2 + 1024 in
+    let out = arr(i in 0..(if guess > 0 then guess + 64 else 64)) u8(0) in
+    let out = byte_write_le(out, 0, low, 8) in
+    GzOut { out = byte_write_le(out, 8, high, 2), olen = size, acc = 0, nbits = 0 }
+private fn gz_deflate(move w: GzOut, borrow bytes: Arr u8 n, level: i64) -> GzOut
+  = let w = if level == 0 then gz_stored(gz_room(w, gz_block_room(n)), bytes, 0, n, true) else gz_lz(w, bytes, level) in
+    gz_room(gz_align(w), 8)
+private fn gz_append(move w: GzOut, value: i64, width: i64) -> GzOut
+  = let olen = w.olen in let out = w.out in
+    GzOut { out = byte_write_le(out, olen, value, width), olen = olen + width, acc = 0, nbits = 0 }
+; A result much smaller than the working buffer is copied out, so that it
+; does not keep the whole buffer alive.
+private fn gz_result(move w: GzOut) -> BytesResult
+  = let olen = w.olen in let out = w.out in
+    if olen + shift_right(olen, 2) + 1024 >= len(out) then bytes_ok(byte_slice(out, 0, olen))
+    else bytes_ok(byte_copy(arr(i in 0..(if olen > 0 then olen else 0)) u8(0), 0, byte_slice(out, 0, olen)))
+
+; Raw DEFLATE (RFC 1951) at `level` 0 (stored) to 9 (smallest).
+fn deflate_raw(borrow bytes: Arr u8 n, level: i64) -> BytesResult
+  = if gz_invalid(n, level) then gz_reject(level) else
+    gz_result(gz_deflate(gz_open(n, level, 0, 0, 0), bytes, level))
+
+; zlib (RFC 1950): CMF/FLG with zlib's FLEVEL for `level`, no dictionary,
+; Adler-32 of the input.
+fn zlib_encode(borrow bytes: Arr u8 n, level: i64) -> BytesResult
+  = if gz_invalid(n, level) then gz_reject(level) else
+    let flags = if level < 2 then 1 else if level < 6 then 94 else if level == 6 then 156 else 218 in
+    let w = gz_deflate(gz_open(n, level, 2, 120 + shift_left(flags, 8), 0), bytes, level) in
+    gz_result(gz_append(w, shift_right(byte_swap64(adler32(bytes)), 32), 4))
+
+; gzip (RFC 1952): one member with MTIME 0, no optional fields, XFL 2 at
+; level 9 and 4 at level 1 (else 0), OS 255, then CRC-32 and ISIZE.
+fn gzip_encode(borrow bytes: Arr u8 n, level: i64) -> BytesResult
+  = if gz_invalid(n, level) then gz_reject(level) else
+    let xfl = if level == 9 then 2 else if level == 1 then 4 else 0 in
+    let w = gz_deflate(gz_open(n, level, 10, 559903, xfl + 65280), bytes, level) in
+    gz_result(gz_append(gz_append(w, crc32(bytes), 4), bit_and(n, 4294967295), 4))

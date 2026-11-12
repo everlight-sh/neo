@@ -1,0 +1,41 @@
+import "std:http_async"
+; Response heads of the async starts, read by tests/drivers/async_headers.neo:
+; the plain starts keep their head, the _at variants add the caller's header
+; lines and a Date, invalid lines are refused, and http_response_async's
+; failure replies carry the default security headers (the 503 also a Date).
+private fn custom() -> Arr u8 _ = "Content-Security-Policy: default-src 'none'\r\nX-Extra: yes\r\n"
+private fn replaced() -> Arr u8 _ = "cache-control: max-age=60\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT\r\n"
+; Sun, 06 Nov 1994 08:49:37 GMT.
+private fn stamp() -> i64 = 784111777000
+private effect(fs,net,env,time,process) fn child(capture:Arr u8 n)->Arr u8 _ = "CHILD"
+private effect(fs,net,env,time,process) fn tick(capture:Arr u8 n)->Arr u8 _ = http_async_finish(web_html("TICK"))
+private effect(fs,net,env,time,process) fn failing(capture:Arr u8 n)->Arr u8 _ = let failed=async_fail(5) in ""
+private effect(fs,net,env,time,process) fn slow(capture:Arr u8 n)->Arr u8 _ = let waited=sleep_ms(3000) in "LATE"
+private fn tasks() -> Arr HttpDeferred _ = arr(i in 0..1) http_deferred("x",function(child))
+
+; 1 when the start refuses headers with code 22 before admitting anything.
+private effect fn refused(headers:Arr u8 n, render:bool) -> i64
+  = if render then let begin=http_render_start_at(web_html("S"),tasks(),0,headers,-1) in if !begin.ok && begin.error.code==22 then 1 else 0
+    else let now=monotonic_ms() in let begin=http_async_start_at(web_html("S"),"x",function(tick),now.value,now.value+1000,headers,-1) in
+      if !begin.ok && begin.error.code==22 then 1 else 0
+private effect fn bad() -> i64
+  = refused("Content-Length: 5\r\n",true)+refused("content-type: text/plain\r\n",false)+refused("Connection: keep-alive\r\n",true)
+    +refused("Transfer-Encoding: gzip\r\n",false)+refused("X-Unterminated: yes",true)+refused("Bad Name: x\r\n",false)
+    +refused("X-Split: a\nb\r\n",true)+refused("NoColon\r\n",false)+refused(": empty\r\n",true)
+    +refused(concat("X-Big: ",arr(i in 0..8200) u8(97),"\r\n"),false)
+
+private effect fn answer(started:BytesResult) -> Arr u8 _
+  = if started.ok then started.value else web_encode(web_reply(503,concat("START ",started.error.message),"text/plain"),false)
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in let path=request.path in let deadline=deadline_after(10000) in let now=monotonic_ms() in
+    if str_equal(path,"/render") then answer(http_render_start(web_html("SHELL"),tasks(),deadline.value)) else
+    if str_equal(path,"/render-at") then answer(http_render_start_with_tail_at(web_html("SHELL"),tasks(),web_html("TAIL"),deadline.value,custom(),stamp())) else
+    if str_equal(path,"/render-replaced") then answer(http_render_start_at(web_html("SHELL"),tasks(),deadline.value,replaced(),stamp())) else
+    if str_equal(path,"/async") then answer(http_async_start(web_html("SHELL"),"x",function(tick),now.value,now.value+10000)) else
+    if str_equal(path,"/async-at") then answer(http_async_start_at(web_html("SHELL"),"x",function(tick),now.value,now.value+10000,custom(),stamp())) else
+    if str_equal(path,"/bad") then web_encode(web_reply(200,concat("REJECTED ",int_text(bad())),"text/plain"),false) else
+    if str_equal(path,"/fail") then answer(http_response_async(path,function(failing),deadline.value)) else
+    if str_equal(path,"/expire") then let brief=deadline_after(100) in answer(http_response_async(path,function(slow),brief.value)) else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main(port:i64)->i64
+  = let options=http_server_options(250,true) in check options.ok in serve_effect(port,handler)

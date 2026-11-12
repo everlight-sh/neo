@@ -430,10 +430,27 @@ failure becomes exit 127. Launch vectors and strings use private mappings so
 parent cleanup cannot invalidate the child's arguments; Neo-opened files and
 sockets are close-on-exec. Argument/environment limits are 1024 entries each,
 64 KiB per entry and 1 MiB total each. `process_close_input` idempotently
-half-closes stdin while preserving stdout/stderr. Process groups, working-directory
-options and a high-level communicate API remain absent.
+half-closes stdin while preserving stdout/stderr. `process_start_inherit` starts
+a child that shares this process's stdin, stdout and stderr instead, so its
+output reaches the terminal (or pipe, or file) directly; its stream functions
+then report EBADF. `process_executable_path` returns the running executable's
+absolute path (`/proc/self/exe` on Linux, so `/proc` must be mounted; the
+kernel's process path on macOS). Process groups, working-directory options and
+a high-level communicate API remain absent.
 
-`std:fs` adds remove, mkdir, rename and `fs_atomic_replace`. Replacement uses an
+`cli_arg(i)`, `cli_count()` and `cli_args()` read the command line, argv[0]
+first. `env_get(name)` reads one variable and `env_list()` returns every
+`NAME=value` entry, to pass on to `process_start`.
+
+`std:fs` adds remove, mkdir, rename, `fs_symlink`, `fs_readlink`, `fs_cwd` and
+`fs_atomic_replace`. `fs_list(path)` returns a directory's entries (name and
+kind, without "." and "..", in no particular order; links are not followed).
+`fs_stat(path, follow)` returns kind, size, permission bits (`mode`) and the
+modification time in nanoseconds (`mtime_ns`). Kinds are
+`fs_kind_directory()`, `fs_kind_file()`, `fs_kind_symlink()` or another number
+for devices, pipes and sockets. `fs_realpath(path)` resolves ".", ".." and
+every symbolic link against the working directory, without needing `/proc`;
+the path must exist. Replacement uses an
 exclusive 0600 temporary file beside the destination, complete write, file sync,
 rename and parent-directory sync. If the directory sync fails after rename,
 the caller receives an error with an uncertain durability outcome. It does not
@@ -449,6 +466,35 @@ inputs longer than 4096 bytes. It is not a shortest-decimal or high-throughput
 replacement for optimized numeric parsing. `float_bits` and `bits_float` are
 pure bitcasts. `std:math` adds finite log/log1p/exp and nonnegative-base pow;
 these routines are approximate, not a complete correctly-rounded math library.
+
+`std:toml` has one function: `toml_parse(text) -> JsonResult` reads a whole
+TOML 1.0 document. The result is a JSON object, so it is read with the
+ordinary JSON accessors. Value mapping:
+
+- Tables, inline tables and array-of-tables elements become objects, with keys
+  in document order. Arrays become arrays.
+- Integers (decimal, hex, octal or binary) become decimal JSON integers.
+- Floats become JSON numbers without `+` or underscores.
+- Dates and times become strings holding the exact TOML text, after validation.
+
+Errors set `ok` to false, `error.code` to 1, `error.position` to the 1-based
+line, and give a message such as `duplicate key "name"`. Rejected: integers
+outside i64; inf, nan and floats beyond binary64; invalid UTF-8; control
+characters; inputs over 16 MiB; nesting deeper than 100.
+
+`std:deflate` decodes raw DEFLATE, zlib and gzip with an output limit, and
+encodes all three:
+
+- `deflate_raw(bytes, level)`, `zlib_encode(bytes, level)` and
+  `gzip_encode(bytes, level)` return a `BytesResult`.
+- Level 0 writes stored blocks. Levels 1-9 follow zlib's speed and size
+  trade-offs, and sizes are within about 1% of gzip's.
+- The output depends only on the input bytes and the level. The gzip header
+  has MTIME 0, no file name and OS 255, so the same input always gives the
+  same bytes (useful for build artifacts and ETags).
+- A level outside 0-9, or input over 1 GiB, is error 22.
+- Input and output are held whole in memory; there is no streaming encoder and
+  no preset dictionary.
 
 `std:base64` implements strict canonical padded Base64 and unpadded Base64url.
 `std:url` implements percent encoding/decoding and form '+' handling.

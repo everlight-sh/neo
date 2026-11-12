@@ -49,7 +49,8 @@ file is supplied. Pass application arguments after `--`: `neo run -- 8080`.
 `neo run --dev` and `neo build --dev` make a development build: faster to
 build, slower to run, checked exactly like a release build.
 Scalar main parameters retain checked numeric argv parsing. A zero-argument
-effectful main can read arbitrary string arguments using `cli_arg`.
+effectful main can read arbitrary string arguments using `cli_arg`,
+`cli_count` and `cli_args`.
 
 Configure your editor to launch `neo lsp` over stdio. It checks unsaved buffers
 and provides completion, hover, definitions, symbols, and formatting.
@@ -172,6 +173,8 @@ with the current `neoc` compiler.
 | `std:errors` | Concrete typed results and optional values |
 | `std:collections` | Integer vectors, sorting, string-to-string map |
 | `std:json` | Strict UTF-8 JSON parsing, accessors, decoded strings, number lexemes, compaction and escaping |
+| `std:toml` | TOML 1.0 documents parsed into `std:json` values |
+| `std:deflate` | Bounded gzip, zlib and raw DEFLATE decoding; deterministic encoding at levels 0-9 |
 | `std:io` | Bounded file reads, writes/appends, locking, fsync, seek/truncate, argv/environment, clocks and process helpers |
 | `std:http` | Request helpers, response construction, HTML escaping, bounded response framing/chunk decoding |
 | `std:net` | HTTP/1.1 POST to IPv4/localhost, nonblocking sockets, deadlines and recoverable errors |
