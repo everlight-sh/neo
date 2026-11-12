@@ -321,13 +321,15 @@ stdout = """
 """
 timeout = 300
 
-# http_smoke.py: examples/http.neo (4 workers on io_uring and on epoll, 1
-# worker) and bench/http/protocol_test.neo; x86_64 Linux.
+# http_smoke.py: examples/http.neo (4 workers on the default backend and on
+# epoll, 1 worker) and bench/http/protocol_test.neo. The default backend is
+# io_uring on x86_64 Linux and epoll on ARM64, and the driver expects a ring
+# only on x86_64.
 [[test]]
 name = "http-smoke"
 file = "drivers/http_smoke.neo"
 stdout = """
-== io_uring backend (default), 4 worker(s)
+== default backend, 4 worker(s)
 Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
 100 concurrent requests: PASS
 512 simultaneous connections: PASS
@@ -353,7 +355,7 @@ Invalid, duplicate, overflowing and unsupported body framing: PASS
 Fragmented chunked request preserves the next pipelined response: PASS
 bench/http/protocol_test.neo: PASS
 Worker processes and backend: PASS
-== io_uring backend (default), 1 worker(s)
+== default backend, 1 worker(s)
 Endpoints, framing, keep-alive, reference checksum, large HTML: PASS
 100 concurrent requests: PASS
 512 simultaneous connections: PASS

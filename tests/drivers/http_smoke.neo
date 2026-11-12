@@ -1,11 +1,11 @@
 ; http_smoke.py: examples/http.neo with 4 workers on the default backend
-; (io_uring on x86_64 Linux), 4 workers on epoll, and 1 worker: endpoints and
-; keep-alive framing against the reference stencil checksums, 100 concurrent
-; requests, 512 simultaneous connections, slow readers, a fragmented POST with a
-; pipelined GET, 512 pipelined requests, ready-batch close and slot compaction,
-; backpressure, refused body framing, a fragmented chunked request, then
-; bench/http/protocol_test.neo, the worker count and whether an io_uring ring is
-; open.
+; (io_uring on x86_64 Linux, epoll on ARM64), 4 workers on epoll, and 1
+; worker: endpoints and keep-alive framing against the reference stencil
+; checksums, 100 concurrent requests, 512 simultaneous connections, slow
+; readers, a fragmented POST with a pipelined GET, 512 pipelined requests,
+; ready-batch close and slot compaction, backpressure, refused body framing, a
+; fragmented chunked request, then bench/http/protocol_test.neo, the worker
+; count and whether an io_uring ring is open (only on the default x86_64 backend).
 import "std:arena"
 import "std:fs"
 import "std:io"
@@ -279,12 +279,13 @@ effect fn hs_workers(server:Process, workers:i64, uring:bool) -> Arr u8 _
       len(children)==(if workers==1 then 0 else workers),concat(int_text(len(children))," worker processes for ",int_text(workers)," workers\n")),
       ring==uring,concat("io_uring ring open: ",if ring then "yes" else "no",", expected ",if uring then "yes" else "no","\n"))
 
-; backend 0: the default (io_uring on x86_64 Linux); 1: epoll.
-effect fn hs_run(borrow binary:Arr u8 _, borrow protocol:Arr u8 _, workers:i64, backend:i64) -> unit
+; backend 0: the default, 1: epoll. uring says whether the default is io_uring
+; (x86_64 Linux; rt_uring_default is false on ARM64, which serves with epoll).
+effect fn hs_run(borrow binary:Arr u8 _, borrow protocol:Arr u8 _, workers:i64, backend:i64, uring:bool) -> unit
   = let port=nw_port() in
     let threads=concat("NEO_THREADS=",int_text(workers)) in
     let environment=if backend==1 then push(push(md_words(),threads),"NEO_HTTP_URING=0") else push(md_words(),threads) in
-    let name=concat(if backend==1 then "epoll backend" else "io_uring backend (default)",", ",int_text(workers)," worker(s)") in
+    let name=concat(if backend==1 then "epoll backend" else "default backend",", ",int_text(workers)," worker(s)") in
     let shown=print_out(concat("== ",name,"\n")) in
     let problems=(using server=process_start(binary,push(md_words(),int_text(port)),dv_environment(environment)) in
       if !nw_wait_port(port,5000) then (let s=nw_poll(server,nw_child()) in concat("the server did not start: ",s.errors)) else
@@ -299,7 +300,7 @@ effect fn hs_run(borrow binary:Arr u8 _, borrow protocol:Arr u8 _, workers:i64, 
       let m=hs_section(hs_framing(port),"Invalid, duplicate, overflowing and unsupported body framing") in
       let n=hs_section(hs_chunked(port),"Fragmented chunked request preserves the next pipelined response") in
       let p=hs_section(hs_protocol(protocol,port),"bench/http/protocol_test.neo") in
-      let q=hs_section(hs_workers(server,workers,backend==0),"Worker processes and backend") in
+      let q=hs_section(hs_workers(server,workers,backend==0 && uring),"Worker processes and backend") in
       let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,nw_child(),3000) in
       concat(a,b,c,e,f,g,h,k,m,n,p,q)) in
     dv_expect(len(problems)==0,concat(name,":\n",problems))
@@ -309,5 +310,6 @@ effect fn main() -> unit
     let binary=pt_join(dir,"http") in let protocol=pt_join(dir,"protocol-test") in
     let a=dv_build(tools,pt_join(tools.here,"../../examples/http.neo"),binary,md_words()) in
     let b=dv_build(tools,pt_join(tools.here,"../../bench/http/protocol_test.neo"),protocol,md_words()) in
-    let c=hs_run(binary,protocol,4,0) in let d=hs_run(binary,protocol,4,1) in let e=hs_run(binary,protocol,1,0) in
+    let uring=str_starts(tools.target,"x86_64") in
+    let c=hs_run(binary,protocol,4,0,uring) in let d=hs_run(binary,protocol,4,1,uring) in let e=hs_run(binary,protocol,1,0,uring) in
     dv_clean(dir)
