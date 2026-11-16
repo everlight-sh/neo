@@ -610,6 +610,13 @@ writes the low `width` bytes of an i64 in little endian order. Width must be
 between zero and eight, and both operations check that the complete write fits.
 Aliases and overlapping slices retain their original contents. Unique owned
 buffers may be updated in place; shared buffers and literals detach first.
+A parameter written without `move` or `borrow` is owned like a `move` one when
+its function hands it on: returns it, starts a loop with it, or passes it to
+`push`, `set` or another owning parameter (a branch that does not, releases
+it). The caller's last use then moves the buffer in, so
+`fn mark(m:Arr bool n, ...) = loop (m2=m, ...) next (set(m2,j,false), ...)`
+updates the caller's array in place instead of copying it. Other parameters
+are borrowed for the call.
 A buffer in a field of a record that the function owns (a `move` parameter, a
 computed `let` value or a loop state) stays unique when that field's last use
 hands it on and nothing reads the record as a whole afterwards: `push`, `set`,

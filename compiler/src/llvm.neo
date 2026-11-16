@@ -208,11 +208,43 @@ fn cg_counted(borrow m:Mods, borrow value:CgValue) -> bool
     let fields=md_node(m,value.record).b in
     loop (i=0, found=false) while !found && i<ast_list_len(m.ast,fields)
       next (i+1,cg_counted(m,cg_field_type(m,fields,i))) yield found
-fn cg_parameter_lent(borrow m:Mods, p:Node) -> bool = p.f!=1 && cg_counted(m,cg_declaration(m,p.b))
+; A parameter written without `move` or `borrow` that its function hands on is
+; owned as if it were `move` (m.handed, cg_handed).
+fn cg_parameter_lent(borrow m:Mods, id:i64) -> bool
+  = let p=md_node(m,id) in p.f!=1 && cg_counted(m,cg_declaration(m,p.b)) && tx_byte(m.handed,id)!=1
+; Handed parameters. When every path through a function hands a parameter on
+; (its plan takes it: a result, a loop's initial value, a push or set operand,
+; an argument for an owning parameter), lending it would make the callee
+; retain the caller's buffer, so the first set or push copies it: the sieve's
+; mark(m, i, i * i) copied its whole array once per prime. Such a parameter
+; uses the owning convention instead. The caller's last use moves its
+; reference in, the buffer stays uniquely referenced, and the callee updates
+; it in place. A parameter only one branch hands on is released by the other.
+; Whether an argument hands a parameter on depends on whether the callee's
+; parameter is handed, so the table grows to a fixed point. Each pass reads
+; only the previous pass's table: a function's entries then depend only on
+; the functions it reaches, and every build that lowers it (the kept runtime
+; object, a prepared library, the program) gives it the same convention.
+type CgHanded = { table:Arr u8 _, found:Arr i64 _ }
+fn cg_handed_found(borrow m:Mods, borrow fns:Arr i64 _) -> Arr i64 _
+  = loop (k=0, found=tx_ints()) while k<len(fns)
+      next (k+1,let f=md_node(m,tx_at(fns,k)) in
+        if f.kind!=n_fn() || f.d<0 || ast_flag(f,fl_external()) || tc_abi_boundary(f) || ast_flag(f,fl_variadic()) then found else
+        loop (i=0, out=found) while i<ast_list_len(m.ast,f.b)
+          next (i+1,let id=ast_list_at(m.ast,f.b,i) in let p=md_node(m,id) in
+            if p.f!=0 || tx_byte(m.handed,id)==1 || md_resource_type(m,p.b)>=0 || !cg_counted(m,cg_declaration(m,p.b)) then out
+            else if cg_plan(m,fns,f.d,p.a,-1,true).state==1 then push(out,id) else out) yield out) yield found
+fn cg_handed_step(borrow m:Mods, borrow fns:Arr i64 _, move h:CgHanded) -> CgHanded
+  = let table=loop (i=0, t=h.table) while i<len(h.found) next (i+1,let id=tx_at(h.found,i) in if id>=0 && id<len(t) then set(t,id,u8(1)) else t) yield t in
+    let found=cg_handed_found(m with { handed=table },fns) in CgHanded { table=table, found=found }
+fn cg_handed(borrow m:Mods, borrow fns:Arr i64 _) -> Arr u8 _
+  = let none=arr(i in 0..len(m.ast.nodes)/11) u8(0) in
+    let first=cg_handed_found(m with { handed=tx_empty() },fns) in
+    loop (h=CgHanded { table=none, found=first }) while len(h.found)>0 next (cg_handed_step(m,fns,h)) yield h.table
 fn cg_lends(borrow m:Mods, f:Node) -> bool
   = !tc_abi_boundary(f) && !ast_flag(f,fl_variadic()) &&
     loop (i=0, found=false) while !found && i<ast_list_len(m.ast,f.b)
-      next (i+1,cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i)))) yield found
+      next (i+1,cg_parameter_lent(m,ast_list_at(m.ast,f.b,i))) yield found
 fn cg_lent_symbol(borrow m:Mods, id:i64) -> Arr u8 _
   = let symbol=cg_symbol(m,id) in let size=len(symbol) in
     if size>1 && tx_byte(symbol,size-1)==34 then concat(pt_slice(symbol,0,size-1),".lent\"") else concat(symbol,".lent")
@@ -220,7 +252,7 @@ fn cg_lent_arguments(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBindi
   = loop (i=0, a=CgReads { state=s, values=arr(j in 0..0) cg_unit(), owned=tx_ints() })
       while a.state.error<0 && i<ast_list_len(m.ast,list)
       next (i+1,let id=ast_list_at(m.ast,list,i) in
-        if i<ast_list_len(m.ast,f.b) && cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i))) then
+        if i<ast_list_len(m.ast,f.b) && cg_parameter_lent(m,ast_list_at(m.ast,f.b,i)) then
           let read=cg_read(m,fns,env,a.state,id) in
           CgReads { state=read.state, values=push(a.values,read.state.value), owned=push(a.owned,if read.borrowed then 0 else 1) }
         else let lowered=cg_expr(m,fns,env,a.state,id) in
@@ -281,7 +313,7 @@ fn cg_plan_list(borrow m:Mods, borrow fns:Arr i64 _, list:i64, name:i64, field:i
 ; argument for an owning parameter of the function decl.
 fn cg_argument_owned(borrow m:Mods, decl:i64, i:i64) -> bool
   = if decl== -2 then i==0 else if decl<0 then true else let f=md_node(m,decl) in
-    i<ast_list_len(m.ast,f.b) && !(cg_lends(m,f) && cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i))))
+    i<ast_list_len(m.ast,f.b) && !(cg_lends(m,f) && cg_parameter_lent(m,ast_list_at(m.ast,f.b,i)))
 ; Arguments run in order and the call runs after all of them. A plain `x` (or
 ; the field `x.f` a field plan follows) in an owning position can therefore be
 ; the call's last use of it even when a later argument reads it: that read is
@@ -1689,7 +1721,7 @@ fn cg_owning_wrapper(borrow m:Mods, f:Node, borrow linkage:Arr u8 _, borrow resu
                      borrow lent:Arr u8 _, borrow p:CgParams) -> Arr u8 _
   = let call=concat("call ",cg_return(result)," ",lent,"(",p.text,")\n") in
     let releases=loop (i=0, out=tx_empty()) while i<len(p.env)
-      next (i+1,if cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i))) then
+      next (i+1,if cg_parameter_lent(m,ast_list_at(m.ast,f.b,i)) then
         concat(out,cg_ref_call(cg_binding(p.env,i).value,false)) else out) yield out in
     concat("define ",linkage,cg_return(result)," ",symbol,"(",p.text,") {\nentry:\n",
       if result.ty==n_t_unit() then concat("  ",call,releases,"  ret void\n}\n\n")
@@ -1715,7 +1747,7 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
       next (i+1, let param=md_node(m,ast_list_at(m.ast,f.b,i)) in
             let value=cg_declaration(m,param.b) with { operand=concat("%p",int_text(i)) } in
             ; A parameter this function owns, other than a resource it must drop.
-            let owned=!entry && cg_counted(m,value) && !(lends && cg_parameter_lent(m,param)) && md_resource_type(m,param.b)<0 in
+            let owned=!entry && cg_counted(m,value) && !(lends && cg_parameter_lent(m,ast_list_at(m.ast,f.b,i))) && md_resource_type(m,param.b)<0 in
             let moves=if owned then cg_moves(m,fns,f.d,param.a) else tx_ints() in
             let parts=if owned then cg_parts(m,fns,value,f.d,param.a,false,moves) else tx_ints() in
             CgParams { env=push(params.env,cg_bind(param.a,value) with { moves=moves, parts=parts }),
@@ -1736,7 +1768,7 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
       else let lowered=cg_expr(m,fns,sizes.env,ready,f.d) in if lowered.error>=0 then lowered else
         loop (i=len(p.env)-1, s=cg_own_view(lowered)) while i>=0
           next (i-1,let binding=cg_binding(owners.env,i) in
-            if len(binding.moves)>0 || (lends && cg_parameter_lent(m,md_node(m,ast_list_at(m.ast,f.b,i)))) then s else
+            if len(binding.moves)>0 || (lends && cg_parameter_lent(m,ast_list_at(m.ast,f.b,i))) then s else
             cg_cleanup(m,s,binding,md_resource_drop(m,fns,binding.value.record))) yield s in
     if body.error>=0 then body else
     let finish=cg_write(body,concat("  ret ",if result.ty==n_t_unit() then "void" else cg_typed(body.value),"\n")) in
@@ -2110,7 +2142,7 @@ fn cg_reachable(borrow p:CgPieces, borrow startup:Arr u8 _) -> Arr Arr u8 _ _
 ; startup: the text an executable adds after this module; what it calls stays.
 fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool,
                    borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _) -> CgProgram
-  = let fns=tc_functions(m) in
+  = let fns=tc_functions(m) in let m=m with { handed=cg_handed(m,fns) } in
     let runtime=if source_runtime then cg_runtime_check(m,fns) else TcReport { result=tc_type(n_t_unit()), module=-1 } in
     if runtime.result.value.ty<=0 then CgProgram { text=tx_empty(), report=runtime } else
     let views=loop (i=0, found=partition!=0) while !found && i<len(m.ast.nodes)/11

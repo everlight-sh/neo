@@ -212,6 +212,16 @@ stdin-file = "vectors/shared_arrays/runs.in"
 stdout = "shared_arrays.neo: 6 runs OK\n"
 timeout = 300
 
+# A parameter its function hands on is owned, so set updates the caller's
+# array in place: the sieve allocates a fixed amount whatever n is.
+[[test]]
+name = "handed-parameters"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/handed_parameters.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/handed_parameters/runs.in"
+stdout = "handed_parameters.neo: 4 runs OK\n"
+timeout = 300
+
 # borrow_parameters.py: effect borrows without copies at 1/1000/10000.
 [[test]]
 name = "borrow-parameters"

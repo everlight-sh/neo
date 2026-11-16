@@ -1,0 +1,7 @@
+# Runs of tests/fixtures/handed_parameters.neo: workers, then n. A sieve and a
+# picked array whose parameters are handed on make a fixed number of
+# allocation requests whatever n is. Build with NEO_ALLOC_STATS=1.
+1	2		=1 OK\n
+1	100		=25 OK\n
+1	1000000		=78498 OK\n
+4	1000000		=78498 OK\n
