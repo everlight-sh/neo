@@ -395,9 +395,12 @@ disables one); every backend checks them once a second.
 Each event can batch up to 64 responses, with a 256 KiB flush threshold. Retained
 output buffers handle partial writes and backpressure; buffered complete
 requests keep progressing even when no new input bytes arrive.
-x86-64 Linux serves with io_uring (Linux 6.1+): one ring per worker, one
-`io_uring_enter` per loop for every queued receive and send, and at most one
-operation in flight per connection. Where a ring cannot be created (older
+x86-64 Linux serves with io_uring (Linux 6.1+): one ring per worker and one
+`io_uring_enter` per loop for every queued operation. Each connection keeps
+one multishot receive armed over a ring of provided buffers, instead of
+queuing a receive (and usually a poll) per request, and has at most one send
+in flight; `NEO_HTTP_URING_MULTISHOT=0` queues a receive per request (also
+the fallback where the kernel refuses buffer rings). Where a ring cannot be created (older
 kernels, Docker's default seccomp profile) and on ARM64 Linux, it uses
 persistent, level-triggered epoll registrations, with write readiness
 enabled only for queued output or buffered requests. Registrations survive

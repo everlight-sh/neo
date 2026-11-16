@@ -5,17 +5,55 @@
 ; One ring per worker process, SINGLE_ISSUER | DEFER_TASKRUN: completions are
 ; posted only inside this worker's io_uring_enter. Each loop makes one
 ; io_uring_enter that submits every queued operation and waits for a
-; completion. A connection has at most one operation in flight (a receive or
-; a send), so a state is only dropped or reused when nothing references it.
+; completion. With a receive queued per request a connection has at most one
+; operation in flight (a receive or a send), so a state is only dropped or
+; reused when nothing references it; multishot receives (below) tag theirs.
 ; Accepts keep the epoll backend's round-robin turn: the listener (through a
 ; one-entry epoll instance) and the notification socket are polled through the
 ; ring, then accepted directly.
-; user_data: listener poll=0, notification poll=1, receive=2+2i, send=3+2i.
+; user_data: listener poll=0, notification poll=1, receive=2+2i, send=3+2i
+; (with the generation above bit 32 for multishot receives), and 2^32-1 for
+; cancels, whose completions are ignored.
 ;
 ; Ring descriptor (128 bytes): fd@0, mapping@8, sqes@16, sq mask@24,
 ; sq entries@32, sq tail@40, queued@48, cq mask@56, the kernel's offsets of
-; sq tail@64, cq head@72, cq tail@80 and cqes@88, then cq head@96.
+; sq tail@64, cq head@72, cq tail@80 and cqes@88, then cq head@96, and for
+; multishot receives the buffer ring@104 (null without them), its buffers@112
+; and the buffer ring tail this worker has filled up to@120.
 ; Ring indices are unsigned 32-bit counters kept as i64 in [0, 2^32).
+;
+; Multishot receives. Where the kernel takes a ring of provided buffers
+; (IORING_REGISTER_PBUF_RING) each connection keeps one receive armed
+; (IORING_RECV_MULTISHOT) instead of queuing one per request: each arrival
+; completes into one of 128 1 KiB buffers, which is copied to the connection's
+; input and handed back before the next io_uring_enter. With a receive queued
+; per request, most found nothing yet (87% on hello with the server as the
+; bottleneck), so the kernel tried it, armed a poll, woke it and tried again;
+; the armed receive keeps one poll for the connection's lifetime. A connection
+; then has its receive and at most one send in flight. Its slot's metadata
+; (16 bytes at local@16: generation@0, flags@8 with 1 receive armed, 2 send
+; in flight, 4 receive being cancelled) tags each operation's user_data with
+; the generation, so a completion that arrives after its connection closed is
+; recognised and only its buffer is returned. A connection is closed only
+; with no send in flight (an end of input during a send closes it when the
+; send completes); its armed receive is then cancelled, which also releases
+; the kernel's reference to the socket. While a send is in flight, input that
+; piles up past 64 KiB stops the receive until the connection catches up, as
+; a full socket buffer would. NEO_HTTP_URING_MULTISHOT=0 queues a receive per
+; request as before.
+; Hello with the server capped at half a core (wrk -c64 on the other core, 9
+; interleaved rounds on a 2-vCPU EPYC Genoa VM, Linux 6.8): 6% fewer
+; instructions and cycles per request than with a receive queued per request
+; (18.7k and 24.4k against 19.7k and 26.2k, medians). Every server measured
+; there sends the same 2 TCP segments per request, and 97% of this server's
+; profile is in the kernel, nearly all of it loopback TCP.
+;
+; Registered sockets (IOSQE_FIXED_FILE) are not used. Before Linux 6.13 the
+; kernel frees a file removed from the ring's table only once every operation
+; issued before the removal has completed, oldest first, so one keep-alive
+; connection's armed receive held back every later closed connection's socket:
+; no FIN reached its client (http-smoke's compaction case on 6.8). They would
+; save each send's socket lookup, 1.5% of the profile.
 
 effect fn rt_uring_setup (d : ptr) -> bool
   = let params = stack_alloc(120) in let cleared = memset(params, i32(0), 120) in
@@ -52,6 +90,46 @@ effect fn rt_uring_setup (d : ptr) -> bool
         let a10 = store_i64(d, 80, i64(load_i32(params, 84))) in
         let a11 = store_i64(d, 88, i64(load_i32(params, 100))) in
         let a12 = store_i64(d, 96, bit_and(i64(atomic_load_i32(mapping, i64(load_i32(params, 80)))), 4294967295)) in true
+
+; The buffer ring (one page of 128 16-byte entries: address, length, buffer id,
+; with the tail in the last two bytes of entry 0) and its buffers, registered
+; as buffer group 0. Leaves d@104 null when the kernel refuses it.
+effect fn rt_uring_buffers (d : ptr) -> unit
+  = let off = rt_getenv(data("NEO_HTTP_URING_MULTISHOT\0")) in
+    let base = if off != null() && load_u8(off, 0) == '0' then -1 else rt_private_map(4096 + 131072) in
+    let none = store_ptr(d, 104, null()) in
+    if base <= 0 then noop() else
+      let ring = ptr_from_i64(base) in
+      let register = stack_alloc(40) in let cleared = memset(register, i32(0), 40) in
+      let address = store_i64(register, 0, base) in let entries = store_i32(register, 8, i32(128)) in
+      ; IORING_REGISTER_PBUF_RING. Ubuntu 6.8.0 kernels (seen on 6.8.0-147) invert
+      ; the reserved-field check and refuse it zeroed with EINVAL, so a refused
+      ; registration is retried once with reserved[0] set, which they accept and
+      ; correct kernels never see.
+      let registered = rt_uring_register_buffers(d, register) in
+      if registered < 0 then let unmapped = rt_munmap(ring, 4096 + 131072) in noop() else
+        let buffers = store_ptr(d, 112, ptr_add(ring, 4096)) in let tail = store_i64(d, 120, 0) in
+        let filled = loop (i = 0) while i < 128 next (let given = rt_uring_provide(ring, d, i) in i + 1) yield i in
+        let published = rt_uring_publish(ring, d) in store_ptr(d, 104, ring)
+
+effect fn rt_uring_register_buffers (d : ptr, register : ptr) -> i64
+  = let first = syscall6(427, load_i64(d, 0), 22, ptr_to_i64(register), 1, 0, 0) in
+    if first != -22 then rt_result(first) else
+      let marked = store_i64(register, 16, 1) in
+      rt_result(syscall6(427, load_i64(d, 0), 22, ptr_to_i64(register), 1, 0, 0))
+
+; Puts buffer bid at the filled tail; rt_uring_publish shows it to the kernel.
+; There is no 16-bit store, so an entry's id is written with a 32-bit store:
+; in entry 0 its upper half is the published tail, which it keeps.
+effect fn rt_uring_provide (ring : ptr, d : ptr, bid : i64) -> unit
+  = let tail = load_i64(d, 120) in let slot = bit_and(tail, 127) in let entry = ptr_add(ring, slot * 16) in
+    let address = store_i64(entry, 0, ptr_to_i64(ptr_add(load_ptr(d, 112), bid * 1024))) in
+    let length = store_i32(entry, 8, i32(1024)) in
+    let shown = bit_and(i64(load_i32(ring, 12)), 4294901760) in
+    let id = store_i32(entry, 12, i32(if slot == 0 then bit_or(bid, shown) else bid)) in
+    store_i64(d, 120, bit_and(tail + 1, 65535))
+effect fn rt_uring_publish (ring : ptr, d : ptr) -> unit
+  = atomic_store_i32(ring, 12, i32(bit_or(bit_and(i64(load_i32(ring, 12)), 65535), shift_left(load_i64(d, 120), 16))))
 
 ; Publishes the queued submissions and enters the ring once. With a wait
 ; argument (a 24-byte io_uring_getevents_arg) it also waits for a completion,
@@ -132,6 +210,106 @@ effect fn rt_uring_complete (d : ptr, state : ptr, handler : ptr, index : i64, s
       let stamped = rt_http_received(state, before) in
       rt_uring_continue(d, state, handler, index)
 
+; ---- multishot receives (see the top): meta is the connection's 16 bytes.
+; user_data: 2+2i for the receive, 3+2i for a send, the generation above bit 32.
+effect fn rt_uring_user (meta : ptr, index : i64, kind : i64) -> i64
+  = 2 + index * 2 + kind + shift_left(bit_and(load_i64(meta, 0), 2147483647), 32)
+
+; IORING_OP_RECV | IOSQE_BUFFER_SELECT with IORING_RECV_MULTISHOT, buffer group 0.
+effect fn rt_uring_arm (d : ptr, meta : ptr, state : ptr, index : i64) -> unit
+  = let armed = store_i64(meta, 8, bit_or(load_i64(meta, 8), 1)) in
+    rt_uring_push(d, 27 + 32 * 256 + 2 * 65536, load_i64(state, 0), 0, 0, 0, rt_uring_user(meta, index, 0))
+
+effect fn rt_uring_send_armed (d : ptr, meta : ptr, state : ptr, index : i64) -> unit
+  = let sending = store_i64(meta, 8, bit_or(load_i64(meta, 8), 2)) in let sent = load_i64(state, 40) in
+    rt_uring_push(d, 26, load_i64(state, 0), ptr_to_i64(ptr_add(load_ptr(state, 24), sent)),
+      load_i64(state, 32) - sent, 16384, rt_uring_user(meta, index, 1))
+
+; IORING_OP_ASYNC_CANCEL of the armed receive with IOSQE_CQE_SKIP_SUCCESS. Its
+; own completion (only when the receive had already ended) is ignored. Flag 4
+; holds off a new receive until the old one's last completion arrives: both
+; carry the same user_data, and two receives on one socket could split its data.
+effect fn rt_uring_cancel (d : ptr, meta : ptr, index : i64) -> unit
+  = if bit_and(load_i64(meta, 8), 1) == 0 then noop() else
+      let disarmed = store_i64(meta, 8, bit_or(bit_and(load_i64(meta, 8), -2), 4)) in
+      rt_uring_push(d, 14 + 64 * 256, 0, rt_uring_user(meta, index, 0), 0, 0, 4294967295)
+
+; The connection was closed (by rt_drop here or in the request code): stop its
+; receive and retire its generation.
+effect fn rt_uring_retire (d : ptr, meta : ptr, index : i64) -> unit
+  = let cancelled = rt_uring_cancel(d, meta, index) in
+    let aged = store_i64(meta, 0, load_i64(meta, 0) + 1) in store_i64(meta, 8, 0)
+effect fn rt_uring_close (d : ptr, meta : ptr, state : ptr, index : i64) -> unit
+  = if bit_and(load_i64(meta, 8), 2) != 0 then store_i64(state, 48, 1) else
+      let dropped = rt_drop(state) in rt_uring_retire(d, meta, index)
+
+; With nothing being sent: render what is buffered, then send it, or keep
+; receiving.
+effect fn rt_uring_next (d : ptr, meta : ptr, state : ptr, handler : ptr, index : i64) -> unit
+  = let prepared = if load_i64(state, 16) > 0 && load_i64(state, 48) < 4 then rt_prepare(state, handler) else noop() in
+    if load_i64(state, 0) < 0 then rt_uring_retire(d, meta, index)
+    else if load_i64(state, 32) > 0 then rt_uring_send_armed(d, meta, state, index)
+    else if bit_and(load_i64(meta, 8), 5) == 0 then rt_uring_arm(d, meta, state, index) else noop()
+
+; Appends from source while the input can grow; the bytes left, or -1 when the
+; input is at its limit.
+effect fn rt_uring_append (state : ptr, source : ptr, left : i64) -> i64
+  = let room = rt_http_input_room(state) in if room <= 0 then -1 else
+      let count = if room < left then room else left in let have = load_i64(state, 16) in
+      let copied = memcpy(ptr_add(load_ptr(state, 8), have), source, count) in
+      let saved = store_i64(state, 16, have + count) in left - count
+
+; n bytes arrived in buffer bid: appended to the input (counted while
+; lingering), and the buffer goes back. False when the input is full.
+effect fn rt_uring_take (d : ptr, state : ptr, bid : i64, n : i64) -> bool
+  = let source = ptr_add(load_ptr(d, 112), bid * 1024) in
+    let before = load_i64(state, 16) in
+    let left = if load_i64(state, 48) == 4 then let counted = store_i64(state, 120, load_i64(state, 120) + n) in 0
+      else loop (left = n) while left > 0 next (rt_uring_append(state, ptr_add(source, n - left), left)) yield left in
+    let given = rt_uring_provide(load_ptr(d, 104), d, bid) in
+    let stamped = if left == 0 && load_i64(state, 48) != 4 then rt_http_received(state, before) else noop() in left == 0
+
+effect fn rt_uring_received (d : ptr, meta : ptr, state : ptr, handler : ptr, index : i64, result : i64, flags : i64) -> unit
+  = let ended = if bit_and(flags, 2) != 0 then noop() else store_i64(meta, 8, bit_and(load_i64(meta, 8), -6)) in
+    let sending = bit_and(load_i64(meta, 8), 2) != 0 in
+    if result > 0 then
+      if bit_and(flags, 1) == 0 || !rt_uring_take(d, state, bit_and(shift_right(flags, 16), 65535), result) then rt_uring_close(d, meta, state, index)
+      else if load_i64(state, 48) == 4 then
+        (if load_i64(state, 120) > 1048576 then rt_uring_close(d, meta, state, index) else rt_uring_next(d, meta, state, handler, index))
+      else if !sending then rt_uring_next(d, meta, state, handler, index)
+      else if load_i64(state, 16) > 65536 then rt_uring_cancel(d, meta, index) else noop()
+    ; Out of buffers (ENOBUFS), interrupted, or cancelled for backpressure: armed
+    ; again once nothing is being sent.
+    else if result == 0 - 105 || result == 0 - 4 || result == 0 - 11 || result == 0 - 125 then
+      (if sending then noop() else rt_uring_next(d, meta, state, handler, index))
+    else rt_uring_close(d, meta, state, index)
+
+effect fn rt_uring_sent (d : ptr, meta : ptr, state : ptr, handler : ptr, index : i64, result : i64) -> unit
+  = let done = store_i64(meta, 8, bit_and(load_i64(meta, 8), -3)) in
+    if result < 0 then
+      if result == 0 - 4 || result == 0 - 11 then rt_uring_send_armed(d, meta, state, index) else rt_uring_close(d, meta, state, index)
+    else if result == 0 then rt_uring_close(d, meta, state, index)
+    else
+      let progress = store_i64(state, 72, rt_http_now()) in
+      let sent = load_i64(state, 40) + result in
+      if sent < load_i64(state, 32) then let saved = store_i64(state, 40, sent) in rt_uring_send_armed(d, meta, state, index)
+      else let reset = store_i64(state, 32, 0) in let rewound = store_i64(state, 40, 0) in
+        let close = load_i64(state, 48) in
+        if close == 1 then rt_uring_close(d, meta, state, index)
+        else let lingering = if close == 3 then rt_http_linger(state) else noop() in
+          rt_uring_next(d, meta, state, handler, index)
+
+; A completion for connection index under the generation in user's upper half;
+; one for a closed connection, or a failed cancel, only returns its buffer.
+effect fn rt_uring_armed_event (d : ptr, states : ptr, local : ptr, handler : ptr, user : i64, result : i64, flags : i64) -> unit
+  = let low = bit_and(user, 4294967295) in let index = (low - 2) / 2 in
+    let meta = ptr_add(load_ptr(local, 16), index * 16) in let state = ptr_add(states, index * 128) in
+    if low == 4294967295 || index < 0 || index >= load_i64(local, 0) || shift_right(user, 32) != bit_and(load_i64(meta, 0), 2147483647)
+      || load_i64(state, 0) < 0 then
+      (if bit_and(flags, 1) != 0 then rt_uring_provide(load_ptr(d, 104), d, bit_and(shift_right(flags, 16), 65535)) else noop())
+    else if low % 2 == 1 then rt_uring_sent(d, meta, state, handler, index, result)
+    else rt_uring_received(d, meta, state, handler, index, result, flags)
+
 ; Timeouts: a connection always has an operation in flight, so an expired one
 ; is shut down, and that operation's completion closes it.
 effect fn rt_uring_sweep (states : ptr, n : i64, control : ptr, parent : i64) -> unit
@@ -153,7 +331,7 @@ effect fn rt_uring_slot (states : ptr, n : i64) -> i64
       yield if found < 0 then n else found
 
 effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, listener : i64, control : ptr,
-                          worker : i64, workers : i64{workers >= 1}, scratch : ptr, user : i64, result : i64) -> unit
+                          worker : i64, workers : i64{workers >= 1}, scratch : ptr, user : i64, result : i64, flags : i64) -> unit
   = if user == 0 then
       ; Accept every pending connection while this worker holds the accept
       ; turn (with one worker, until the listener is drained). One accept per
@@ -163,12 +341,15 @@ effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, lis
       let drained = loop (more = true) while more
         next (let slot = rt_accept_at(listener, states, rt_uring_slot(states, load_i64(local, 0)), true,
                 local, control, worker, workers) in
-              if slot < 0 then false else let queued = rt_uring_recv(d, ptr_add(states, slot * 128), slot) in true)
+              if slot < 0 then false else
+              let queued = if load_ptr(d, 104) == null() then rt_uring_recv(d, ptr_add(states, slot * 128), slot)
+                else rt_uring_arm(d, ptr_add(load_ptr(local, 16), slot * 16), ptr_add(states, slot * 128), slot) in true)
         yield more in noop()
     else if user == 1 then
       let notify = load_i64(control, 256 + worker * 16) in
       let drained = rt_read(notify, scratch, 64) in
       rt_uring_push(d, 6, notify, 0, 0, 1, 1)
+    else if load_ptr(d, 104) != null() then rt_uring_armed_event(d, states, local, handler, user, result, flags)
     else let index = (user - 2) / 2 in
       if index < 0 || index >= load_i64(local, 0) then ax_trap(data("invalid io_uring completion\0")) else
         let state = ptr_add(states, index * 128) in
@@ -183,16 +364,20 @@ effect fn rt_uring_reap (d : ptr, states : ptr, local : ptr, handler : ptr, list
     let head = loop (h = load_i64(d, 96)) while h != tail
       next (let cqe = ptr_add(mapping, load_i64(d, 88) + bit_and(h, load_i64(d, 56)) * 16) in
             let handled = rt_uring_event(d, states, local, handler, listener, control, worker, workers, scratch,
-              load_i64(cqe, 0), i64(load_i32(cqe, 8))) in bit_and(h + 1, 4294967295))
+              load_i64(cqe, 0), i64(load_i32(cqe, 8)), i64(load_i32(cqe, 12))) in bit_and(h + 1, 4294967295))
       yield h in
+    ; The buffers handed back while handling them are visible from the next entry.
+    let given = if load_ptr(d, 104) == null() then noop() else rt_uring_publish(load_ptr(d, 104), d) in
     let saved = store_i64(d, 96, head) in
     atomic_store_i32(mapping, load_i64(d, 72), i32(head))
 
 effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control : ptr, worker : i64,
                               workers : i64{workers >= 1}, parent : i64) -> i64
   = let states = ax_alloc(rt_http_limit(control) * 128) in
-    ; local: connection count@0, listener polled@8.
-    let local = stack_alloc(16) in let cleared = memset(local, i32(0), 16) in
+    ; local: connection count@0, listener polled@8, connection metadata@16.
+    let local = stack_alloc(24) in let cleared = memset(local, i32(0), 24) in
+    let meta = ax_alloc(rt_http_limit(control) * 16) in let unused = memset(meta, i32(0), rt_http_limit(control) * 16) in
+    let kept = store_ptr(local, 16, meta) in
     let scratch = stack_alloc(64) in
     let notify = load_i64(control, 256 + worker * 16) in
     let watched = rt_uring_push(d, 6, notify, 0, 0, 1, 1) in
@@ -223,7 +408,7 @@ effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control 
 
 effect fn rt_serve_uring (listener : i64, handler : ptr, control : ptr, worker : i64,
                         workers : i64{workers >= 1}, parent : i64, requested : bool) -> i64
-  = let d = stack_alloc(128) in
-    if rt_uring_setup(d) then rt_http_uring_worker(d, listener, handler, control, worker, workers, parent)
+  = let d = stack_alloc(128) in let blank = memset(d, i32(0), 128) in
+    if rt_uring_setup(d) then let buffered = rt_uring_buffers(d) in rt_http_uring_worker(d, listener, handler, control, worker, workers, parent)
     else let noted = if requested && worker == 0 then rt_write_all(2, data("neo: io_uring unavailable, serving with epoll\n"), 46) else noop() in
       rt_http_epoll_worker(listener, handler, control, worker, workers, parent)
