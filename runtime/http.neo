@@ -427,11 +427,13 @@ effect fn rt_http_sweep(states:ptr, n:i64, control:ptr, parent:i64) -> i64
 ; (a second later when it lived less than one), and the accept turn skips it
 ; meanwhile. A worker stopped by SIGINT or SIGTERM is not replaced.
 effect fn rt_http_spawn(listener:i64, handler:ptr, control:ptr, worker:i64, workers:i64{workers>=1}, parent:i64) -> i64
-  = let monitor=load_i64(runtime_state(),1728) in
+  = let monitor=load_i64(runtime_state(),1728) in let timers=load_ptr(runtime_state(),1880) in
     let pid=rt_fork() in
     if pid<0 then -1 else if pid>0 then
       let saved=store_i64(control,8192+worker*8,pid) in let born=store_i64(control,16448+worker*8,rt_clock_ns()/1000000) in pid
     else
+      ; Intervals registered before startup run in worker zero only.
+      let adopted=if worker==0 then rt_timer_adopt(timers) else noop() in
       ; rt_fork forgot the parent's signal monitor; close its descriptor.
       let closed=if monitor>0 then rt_close(monitor-1) else 0 in
       let supervised=store_i64(runtime_state(),2024,1) in

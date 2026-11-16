@@ -76,7 +76,10 @@ from using its old slot. `event_read_count` and `http_async_callback_count` prov
 process-local diagnostics for idle/wakeup tests.
 
 `std:timer` supplies bounded process-owned interval callbacks. An interval started
-before HTTP forks runs only in the original worker; children forget its private
+before the HTTP server starts runs in worker zero only: the serving process
+itself with one worker; with more, the first forked worker, which adopts it
+under the same handle (a replacement worker zero starts it again from the
+original registration). Other workers and other forked children forget the
 registry. The HTTP executor drives it, or a standalone program can use
 `timer_poll`. These timers produce application data independently of subscribers;
 they are not subscription polling. Stop explicit timer handles with

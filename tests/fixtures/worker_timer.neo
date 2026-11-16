@@ -1,0 +1,27 @@
+import "std:http_async"
+import "std:io"
+import "std:strings"
+import "std:timer"
+; An interval registered before serve_effect, read by tests/drivers/worker_timer.neo.
+; Arguments: the port and a log path. The interval's token is saved next to the
+; log (LOG.token) before serving; each tick appends this process's id and a
+; newline to the log. /stop stops the interval in the worker that runs it and
+; answers "stopped" ("kept" when the saved token did not stop it); a worker
+; without the interval answers "elsewhere".
+private effect(fs,net,env,time,process) fn tick(capture:Arr u8 n)->Arr u8 _
+  = let appended=fs_append(capture,concat(int_text(process_id()),"\n")) in ""
+private effect fn stop(borrow log:Arr u8 n)->Arr u8 _
+  = if timer_interval_count()==0 then "elsewhere" else
+    let saved=fs_read(concat(log,".token")) in let token=if saved.ok then int_parse(str_trim(saved.value)) else int_error(2,"no token",0) in
+    let stopped=if token.ok then timer_interval_stop(token.value) else noop() in
+    if timer_interval_count()==0 then "stopped" else "kept"
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in let log=cli_arg(2) in
+    let body=if !log.present then "no log" else if str_equal(request.path,"/stop") then stop(log.value)
+      else concat("count ",int_text(timer_interval_count())) in
+    web_encode(web_reply(200,body,"text/plain"),false)
+effect fn main()->i64
+  = let port=int_parse(cli_arg(1).value) in let log=cli_arg(2) in check port.ok && log.present in
+    let timer=timer_interval_start(50,function(tick),log.value) in check timer.ok in
+    let saved=fs_write(concat(log.value,".token"),int_text(timer.value)) in check saved.ok in
+    let options=http_server_options(250,true) in check options.ok in serve_effect(port.value,handler)

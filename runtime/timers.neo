@@ -1,5 +1,7 @@
 ; Process-owned short timer callbacks. Slots are private and forgotten by a
 ; forked child; an interval registered before HTTP startup runs in worker zero.
+; With one worker that is the serving process itself; with more, every worker
+; is a forked child and worker zero adopts the parent's slots (rt_timer_adopt).
 ; State: table@1880, executing slot@1888, live count@1904.
 effect fn rt_timer_table()->ptr
   = let table=load_ptr(runtime_state(),1880) in if table!=null() then table else
@@ -39,3 +41,24 @@ effect fn rt_timer_timeout(maximum:i64)->i64
     let nearest=loop(i=0,wait=if maximum<0 then 86400000 else maximum) while i<16 next(i+1,
       let slot=ptr_add(table,i*64) in let remaining=load_i64(slot,32)-now in
       if load_ptr(slot,0)!=null() && remaining<wait then remaining else wait) yield wait in if nearest<0 then 0 else nearest
+; Worker zero of a multi-worker server takes over the intervals registered
+; before startup. rt_fork cleared this process's timer state and dropped their
+; handles. The parent's table is in the shared heap, so each live slot and its
+; capture are copied into memory this worker owns and its handle is restored
+; under the same token; the parent's copy is never written. A worker zero that
+; replaces a failed one starts again from the parent's slots.
+effect fn rt_timer_adopt(parent:ptr)->unit
+  = if parent==null() then noop() else
+    let table=rt_timer_table() in let handles=rt_handles() in
+    let adopted=loop(i=0,count=0) while i<16 next(i+1,
+      let from=ptr_add(parent,i*64) in let token=load_i64(from,40) in
+      if load_ptr(from,0)==null() || token<=4096 then count else
+      let entry=ptr_add(handles,((token-1)%4096)*32) in if load_i64(entry,0)!=0 then count else
+      let slot=ptr_add(table,i*64) in let n=load_i64(from,16) in
+      let bytes=ax_alloc(if n<1 then 1 else n) in let copied=memcpy(bytes,load_ptr(from,8),n) in
+      let a=store_ptr(slot,0,load_ptr(from,0)) in let b=store_ptr(slot,8,bytes) in let c=store_i64(slot,16,n) in
+      let d=store_i64(slot,24,load_i64(from,24)) in let e=store_i64(slot,32,load_i64(from,32)) in let f=store_i64(slot,40,token) in
+      let g=store_i64(entry,8,ptr_to_i64(slot)) in let k=store_i64(entry,16,23) in let o=store_i64(entry,24,rt_handle_pid()) in
+      let live=store_i64(entry,0,(token-1)/4096) in
+      let counted=store_i64(runtime_state(),128,load_i64(runtime_state(),128)+1) in count+1) yield count in
+    let saved=store_i64(runtime_state(),1904,adopted) in noop()

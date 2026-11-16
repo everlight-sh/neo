@@ -1,0 +1,58 @@
+; tests/fixtures/worker_timer.neo: an interval registered before serve_effect
+; ticks steadily in worker zero alone with 1, 2 and 4 workers (with one worker
+; that is the server process, with more a forked worker), keeps its token there
+; (/stop stops it for good), and shutdown stops it, also while it is live.
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+; The log's tick lines: how many, the process id on the first, and how many
+; name another process.
+type WtLog = { ticks:i64, owner:i64, strays:i64 }
+effect fn wt_log(borrow path:Arr u8 _) -> WtLog
+  = let read=fs_read(path) in let text=if read.ok then str_trim(read.value) else tx_empty() in
+    if len(text)==0 then WtLog { ticks=0, owner=0, strays=0 } else
+    let lines=nw_split(text,10) in let owner=nw_int(md_word(lines,0)) in
+    let strays=loop (i=0, n=0) while i<len(lines) next (i+1,if nw_int(md_word(lines,i))==owner then n else n+1) yield n in
+    WtLog { ticks=len(lines), owner=owner, strays=strays }
+
+; /stop on fresh connections until the worker running the interval answers.
+effect(net,time) fn wt_stop(port:i64, attempts:i64) -> Arr u8 _
+  = loop (i=0, answer=tx_empty()) while i<attempts && !tx_equal(answer,"stopped") && !tx_equal(answer,"kept")
+      next (i+1,let r=nw_get(port,"/stop","") in if r.complete && r.status==200 then r.body else concat("status ",int_text(r.status))) yield answer
+
+; stop: stop the interval through /stop before shutting down; otherwise it is
+; still running when SIGTERM arrives.
+effect fn wt_run(borrow binary:Arr u8 _, borrow dir:Arr u8 _, workers:i64, stop:bool) -> Arr u8 _
+  = let port=nw_port() in let log=pt_join(dir,concat("ticks-",int_text(workers),if stop then "-stop" else "-live")) in
+    let label=concat(int_text(workers)," worker(s)",if stop then "" else ", live at shutdown",": ") in
+    let environment=dv_environment(push(md_words(),concat("NEO_THREADS=",int_text(workers)))) in
+    using server=process_start(binary,push(push(md_words(),int_text(port)),log),environment) in
+    let up=nw_await(server,nw_child(),"neo: serving",5000) in
+    if !nw_contains(up.errors,"neo: serving") then concat(label,"the server did not start: ",up.errors,up.output,"\n") else
+    let waited=nw_sleep(700) in let seen=wt_log(log) in let pid=nw_process_pid(server) in
+    let p=nw_note("",seen.ticks>=5,concat(label,int_text(seen.ticks)," ticks in 700 ms at a 50 ms interval")) in
+    let p=nw_note(p,seen.strays==0,concat(label,int_text(seen.strays)," ticks from a second process")) in
+    let p=nw_note(p,if workers==1 then seen.owner==pid else seen.owner>0 && seen.owner!=pid,
+      concat(label,"ticks from process ",int_text(seen.owner),", server ",int_text(pid))) in
+    let p=if !stop then p else
+      let answer=wt_stop(port,40) in let p=nw_note(p,tx_equal(answer,"stopped"),concat(label,"/stop answered ",tx_repr(answer,true))) in
+      let before=wt_log(log) in let paused=nw_sleep(300) in let after=wt_log(log) in
+      nw_note(p,after.ticks==before.ticks,concat(label,int_text(after.ticks-before.ticks)," ticks after /stop")) in
+    let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,up,4000) in
+    let p=nw_note(p,!done.running && done.code==0,concat(label,"server exit ",int_text(done.code),": ",done.errors)) in
+    nw_note(p,!nw_contains(done.errors,"starting another"),concat(label,"a worker exited: ",done.errors))
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("worker-timer") in let binary=pt_join(dir,"worker-timer") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/worker_timer.neo"),binary,md_words()) in
+    let a=wt_run(binary,dir,1,true) in let b=wt_run(binary,dir,2,true) in let c=wt_run(binary,dir,4,true) in let d=wt_run(binary,dir,2,false) in
+    let checked=dv_expect(len(a)+len(b)+len(c)+len(d)==0,concat(a,b,c,d)) in
+    let shown=print_out("PASS an interval registered before serving runs in worker zero only with 1, 2 and 4 workers, stops by its token there, and stops at shutdown\n") in
+    dv_clean(dir)

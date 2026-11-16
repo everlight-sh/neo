@@ -161,6 +161,14 @@ file = "drivers/async_headers.neo"
 stdout = "PASS async starts keep their head; _at variants add header lines and Date; invalid lines are refused; failure replies carry the security headers\n"
 timeout = 120
 
+# An interval registered before serve_effect runs in worker zero only, keeps
+# its token there and stops at shutdown, with 1, 2 and 4 workers.
+[[test]]
+name = "worker-timer"
+file = "drivers/worker_timer.neo"
+stdout = "PASS an interval registered before serving runs in worker zero only with 1, 2 and 4 workers, stops by its token there, and stops at shutdown\n"
+timeout = 120
+
 # prepared_frames.py: the async_frames.neo server under backpressure,
 # eviction, disconnects and shutdown; prepared_frames.neo checks the frame
 # cache itself (keys, bounded storage, eviction, fork ownership).
