@@ -191,6 +191,7 @@ effect fn rt_sync_data(fd:i64) -> i64 = rt_result(syscall6(83,fd,0,0,0,0,0))
 effect fn rt_signal_mask(how:i64,mask:ptr,old:ptr)->i64 = rt_result(syscall6(135,how,ptr_to_i64(mask),ptr_to_i64(old),8,0,0))
 fn rt_signal_block_mode()->i64=0
 fn rt_signal_restore_mode()->i64=2
+fn rt_signal_unblock_mode()->i64=1
 effect fn rt_signal_open(mask:ptr)->i64 = rt_result(syscall6(74,-1,ptr_to_i64(mask),8,526336,0,0))
 effect fn rt_signal_take(fd:i64)->i64
   = let event=stack_alloc(128) in let received=rt_read(fd,event,128) in if received==128 then i64(load_i32(event,0)) else 0

@@ -464,9 +464,13 @@ export effect fn ax_par_for_shared(chunks: i64, work: ptr, context: ptr) -> unit
 effect fn rt_cloexec(fd:i64) -> i64
   = if fd<0 then fd else let result=rt_fcntl(fd,2,1) in if result>=0 then fd else let closed=rt_close(fd) in -1
 ; A negative stdio or stderr leaves the child's descriptors 0 and 1, or 2,
-; as inherited from this process.
+; as inherited from this process. While a signal monitor holds SIGINT and
+; SIGTERM blocked (std:signals, HTTP shutdown; fd+1@1728) the child unblocks
+; them before exec; the rest of the signal mask is inherited.
 effect fn rt_spawn_exec(path:ptr,argv:ptr,envp:ptr,stdio:i64,stderr:i64) -> i64
   = let pid=rt_result(fork_syscall()) in if pid!=0 then pid else
+    let unblocked=if load_i64(runtime_state(),1728)==0 then 0 else
+      let mask=stack_alloc(8) in let set=store_i64(mask,0,16386) in rt_signal_mask(rt_signal_unblock_mode(),mask,null()) in
     let input=if stdio<0 then 0 else rt_dup_stdio(stdio,0) in let output=if stdio<0 then 0 else rt_dup_stdio(stdio,1) in
     let error=if stderr<0 then 0 else rt_dup_stdio(stderr,2) in
     let result=if input<0 || output<0 || error<0 then -1 else rt_exec(path,argv,envp) in

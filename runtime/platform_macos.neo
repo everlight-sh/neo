@@ -339,6 +339,7 @@ effect fn rt_http_kqueue_worker (listener : i64, handler : ptr, control:ptr, wor
 effect fn rt_signal_mask(how:i64,mask:ptr,old:ptr)->i64 = rt_result(syscall6(48,how,ptr_to_i64(mask),ptr_to_i64(old),0,0,0))
 fn rt_signal_block_mode()->i64=1
 fn rt_signal_restore_mode()->i64=3
+fn rt_signal_unblock_mode()->i64=2
 effect fn rt_signal_open(mask:ptr)->i64
   = let fd=rt_cloexec(rt_result(syscall6(362,0,0,0,0,0,0))) in if fd<0 then -1 else
     let changes=stack_alloc(64) in let first=rt_kevent_set(changes,2,-6,33,0,0) in let second=rt_kevent_set(ptr_add(changes,32),15,-6,33,0,0) in

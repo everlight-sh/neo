@@ -1,0 +1,64 @@
+import "std:io"
+import "std:process"
+import "std:signals"
+import "std:strings"
+import "std:time"
+
+; Children started while a shutdown_signal monitor blocks SIGINT and SIGTERM
+; here do not inherit that block, and process_signal delivers SIGINT (2) as
+; well as SIGTERM; other signals are refused. On Linux the masks are read from
+; /proc too. A run that ignores SIGINT or SIGTERM (a background job of a
+; non-interactive shell passes that on) does not try to deliver that signal.
+
+fn nibble(b:i64) -> i64 = if b>=48 && b<=57 then b-48 else if b>=97 && b<=102 then b-87 else if b>=65 && b<=70 then b-55 else 0
+; The low 16 bits of a /proc status mask such as "SigBlk:\t0000000000004002",
+; -1 when the line is missing.
+fn mask_low(borrow status:Arr u8 n, borrow name:Arr u8 m) -> i64
+  = let label=concat(name,":\t") in let at=str_find(status,label) in
+    if !at.present || at.value+len(label)+16>n then -1 else
+    let start=at.value+len(label)+12 in
+    loop(i=0,value=0) while i<4 next(i+1,value*16+nibble(str_byte(status,start+i))) yield value
+; SIGINT and SIGTERM in a signal mask.
+fn shutdown_bits(mask:i64) -> i64 = bit_and(mask,16386)
+
+effect fn wait_exit(child:Process) -> ProcessStatus
+  = loop(status=process_status(child),rounds=0) while status.ok && status.running && rounds<5000
+      next(let paused=sleep_ms(1) in process_status(child),rounds+1) yield status
+
+type Collected = { out:Arr u8 _, done:bool }
+effect fn collect_step(child:Process, move c:Collected) -> Collected
+  = let part=process_try_read(child,1,65536) in
+    if part.ok && len(part.value)>0 then Collected { out=concat(c.out,part.value), done=false } else
+    let status=process_status(child) in
+    if status.ok && status.running then let paused=sleep_ms(1) in Collected { out=c.out, done=false } else
+    let last=process_try_read(child,1,65536) in
+    if last.ok && len(last.value)>0 then Collected { out=concat(c.out,last.value), done=false } else Collected { out=c.out, done=true }
+; Everything a child writes to stdout until it exits.
+effect fn collect(child:Process) -> Arr u8 _
+  = loop(c=Collected { out="", done=false },rounds=0) while !c.done && rounds<5000 next(collect_step(child,c),rounds+1) yield c.out
+
+; The signal that ended a /bin/sleep child sent signal, or -1.
+effect fn ended_by(inherit:bool, signal:i64, borrow environment:Arr Arr u8 _ k) -> i64
+  = using child=if inherit then process_start_inherit("/bin/sleep",arr(i in 0..1) "30",environment)
+      else process_start("/bin/sleep",arr(i in 0..1) "30",environment) in
+    let sent=process_signal(child,signal) in let ended=wait_exit(child) in
+    if sent.ok && ended.ok && !ended.running then ended.signal else -1
+
+effect fn main() -> unit
+  = let environment=env_list() in
+    using monitor=shutdown_signal() in let watching=shutdown_signal_status(monitor) in check watching.ok in
+    let own=fs_read("/proc/self/status") in let linux=own.ok in
+    let ignored=if linux then mask_low(own.value,"SigIgn") else 0 in
+    let blocked=if linux then mask_low(own.value,"SigBlk") else 16386 in check shutdown_bits(blocked)==16386 in
+    let child_mask=if !linux then 0 else
+      (using child=process_start("/bin/cat",arr(i in 0..1) "/proc/self/status",environment) in mask_low(collect(child),"SigBlk")) in
+    check child_mask>=0 && shutdown_bits(child_mask)==0 in
+    let refused=(using child=process_start("/bin/sleep",arr(i in 0..1) "30",environment) in process_signal(child,3)) in
+    check !refused.ok && refused.error.code==22 in
+    let skip_int=bit_and(ignored,2)!=0 in let skip_term=bit_and(ignored,16384)!=0 in
+    let noted=if skip_int || skip_term then print_error("process-signals: SIGINT or SIGTERM is ignored here; not delivering it\n") else int_ok(0) in
+    let a=if skip_int then 2 else ended_by(false,2,environment) in
+    let b=if skip_int then 2 else ended_by(true,2,environment) in
+    let c=if skip_term then 15 else ended_by(false,15,environment) in
+    check a==2 && b==2 && c==15 in
+    let printed=print_out("process signals OK\n") in noop()

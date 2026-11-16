@@ -68,8 +68,9 @@ effect(process,fs) fn process_try_write(process:Process,bytes:Arr u8 n,offset:i6
     if offset<0 || offset>n then int_error(22,"invalid write offset",0) else
       let count=rt_send(load_i64(ptr_from_i64(address),16),ptr_add(data(bytes),offset),n-offset) in
       if count<0 then int_error(i64(load_i32(rt_errno(),0)),"child write failed",offset) else int_ok(count)
+; SIGINT (2), SIGTERM (15) or SIGKILL (9); a child that already exited is not signalled.
 effect(process) fn process_signal(process:Process,signal:i64) -> IntResult
-  = if signal!=15 && signal!=9 then int_error(22,"unsupported child signal",0) else
+  = if signal!=2 && signal!=15 && signal!=9 then int_error(22,"unsupported child signal",0) else
     let status=process_status(process) in if !status.ok then int_error(status.error.code,status.error.message,0) else
     if !status.running then int_ok(0) else
       let address=rt_handle_fd(process.token,10) in let result=rt_kill(load_i64(ptr_from_i64(address),8),signal) in

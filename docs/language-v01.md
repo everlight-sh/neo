@@ -425,7 +425,8 @@ cryptography itself is not preempted by cancellation.
 `std:process` launches an absolute executable with explicit argument and
 environment arrays, no shell or PATH lookup. It owns separate full-duplex
 stdin/stdout and stderr streams, nonblocking reads/writes, polling exit status
-and TERM/KILL signals. Scope cleanup kills and reaps a live child. An exec
+and INT/TERM/KILL signals (`process_signal` takes 2, 15 or 9). Scope cleanup
+kills and reaps a live child. An exec
 failure becomes exit 127. Launch vectors and strings use private mappings so
 parent cleanup cannot invalidate the child's arguments; Neo-opened files and
 sockets are close-on-exec. Argument/environment limits are 1024 entries each,
@@ -433,7 +434,10 @@ sockets are close-on-exec. Argument/environment limits are 1024 entries each,
 half-closes stdin while preserving stdout/stderr. `process_start_inherit` starts
 a child that shares this process's stdin, stdout and stderr instead, so its
 output reaches the terminal (or pipe, or file) directly; its stream functions
-then report EBADF. `process_executable_path` returns the running executable's
+then report EBADF. A child starts with SIGINT and SIGTERM unblocked even while
+a signal monitor (`std:signals`, the HTTP server's graceful shutdown) keeps
+them blocked here; the rest of the signal mask is inherited.
+`process_executable_path` returns the running executable's
 absolute path (`/proc/self/exe` on Linux, so `/proc` must be mounted; the
 kernel's process path on macOS). Process groups, working-directory options and
 a high-level communicate API remain absent.
