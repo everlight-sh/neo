@@ -204,9 +204,9 @@ effect fn la_bytesmap_smoke(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
 
 ; language_perf_checks.py: language_bench.neo prints checksum, nanoseconds,
 ; requests and bytes. Appends (mode 0) take at most 64 requests and 32n+1024
-; bytes; the sort (1) the array, one second buffer of its length and, for the
-; radix sort, its digit counts and bucket starts (at most 32 requests and
-; 16n+256KiB); the hash map (2) at most 20n+128 requests and 800n+1MiB; bytes
+; bytes; the sort (1) the array and one second buffer of its length with the
+; radix sort's digit counts (at most 32 requests and 16n+256KiB); the hash
+; map (2) at most 20n+128 requests and 800n+1MiB; bytes
 ; grow at most 20x per 10x size. The time is not checked.
 effect fn la_bench_run(borrow binary:Arr u8 _, mode:i64, n:i64, g:LaGrowth) -> LaGrowth
   = let output=la_run(binary,la_pair(mode,n),1,"") in

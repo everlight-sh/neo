@@ -4,7 +4,9 @@
 ; expressions computes both and traps only for the one it chooses
 ; (cg_if_select). Arithmetic at the top of a comprehension or sum body is
 ; tested once after the loop (cg_lazy_tree). An index step such as i - 1 has
-; no test at all (cg_index_step).
+; no test at all (cg_index_step). A loop state stepped by an `if` on itself
+; is a select too (cg_loop_picks), and c * x + d with literals is tested once
+; for both steps (cg_scaled).
 fn three (x : i64, i : i64) -> i64 = if i == 0 then x else if i == 1 then 1 else -1
 fn step (x : i64) -> i64 = if x % 2 == 0 then x / 2 else 3 * x + 1
 fn ends (xs : Arr i64 n) -> Arr i64 n
@@ -25,4 +27,7 @@ fn main (mode : i64, x : i64) -> i64
     else if mode == 10 then check x >= 0 in sum(i in 0..x) i
     else if mode == 11 then check x >= 0 in sum(i in 0..x) if i % 3 == 0 then 1 else 0
     else if mode == 12 then check x >= 0 in let xs = arr(i in 0..x) 4611686018427387904 - i in sum(i in 0..x) xs[i]
+    else if mode == 13 then loop (v = x, k = 0) while k < 1 next (if v % 2 == 0 then v / 2 else 3 * v + 1, k + 1) yield v
+    else if mode == 14 then x * 5 - 7
+    else if mode == 15 then 9 + x * 9
     else 0

@@ -163,11 +163,17 @@ typed Result. Fixed seeds, including compatibility `map_empty`, do not establish
 resistance to chosen-input hash flooding. `std:collections` preserves the
 integer-vector and string-map call APIs, using geometric append and a compact
 byte map. Its former public StringMap representation has changed.
-`vector_sort` sorts fewer than 48 integers by insertion, fewer than 2,048 by
-merging runs of 32, and longer vectors by a least-significant-digit radix sort
-(8-bit digits below 65,536 values, 11-bit digits from there). One pass counts
-every digit; a digit that all values share moves nothing. From 48 values on it
-uses one second buffer of the vector's length.
+`vector_sort` sorts fewer than 32 integers by insertion and longer vectors by
+a radix sort on their leading bits only. One pass finds the bits in which the
+values differ at all; two counting passes put the values in order by the top
+10 to 22 of those bits (5, 6, 8 or 11 bits a pass, by how many values there
+are), which tells nearly all values apart; a last pass sorts each stretch of
+values those bits left together, by insertion when it is short and by the
+same steps on its lower bits when it is long. More than 1,048,576 values are
+first split by their top 11 differing bits into 2,048 stretches. The time is
+linear in the number of values for any input. From 32 values on the sort uses
+one second buffer: the values and two tables of at most 2,048 counts (above
+1,048,576 values, the values and 2,048 counts).
 
 `std:bytesmap` provides `BytesMap`, empty/random/length/capacity/get/put/delete,
 with_capacity, storage_bytes and explicit compact operations. It is specialized for byte keys
@@ -230,13 +236,30 @@ body (`+`, `-`, `*`, and `/` or `%` by a literal, over variables, literals and
 elements read at simple indexes) is checked once, after the loop: the program
 still traps, before the array or total can be used, but later than the
 overflowing element. An `if` between two short integer expressions evaluates
-both and traps only for the one it chooses.
+both and traps only for the one it chooses; so does a loop state whose next
+value is an `if` on the state itself (`if x % 2 == 0 then x / 2 else 3 * x +
+1`), which is then a conditional move and not a branch.
 
-A `sum` whose term is a loop of its own over numbers (written out, or a call
-to a pure function whose body is one loop) computes eight terms at a time: the
-eight loops advance together, each for as many turns as it needs, and each
-computes exactly what it would alone. A term whose integer arithmetic
-overflows traps after the group has finished.
+A `let` or `check` at the top of a comprehension or sum body that is linear
+in the index (sums, differences and products with at most one factor that
+depends on the index, compared with `<`, `<=`, `>` or `>=`) is decided by the
+first and the last index, before the loop: what holds for both holds for
+every index between them. The loop then runs without those checks, so a body
+such as `let at = k * width + j in check at >= 0 && at < m in a[at]` is one
+LLVM can vectorise. A range that fails such a check, or overflows in such a
+`let`, traps before its first element is computed; an empty range never
+traps.
+
+A `sum` whose term, or a comprehension whose element, is a loop of its own
+over numbers (written out, or a call to a pure function whose body is one
+loop) computes eight terms at a time: the eight loops advance together, each
+for as many turns as it needs, and each computes exactly what it would alone.
+A term whose integer arithmetic overflows traps after the group has finished.
+
+A loop that edits an array state on every turn (`set`, `byte_copy`,
+`byte_write_le`) decides once, before its first turn, whether the array is
+shared: a shared one is copied there, and the loop edits the copy in place
+with no further test. A loop that runs no turn copies nothing.
 
 A pure function over numbers that ends, on some path, with `e + f(args)`
 calling itself (`fib(n - 1) + fib(n - 2)`) adds `e` to a running total and

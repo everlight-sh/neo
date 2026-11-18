@@ -240,7 +240,17 @@ name = "overflow-checks"
 file = "drivers/language_sweep.neo"
 args = ["fixtures/overflow_checks.neo"]
 stdin-file = "vectors/overflow_checks/runs.in"
-stdout = "overflow_checks.neo: 35 runs OK\n"
+stdout = "overflow_checks.neo: 50 runs OK\n"
+timeout = 300
+
+# Lets and checks linear in a range's index are decided by its first and last
+# index before the loop: the same results and traps as testing every index.
+[[test]]
+name = "end-checks"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/end_checks.neo"]
+stdin-file = "vectors/end_checks/runs.in"
+stdout = "end_checks.neo: 31 runs OK\n"
 timeout = 300
 
 # A sum whose term is a loop runs four terms at a time under a mask: the same
@@ -250,7 +260,7 @@ name = "lanes"
 file = "drivers/language_sweep.neo"
 args = ["fixtures/lanes.neo"]
 stdin-file = "vectors/lanes/runs.in"
-stdout = "lanes.neo: 19 runs OK\n"
+stdout = "lanes.neo: 29 runs OK\n"
 timeout = 300
 
 # A function that ends with `e + f(args)` loops instead of calling itself:
@@ -308,6 +318,16 @@ args = ["fixtures/vector_sort_probe.neo"]
 stdin-file = "vectors/vector_sort_cases/runs.in.gz"
 stdout = "vector_sort_probe.neo: 88 runs OK\n"
 timeout = 300
+
+# Every size class and input shape of vector_sort: in order, the same values,
+# and an input that another name still reads left as it was.
+[[test]]
+name = "vector-sort-shapes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/vector_sort_shapes.neo"]
+stdin-file = "vectors/vector_sort_shapes/runs.in"
+stdout = "vector_sort_shapes.neo: 316 runs OK\n"
+timeout = 600
 
 # word_bytes.py: owned little-endian word bytes for short, large and signed words.
 [[test]]

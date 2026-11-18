@@ -1,0 +1,21 @@
+; Lets and checks at the top of a comprehension or sum body that are linear
+; in the index are decided for the first and the last index before the loop
+; (cg_ends): the loop then computes the lets unchecked and skips the checks.
+; A range traps exactly when one of its indexes fails a check or overflows,
+; an empty range never does, and anything not linear is still tested at every
+; index.
+fn column (borrow a : Arr i64 m, n : i64, width : i64, j : i64) -> i64
+  = sum(k in 0..n) let at = k * width + j in check at >= 0 && at < m in a[at]
+
+fn main (mode : i64, n : i64{n >= 0}, x : i64) -> i64
+  = let a = arr(i in 0..1000) i in
+    if mode == 0 then column(a, n, x, 0)
+    else if mode == 1 then column(a, n, 10, x)
+    else if mode == 2 then sum(k in 0..n) let at = x - k in check at >= 0 && at < 1000 in a[at]
+    else if mode == 3 then sum(k in 0..n) let big = k * x in check big >= 0 in 1
+    else if mode == 4 then
+      let b = arr(k in 0..n) let at = k * 2 + x in check at >= 0 && at < 1000 in a[at] in
+      sum(k in 0..len(b)) b[k]
+    else if mode == 5 then sum(k in 0..n) let square = k * k in check square < x in 1
+    else if mode == 6 then sum(k in 0..n) let at = k + x in check at >= 0 && at < 1000 in if k < 5 then a[at] else 0
+    else 0

@@ -23,3 +23,15 @@
 # Rows of escape counts through a function.
 1	4 0 16 23		=1\n
 4	4 0 16 23		=1\n
+# A comprehension of loops, and the sum, against the same terms added one by one in a plain loop.
+1	5 0 1000 1		=1\n
+4	5 0 1003 7		=1\n
+1	5 0 7 27		=1\n
+1	5 3 3 5		=1\n
+1	6 0 64 64		=1\n
+4	6 0 1001 1000		=1\n
+1	6 -9 10 64		=1\n
+# A lane of a comprehension that overflows traps.
+1	7 0 8 1		=576460752303423488\n
+1	7 0 4 16		!integer overflow
+4	7 0 9 12		!integer overflow

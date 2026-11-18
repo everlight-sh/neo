@@ -1,7 +1,8 @@
-; A sum whose term is a loop runs four terms at a time under a mask
-; (cg_lane_sum). Each mode adds such terms and compares the total with the
-; same terms computed one by one into an array, or prints the total. A lane
-; that overflows traps, as its own loop would.
+; A sum whose term is a loop, and a comprehension whose element is one, run
+; eight terms at a time under a mask (cg_lane_sum). The modes compare such a
+; sum with the comprehension's elements added up, both with the same terms
+; added one by one in a plain loop, or print the total. A lane that overflows
+; traps, as its own loop would.
 fn escape (cx : f64, cy : f64, max : i64) -> i64
   = loop (zx = 0.0, zy = 0.0, k = 0) while k < max && zx * zx + zy * zy <= 4.0
       next (zx * zx - zy * zy + cx, 2.0 * zx * zy + cy, k + 1) yield k
@@ -33,4 +34,14 @@ fn main (mode : i64, lo : i64, hi : i64{hi >= lo}, x : i64{x > 0}) -> i64
       let count = (hi - lo) * x in check count >= 0 in
       let each = arr(p in 0..count) escape(-2.0 + 3.0 * f64(p % x) / f64(x), -1.5 + 3.0 * f64(lo + p / x) / f64(x), 100) in
       same(sum(y in lo..hi) row(y, x), sum(p in 0..len(each)) each[p])
+    else if mode == 5 then
+      let each = arr(i in lo..hi) steps(i + x) in
+      let one = loop (i = lo, acc = 0) while i < hi next (i + 1, acc + steps(i + x)) yield acc in
+      if one == (sum(i in lo..hi) steps(i + x)) then same(one, sum(i in 0..len(each)) each[i]) else 0 - 2
+    else if mode == 6 then
+      let each = arr(i in lo..hi) escape(-2.0 + 3.0 * f64(i) / f64(x), 0.25, 200) in
+      let one = loop (i = lo, acc = 0) while i < hi next (i + 1, acc + escape(-2.0 + 3.0 * f64(i) / f64(x), 0.25, 200)) yield acc in
+      if one == (sum(i in lo..hi) escape(-2.0 + 3.0 * f64(i) / f64(x), 0.25, 200)) then same(one, sum(i in 0..len(each)) each[i]) else 0 - 2
+    else if mode == 7 then
+      let each = arr(i in lo..hi) grow(x + i, 59) in check len(each) > 0 in each[0]
     else 0
