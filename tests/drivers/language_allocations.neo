@@ -204,16 +204,17 @@ effect fn la_bytesmap_smoke(borrow tools:DvTools, borrow dir:Arr u8 _) -> i64
 
 ; language_perf_checks.py: language_bench.neo prints checksum, nanoseconds,
 ; requests and bytes. Appends (mode 0) take at most 64 requests and 32n+1024
-; bytes, the sort (1) exactly one 8n-byte buffer, the hash map (2) at most
-; 20n+128 requests and 800n+1MiB; bytes grow at most 20x per 10x size. The
-; time is not checked.
+; bytes; the sort (1) the array, one second buffer of its length and, for the
+; radix sort, its digit counts and bucket starts (at most 32 requests and
+; 16n+256KiB); the hash map (2) at most 20n+128 requests and 800n+1MiB; bytes
+; grow at most 20x per 10x size. The time is not checked.
 effect fn la_bench_run(borrow binary:Arr u8 _, mode:i64, n:i64, g:LaGrowth) -> LaGrowth
   = let output=la_run(binary,la_pair(mode,n),1,"") in
     let label=la_label("language_bench",la_pair(mode,n),1) in let v=lg_ints(output) in
     let requests=lg_at(v,2) in let traffic=lg_at(v,3) in
     let shape=la_expect(lg_ints_ok(output,4),label,output,"expected four integers") in
     let bounded=la_expect(if mode==0 then requests<=64 && traffic<=32*n+1024
-      else if mode==1 then requests==1 && traffic==8*n else requests<=20*n+128 && traffic<=800*n+1048576,
+      else if mode==1 then requests<=32 && traffic<=16*n+262144 else requests<=20*n+128 && traffic<=800*n+1048576,
       label,output,"allocation requests or bytes out of bounds") in
     let linear=la_expect(g.last<0 || traffic<=20*g.last,label,output,concat("bytes grew more than 20x from ",int_text(g.last))) in
     LaGrowth { runs=g.runs+1, last=traffic }

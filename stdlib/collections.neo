@@ -11,26 +11,125 @@ fn vector_push (move vector: IntVector, value: i64) -> IntVector
   = IntVector { values = push(vector.values,value) }
 fn vector_get (vector: IntVector, index: i64) -> OptionInt
   = let a = vector.values in if index >= 0 && index < len(a) then some_int(a[index]) else none_int()
-fn vector_heap_child(borrow values:Arr i64 n,count:i64,root:i64,held:i64) -> i64
-  = if root>=count/2 then -1 else let left=root*2+1 in let right=left+1 in
-    check left>=0 && left<count && left<n in
-    let child=if right<count then check right>=0 && right<n in if values[right]>values[left] then right else left else left in
-    check child>=0 && child<n in if held>=values[child] then -1 else child
-fn vector_heap_down(move values:Arr i64 n,count:i64,root:i64) -> Arr i64 n
-  = check root>=0 && root<count && count<=n in let held=values[root] in
-    loop(index=root,child=vector_heap_child(values,count,root,held),row=values) while child>=0
-      next(child,vector_heap_child(row,count,child,held),check index>=0 && index<len(row) && child>=0 && child<len(row) in set(row,index,row[child])) yield
-      check index>=0 && index<len(row) in set(row,index,held)
+; Sorting. Fewer than 48 values are sorted by insertion. Up to 2,048 values
+; are sorted by merging: runs of 32 sorted by insertion, then merged in pairs
+; back and forth between the array and a second buffer of its length. More
+; are sorted by a least-significant-digit radix sort: one pass counts every
+; digit of every value, then each digit whose values are not all in one
+; bucket moves the values, in order, into the second buffer. Digits are 8 bits
+; below 65,536 values and 11 bits from there. Flipping the sign bit makes the
+; unsigned digit order the signed order.
+; The masks are literals and the index ranges are stated, so the checker
+; proves the bounds of every access in the inner loops but one: where a value
+; goes in a radix pass is read from the bucket starts.
+private fn vs_key(value:i64) -> i64 = bit_xor(value,-9223372036854775808)
+
+; Sorts values[lo..hi) by insertion.
+private fn vs_insertion(move values:Arr i64 n,lo:i64,hi:i64) -> Arr i64 n
+  = check lo>=0 && hi<=n in
+    loop(i:i64{i>=lo}=lo+1,row=values) while i<hi
+      next(i+1,let held=row[i] in
+        loop(j:i64{j>=lo && j<=i}=i,inner=row) while j>lo && inner[j-1]>held
+          next(j-1,set(inner,j,inner[j-1]))
+          yield set(inner,j,held))
+      yield row
+
+; Merges the sorted from[lo..mid) and from[mid..hi) into to[lo..hi). The main
+; loop runs while both have a value left, so its choice is a select and not a
+; branch; what is left of one of them is then copied.
+type VsMerged = { i:i64, j:i64, out:Arr i64 _ }
+private fn vs_merge(borrow from:Arr i64 n,move to:Arr i64 m,lo:i64,mid:i64,hi:i64) -> Arr i64 _
+  = check lo>=0 && lo<=mid && mid<=hi && hi<=n && hi<=m in
+    let both=loop(i:i64{i>=lo && i<=mid}=lo,j:i64{j>=mid && j<=hi}=mid,out=to) while i<mid && j<hi
+      next(if from[i]<=from[j] then i+1 else i,
+        if from[i]<=from[j] then j else j+1,
+        let a=from[i] in let b=from[j] in set(out,i+j-mid,if a<=b then a else b))
+      yield VsMerged { i=i, j=j, out=out } in
+    let i0=both.i in let j0=both.j in let rest=both.out in
+    check i0>=lo && i0<=mid && j0>=mid && j0<=hi && len(rest)>=hi in
+    let left=loop(i:i64{i>=i0 && i<=mid}=i0,out=rest) while i<mid
+      next(i+1,check i+j0-mid<len(out) in set(out,i+j0-mid,from[i])) yield out in
+    loop(j:i64{j>=j0 && j<=hi}=j0,out=left) while j<hi
+      next(j+1,check j<len(out) in set(out,j,from[j])) yield out
+
+private fn vs_merge_pass(borrow from:Arr i64 n,move to:Arr i64 _,width:i64) -> Arr i64 _
+  = check width>=1 in
+    loop(lo:i64{lo>=0}=0,out=to) while lo<n
+      next(lo+2*width,let mid=if lo+width<n then lo+width else n in let hi=if lo+2*width<n then lo+2*width else n in
+        vs_merge(from,out,lo,mid,hi)) yield out
+
+private fn vs_merge_sort(move values:Arr i64 n) -> Arr i64 _
+  = let runs=loop(lo:i64{lo>=0}=0,row=values) while lo<n
+      next(lo+32,vs_insertion(row,lo,if lo+32<n then lo+32 else n)) yield row in
+    loop(width=32,from=runs,to=arr(i in 0..n) 0) while width<n
+      next(width*2,vs_merge_pass(from,to,width),from) yield from
+
+; The first pass from `pass` on that has to move values, or `passes`: a pass
+; whose values all have the same digit moves nothing.
+private fn vs_next(borrow counts:Arr i64 c,pass:i64,passes:i64,buckets:i64,total:i64) -> i64
+  = loop(at=pass,found=false) while !found && at<passes
+      next(if found then at else at+1,
+        !(loop(slot=0,uniform=false) while !uniform && slot<buckets
+          next(slot+1,let index=at*buckets+slot in check index>=0 && index<c in counts[index]==total) yield uniform))
+      yield if found then at-1 else at
+
+; Where each bucket of a pass starts in the output.
+private fn vs_starts(borrow counts:Arr i64 c,pass:i64,buckets:i64) -> Arr i64 _
+  = check buckets>=0 in
+    loop(slot=0,at=0,starts=arr(k in 0..buckets) 0) while slot<buckets
+      next(slot+1,let index=pass*buckets+slot in check index>=0 && index<c in wrapping_add(at,counts[index]),
+        check slot>=0 && slot<len(starts) in set(starts,slot,at))
+      yield starts
+
+; 8-bit digits: 8 rows of 256 counts.
+private fn vs_counts8(borrow values:Arr i64 n) -> Arr i64 _
+  = loop(i:i64{i>=0}=0,counts=arr(slot in 0..2048) 0) while i<n
+      next(i+1,let key=vs_key(values[i]) in
+        loop(pass:i64{pass>=0}=0,row=counts) while pass<8
+          next(pass+1,let slot=pass*256+bit_and(shift_right(key,pass*8),255) in set(row,slot,wrapping_add(row[slot],1)))
+          yield row)
+      yield counts
+private fn vs_scatter8(borrow from:Arr i64 n,move to:Arr i64 m,move starts:Arr i64 b,shift:i64) -> Arr i64 m
+  = check b>=256 in
+    loop(i:i64{i>=0}=0,out=to,at=starts) while i<n
+      next(i+1,
+        let slot=bit_and(shift_right(vs_key(from[i]),shift),255) in let position=at[slot] in
+          check position>=0 && position<len(out) in set(out,position,from[i]),
+        let slot=bit_and(shift_right(vs_key(from[i]),shift),255) in set(at,slot,wrapping_add(at[slot],1)))
+      yield out
+private fn vs_radix8(move values:Arr i64 n) -> Arr i64 n
+  = let counts=vs_counts8(values) in
+    loop(pass=vs_next(counts,0,8,256,n),from=values,to=arr(i in 0..n) 0) while pass<8
+      next(vs_next(counts,pass+1,8,256,n),vs_scatter8(from,to,vs_starts(counts,pass,256),pass*8),from)
+      yield from
+
+; 11-bit digits: 6 rows of 2,048 counts.
+private fn vs_counts11(borrow values:Arr i64 n) -> Arr i64 _
+  = loop(i:i64{i>=0}=0,counts=arr(slot in 0..12288) 0) while i<n
+      next(i+1,let key=vs_key(values[i]) in
+        loop(pass:i64{pass>=0}=0,row=counts) while pass<6
+          next(pass+1,let slot=pass*2048+bit_and(shift_right(key,pass*11),2047) in set(row,slot,wrapping_add(row[slot],1)))
+          yield row)
+      yield counts
+private fn vs_scatter11(borrow from:Arr i64 n,move to:Arr i64 m,move starts:Arr i64 b,shift:i64) -> Arr i64 m
+  = check b>=2048 in
+    loop(i:i64{i>=0}=0,out=to,at=starts) while i<n
+      next(i+1,
+        let slot=bit_and(shift_right(vs_key(from[i]),shift),2047) in let position=at[slot] in
+          check position>=0 && position<len(out) in set(out,position,from[i]),
+        let slot=bit_and(shift_right(vs_key(from[i]),shift),2047) in set(at,slot,wrapping_add(at[slot],1)))
+      yield out
+private fn vs_radix11(move values:Arr i64 n) -> Arr i64 n
+  = let counts=vs_counts11(values) in
+    loop(pass=vs_next(counts,0,6,2048,n),from=values,to=arr(i in 0..n) 0) while pass<6
+      next(vs_next(counts,pass+1,6,2048,n),vs_scatter11(from,to,vs_starts(counts,pass,2048),pass*11),from)
+      yield from
 
 fn vector_sort (move vector: IntVector) -> IntVector
   = let initial = vector.values in let n = len(initial) in
-    let heap = loop(i = n / 2, row = initial) while i > 0
-      next(i - 1,vector_heap_down(row,n,i - 1)) yield row in
-    IntVector { values = loop(left = n, row = heap) while left > 1
-      next(left - 1,check len(row) == n && left <= n && left > 1 in
-           let top = row[0] in let last = row[left - 1] in
-           let swapped = set(set(row,0,last),left - 1,top) in
-           vector_heap_down(swapped,left - 1,0)) yield row }
+    IntVector { values = if n < 48 then vs_insertion(initial,0,n)
+      else if n < 2048 then vs_merge_sort(initial)
+      else if n < 65536 then vs_radix8(initial) else vs_radix11(initial) }
 ; Compatibility wrappers use deterministic seeds. For untrusted keys use
 ; hashmap_random to obtain a kernel-seeded map with the typed Result API.
 fn map_empty () -> StringMap

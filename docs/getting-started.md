@@ -129,7 +129,7 @@ immutable; mutation still uses copying when necessary.
 message and position. `OptionInt` and `OptionBytes` contain `present` and value.
 These compatibility records coexist with generic `Option<T>` and `Result<T,E>`.
 Generic records/functions, enums, exhaustive matching and scoped Result binds are
-available. Collections provide geometric vectors, heapsort and SipHash maps,
+available. Collections provide geometric vectors, a radix sort and SipHash maps,
 including owned generic values. Scoped File/Socket owners use `using` and checked
 resource moves. See the language contract for complete syntax and limitations.
 
