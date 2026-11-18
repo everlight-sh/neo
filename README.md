@@ -49,7 +49,10 @@ comprehension is compiled a second time for processors with AVX2 and FMA
 runs: the same executable uses four-wide vectors where the processor has
 them. Because a float `sum` may add its terms in any order, its last bits
 can then differ between processors, as they already can between worker
-counts. `NEO_WIDE=0` at build time leaves the second copy out.
+counts. A `sum` or comprehension whose term is itself a loop over numbers
+gets a third copy for processors with AVX-512 (x86-64-v4), which advances
+sixteen of those loops together. `NEO_WIDE=0` at build time leaves the extra
+copies out.
 
 `--cpu NAME` (or `NEO_CPU`) compiles the whole program for one of Clang's
 processor names instead: `--cpu x86-64-v3`, or `--cpu native` for everything

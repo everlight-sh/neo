@@ -255,6 +255,8 @@ over numbers (written out, or a call to a pure function whose body is one
 loop) computes eight terms at a time: the eight loops advance together, each
 for as many turns as it needs, and each computes exactly what it would alone.
 A term whose integer arithmetic overflows traps after the group has finished.
+In a parallel `sum` or comprehension on x86-64 the groups are of sixteen on
+processors with AVX-512, chosen when the program runs.
 
 A loop that edits an array state on every turn (`set`, `byte_copy`,
 `byte_write_le`) decides once, before its first turn, whether the array is
@@ -265,7 +267,10 @@ A pure function over numbers that ends, on some path, with `e + f(args)`
 calling itself (`fib(n - 1) + fib(n - 2)`) adds `e` to a running total and
 starts again with `args` instead of making that call. It returns what the
 recursion would, and traps when that result does not fit in an i64, not when
-a partial result on the way does.
+a partial result on the way does. When the function is short, the calls to
+itself that remain (`fib(n - 1)`) are written out in place several levels
+deep (eight levels for one such call, three for two, two for three), so one
+real call does the work of that many.
 Bitwise operations, logical shifts and arithmetic right shift operate on exact
 64-bit patterns; shift counts are masked modulo 64. Casts to u8/i32 keep low bits.
 Array bounds/division/refinement obligations must be proven or guarded by `check`.

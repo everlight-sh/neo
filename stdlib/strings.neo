@@ -51,12 +51,18 @@ private fn int_text_general (value: i64) -> Arr u8 _
       next(i-1,v/10,let at=i-1+prefix in check at>=0 && at<len(out) in set(out,at,u8(48-v%10))) yield out
 private fn decimal_pair(value:i64) -> i64
   = check value>=0 && value<100 in bytes_le16("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899",value*2)
+; The first `length` bytes of the word `packed`, lowest byte first, as text.
+; The word is written with one store: a copy of the text (an append to a
+; longer text reads it in words) then reads what one store wrote, where bytes
+; written one at a time make each such read wait for all of them.
+private fn packed_text(packed:i64,length:i64) -> Arr u8 _
+  = check length>=1 && length<=8 in byte_slice(byte_write_le("00000000",0,packed,8),0,length)
 private fn int_text_tiny(value:i64) -> Arr u8 _
   = check value>=0 && value<1000 in
     let length=if value<10 then 1 else if value<100 then 2 else 3 in
     let packed=if value<10 then value+48 else if value<100 then decimal_pair(value) else
       bit_or(value/100+48,shift_left(decimal_pair(value%100),8)) in
-    check length>=1 && length<=3 in arr(i in 0..length) u8(shift_right(packed,i*8))
+    packed_text(packed,length)
 ; Pack short positive integers in two bounded four-digit groups. No decimal
 ; loop or repeated length discovery is needed before allocating the bytes.
 fn int_text(value:i64) -> Arr u8 _
@@ -70,7 +76,7 @@ fn int_text(value:i64) -> Arr u8 _
     let digits=if high<10 then 1 else if high<100 then 2 else if high<1000 then 3 else 4 in
     let length=if high==0 then 4 else digits+4 in
     let packed=if high==0 then low_word else bit_or(prefix,shift_left(low_word,digits*8)) in
-      check length>=1 && length<=8 in arr(i in 0..length) u8(shift_right(packed,i*8))
+      packed_text(packed,length)
 private fn int_parse_checked (text: Arr u8 n) -> IntResult
   = let negative = str_byte(text, 0) == 45 in
     let start = if negative || str_byte(text, 0) == 43 then 1 else 0 in

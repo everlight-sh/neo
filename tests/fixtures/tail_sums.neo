@@ -1,6 +1,9 @@
 ; A function that ends with `e + f(args)` adds e to a running total and
 ; starts again instead of calling itself (cg_tail_add). Its result is the
 ; same; it traps when the result does not fit, not when a partial one does.
+; A short such function is written out several levels deep, by how many
+; calls to itself it has left (fib one, three two, four three): the results
+; and the traps are those of the plain recursion.
 fn fib (n : i64) -> i64 = if n < 2 then n else fib(n - 1) + fib(n - 2)
 fn count (n : i64) -> i64 = if n <= 0 then 0 else 1 + count(n - 1)
 fn weigh (n : i64, w : i64) -> i64 = if n <= 0 then 0 else check n > 0 in n * w + weigh(n - 1, w)
@@ -8,8 +11,13 @@ fn weigh (n : i64, w : i64) -> i64 = if n <= 0 then 0 else check n > 0 in n * w 
 ; result back: 2 * least-ish steps down, then up.
 fn swing (n : i64, big : i64) -> i64
   = if n <= 0 then 0 else if n % 2 == 0 then big + swing(n - 1, big) else (0 - big) + swing(n - 1, big)
+fn three (n : i64) -> i64 = if n < 3 then n else three(n - 1) + three(n - 2) + three(n - 3)
+fn four (n : i64, w : i64) -> i64
+  = if n < 4 then w else four(n - 1, w) + four(n - 2, w) + four(n - 3, w) + four(n - 4, w)
 fn main (mode : i64, n : i64, x : i64) -> i64
   = if mode == 0 then fib(n)
     else if mode == 1 then count(n)
     else if mode == 2 then weigh(n, x)
-    else swing(n, x)
+    else if mode == 3 then swing(n, x)
+    else if mode == 4 then three(n)
+    else four(n, x)

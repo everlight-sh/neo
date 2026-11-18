@@ -1774,7 +1774,7 @@ fn cg_lane_sum(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, 
     let s=cg_ins(s,n_t_i64(),concat("sub i64 ",hi,", ",lo)) in let span=s.value.operand in
     let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",lo)) in
     let s=cg_ins(s,n_t_i64(),concat("select i1 ",s.value.operand,", i64 ",span,", i64 0")) in
-    let s=cg_ins(s,n_t_i64(),concat("and i64 ",s.value.operand,", -8")) in
+    let s=cg_ins(s,n_t_i64(),concat("and i64 ",s.value.operand,", -8 ; lanes")) in
     let s=cg_ins(s,n_t_i64(),concat("add i64 ",lo,", ",s.value.operand)) in let stop=s.value.operand in
     let header=s.serial in let work=header+1 in let done=work+1 in let x=cg_reg(done+1) in let total=cg_reg(done+2) in
     let w=s with { text=tx_empty(), globals=tx_empty(), serial=done+3, block=work, pending=tx_empty() } in
@@ -1791,11 +1791,11 @@ fn cg_lane_sum(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, 
         cg_write(slot,concat("  store ",cg_lane_ty(ty)," ",term.value.operand,", ptr ",slot.value.operand,", align 8\n"))
       else if ty==n_t_f64() then
         cg_ins(term,n_t_f64(),concat("call reassoc double @llvm.vector.reduce.fadd.v8f64(double ",total,", <8 x double> ",term.value.operand,")"))
-      else loop (i=0, acc=term with { value=cg_value(n_t_i64(),total) }) while i<8
-        next (i+1,let part=cg_ins(acc,n_t_i64(),concat("extractelement <8 x i64> ",term.value.operand,", i64 ",int_text(i))) in
-          let wide=cg_ins(part,n_t_i64(),concat("sext i64 ",part.value.operand," to i128")) in
-          cg_ins(wide,n_t_i64(),concat("add i128 ",acc.value.operand,", ",wide.value.operand))) yield acc in
-    let stepped=cg_ins(added,n_t_i64(),concat("add nsw i64 ",x,", 8")) in
+      else
+        let wide=cg_ins(term,n_t_i64(),concat("sext <8 x i64> ",term.value.operand," to <8 x i128>")) in
+        let block=cg_ins(wide,n_t_i64(),concat("call i128 @llvm.vector.reduce.add.v8i128(<8 x i128> ",wide.value.operand,")")) in
+        cg_ins(block,n_t_i64(),concat("add i128 ",total,", ",block.value.operand)) in
+    let stepped=cg_ins(added,n_t_i64(),concat("add nsw i64 ",x,", 8 ; lanes")) in
     let s=cg_block(cg_jump(s with { serial=stepped.serial, allocas=stepped.allocas, globals=concat(s.globals,stepped.globals) },header),header) in
     let s=cg_write(s,concat("  ",x," = phi i64 [ ",lo,", %",cg_label(origin)," ], [ ",stepped.value.operand,", %",cg_label(stepped.block)," ]\n",
       if fills then "" else concat("  ",total," = phi ",if ty==n_t_f64() then "double [ 0.0" else "i128 [ 0",", %",cg_label(origin),
@@ -2094,7 +2094,14 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let clone=if !wide || !str_starts(region.code,opening) then tx_empty() else
       concat("define internal void ",symbol,".wide(ptr %ctx, i64 %chunk) \"target-cpu\"=\"x86-64-v3\" {\n",
         str_slice(region.code,len(opening),len(region.code))) in
-    let s=s with { serial=region.state.serial, line=n.line, globals=concat(s.globals,region.state.globals,region.code,clone) } in
+    ; A region with lanes (vectors of eight) gets a third copy for processors
+    ; with AVX-512 (x86-64-v4), with sixteen lanes (cg_sixteen): eight 64-bit
+    ; lanes are one register there and their masks a mask register, where
+    ; AVX2 packs and unpacks them (@neo_cpu_widest).
+    let widest=if len(clone)==0 || !str_find(region.code,"<8 x ").present then tx_empty() else
+      concat("define internal void ",symbol,".widest(ptr %ctx, i64 %chunk) \"target-cpu\"=\"x86-64-v4\" {\n",
+        cg_sixteen(str_slice(region.code,len(opening),len(region.code)))) in
+    let s=s with { serial=region.state.serial, line=n.line, globals=concat(s.globals,region.state.globals,region.code,clone,widest) } in
     ; The count is max(hi-lo, 0); the difference is checked, as the sequential array's length is.
     let s=cg_integer_arithmetic(s,"sub",hi,lo) in let difference=s.value.operand in
     let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",lo)) in
@@ -2127,7 +2134,11 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
       let asked=cg_ins(s,n_t_bool(),"call i1 @neo_cpu_wide()") in
       let long=cg_ins(asked,n_t_bool(),concat("icmp sge i64 ",count,", 32")) in
       let both=cg_ins(long,n_t_bool(),concat("and i1 ",asked.value.operand,", ",long.value.operand)) in
-      cg_ins(both,n_t_ptr(),concat("select i1 ",both.value.operand,", ptr ",symbol,".wide, ptr ",symbol)) in
+      let picked=cg_ins(both,n_t_ptr(),concat("select i1 ",both.value.operand,", ptr ",symbol,".wide, ptr ",symbol)) in
+      if len(widest)==0 then picked else let narrower=picked.value.operand in
+      let most=cg_ins(picked,n_t_bool(),"call i1 @neo_cpu_widest()") in
+      let all=cg_ins(most,n_t_bool(),concat("and i1 ",most.value.operand,", ",long.value.operand)) in
+      cg_ins(all,n_t_ptr(),concat("select i1 ",all.value.operand,", ptr ",symbol,".widest, ptr ",narrower)) in
     let s=cg_write(s,concat("  call void @",dispatcher,"(i64 ",chunks,", ptr ",s.value.operand,", ptr ",pointer,")\n",
       "; neo-region {\"fn\":\"",rg_display(s.name),"\",\"pos\":[",int_text(n.line),",",int_text(n.col),
       "],\"kind\":\"",if totals then "sum" else "arr","\",\"dispatcher\":\"",dispatcher,"\",\"work_cost\":",
@@ -2678,6 +2689,55 @@ fn cg_tail_add(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, 
       next (i+1,cg_write(code,concat("  store ",cg_typed(cg_arg(args.values,i)),", ptr %tail.p",int_text(i),", align 8\n"))) yield code in
     let dead=stored.serial in
     cg_block(cg_jump(stored with { serial=dead+1 },stored.again),dead) with { value=cg_value(n_t_i64(),"poison") }
+; How many levels of a short recursive sum one call does (cg_function_mode),
+; by how many calls to itself its body has left: each level multiplies the
+; copies of the body by that number.
+fn cg_deep_levels(sites:i64) -> i64 = if sites==1 then 8 else if sites==2 then 3 else if sites==3 then 2 else 1
+; Lane code for sixteen lanes from the code for eight (cg_lane_sum), for the
+; AVX-512 copy of a region: two registers of eight advance in the time of
+; one. Every vector type, the list of lane indexes, each constant written as
+; eight equal items, the counts marked "; lanes" and the names of the
+; reductions are widened.
+fn cg_eightfold(borrow inner:Arr u8 _) -> bool
+  = let size=(len(inner)+2)/8-2 in
+    if size<1 || (len(inner)+2)%8!=0 || str_find(inner,"<").present then false else
+    loop (k=1, same=true) while same && k<8
+      next (k+1,tx_equal(pt_slice(inner,k*(size+2),k*(size+2)+size),pt_slice(inner,0,size)) &&
+        tx_equal(pt_slice(inner,k*(size+2)-2,k*(size+2)),", ")) yield same
+fn cg_sixteen_lists(borrow text:Arr u8 _) -> Arr u8 _
+  = loop (rest=concat(tx_empty(),text), out=tx_empty(), going=true) while going
+      next (let at=str_find(rest,"<") in if !at.present then rest else
+          let close=str_find(pt_slice(rest,at.value+1,len(rest)),">") in
+          if close.present && cg_eightfold(pt_slice(rest,at.value+1,at.value+1+close.value))
+            then pt_slice(rest,at.value+close.value+2,len(rest)) else pt_slice(rest,at.value+1,len(rest)),
+        let at=str_find(rest,"<") in if !at.present then concat(out,rest) else
+          let close=str_find(pt_slice(rest,at.value+1,len(rest)),">") in
+          if close.present && cg_eightfold(pt_slice(rest,at.value+1,at.value+1+close.value))
+            then let inner=pt_slice(rest,at.value+1,at.value+1+close.value) in concat(out,pt_slice(rest,0,at.value),"<",inner,", ",inner,">")
+            else concat(out,pt_slice(rest,0,at.value+1)),
+        str_find(rest,"<").present)
+      yield out
+fn cg_sixteen(borrow text:Arr u8 _) -> Arr u8 _
+  = let steps=cg_retarget(text,"<i64 0, i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7>",
+      "<i64 0, i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 7, i64 8, i64 9, i64 10, i64 11, i64 12, i64 13, i64 14, i64 15>") in
+    let types=cg_retarget(cg_sixteen_lists(steps),"<8 x ","<16 x ") in
+    let counts=cg_retarget(cg_retarget(types,", -8 ; lanes",", -16 ; lanes"),", 8 ; lanes",", 16 ; lanes") in
+    cg_retarget(cg_retarget(cg_retarget(counts,".v8i1(",".v16i1("),".v8f64(",".v16f64("),".v8i128(",".v16i128(")
+; How many times `needle` occurs in text.
+fn cg_occurrences(borrow text:Arr u8 _, borrow needle:Arr u8 _) -> i64
+  = loop (rest=concat(tx_empty(),text), count=0, going=true) while going
+      next (let at=str_find(rest,needle) in if at.present then pt_slice(rest,at.value+len(needle),len(rest)) else rest,
+        if str_find(rest,needle).present then count+1 else count,
+        str_find(rest,needle).present)
+      yield count
+; text with every `from` replaced by `to`.
+fn cg_retarget(borrow text:Arr u8 _, borrow from:Arr u8 _, borrow to:Arr u8 _) -> Arr u8 _
+  = loop (rest=concat(tx_empty(),text), out=tx_empty(), going=true) while going
+      next (let at=str_find(rest,from) in if at.present then pt_slice(rest,at.value+len(from),len(rest)) else rest,
+        let at=str_find(rest,from) in if at.present then concat(out,pt_slice(rest,0,at.value),to) else concat(out,rest),
+        str_find(rest,from).present)
+      yield out
+
 fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool, shared:bool) -> CgState
   = cg_function_mode(m,fns,id,entry,target,views,source_runtime,shared,tx_ints())
 ; par (rg_par_set): an entry calls main's par clone when main has one; any
@@ -2766,7 +2826,22 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
     let header=concat("; fn ",name,"\ndefine ",linkage,cg_return(result)," ",if lends then lent else symbol,"(",p.text,")",
       if libc then " \"no-builtins\"" else "",policy," {\nentry:\n") in
     let wrapper=if lends then cg_owning_wrapper(m,f,linkage,result,symbol,lent,p) else tx_empty() in
-    finish with { text=concat(header,finish.allocas,finish.text,"}\n\n",wrapper) }
+    ; A short function that recurses inside its sum (cg_tails) is written out
+    ; several levels deep: its recursive call goes to a copy that LLVM expands
+    ; in place, whose call goes to the next such copy, and the last copy's call
+    ; comes back here. One call then does the work of that many levels,
+    ; without their entries and returns.
+    let code=concat(finish.allocas,finish.text,"}\n\n") in let call=concat(" ",symbol,"(") in
+    let levels=if entry || lends || !str_find(finish.allocas,"%tail.total = alloca").present || !cg_short(finish.text,150) then 1
+      else cg_deep_levels(cg_occurrences(finish.text,call)) in
+    if levels<2 then finish with { text=concat(header,code,wrapper) } else
+    let stem=concat(" @neo_deep_",if clone then "p" else "",int_text(id),"_") in
+    let copy=concat("define internal ",cg_return(result)) in let opens=concat("(",p.text,") alwaysinline {\nentry:\n") in
+    ; Copy k calls copy k + 1; the last one calls the function itself.
+    let copies=loop (k=1, out=tx_empty()) while k<levels
+      next (k+1,concat(out,copy,stem,int_text(k),opens,
+        if k+1<levels then cg_retarget(code,call,concat(stem,int_text(k+1),"(")) else code)) yield out in
+    finish with { text=concat(header,cg_retarget(code,call,concat(stem,"1(")),copies) }
 
 fn cg_slot_refs(borrow element:CgValue, retain:bool) -> Arr u8 _
   = let loaded=element with { operand="%value" } in
@@ -3129,8 +3204,12 @@ fn cg_reachable(borrow p:CgPieces, borrow startup:Arr u8 _) -> Arr Arr u8 _ _
 ; wide false (NEO_WIDE=0 at build time) answers no, and LLVM drops the copies.
 fn cg_wide_runtime(borrow text:Arr u8 _, wide:bool) -> Arr u8 _
   = let cpuid="call { i32, i32, i32, i32 } asm \"cpuid\", \"={ax},={bx},={cx},={dx},0,2,~{dirflag},~{fpsr},~{flags}\"" in
+    let widest=if !str_find(text,"@neo_cpu_widest(").present then tx_empty()
+      else if !wide then "define internal i1 @neo_cpu_widest() {\n  ret i1 false\n}\n"
+      else concat("define internal i1 @neo_cpu_widest() {\n  %wide = call i1 @neo_cpu_wide()\n",
+        "  %state = load atomic i8, ptr @ax_cpu_wide_state monotonic, align 1\n  %widest = icmp eq i8 %state, 3\n  ret i1 %widest\n}\n") in
     if !str_find(text,"@neo_cpu_wide(").present then tx_empty()
-    else if !wide then "define internal i1 @neo_cpu_wide() {\n  ret i1 false\n}\n" else concat(
+    else if !wide then concat("define internal i1 @neo_cpu_wide() {\n  ret i1 false\n}\n",widest) else concat(widest,
       "@ax_cpu_wide_state = internal global i8 0\n",
       "define internal i1 @neo_cpu_wide() {\nentry:\n",
       "  %known = load atomic i8, ptr @ax_cpu_wide_state monotonic, align 1\n",
@@ -3145,10 +3224,16 @@ fn cg_wide_runtime(borrow text:Arr u8 _, wide:bool) -> Arr u8 _
       "  %mx = and i32 %cx, 33\n  %okx = icmp eq i32 %mx, 33\n",
       "  %xcr = call { i32, i32 } asm \"xgetbv\", \"={ax},={dx},{cx},~{dirflag},~{fpsr},~{flags}\"(i32 0)\n",
       "  %xa = extractvalue { i32, i32 } %xcr, 0\n  %mxa = and i32 %xa, 6\n  %okxa = icmp eq i32 %mxa, 6\n",
-      "  %both = and i1 %ok7, %okx\n  %all = and i1 %both, %okxa\n  br label %store\n",
+      "  %both = and i1 %ok7, %okx\n  %all = and i1 %both, %okxa\n",
+      ; AVX-512 F, DQ, CD, BW and VL, and the mask and upper register state kept by the system.
+      "  %m7w = and i32 %b7, -805109760\n  %ok7w = icmp eq i32 %m7w, -805109760\n",
+      "  %mxw = and i32 %xa, 230\n  %okxw = icmp eq i32 %mxw, 230\n",
+      "  %bothw = and i1 %ok7w, %okxw\n  %allw = and i1 %all, %bothw\n  br label %store\n",
       "store:\n  %has = phi i1 [ false, %probe ], [ false, %leaf1 ], [ %all, %leaf7 ]\n",
-      "  %state = select i1 %has, i8 2, i8 1\n  store atomic i8 %state, ptr @ax_cpu_wide_state monotonic, align 1\n  br label %done\n",
-      "done:\n  %final = phi i8 [ %known, %entry ], [ %state, %store ]\n  %wide = icmp eq i8 %final, 2\n  ret i1 %wide\n}\n")
+      "  %most = phi i1 [ false, %probe ], [ false, %leaf1 ], [ %allw, %leaf7 ]\n",
+      "  %some = select i1 %has, i8 2, i8 1\n  %state = select i1 %most, i8 3, i8 %some\n",
+      "  store atomic i8 %state, ptr @ax_cpu_wide_state monotonic, align 1\n  br label %done\n",
+      "done:\n  %final = phi i8 [ %known, %entry ], [ %state, %store ]\n  %wide = icmp uge i8 %final, 2\n  ret i1 %wide\n}\n")
 fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool,
                    borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _, wide:bool) -> CgProgram
   = let fns=tc_functions(m) in let m=m with { handed=cg_handed(m,fns) } in
@@ -3171,6 +3256,8 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
       "declare i64 @llvm.bswap.i64(i64)\ndeclare i64 @llvm.cttz.i64(i64, i1)\ndeclare double @llvm.sqrt.f64(double)\n",
       "declare void @llvm.assume(i1)\n",
       "declare i1 @llvm.vector.reduce.or.v8i1(<8 x i1>)\ndeclare double @llvm.vector.reduce.fadd.v8f64(double, <8 x double>)\n",
+      "declare i128 @llvm.vector.reduce.add.v8i128(<8 x i128>)\ndeclare i128 @llvm.vector.reduce.add.v16i128(<16 x i128>)\n",
+      "declare i1 @llvm.vector.reduce.or.v16i1(<16 x i1>)\ndeclare double @llvm.vector.reduce.fadd.v16f64(double, <16 x double>)\n",
       "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)\n",
       "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)\n",
       "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n\n",cg_byte_runtime()) in
