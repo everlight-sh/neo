@@ -1,0 +1,19 @@
+; The networks of exchanges that sort 2 to 20 values (sort_small, the
+; compiler's sort_kernel.neo) on every input of zeros and ones of each
+; length: a network that sorts all of those sorts every input. Prints how
+; many inputs came out in order with the same number of ones.
+import "std:collections"
+
+fn ones (borrow a : Arr i64 n) -> i64
+  = loop (i : i64{i >= 0} = 0, count = 0) while i < n next (i + 1, count + a[i]) yield count
+fn ordered (borrow a : Arr i64 n) -> bool
+  = loop (i : i64{i >= 1} = 1, ok = true) while ok && i < n next (i + 1, a[i - 1] <= a[i]) yield ok
+
+fn main (n : i64{n >= 1 && n <= 20}) -> i64
+  = let patterns = shift_left(1, n) in
+    loop (p = 0, good = 0) while p < patterns
+      next (p + 1,
+        let sorted = vector_sort(IntVector { values = arr(i in 0..n) bit_and(shift_right(p, i), 1) }).values in
+        let wanted = loop (i = 0, count = 0) while i < n next (i + 1, count + bit_and(shift_right(p, i), 1)) yield count in
+        if len(sorted) == n && ordered(sorted) && ones(sorted) == wanted then good + 1 else good)
+      yield good

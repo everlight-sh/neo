@@ -163,7 +163,12 @@ typed Result. Fixed seeds, including compatibility `map_empty`, do not establish
 resistance to chosen-input hash flooding. `std:collections` preserves the
 integer-vector and string-map call APIs, using geometric append and a compact
 byte map. Its former public StringMap representation has changed.
-`vector_sort` sorts fewer than 32 integers by insertion and longer vectors by
+`vector_sort` sorts up to 20 integers with a network of exchanges between
+registers, one per count, and up to 128 (64 with AVX2 only) with a network
+of vector steps where the processor has AVX-512 or AVX2, found out when the
+program runs; the compiler emits both (the builtin `sort_small`). Fewer than
+32 on other processors have their first 20 sorted that way and the rest put
+in by insertion, and longer vectors are sorted by
 a radix sort on their leading bits only. One pass finds the bits in which the
 values differ at all; two counting passes put the values in order by the top
 10 to 22 of those bits (5, 6, 8 or 11 bits a pass, by how many values there
@@ -171,7 +176,7 @@ are), which tells nearly all values apart; a last pass sorts each stretch of
 values those bits left together, by insertion when it is short and by the
 same steps on its lower bits when it is long. More than 1,048,576 values are
 first split by their top 11 differing bits into 2,048 stretches. The time is
-linear in the number of values for any input. From 32 values on the sort uses
+linear in the number of values for any input. The radix sort uses
 one second buffer: the values and two tables of at most 2,048 counts (above
 1,048,576 values, the values and 2,048 counts).
 
@@ -256,7 +261,17 @@ loop) computes eight terms at a time: the eight loops advance together, each
 for as many turns as it needs, and each computes exactly what it would alone.
 A term whose integer arithmetic overflows traps after the group has finished.
 In a parallel `sum` or comprehension on x86-64 the groups are of sixteen on
-processors with AVX-512, chosen when the program runs.
+processors with AVX-512, chosen when the program runs. Loops whose states are
+all integers run in groups only there: on other x86-64 processors they run
+one by one, which is quicker for them.
+
+A loop that keeps the greatest or the least of a term over a counter,
+`loop (i = lo, best = b) while i < hi next (i + 1, let s = term in if s >
+best then s else best)`, in either order of its two states and of the
+comparison, is computed like a comprehension of its terms when the term is a
+loop over numbers and does not read `best`: 65,536 terms at a time, in
+groups and on the workers a comprehension would use. Its result is the
+loop's, and a term that traps still traps.
 
 A loop that edits an array state on every turn (`set`, `byte_copy`,
 `byte_write_le`) decides once, before its first turn, whether the array is

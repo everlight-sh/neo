@@ -51,8 +51,9 @@ them. Because a float `sum` may add its terms in any order, its last bits
 can then differ between processors, as they already can between worker
 counts. A `sum` or comprehension whose term is itself a loop over numbers
 gets a third copy for processors with AVX-512 (x86-64-v4), which advances
-sixteen of those loops together. `NEO_WIDE=0` at build time leaves the extra
-copies out.
+sixteen of those loops together; sorting up to 128 integers uses a sorting
+network of vector steps on processors with AVX2 or AVX-512. `NEO_WIDE=0` at
+build time leaves the extra copies out.
 
 `--cpu NAME` (or `NEO_CPU`) compiles the whole program for one of Clang's
 processor names instead: `--cpu x86-64-v3`, or `--cpu native` for everything

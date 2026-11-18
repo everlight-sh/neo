@@ -1,0 +1,28 @@
+; A loop that keeps the greatest or the least of a term over a counter is
+; computed like a comprehension of its terms, 65,536 at a time (rg_fold,
+; cg_loop_fold): the same result as the loop one turn at a time, for either
+; order of its two states and of the comparison, for an empty range, and a
+; term that overflows still traps. A loop whose term reads the running value
+; is left as it is.
+fn steps (start : i64) -> i64
+  = loop (x = start, k = 0) while x != 1 next (if x % 2 == 0 then x / 2 else 3 * x + 1, k + 1) yield k
+fn grow (x : i64, turns : i64) -> i64
+  = loop (v = x, k = 0) while k < turns next (v * 2, k + 1) yield v
+; The same folds one turn at a time: the term reads `best`, so they are not folds.
+fn slow_most (lo : i64, hi : i64) -> i64
+  = loop (i = lo, best = 0) while i < hi next (i + 1, let s = steps(i) + best - best in if s > best then s else best) yield best
+fn slow_least (lo : i64, hi : i64) -> i64
+  = loop (i = lo, best = 1000000) while i < hi next (i + 1, let s = steps(i) + best - best in if s < best then s else best) yield best
+
+fn main (mode : i64, lo : i64{lo >= 1}, hi : i64, x : i64) -> i64
+  = if mode == 0 then
+      let most = loop (i = lo, best = 0) while i < hi next (i + 1, let s = steps(i) in if s > best then s else best) yield best in
+      if most == slow_most(lo, hi) then most else 0 - 1
+    else if mode == 1 then
+      let least = loop (best = 1000000, i = lo) while i < hi next (let s = steps(i) in if best <= s then best else s, i + 1) yield best in
+      if least == slow_least(lo, hi) then least else 0 - 1
+    else if mode == 2 then
+      loop (i = lo, best = x) while i < hi next (i + 1, let s = steps(i) in if best >= s then best else s) yield best + i
+    else if mode == 3 then
+      loop (i = lo, best = 0) while i < hi next (i + 1, let s = grow(x + i, 59) in if s > best then s else best) yield best
+    else 0

@@ -39,6 +39,7 @@ fn bi_signature(borrow name:Arr u8 _) -> BiSignature
     else if tx_equal(name,"aes_hardware") then bi_fixed(n_t_bool(),tx_ints(),false,"aes_hardware takes no arguments")
     else if bi_crypto(name) then bi_system(i,if str_starts(name,"carryless") then two else arr(j in 0..4) i,name)
     else if tx_equal(name,"allocation_stats_enabled") then bi_fixed(n_t_bool(),tx_ints(),false,"allocation_stats_enabled takes no arguments")
+    else if tx_equal(name,"sort_small_limit") then bi_fixed(n_t_i64(),tx_ints(),false,"sort_small_limit takes no arguments")
     else if tx_equal(name,"float_bits") then bi_system(i,push(tx_ints(),f),name)
     else if tx_equal(name,"bits_float") then bi_system(f,push(tx_ints(),i),name)
     else if tx_equal(name,"ptr_to_i64") then bi_system(i,push(tx_ints(),p),name)

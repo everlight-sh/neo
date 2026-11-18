@@ -11,6 +11,7 @@ import "intrinsics.neo"
 import "native_asm.neo"
 import "native_crypto.neo"
 import "regions.neo"
+import "sort_kernel.neo"
 
 type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 ; moves: uses of the binding that take its own reference (see cg_plan).
@@ -23,7 +24,8 @@ type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, parts:Arr i64 _, unique:Arr u8 _, ranged:bool, floor:i64 }
 type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
                  function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool,
-                 par:Arr i64 _, lazy:bool, pending:Arr u8 _, tails:Arr i64 _, again:i64, sure:bool, picks:Arr i64 _ }
+                 par:Arr i64 _, lazy:bool, pending:Arr u8 _, tails:Arr i64 _, again:i64, sure:bool, picks:Arr i64 _, flat:bool }
+; flat: no lanes here (the copy of a region for processors without AVX-512, cg_par_range).
 ; sure: integer arithmetic cannot overflow here and is not checked (cg_ends).
 ; picks: the `if`s lowered as a select of both sides (cg_loop_picks).
 ; tails, again: the additions that end this function with a call to itself
@@ -366,7 +368,7 @@ fn cg_plan_arguments(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, fiel
 ; to observe its arguments.
 fn cg_plan_call(borrow m:Mods, borrow fns:Arr i64 _, n:Node, name:i64, field:i64) -> CgPlan
   = let callee=md_str(m,n.a) in
-    if str_find(" push set byte_copy byte_write_le byte_slice ",concat(" ",callee," ")).present then cg_plan_arguments(m,fns,n,name,field,-1)
+    if str_find(" push set byte_copy byte_write_le byte_slice sort_small ",concat(" ",callee," ")).present then cg_plan_arguments(m,fns,n,name,field,-1)
     else if tx_equal(callee,"concat") then cg_plan_arguments(m,fns,n,name,field,-2)
     else if md_is_builtin(m,callee) then cg_plan_list(m,fns,n.b,name,field,false) else
     let id=md_find_decl(m,fns,n.a) in if id<0 then cg_plan_list(m,fns,n.b,name,field,false) else
@@ -968,7 +970,7 @@ fn cg_concat(move s:CgState, borrow values:Arr CgValue _, borrow owned:Arr i64 _
 fn cg_fresh(borrow m:Mods, id:i64) -> bool
   = let n=md_node(m,id) in
     if n.kind==n_arrc() then !cg_range_empty(m,n)
-    else n.kind==n_call() && str_find(" set push byte_copy byte_write_le concat byte_uninit ",concat(" ",md_str(m,n.a)," ")).present
+    else n.kind==n_call() && str_find(" set push byte_copy byte_write_le concat byte_uninit sort_small ",concat(" ",md_str(m,n.a)," ")).present
 ; A comprehension over a literal empty range, the usual spelling of an empty array.
 fn cg_range_empty(borrow m:Mods, n:Node) -> bool
   = let lo=md_node(m,n.b) in let hi=md_node(m,n.c) in lo.kind==n_num() && hi.kind==n_num() && hi.a<=lo.a
@@ -1111,6 +1113,44 @@ fn cg_array_edit(move s:CgState, borrow values:Arr CgValue _, append:bool, sure:
     let s=cg_release(cg_store_element(s,result,index.operand,value),original) in let copy_end=s.block in
     cg_phi(cg_block(cg_jump(s,done),done),updated,direct_end,result,copy_end)
 
+; How many values sort_small takes on this processor: 20 everywhere (the
+; networks in registers), 64 with AVX2 (the vector kernel's 128-value size
+; needs more registers than AVX2 has) and 128 with AVX-512.
+fn cg_sort_limit(move s:CgState) -> CgState
+  = if !str_starts(s.target,"x86_64-") then s with { value=cg_value(n_t_i64(),"20") } else
+    let wide=cg_ins(s,n_t_bool(),"call i1 @neo_cpu_wide()") in
+    let most=cg_ins(wide,n_t_bool(),"call i1 @neo_cpu_widest()") in
+    let some=cg_ins(most,n_t_i64(),concat("select i1 ",wide.value.operand,", i64 64, i64 20")) in
+    cg_ins(some,n_t_i64(),concat("select i1 ",most.value.operand,", i64 128, i64 ",some.value.operand))
+; sort_small(values, from, to): values[from..to), at most 128 of them, put in
+; order by the small-sort kernel (sort_kernel.neo). Like set it takes the
+; array and works in place when it holds the only reference, else on a copy.
+; The range is tested here: it never reaches the kernel outside the array or
+; longer than sort_small_limit() allows.
+fn cg_sort_small(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
+    let array=cg_arg(args.values,0) in let lo=cg_arg(args.values,1).operand in let hi=cg_arg(args.values,2).operand in
+    let s=cg_sort_limit(args.state with { line=n.line }) in let limit=s.value.operand in
+    let s=cg_extract(s,array,1,n_t_i64()) in let length=s.value.operand in
+    let s=cg_ins(s,n_t_i64(),concat("sub i64 ",hi,", ",lo)) in let count=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",lo,", 0")) in let below=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",length)) in let above=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp ugt i64 ",count,", ",limit)) in let long=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("or i1 ",below,", ",above)) in
+    let s=cg_ins(s,n_t_bool(),concat("or i1 ",s.value.operand,", ",long)) in
+    let s=cg_guard(s,s.value.operand,concat("sort_small: range outside the array or too long at ",s.name,":",int_text(s.line)),false) in
+    let owned=if cg_fresh(m,ast_list_at(m.ast,n.b,0)) then s with { value=array } else
+      let asked=cg_ins(s,n_t_bool(),concat("call i1 @neo_unique(",cg_typed(array),")")) in
+      let copy=asked.serial in let done=copy+1 in let from=asked.block in
+      let c=cg_block(cg_branch(asked with { serial=done+1 },asked.value.operand,done,copy),copy) in
+      let c=cg_array_allocate(c,cg_element(array),length) in let result=c.value in
+      let c=cg_release(cg_copy_array(c,array,result,"0",length),array) in let copied=c.block in
+      cg_phi(cg_block(cg_jump(c,done),done),array,from,result,copied) in
+    let mine=owned.value in
+    let data=cg_extract(owned,mine,0,n_t_ptr()) in
+    let at=cg_offset(data,"i64",data.value.operand,lo) in
+    cg_write(at,concat("  call void @neo_sort_small(ptr ",at.value.operand,", i64 ",count,")\n")) with { value=mine }
+
 fn cg_byte_bounds(move s:CgState, borrow offset:Arr u8 _, borrow limit:Arr u8 _, borrow message:Arr u8 _) -> CgState
   = let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",offset,", 0")) in let low=s.value.operand in
     let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",offset,", ",limit)) in
@@ -1247,6 +1287,7 @@ fn cg_intrinsic(move s:CgState, borrow name:Arr u8 _, borrow values:Arr CgValue 
     else if tx_equal(name,"aes_hardware") then cg_ins(s,result,"call i1 @neo_crypto_hardware()")
     else if bi_crypto(name) then cg_ins(s,result,concat("call i64 @neo_crypto_",name,"(",cg_arg_text(values),")"))
     else if tx_equal(name,"allocation_stats_enabled") then cg_ins(s,result,"load i1, ptr @ax_native_alloc_stats, align 1")
+    else if tx_equal(name,"sort_small_limit") then cg_sort_limit(s)
     else if tx_equal(name,"counter_ticks") || tx_equal(name,"counter_frequency") then
       if !str_starts(s.target,"arm64-") && !str_starts(s.target,"aarch64-") then s with { error=id } else
       let instruction=if tx_equal(name,"counter_ticks") then "isb\\0Amrs $0, cntvct_el0" else "mrs $0, cntfrq_el0" in
@@ -1361,6 +1402,7 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       let parts=cg_read_arguments(m,fns,env,s,n.b) in if parts.state.error>=0 then parts.state else
       cg_concat(parts.state with { line=n.line },parts.values,parts.owned,
         tx_at(parts.owned,0)==1 && md_node(m,ast_list_at(m.ast,n.b,0)).kind!=n_str())
+    else if tx_equal(name,"sort_small") then cg_sort_small(m,fns,env,s,n)
     else if tx_equal(name,"push") || tx_equal(name,"set") then
       let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
       cg_array_edit(args.state with { line=n.line },args.values,tx_equal(name,"push"),cg_fresh(m,ast_list_at(m.ast,n.b,0)),
@@ -1806,12 +1848,12 @@ fn cg_lane_sum(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, 
     CgLanes { state=s, rest=x, total=total, ty=ty }
 ; Tries the lanes of sum n on a scratch copy of s.
 fn cg_lane_try(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, borrow s:CgState, n:Node, borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgLanes
-  = if n.kind!=n_sum() || s.runtime || s.lazy then CgLanes { state=s with { text=tx_empty(), globals=tx_empty(), error=0 }, rest=tx_empty(), total=tx_empty(), ty=0 }
+  = if n.kind!=n_sum() || s.runtime || s.lazy || s.flat then CgLanes { state=s with { text=tx_empty(), globals=tx_empty(), error=0 }, rest=tx_empty(), total=tx_empty(), ty=0 }
     else cg_lane_sum(m,fns,env,s with { text=tx_empty(), globals=tx_empty() },n,lo,hi,"","")
 ; Tries the lanes of comprehension n, whose elements go to target.
 fn cg_lane_fill(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, borrow s:CgState, n:Node, borrow lo:Arr u8 _, borrow hi:Arr u8 _,
                 borrow target:Arr u8 _, borrow base:Arr u8 _) -> CgLanes
-  = if n.kind!=n_arrc() || s.runtime || s.lazy then CgLanes { state=s with { text=tx_empty(), globals=tx_empty(), error=0 }, rest=tx_empty(), total=tx_empty(), ty=0 }
+  = if n.kind!=n_arrc() || s.runtime || s.lazy || s.flat then CgLanes { state=s with { text=tx_empty(), globals=tx_empty(), error=0 }, rest=tx_empty(), total=tx_empty(), ty=0 }
     else cg_lane_sum(m,fns,env,s with { text=tx_empty(), globals=tx_empty() },n,lo,hi,target,base)
 ; The state after the blocks, continuing s.
 fn cg_lane_after(move s:CgState, borrow l:CgLanes) -> CgState
@@ -1903,13 +1945,20 @@ fn cg_ends_body(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let bound=cg_expr(m,fns,env,s with { sure=true },n.b) in if bound.error>=0 then bound else
     cg_ends_body(m,fns,push(env,cg_bind(n.a,bound.value)),bound with { sure=false },n.c,rest,slot)
 
+; Whether lanes pay in code that has no copy for wider registers. On x86-64
+; that code is for the oldest processors, where eight 64-bit integers are
+; four registers and their comparisons and masks are put together from
+; 32-bit ones: lanes whose states are all integers then run slower than the
+; loops one by one. Lanes with a float state pay everywhere.
+fn cg_lane_pays(borrow s:CgState, borrow text:Arr u8 _) -> bool
+  = !str_starts(s.target,"x86_64-") || str_find(text,"<8 x double>").present
 ; A comprehension whose element is a loop over scalars: its array is filled
 ; eight elements at a time (cg_lane_sum), then one at a time for what is
 ; left. The state's error is set when the element is not such a loop.
 fn cg_arr_lanes(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node, borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgState
-  = if n.kind!=n_arrc() || s.runtime || s.lazy || cg_range_empty(m,n) then s with { error=0 } else
+  = if n.kind!=n_arrc() || s.runtime || s.lazy || s.flat || cg_range_empty(m,n) then s with { error=0 } else
     let trial=cg_lane_sum(m,fns,env,s with { text=tx_empty(), globals=tx_empty() },n,lo,hi,"","") in
-    if trial.state.error>=0 then s with { error=0 } else
+    if trial.state.error>=0 || !cg_lane_pays(s,trial.state.text) then s with { error=0 } else
     let s=cg_integer_arithmetic(s with { line=n.line },"sub",hi,lo) in
     let s=cg_array_allocate(s,cg_value(trial.ty,""),s.value.operand) in let array=s.value in
     let s=cg_extract(s,array,0,n_t_ptr()) in
@@ -1931,11 +1980,16 @@ fn cg_arr_lanes(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     cg_sticky_close(cg_counted_tail(s,range) with { line=n.line },sticky) with { value=array }
 
 fn cg_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
-  = if cg_par_wanted(m,s,n) then cg_par_range(m,fns,env,s,id,n) else
-    let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
+  = let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
     let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else let hi=s.value.operand in
+    cg_range_at(m,fns,env,s,id,n,lo,hi)
+; The sum or comprehension n over lo..hi, its bounds already lowered (n.b and
+; n.c are then only looked at for what kind of expression they are).
+fn cg_range_at(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
+               borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgState
+  = if cg_par_wanted(m,s,n) then cg_par_range(m,fns,env,s,id,n,lo,hi) else
     let quick=cg_arr_lanes(m,fns,env,s,n,lo,hi) in if quick.error<0 then quick else
-    let blocks=cg_lane_try(m,fns,env,s,n,lo,hi) in let lanes=blocks.state.error<0 in
+    let blocks=cg_lane_try(m,fns,env,s,n,lo,hi) in let lanes=blocks.state.error<0 && cg_lane_pays(s,blocks.state.text) in
     let s=if lanes then cg_lane_after(s,blocks) else s in let lo=if lanes then blocks.rest else lo in
     let rest=if lanes || s.runtime then n.d else cg_ends(m,n.d,n.a) in
     let s=if rest==n.d then s else cg_ends_guard(m,fns,env,s,n,lo,hi,rest) in if s.error>=0 then s else
@@ -2079,17 +2133,22 @@ fn cg_par_region(borrow m:Mods, borrow fns:Arr i64 _, borrow captured:Arr CgBind
 
 ; A region whose body cannot be outlined (an unsupported or counted element)
 ; is lowered sequentially, as is everything inside it.
-fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
-  = let par=s.par in let totals=n.kind==n_sum() in let start=s in
-    let s=cg_expr(m,fns,env,s,n.b) in if s.error>=0 then s else let lo=s.value.operand in
-    let s=cg_expr(m,fns,env,s,n.c) in if s.error>=0 then s else let hi=s.value.operand in
+fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
+                borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgState
+  = let par=s.par in let totals=n.kind==n_sum() in
     let walk=rg_walk(m,fns,rg_none(),n.d) in
     let captured=cg_par_captures(m,env,walk.names) in
     let context=cg_par_context(captured,totals) in
     let symbol=concat("@neo_region_",int_text(s.function),"_",int_text(s.serial)) in
-    let region=cg_par_region(m,fns,captured,s,n,context,symbol,totals) in
-    if !region.ok then cg_range(m,fns,env,start with { par=tx_ints() },id,n) with { par=par } else
-    let shared=cg_par_safe(m,fns,s,region.code,tx_ints()) in
+    let laned=cg_par_region(m,fns,captured,s,n,context,symbol,totals) in
+    if !laned.ok then cg_range_at(m,fns,env,s with { par=tx_ints() },id,n,lo,hi) with { par=par } else
+    ; Lanes whose states are all integers pay only in the AVX-512 copy
+    ; (cg_lane_pays): the two other copies are then lowered without lanes.
+    let whole=str_starts(s.target,"x86_64-") && str_find(laned.code,"<8 x ").present && !str_find(laned.code,"<8 x double>").present in
+    let flat=if !whole then laned else
+      cg_par_region(m,fns,captured,s with { flat=true, function=s.function+4*(len(m.ast.nodes)/11) },n,context,symbol,totals) in
+    let region=if flat.ok then flat else laned in let whole=whole && flat.ok in
+    let shared=cg_par_safe(m,fns,s,region.code,tx_ints()) && (!whole || cg_par_safe(m,fns,s,laned.code,tx_ints())) in
     let dispatcher=if shared then "ax_par_for_shared" else "ax_par_for" in
     let cost=if shared then walk.cost else -1 in
     let element=region.element in
@@ -2106,10 +2165,11 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     ; with AVX-512 (x86-64-v4), with sixteen lanes (cg_sixteen): eight 64-bit
     ; lanes are one register there and their masks a mask register, where
     ; AVX2 packs and unpacks them (@neo_cpu_widest).
-    let widest=if len(clone)==0 || !str_find(region.code,"<8 x ").present then tx_empty() else
+    let widest=if len(clone)==0 || !str_find(laned.code,"<8 x ").present || !str_starts(laned.code,opening) then tx_empty() else
       concat("define internal void ",symbol,".widest(ptr %ctx, i64 %chunk) \"target-cpu\"=\"x86-64-v4\" {\n",
-        cg_sixteen(str_slice(region.code,len(opening),len(region.code)))) in
-    let s=s with { serial=region.state.serial, line=n.line, globals=concat(s.globals,region.state.globals,region.code,clone,widest) } in
+        cg_sixteen(str_slice(laned.code,len(opening),len(laned.code)))) in
+    let s=s with { serial=if laned.state.serial>region.state.serial then laned.state.serial else region.state.serial, line=n.line,
+      globals=concat(s.globals,region.state.globals,if whole then laned.state.globals else tx_empty(),region.code,clone,widest) } in
     ; The count is max(hi-lo, 0); the difference is checked, as the sequential array's length is.
     let s=cg_integer_arithmetic(s,"sub",hi,lo) in let difference=s.value.operand in
     let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",lo)) in
@@ -2266,6 +2326,60 @@ fn cg_loop_picks(borrow m:Mods, borrow env:Arr CgBinding _, n:Node) -> Arr i64 _
         if step.kind==n_if() && cg_mentions(m,step.a,md_node(m,ast_list_at(m.ast,n.a,i)).a,-1) &&
           cg_plain_size(m,env,step.b)+cg_plain_size(m,env,step.c)<=9 then push(picks,id) else picks) yield picks
 
+; A loop that keeps the greatest or the least of a term over a counter
+; (rg_fold), in a function that may start regions, and whose term can run in
+; lanes: the terms are computed ahead of the loop, 65,536 indexes at a time,
+; as the elements of a comprehension (a region, with its lanes and its
+; workers), and folded as they are read back. The loop then starts with its
+; counter at the bound and the folded value, and runs no turn. Every term is
+; computed exactly as the loop would have, and a term that traps still
+; traps.
+fn cg_loop_fold(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move a:CgArgs, n:Node) -> CgArgs
+  = let s=a.state in
+    if s.runtime || s.lazy || s.flat || len(s.par)==0 || !str_find(s.target,"-linux").present then a else
+    let fold=rg_fold(m,fns,n) in if !fold.ok then a else
+    let c=if cg_named(m,md_node(m,ast_list_at(m.ast,n.a,0)).a,fold.counter) then 0 else 1 in
+    let first=cg_arg(a.values,c) in let start=cg_arg(a.values,1-c) in
+    if first.ty!=n_t_i64() || start.ty!=n_t_i64() then a else
+    ; The comprehension of the terms: only its index and its body are real.
+    let terms=n with { kind=n_arrc(), a=fold.counter, b=n.b, c=n.b, d=fold.term } in
+    let trial=cg_lane_sum(m,fns,env,s with { text=tx_empty(), globals=tx_empty() },terms with { kind=n_sum() },first.operand,first.operand,"","") in
+    if trial.state.error>=0 || trial.ty!=n_t_i64() then a else
+    let bound=cg_expr(m,fns,env,s,fold.hi) in if bound.error>=0 || bound.value.ty!=n_t_i64() then a else
+    let lo=first.operand in let hi=bound.value.operand in
+    let origin=bound.block in let header=bound.serial in let body=header+1 in let done=body+1 in
+    let from=cg_reg(done+1) in let best=cg_reg(done+2) in
+    let w=bound with { text=tx_empty(), globals=tx_empty(), serial=done+3, block=body } in
+    let span=cg_ins(w,n_t_i64(),concat("sub nsw i64 ",hi,", ",from)) in
+    let short=cg_ins(span,n_t_bool(),concat("icmp slt i64 ",span.value.operand,", 65536")) in
+    let size=cg_ins(short,n_t_i64(),concat("select i1 ",short.value.operand,", i64 ",span.value.operand,", i64 65536")) in
+    let count=size.value.operand in
+    let upto=cg_ins(size,n_t_i64(),concat("add nsw i64 ",from,", ",count)) in let to=upto.value.operand in
+    let filled=cg_range_at(m,fns,env,upto,n.b,terms,from,to) in if filled.error>=0 then a else let array=filled.value in
+    let data=cg_extract(filled,array,0,n_t_ptr()) in let before=data.block in
+    let read=data.serial in let work=read+1 in let end=work+1 in
+    let j=cg_reg(end+1) in let seen=cg_reg(end+2) in let after=cg_reg(end+3) in let at=cg_reg(end+4) in
+    let value=cg_reg(end+5) in let kept=cg_reg(end+6) in let more=cg_reg(end+7) in
+    let r=cg_block(cg_jump(data with { serial=end+8 },read),read) in
+    let r=cg_write(r,concat("  ",j," = phi i64 [ 0, %",cg_label(before)," ], [ ",after,", %",cg_label(work)," ]\n",
+      "  ",seen," = phi i64 [ ",best,", %",cg_label(before)," ], [ ",kept,", %",cg_label(work)," ]\n",
+      "  ",more," = icmp slt i64 ",j,", ",count,"\n")) in
+    let r=cg_block(cg_branch(r,more,work,end),work) in
+    let r=cg_write(r,concat("  ",at," = getelementptr i64, ptr ",data.value.operand,", i64 ",j,"\n",
+      "  ",value," = load i64, ptr ",at,", align 8\n",
+      "  ",kept," = call i64 @llvm.",if fold.least then "smin" else "smax",".i64(i64 ",seen,", i64 ",value,")\n",
+      "  ",after," = add nsw i64 ",j,", 1\n")) in
+    let r=cg_release(cg_block(cg_jump(r,read),end),array) in let last=r.block in
+    let r=cg_jump(r,header) in
+    let s=cg_block(cg_jump(bound with { serial=r.serial, allocas=r.allocas, globals=concat(bound.globals,r.globals) },header),header) in
+    let s=cg_write(s,concat("  ",from," = phi i64 [ ",lo,", %",cg_label(origin)," ], [ ",to,", %",cg_label(last)," ]\n",
+      "  ",best," = phi i64 [ ",start.operand,", %",cg_label(origin)," ], [ ",seen,", %",cg_label(last)," ]\n")) in
+    let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",from,", ",hi)) in
+    let s=cg_block(cg_write(cg_block(cg_branch(s,s.value.operand,body,done),body),r.text) with { block=last },done) in
+    let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",lo,", ",hi)) in
+    let s=cg_ins(s,n_t_i64(),concat("select i1 ",s.value.operand,", i64 ",hi,", i64 ",lo)) in
+    CgArgs { state=s, values=arr(i in 0..len(a.values)) if i==c then s.value else if i==1-c then start with { operand=best } else cg_arg(a.values,i) }
+
 fn cg_loop_initial(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, list:i64) -> CgArgs
   = loop (i=0, a=CgArgs { state=s, values=arr(j in 0..0) cg_unit() }) while a.state.error<0 && i<ast_list_len(m.ast,list)
       next (i+1, let state=md_node(m,ast_list_at(m.ast,list,i)) in let lowered=cg_expr(m,fns,env,a.state,state.c) in
@@ -2278,6 +2392,7 @@ fn cg_loop_phi(move s:CgState, borrow value:CgValue, borrow initial:CgValue, ini
 
 fn cg_loop(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
   = let initial=cg_loop_initial(m,fns,env,s,n.a) in if initial.state.error>=0 then initial.state else
+    let initial=cg_loop_fold(m,fns,env,initial,n) in
     let s=initial.state in let count=len(initial.values) in
     ; Whether each stable array state is uniquely referenced as the loop is
     ; entered: known for a fresh buffer, handed down from an enclosing stable
@@ -2515,7 +2630,7 @@ fn cg_chain_take(borrow m:Mods, borrow fns:Arr i64 _, id:i64, base:i64, field:i6
       let record=md_node(m,n.a) in
       if record.kind==n_field() && cg_named(m,record.b,field) && cg_same_path(m,record.a,base) then n.a else -1
     else if n.kind!=n_call() || ast_list_len(m.ast,n.b)<1 then -1 else
-    let callee=md_str(m,n.a) in let edits=str_find(" push set byte_copy byte_write_le concat ",concat(" ",callee," ")).present in
+    let callee=md_str(m,n.a) in let edits=str_find(" push set byte_copy byte_write_le concat sort_small ",concat(" ",callee," ")).present in
     let decl=if edits || md_is_builtin(m,callee) then -1 else md_find_decl(m,fns,n.a) in
     if !edits && (decl<0 || !cg_argument_owned(m,decl,0)) then -1 else
     let alone=loop (k=1, clear=true) while clear && k<ast_list_len(m.ast,n.b)
@@ -2774,7 +2889,7 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
     let diagnostic_id=if entry then len(m.ast.nodes)/11+id else if clone then 2*(len(m.ast.nodes)/11)+id else id in
     let start=CgState { text=tx_empty(), globals=tx_empty(), allocas=tx_empty(), serial=0, block=-1, value=cg_unit(), error=-1,
       function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id),
-      par=if clone then par else tx_ints(), lazy=false, pending=tx_empty(), tails=tx_ints(), again= -1, sure=false, picks=tx_ints() } in
+      par=if clone then par else tx_ints(), lazy=false, pending=tx_empty(), tails=tx_ints(), again= -1, sure=false, picks=tx_ints(), flat=false } in
     let runtime_export=source_runtime && ast_flag(f,fl_exported()) && start.runtime in
     if tc_abi_boundary(f) && cg_abi_reserved(name,len(target)>0,runtime_export) then start with { error=id } else
     if ast_flag(f,fl_external()) then cg_write(start,concat("declare ",cg_return(result)," ",symbol,"(",cg_abi_types(m,f),")\n")) else
@@ -3279,7 +3394,7 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
         " constant i1 ",if allocation_stats then "true\n" else "false\n"),
       cg_failure_runtime(len(target)>0,source_runtime),
       "declare i64 @llvm.bswap.i64(i64)\ndeclare i64 @llvm.cttz.i64(i64, i1)\ndeclare double @llvm.sqrt.f64(double)\n",
-      "declare void @llvm.assume(i1)\n",
+      "declare void @llvm.assume(i1)\ndeclare i64 @llvm.smax.i64(i64, i64)\ndeclare i64 @llvm.smin.i64(i64, i64)\n",
       "declare i1 @llvm.vector.reduce.or.v8i1(<8 x i1>)\ndeclare double @llvm.vector.reduce.fadd.v8f64(double, <8 x double>)\n",
       "declare i128 @llvm.vector.reduce.add.v8i128(<8 x i128>)\ndeclare i128 @llvm.vector.reduce.add.v16i128(<16 x i128>)\n",
       "declare i1 @llvm.vector.reduce.or.v16i1(<16 x i1>)\ndeclare double @llvm.vector.reduce.fadd.v16f64(double, <16 x double>)\n",
@@ -3318,6 +3433,7 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     if entry.report.result.value.ty<=0 then CgProgram { text="",report=entry.report } else
     let prune=(partition==0 || (partition==1 && len(m.shared)>0)) && source_runtime && len(target)>0 && !m.stable_symbols in
     let text=str_concat_parts(if prune then cg_kept(entry,startup,source_runtime) else entry.pieces) in
+    let text=if str_find(text,"@neo_sort_small(").present then concat(text,sk_module(str_starts(target,"x86_64-"))) else text in
     let text=concat(text,na_runtime(target,text,partition),na_crypto(target,text),cg_wide_runtime(text,wide),
       if !source_runtime && str_find(text,"call ptr @ax_alloc(").present then "declare ptr @ax_alloc(i64)\n" else "",
       if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "") in

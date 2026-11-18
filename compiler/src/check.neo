@@ -306,6 +306,17 @@ fn tc_array_builtin(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i6
       else tc_bounds(proof_env,at,second.term,first.term,tc_success(first)) in
     tc_known(result,args.known)
 
+; sort_small(values, from, to): the array with values[from..to) in order. The
+; range is tested when it runs (it must lie in the array and hold at most 128
+; values), so nothing is left to prove.
+fn tc_sort_small(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node) -> TcResult
+  = if ast_list_len(m.ast,n.b)!=3 then tc_error(at,"sort_small takes (array, from, to)") else
+    let args=tc_args(m,fns,env,n.b) in if args.result.value.ty<=0 then args.result else
+    let first=tc_arg(args.values,0) in
+    if first.ty!=n_t_arr() || first.elem!=n_t_i64() || len(first.inner)>0 || tc_arg(args.values,1).ty!=n_t_i64() ||
+      tc_arg(args.values,2).ty!=n_t_i64() then tc_error(at,"sort_small takes (Arr i64, i64, i64)") else
+    tc_known(tc_success(first),args.known)
+
 fn tc_bytes(borrow value:TcValue) -> bool = value.ty==n_t_arr() && value.elem==n_t_u8() && len(value.inner)==0
 fn tc_byte_builtin(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node, borrow name:Arr u8 _) -> TcResult
   = let equal=tx_equal(name,"byte_equal") in let copy=tx_equal(name,"byte_copy") in
@@ -497,6 +508,7 @@ fn tc_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:TcEnv, at:i64, n:Node
       if count!=0 then tc_error(at,concat(name," takes no arguments"))
       else tc_type(if tx_equal(name,"noop") then n_t_unit() else n_t_ptr())
     else if tx_equal(name,"concat") || tx_equal(name,"push") || tx_equal(name,"set") then tc_array_builtin(m,fns,env,at,n,name)
+    else if tx_equal(name,"sort_small") then tc_sort_small(m,fns,env,at,n)
     else if bi_bytes(name) then tc_byte_builtin(m,fns,env,at,n,name)
     else if tx_equal(name,"addr") || tx_equal(name,"data") then tc_address(m,fns,env,at,n.b,name)
     else if tx_equal(name,"view") || tx_equal(name,"byte_uninit") then tc_system_array(m,fns,env,at,n.b,name)

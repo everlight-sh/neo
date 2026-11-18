@@ -243,6 +243,16 @@ stdin-file = "vectors/overflow_checks/runs.in"
 stdout = "overflow_checks.neo: 50 runs OK\n"
 timeout = 300
 
+# A loop that keeps the greatest or least of a term over a counter runs as
+# blocks of a comprehension: the same result as one turn at a time.
+[[test]]
+name = "fold-loops"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/fold_loops.neo"]
+stdin-file = "vectors/fold_loops/runs.in"
+stdout = "fold_loops.neo: 24 runs OK\n"
+timeout = 300
+
 # Lets and checks linear in a range's index are decided by its first and last
 # index before the loop: the same results and traps as testing every index.
 [[test]]
@@ -319,6 +329,15 @@ stdin-file = "vectors/vector_sort_cases/runs.in.gz"
 stdout = "vector_sort_probe.neo: 88 runs OK\n"
 timeout = 300
 
+# The exchange networks for 2 to 20 values sort every input of zeros and ones.
+[[test]]
+name = "sort-networks"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/sort_networks.neo"]
+stdin-file = "vectors/sort_networks/runs.in"
+stdout = "sort_networks.neo: 20 runs OK\n"
+timeout = 300
+
 # Every size class and input shape of vector_sort: in order, the same values,
 # and an input that another name still reads left as it was.
 [[test]]
@@ -326,7 +345,7 @@ name = "vector-sort-shapes"
 file = "drivers/language_sweep.neo"
 args = ["fixtures/vector_sort_shapes.neo"]
 stdin-file = "vectors/vector_sort_shapes/runs.in"
-stdout = "vector_sort_shapes.neo: 316 runs OK\n"
+stdout = "vector_sort_shapes.neo: 445 runs OK\n"
 timeout = 600
 
 # word_bytes.py: owned little-endian word bytes for short, large and signed words.

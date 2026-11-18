@@ -1,0 +1,199 @@
+; The small-sort kernel: the LLVM code behind the builtin sort_small, which
+; puts up to 128 i64 values in order (llvm.neo, cg_sort_small). Two to
+; twenty values are sorted in registers on every target (sk_exact, below);
+; what follows is for more, on x86-64.
+;
+; The values are read as 2, 4, 8 or 16 vectors of eight, the places past the
+; last value holding the greatest i64, and put in order by a bitonic
+; sorter: every step takes the lesser and the greater of pairs of lanes, the
+; same pairs whatever the values are. A step pairs whole vectors, or lanes of
+; one vector (the vector against a shuffle of itself; the lesser and the
+; greater are then put back together by a second shuffle). With AVX-512 a
+; step is one instruction per vector, with AVX2 a comparison and two blends
+; of each half; the kernel is emitted for both and chosen when the program
+; runs. Without AVX2 a 64-bit comparison is put together from 32-bit ones and
+; the kernel is slower than sorting by insertion, so sort_small_limit() is
+; 20 there and the library sorts more values as before.
+import "std:strings"
+import "text.neo"
+
+; The code so far, the first free register number, and the register that holds
+; each vector now.
+type Sk = { text:Arr u8 _, free:i64, v:Arr i64 _ }
+fn sk_reg(borrow tag:Arr u8 _, id:i64) -> Arr u8 _ = concat("%",tag,int_text(id))
+fn sk_put(move a:Arr i64 _, i:i64, value:i64) -> Arr i64 _ = if i>=0 && i<len(a) then set(a,i,value) else a
+fn sk_line(move s:Sk, borrow line:Arr u8 _) -> Sk = s with { text=concat(s.text,"  ",line,"\n") }
+; A new register for `instruction`: number s.free-1 afterwards.
+fn sk_ins(move s:Sk, borrow tag:Arr u8 _, borrow instruction:Arr u8 _) -> Sk
+  = s with { text=concat(s.text,"  ",sk_reg(tag,s.free)," = ",instruction,"\n"), free=s.free+1 }
+fn sk_pick(move s:Sk, borrow tag:Arr u8 _, least:bool, a:i64, b:i64) -> Sk
+  = sk_ins(s,tag,concat("call <8 x i64> @llvm.",if least then "smin" else "smax",".v8i64(<8 x i64> ",sk_reg(tag,a),", <8 x i64> ",sk_reg(tag,b),")"))
+fn sk_mask(borrow lanes:Arr i64 _) -> Arr u8 _
+  = let items=loop (i=0, out=tx_empty()) while i<8
+      next (i+1,concat(out,if i==0 then "" else ", ","i32 ",int_text(tx_at(lanes,i)))) yield out in
+    concat("<",items,">")
+; b < 0 shuffles a alone.
+fn sk_shuffle(move s:Sk, borrow tag:Arr u8 _, a:i64, b:i64, borrow lanes:Arr i64 _) -> Sk
+  = sk_ins(s,tag,concat("shufflevector <8 x i64> ",sk_reg(tag,a),", <8 x i64> ",if b<0 then "poison" else sk_reg(tag,b),
+      ", <8 x i32> ",sk_mask(lanes)))
+
+; A step inside vector a. Mirrored, lane i is paired with its mirror image in
+; its block of `size` lanes; otherwise with the lane `size` away. The lower
+; lane of a pair gets the lesser value.
+fn sk_partner(i:i64, size:i64, mirrored:bool) -> i64
+  = check size>0 in if mirrored then (i/size)*size+(size-1-i%size) else bit_xor(i,size)
+fn sk_lower(i:i64, size:i64, mirrored:bool) -> bool
+  = check size>0 in if mirrored then i%size<size/2 else bit_and(i,size)==0
+fn sk_within(move s:Sk, borrow tag:Arr u8 _, a:i64, size:i64, mirrored:bool) -> Sk
+  = let value=tx_at(s.v,a) in
+    let turned=sk_shuffle(s,tag,value,-1,arr(i in 0..8) sk_partner(i,size,mirrored)) in let other=turned.free-1 in
+    let low=sk_pick(turned,tag,true,value,other) in let lesser=low.free-1 in
+    let high=sk_pick(low,tag,false,value,other) in let greater=high.free-1 in
+    let joined=sk_shuffle(high,tag,lesser,greater,arr(i in 0..8) if sk_lower(i,size,mirrored) then i else 8+i) in
+    joined with { v=sk_put(joined.v,a,joined.free-1) }
+fn sk_each(move s:Sk, borrow tag:Arr u8 _, vectors:i64, size:i64, mirrored:bool) -> Sk
+  = loop (a=0, out=s) while a<vectors next (a+1,sk_within(out,tag,a,size,mirrored)) yield out
+
+; The first step of merging blocks of `span` vectors: vector i of a block
+; against the reverse of vector span-1-i. The lesser lanes stay in the lower
+; half; the greater ones fill the upper half from its first vector on, which
+; leaves that half in reverse, and a reversed half is as good to the steps
+; that follow.
+fn sk_mirror(move s:Sk, borrow tag:Arr u8 _, vectors:i64, span:i64) -> Sk
+  = check span>=2 in let old=s.v in
+    loop (b=0, out=s) while b<vectors
+      next (b+span,loop (i=0, inner=out) while i<span/2
+        next (i+1,let a=tx_at(old,b+i) in
+          let turned=sk_shuffle(inner,tag,tx_at(old,b+span-1-i),-1,arr(k in 0..8) 7-k) in let other=turned.free-1 in
+          let low=sk_pick(turned,tag,true,a,other) in let lesser=low.free-1 in
+          let high=sk_pick(low,tag,false,a,other) in
+          high with { v=sk_put(sk_put(high.v,b+i,lesser),b+span/2+i,high.free-1) }) yield inner)
+      yield out
+; A step between vectors `apart` vectors from each other.
+fn sk_across(move s:Sk, borrow tag:Arr u8 _, vectors:i64, apart:i64) -> Sk
+  = check apart>=1 in
+    loop (b=0, out=s) while b<vectors
+      next (b+2*apart,loop (i=0, inner=out) while i<apart
+        next (i+1,let a=tx_at(inner.v,b+i) in let c=tx_at(inner.v,b+apart+i) in
+          let low=sk_pick(inner,tag,true,a,c) in let lesser=low.free-1 in
+          let high=sk_pick(low,tag,false,a,c) in
+          high with { v=sk_put(sk_put(high.v,b+i,lesser),b+apart+i,high.free-1) }) yield inner)
+      yield out
+
+; The bitonic sorter of 8 * vectors lanes: sorted runs of k/2 lanes are merged
+; into runs of k, for k = 2, 4, ... A merge is one mirrored step, then steps
+; at half the distance each time.
+fn sk_sorter(move s:Sk, borrow tag:Arr u8 _, vectors:i64) -> Sk
+  = loop (k=2, out=s) while k<=8*vectors
+      next (k*2,let merged=if k<=8 then sk_each(out,tag,vectors,k,true) else sk_mirror(out,tag,vectors,k/8) in
+        loop (apart=k/4, inner=merged) while apart>=1
+          next (apart/2,if apart>=8 then sk_across(inner,tag,vectors,apart/8) else sk_each(inner,tag,vectors,apart,false))
+          yield inner)
+      yield out
+
+; One size of the kernel. With a buffer: fill it, copy the values in, sort,
+; copy out. Masked (AVX-512): each vector is read from the array itself under
+; a mask of the lanes that are values, the others taking the greatest i64,
+; and written back under the same mask, which touches nothing past the
+; values.
+fn sk_most() -> Arr u8 _
+  = concat("<",loop (i=0, out=tx_empty()) while i<8
+      next (i+1,concat(out,if i==0 then "" else ", ","i64 9223372036854775807")) yield out,">")
+fn sk_lanes(first:i64) -> Arr u8 _
+  = concat("<",loop (i=0, out=tx_empty()) while i<8
+      next (i+1,concat(out,if i==0 then "" else ", ","i64 ",int_text(first+i))) yield out,">")
+fn sk_body(borrow tag:Arr u8 _, vectors:i64, masked:bool) -> Arr u8 _
+  = let source=if masked then "%data" else "%buf" in
+    let start=Sk { text=tx_empty(), free=1, v=tx_ints() } in
+    ; Registers 1..vectors: where each vector is; with masks, vectors+1.. : its mask.
+    let slots=loop (i=0, s=start) while i<vectors
+      next (i+1,let at=sk_ins(s,tag,concat("getelementptr inbounds i64, ptr ",source,", i64 ",int_text(8*i))) in
+        let slot=at.free-1 in
+        if masked then at else sk_line(at,concat("store <8 x i64> ",sk_most(),", ptr ",sk_reg(tag,slot),", align 8"))) yield s in
+    let ready=if masked then
+        loop (i=0, s=slots) while i<vectors
+          next (i+1,sk_ins(s,tag,concat("icmp ugt <8 x i64> %count, ",sk_lanes(8*i)))) yield s
+      else sk_line(slots,"call void @llvm.memcpy.p0.p0.i64(ptr align 8 %buf, ptr align 8 %data, i64 %bytes, i1 false)") in
+    let loaded=loop (i=0, s=ready) while i<vectors
+        next (i+1,let read=sk_ins(s,tag,if masked then
+              concat("call <8 x i64> @llvm.masked.load.v8i64.p0(ptr ",sk_reg(tag,1+i),", i32 8, <8 x i1> ",sk_reg(tag,vectors+1+i),", <8 x i64> ",sk_most(),")")
+            else concat("load <8 x i64>, ptr ",sk_reg(tag,1+i),", align 8")) in
+          let register=read.free-1 in read with { v=push(read.v,register) }) yield s in
+    let sorted=sk_sorter(loaded,tag,vectors) in
+    let stored=loop (i=0, out=sorted.text) while i<vectors
+      next (i+1,if masked then
+          concat(out,"  call void @llvm.masked.store.v8i64.p0(<8 x i64> ",sk_reg(tag,tx_at(sorted.v,i)),", ptr ",sk_reg(tag,1+i),
+            ", i32 8, <8 x i1> ",sk_reg(tag,vectors+1+i),")\n")
+        else concat(out,"  store <8 x i64> ",sk_reg(tag,tx_at(sorted.v,i)),", ptr ",sk_reg(tag,1+i),", align 8\n")) yield out in
+    concat(stored,if masked then "" else "  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %data, ptr align 8 %buf, i64 %bytes, i1 false)\n","  ret void\n")
+
+fn sk_function(borrow name:Arr u8 _, borrow attributes:Arr u8 _, masked:bool) -> Arr u8 _
+  = concat("define internal void ",name,"(ptr %data, i64 %n)",attributes," {\nentry:\n",
+      "  %one = insertelement <8 x i64> poison, i64 %n, i64 0\n  %count = shufflevector <8 x i64> %one, <8 x i64> poison, <8 x i32> zeroinitializer\n",
+      if masked then "" else "  %buf = alloca [128 x i64], align 64\n  %bytes = shl i64 %n, 3\n",
+      "  %none = icmp eq i64 %n, 0\n  br i1 %none, label %empty, label %some\nempty:\n  ret void\n",
+      "some:\n  %huge = icmp ugt i64 %n, 64\n  br i1 %huge, label %s128, label %medium\n",
+      "medium:\n  %big = icmp ugt i64 %n, 32\n  br i1 %big, label %s64, label %small\n",
+      "small:\n  %mid = icmp ugt i64 %n, 16\n  br i1 %mid, label %s32, label %s16\n",
+      "s16:\n",sk_body("a",2,masked),"s32:\n",sk_body("b",4,masked),"s64:\n",sk_body("c",8,masked),"s128:\n",sk_body("d",16,masked),"}\n")
+
+; Two to twenty values: a network of exchanges between numbers held in
+; registers, one piece of code per count. Each value is read once, an
+; exchange is the lesser and the greater of two of them (a comparison and two
+; conditional moves), and each is written once: no value is compared to
+; decide where the code goes. The exchanges are those of Batcher's odd-even
+; merge sort for sixteen lines (thirty-two, for more than sixteen values),
+; without the ones that touch a line past the count (a line that would hold
+; the greatest value never moves).
+fn sk_merge_pairs(move out:Arr i64 _, lo:i64, hi:i64, apart:i64) -> Arr i64 _
+  = let step=apart*2 in
+    if step<hi-lo then
+      let first=sk_merge_pairs(out,lo,hi,step) in let second=sk_merge_pairs(first,lo+apart,hi,step) in
+      loop (i=lo+apart, pairs=second) while i<hi-apart && step>0 next (i+step,push(push(pairs,i),i+apart)) yield pairs
+    else push(push(out,lo),lo+apart)
+fn sk_sort_pairs(move out:Arr i64 _, lo:i64, hi:i64) -> Arr i64 _
+  = if hi-lo<1 then out else
+    let mid=lo+(hi-lo)/2 in
+    sk_merge_pairs(sk_sort_pairs(sk_sort_pairs(out,lo,mid),mid+1,hi),lo,hi,1)
+; Value i is at register 2i+1 (its address) and 2i+2 (as read).
+fn sk_exact(count:i64, borrow pairs:Arr i64 _) -> Arr u8 _
+  = let tag=concat("t",int_text(count),"_") in
+    let loaded=loop (i=0, s=Sk { text=tx_empty(), free=1, v=tx_ints() }) while i<count
+      next (i+1,let at=sk_ins(s,tag,concat("getelementptr inbounds i64, ptr %data, i64 ",int_text(i))) in
+        let place=at.free-1 in
+        let read=sk_ins(at,tag,concat("load i64, ptr ",sk_reg(tag,place),", align 8")) in
+        let register=read.free-1 in read with { v=push(read.v,register) }) yield s in
+    let sorted=loop (k=0, s=loaded) while 2*k+1<len(pairs)
+      next (k+1,let i=tx_at(pairs,2*k) in let j=tx_at(pairs,2*k+1) in
+        if j>=count then s else
+        let a=tx_at(s.v,i) in let b=tx_at(s.v,j) in
+        let low=sk_ins(s,tag,concat("call i64 @llvm.smin.i64(i64 ",sk_reg(tag,a),", i64 ",sk_reg(tag,b),")")) in let lesser=low.free-1 in
+        let high=sk_ins(low,tag,concat("call i64 @llvm.smax.i64(i64 ",sk_reg(tag,a),", i64 ",sk_reg(tag,b),")")) in
+        let greater=high.free-1 in high with { v=sk_put(sk_put(high.v,i,lesser),j,greater) }) yield s in
+    let stored=loop (i=0, out=sorted.text) while i<count
+      next (i+1,concat(out,"  store i64 ",sk_reg(tag,tx_at(sorted.v,i)),", ptr ",sk_reg(tag,2*i+1),", align 8\n")) yield out in
+    concat(stored,"  ret void\n")
+
+; What a module that calls @neo_sort_small adds: the function itself, which
+; goes to the code for 2 to 20 values by their count, and with `vectors` (an
+; x86-64 target) the kernel for AVX2 and for AVX-512, for more values. More
+; than 20 only reach it where sort_small_limit() allows, which has asked the
+; processor.
+fn sk_module(vectors:bool) -> Arr u8 _
+  = let sixteen=sk_sort_pairs(tx_ints(),0,15) in let more=sk_sort_pairs(tx_ints(),0,31) in
+    let cases=loop (k=2, out=tx_empty()) while k<=20
+      next (k+1,concat(out,"    i64 ",int_text(k),", label %t",int_text(k),"\n")) yield out in
+    let exact=loop (k=2, out=tx_empty()) while k<=20
+      next (k+1,concat(out,"t",int_text(k),":\n",if k<=16 then sk_exact(k,sixteen) else sk_exact(k,more))) yield out in
+    concat(if !vectors then tx_empty() else concat(
+        "declare <8 x i64> @llvm.smin.v8i64(<8 x i64>, <8 x i64>)\ndeclare <8 x i64> @llvm.smax.v8i64(<8 x i64>, <8 x i64>)\n",
+        "declare <8 x i64> @llvm.masked.load.v8i64.p0(ptr, i32, <8 x i1>, <8 x i64>)\n",
+        "declare void @llvm.masked.store.v8i64.p0(<8 x i64>, ptr, i32, <8 x i1>)\n",
+        sk_function("@neo_sort_small.wide"," \"target-cpu\"=\"x86-64-v3\"",false),
+        sk_function("@neo_sort_small.widest"," \"target-cpu\"=\"x86-64-v4\" \"prefer-vector-width\"=\"512\"",true)),
+      "define internal void @neo_sort_small(ptr %data, i64 %n) {\nentry:\n  switch i64 %n, label %more [\n",
+      "    i64 0, label %done\n    i64 1, label %done\n",cases,"  ]\ndone:\n  ret void\n",exact,
+      if !vectors then "more:\n  ret void\n}\n" else concat("more:\n  %most = call i1 @neo_cpu_widest()\n",
+        "  br i1 %most, label %widest, label %wide\n",
+        "widest:\n  call void @neo_sort_small.widest(ptr %data, i64 %n)\n  ret void\n",
+        "wide:\n  call void @neo_sort_small.wide(ptr %data, i64 %n)\n  ret void\n}\n"))

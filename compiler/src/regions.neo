@@ -74,6 +74,7 @@ fn rg_walk(borrow m:Mods, borrow fns:Arr i64 _, move w:RgWalk, id:i64) -> RgWalk
       let w=if rg_candidate(m,n) then w with { regions=true } else w in
       rg_cost(rg_walk(m,fns,rg_walk(m,fns,rg_walk(m,fns,w,n.b),n.c),n.d),1)
     else if kind==n_loop() then
+      let w=if rg_fold(m,fns,n).ok then w with { regions=true } else w in
       let init=rg_list(m,fns,w with { cost=-1 },n.a,3) in
       rg_walk(m,fns,rg_list(m,fns,rg_walk(m,fns,init,n.b),n.c,0),n.d)
     else if kind==n_reclit() then rg_cost(rg_list(m,fns,w,n.b,2),1)
@@ -81,6 +82,46 @@ fn rg_walk(borrow m:Mods, borrow fns:Arr i64 _, move w:RgWalk, id:i64) -> RgWalk
     else if kind==n_with() then rg_cost(rg_list(m,fns,rg_walk(m,fns,w,n.a),n.b,2),1)
     else if kind==n_match() then rg_cost(rg_list(m,fns,rg_walk(m,fns,w,n.a),n.b,3),1)
     else rg_cost(w,1)
+
+; A loop that folds a range into one number:
+;   loop (i = lo, best = b) while i < hi
+;     next (i + 1, let s = term in if s > best then s else best)
+; A counter steps by one up to a bound the loop does not change, and the other
+; state keeps the greater (or the lesser) of itself and a term that does not
+; read it. The term of one index does not depend on any other's, so the terms
+; can be computed like the elements of a comprehension (cg_loop_fold), and
+; such a loop counts as a region.
+type RgFold = { ok:bool, counter:i64, total:i64, hi:i64, term:i64, least:bool }
+fn rg_no_fold() -> RgFold = RgFold { ok=false, counter= -1, total= -1, hi= -1, term= -1, least=false }
+fn rg_is(borrow m:Mods, id:i64, name:i64) -> bool
+  = let n=md_node(m,id) in n.kind==n_var() && tx_equal(md_str(m,n.a),md_str(m,name))
+; The fold with the counter as state c (0 or 1) of loop n.
+fn rg_fold_at(borrow m:Mods, borrow fns:Arr i64 _, n:Node, c:i64) -> RgFold
+  = let counter=md_node(m,ast_list_at(m.ast,n.a,c)).a in let total=md_node(m,ast_list_at(m.ast,n.a,1-c)).a in
+    let step=md_node(m,ast_list_at(m.ast,n.c,c)) in let keep=md_node(m,ast_list_at(m.ast,n.c,1-c)) in
+    let cond=md_node(m,n.b) in
+    if step.kind!=n_bin() || step.a!=24 || !rg_is(m,step.b,counter) then rg_no_fold() else
+    let one=md_node(m,step.c) in
+    if one.kind!=n_num() || one.a!=1 || one.b!=0 then rg_no_fold()
+    else if cond.kind!=n_bin() || cond.a!=22 || !rg_is(m,cond.b,counter) || keep.kind!=n_let() then rg_no_fold() else
+    let term=keep.a in let pick=md_node(m,keep.c) in
+    if pick.kind!=n_if() then rg_no_fold() else
+    let test=md_node(m,pick.a) in
+    if test.kind!=n_bin() || (test.a!=22 && test.a!=23 && test.a!=8 && test.a!=9) then rg_no_fold() else
+    let left_term=rg_is(m,test.b,term) && rg_is(m,test.c,total) in let left_total=rg_is(m,test.b,total) && rg_is(m,test.c,term) in
+    let then_term=rg_is(m,pick.b,term) && rg_is(m,pick.c,total) in let then_total=rg_is(m,pick.b,total) && rg_is(m,pick.c,term) in
+    if (!left_term && !left_total) || (!then_term && !then_total) then rg_no_fold() else
+    ; Whether the test holds when the term is the greater of the two, and
+    ; whether the term is then the one kept.
+    let rising=test.a==23 || test.a==9 in let holds=if left_term then rising else !rising in
+    let greatest=if holds then then_term else then_total in
+    let bound=rg_walk(m,fns,rg_none(),cond.c) in let reads=rg_walk(m,fns,rg_none(),keep.b) in
+    if bound.cost<0 || rg_named(m,bound.names,counter) || rg_named(m,bound.names,total) || rg_named(m,reads.names,total) ||
+      tx_equal(md_str(m,term),md_str(m,total)) || tx_equal(md_str(m,term),md_str(m,counter)) then rg_no_fold() else
+    RgFold { ok=true, counter=counter, total=total, hi=cond.c, term=keep.b, least=!greatest }
+fn rg_fold(borrow m:Mods, borrow fns:Arr i64 _, n:Node) -> RgFold
+  = if n.kind!=n_loop() || ast_list_len(m.ast,n.a)!=2 || ast_list_len(m.ast,n.c)!=2 then rg_no_fold() else
+    let first=rg_fold_at(m,fns,n,0) in if first.ok then first else rg_fold_at(m,fns,n,1)
 
 fn rg_named(borrow m:Mods, borrow names:Arr i64 _, name:i64) -> bool
   = let text=md_str(m,name) in

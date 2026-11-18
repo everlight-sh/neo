@@ -11,7 +11,9 @@ fn vector_push (move vector: IntVector, value: i64) -> IntVector
   = IntVector { values = push(vector.values,value) }
 fn vector_get (vector: IntVector, index: i64) -> OptionInt
   = let a = vector.values in if index >= 0 && index < len(a) then some_int(a[index]) else none_int()
-; Sorting. Fewer than 32 values are sorted by insertion. More are sorted by
+; Sorting. Up to 20 values, and up to 128 where the processor has AVX2 or
+; AVX-512, are sorted by the compiler's small-sort kernel (vs_stretch), a
+; few more with the help of insertion. The rest are sorted by
 ; a radix sort on only their leading bits: one pass finds the bits in which
 ; the values differ at all, two counting passes then put the values in order
 ; by the top 10, 12, 16 or 22 of those bits (5, 6, 8 or 11 bits a pass, by
@@ -28,10 +30,10 @@ fn vector_get (vector: IntVector, index: i64) -> OptionInt
 ; in a pass is read from the bucket starts.
 private fn vs_key(value:i64) -> i64 = bit_xor(value,-9223372036854775808)
 
-; Sorts values[lo..hi) by insertion.
-private fn vs_insertion(move values:Arr i64 n,lo:i64,hi:i64) -> Arr i64 n
-  = check lo>=0 && hi<=n in
-    loop(i:i64{i>=lo}=lo+1,row=values) while i<hi
+; Sorts values[lo..hi) by insertion, values[lo..from) being in order already.
+private fn vs_insertion(move values:Arr i64 n,lo:i64,from:i64,hi:i64) -> Arr i64 n
+  = check lo>=0 && lo<from && hi<=n in
+    loop(i:i64{i>=from}=from,row=values) while i<hi
       next(i+1,let held=row[i] in
         loop(j:i64{j>=lo && j<=i}=i,inner=row) while j>lo && inner[j-1]>held
           next(j-1,set(inner,j,inner[j-1]))
@@ -267,16 +269,29 @@ private fn vs_range(move values:Arr i64 n,lo:i64,hi:i64) -> Arr i64 n
     else if count<4096 then vs_pass8(values,lo,hi,top)
     else if count<=1048576 then vs_pass11(values,lo,hi,top)
     else let sorted=vs_split(values,lo,hi,top) in vs_restore(values,lo,sorted)
+; A stretch of up to 128 values goes to the compiler's small-sort kernel
+; (sort_small) where it pays: up to 20 values everywhere (a network of
+; exchanges in registers), up to 128 with AVX-512 and up to 64 with AVX2 (a
+; network of vector steps). Other stretches under 32 have their first 20
+; values sorted that way and the rest put in by insertion.
 private fn vs_stretch(move values:Arr i64 n,lo:i64,hi:i64) -> Arr i64 n
-  = if hi-lo<32 then vs_insertion(values,lo,hi) else vs_range(values,lo,hi)
+  = let count=hi-lo in
+    if count<2 then values
+    else if count<=20 || count<=sort_small_limit() then sort_small(values,lo,hi)
+    else if count<32 then vs_insertion(sort_small(values,lo,lo+20),lo,lo+20,hi)
+    else vs_range(values,lo,hi)
 private fn vs_whole(move values:Arr i64 n) -> Arr i64 _
   = check n>0 in
     let differ=vs_spread(values,0,n) in
     if differ==0 then values else vs_split(values,0,n,vs_width(differ))
 
+; The few-values case is decided first and is all a caller of a short
+; vector runs.
 fn vector_sort (move vector: IntVector) -> IntVector
   = let initial = vector.values in let n = len(initial) in
-    IntVector { values = if n <= 1048576 then vs_stretch(initial,0,n) else vs_whole(initial) }
+    IntVector { values = if n < 2 then initial else if n <= 20 then sort_small(initial,0,n) else vs_sorted(initial) }
+private fn vs_sorted(move values:Arr i64 n) -> Arr i64 _
+  = if n <= 1048576 then vs_stretch(values,0,n) else vs_whole(values)
 ; Compatibility wrappers use deterministic seeds. For untrusted keys use
 ; hashmap_random to obtain a kernel-seeded map with the typed Result API.
 fn map_empty () -> StringMap

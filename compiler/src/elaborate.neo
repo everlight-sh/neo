@@ -286,7 +286,7 @@ fn el_call(move s:ElState, borrow ctx:ElContext, borrow env:ElBindings, id:i64, 
       let ty=md_node(s.m,first).a in el_expr_node(s,id,n with { b=args.id,e=ty },ty)
     else let sig=bi_signature(name) in
     let callback=el_at(env.types,el_local(s.m,env.names,n.a)) in let callback_type=md_node(s.m,callback) in
-    let ty=if tx_equal(name,"set") || tx_equal(name,"push") || tx_equal(name,"concat") then first
+    let ty=if tx_equal(name,"set") || tx_equal(name,"push") || tx_equal(name,"concat") || tx_equal(name,"sort_small") then first
       else if tx_equal(name,"noop") then el_scalar(s,n_t_unit())
       else if tx_equal(name,"null") || tx_equal(name,"data") || tx_equal(name,"addr") || tx_equal(name,"callback_address") then el_scalar(s,n_t_ptr())
       else if tx_equal(name,"view") || tx_equal(name,"byte_uninit") || tx_equal(name,"byte_copy") || tx_equal(name,"byte_slice") ||
