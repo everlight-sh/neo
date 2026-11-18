@@ -22,8 +22,10 @@ fn child(x:i64) -> i64 = let a=arr(i in 0..2) x+i in sum(i in 0..2) a[i]
 fn calls(n:i64) -> i64 = sum(i in 0..n) child(i) ; region: ax_par_for
 fn made(k:i64) -> Arr i64 _ = arr(i in 0..4) i+k
 fn lengths(n:i64) -> i64 = sum(i in 0..n) len(made(i)) ; region: ax_par_for
-; A recursive callee may need more stack than a worker thread has.
-fn depth(k:i64) -> i64 = if k<=0 then 0 else 1+depth(k-1)
+; A recursive callee may need more stack than a worker thread has. The call
+; sits inside an argument: written as 1+depth(k-1) it would be a loop, not a
+; recursion (a function that ends with `e + f(args)` starts again instead).
+fn depth(k:i64) -> i64 = if k<=0 then 0 else bit_and(1+depth(k-1),255)
 fn recursive(n:i64) -> i64 = sum(i in 0..n) depth(bit_and(i,7)) ; region: ax_par_for
 
 fn main(n:i64{n>=1, n<=100000}) -> i64

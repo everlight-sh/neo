@@ -161,8 +161,13 @@ replace linear association lookup. Explicit seeds support reproducibility;
 `hashmap_random::<K,V>()` obtains independent kernel seed words and returns a
 typed Result. Fixed seeds, including compatibility `map_empty`, do not establish
 resistance to chosen-input hash flooding. `std:collections` preserves the
-integer-vector and string-map call APIs, using geometric append, heapsort and
-a compact byte map. Its former public StringMap representation has changed.
+integer-vector and string-map call APIs, using geometric append and a compact
+byte map. Its former public StringMap representation has changed.
+`vector_sort` sorts fewer than 48 integers by insertion, fewer than 2,048 by
+merging runs of 32, and longer vectors by a least-significant-digit radix sort
+(8-bit digits below 65,536 values, 11-bit digits from there). One pass counts
+every digit; a digit that all values share moves nothing. From 48 values on it
+uses one second buffer of the vector's length.
 
 `std:bytesmap` provides `BytesMap`, empty/random/length/capacity/get/put/delete,
 with_capacity, storage_bytes and explicit compact operations. It is specialized for byte keys
@@ -217,6 +222,27 @@ raw pointers or imported memory routines.
 
 Safe i64 arithmetic traps on overflow. Division truncates toward zero; remainder
 has the dividend's sign. Explicit wrapping operations preserve modulo-2^64 bits.
+An integer `sum` traps when its total does not fit in an i64, not when a
+partial total overflows on the way: the terms may be added in any order (a sum
+of more than 2^31 terms also traps when the total up to the end of one of its
+blocks of 2^31 does not fit). Arithmetic at the top of a comprehension or sum
+body (`+`, `-`, `*`, and `/` or `%` by a literal, over variables, literals and
+elements read at simple indexes) is checked once, after the loop: the program
+still traps, before the array or total can be used, but later than the
+overflowing element. An `if` between two short integer expressions evaluates
+both and traps only for the one it chooses.
+
+A `sum` whose term is a loop of its own over numbers (written out, or a call
+to a pure function whose body is one loop) computes eight terms at a time: the
+eight loops advance together, each for as many turns as it needs, and each
+computes exactly what it would alone. A term whose integer arithmetic
+overflows traps after the group has finished.
+
+A pure function over numbers that ends, on some path, with `e + f(args)`
+calling itself (`fib(n - 1) + fib(n - 2)`) adds `e` to a running total and
+starts again with `args` instead of making that call. It returns what the
+recursion would, and traps when that result does not fit in an i64, not when
+a partial result on the way does.
 Bitwise operations, logical shifts and arithmetic right shift operate on exact
 64-bit patterns; shift counts are masked modulo 64. Casts to u8/i32 keep low bits.
 Array bounds/division/refinement obligations must be proven or guarded by `check`.

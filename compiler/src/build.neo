@@ -97,7 +97,9 @@ fn bd_compile_flags(borrow config:BdConfig, borrow remarks:Arr u8 _) -> Arr Arr 
   = let target=config.target in
     let args=push(push(push(push(push(md_words(),concat("--target=",target)),concat("-O",config.level)),
       "-Wno-override-module"),"-ffunction-sections"),"-fdata-sections") in
-    let args=if str_starts(target,"arm64-") || str_starts(target,"aarch64-") then push(args,"-mno-outline-atomics") else args in
+    let arm=str_starts(target,"arm64-") || str_starts(target,"aarch64-") in
+    let args=if arm then push(args,"-mno-outline-atomics") else args in
+    let args=if len(config.cpu)==0 then args else push(args,concat(if arm then "-mcpu=" else "-march=",config.cpu)) in
     ; x86-64: start every loop on a 32-byte boundary, so a hot loop's speed
     ; does not depend on where the code before it happens to end.
     let args=if str_starts(target,"x86_64-") then push(args,"-falign-loops=32") else args in
@@ -210,10 +212,20 @@ effect(process,fs,env,time,unsafe) fn bd_link(borrow config:BdConfig, borrow ir:
   = let linked=bd_link_profile(config,ir,"",output,false) in noop()
 
 ; exports: the program's explicit ABI exports (bd_export_roots), kept by the link.
-type BdConfig = { clang:Arr u8 _, runtime:Arr u8 _, target:Arr u8 _, level:Arr u8 _, error:Arr u8 _, exports:Arr Arr u8 _ _ }
+; cpu: the processor the program's own code is compiled for (--cpu or NEO_CPU),
+; or empty for the target's baseline. Clang's names: x86-64-v3, native, ...
+type BdConfig = { clang:Arr u8 _, runtime:Arr u8 _, target:Arr u8 _, level:Arr u8 _, error:Arr u8 _, exports:Arr Arr u8 _ _, cpu:Arr u8 _ }
+fn bd_cpu_valid(borrow name:Arr u8 _) -> bool
+  = len(name)>0 && len(name)<48 && tx_byte(name,0)!=45 &&
+    loop (i=0, ok=true) while ok && i<len(name)
+      next (i+1,let c=tx_byte(name,i) in (c>=48 && c<=57) || (c>=97 && c<=122) || c==45 || c==46 || c==95 || c==43) yield ok
+; What distinguishes builds of one source for one target: the optimisation
+; level, and the processor when one is named.
+fn bd_profile(borrow config:BdConfig) -> Arr u8 _
+  = if len(config.cpu)==0 then config.level else concat(config.level,"+",config.cpu)
 effect(process,fs,env,time,unsafe) fn bd_configuration(borrow requested:Arr u8 _, seed:bool, borrow level:Arr u8 _) -> BdConfig
   = let clang=bd_clang() in
-    let config=BdConfig { clang=clang, runtime=tx_empty(), target=tx_empty(), level=level, error=tx_empty(), exports=md_words() } in
+    let config=BdConfig { clang=clang, runtime=tx_empty(), target=tx_empty(), level=level, error=tx_empty(), exports=md_words(), cpu=tx_empty() } in
     if len(clang)==0 then config with { error="Clang executable not found" } else
     let env_target=env_get("NEO_TARGET") in let target=if len(requested)>0 then requested else env_target.value in
     if seed then

@@ -42,6 +42,20 @@ See [docs/getting-started.md](docs/getting-started.md).
 `--target TRIPLE` overrides Clang's detected target. To rebuild the compiler
 from the checkout, run `./compiler/bootstrap.sh`.
 
+A build targets the oldest processor of its architecture, so the executable
+runs on any of them. On x86-64 the body of every parallel `sum` and array
+comprehension is compiled a second time for processors with AVX2 and FMA
+(x86-64-v3, 2013 and later), and the program picks one of the two when it
+runs: the same executable uses four-wide vectors where the processor has
+them. Because a float `sum` may add its terms in any order, its last bits
+can then differ between processors, as they already can between worker
+counts. `NEO_WIDE=0` at build time leaves the second copy out.
+
+`--cpu NAME` (or `NEO_CPU`) compiles the whole program for one of Clang's
+processor names instead: `--cpu x86-64-v3`, or `--cpu native` for everything
+the building machine has. An executable built that way stops with an illegal
+instruction on a processor without those extensions.
+
 An executable's module holds only the functions its entry point, its exported
 functions and the startup code can reach, so a small program does not pay for
 optimising the rest of the runtime and the libraries. The native compiler

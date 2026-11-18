@@ -1,0 +1,36 @@
+; A sum whose term is a loop runs four terms at a time under a mask
+; (cg_lane_sum). Each mode adds such terms and compares the total with the
+; same terms computed one by one into an array, or prints the total. A lane
+; that overflows traps, as its own loop would.
+fn escape (cx : f64, cy : f64, max : i64) -> i64
+  = loop (zx = 0.0, zy = 0.0, k = 0) while k < max && zx * zx + zy * zy <= 4.0
+      next (zx * zx - zy * zy + cx, 2.0 * zx * zy + cy, k + 1) yield k
+fn steps (start : i64) -> i64
+  = loop (x = start, k = 0) while x != 1 next (if x % 2 == 0 then x / 2 else 3 * x + 1, k + 1) yield k
+fn grow (x : i64, turns : i64) -> i64
+  = loop (v = x, k = 0) while k < turns next (v * 2, k + 1) yield v
+fn halves (x : f64, turns : i64) -> f64
+  = loop (v = x, k = 0) while k < turns next (v * 0.5, k + 1) yield v
+; A sum of loops inside a function: the plain loop's lanes, not a region's.
+fn row (y : i64, w : i64{w > 0}) -> i64
+  = sum(x in 0..w) escape(-2.0 + 3.0 * f64(x) / f64(w), -1.5 + 3.0 * f64(y) / f64(w), 100)
+
+fn same (a : i64, b : i64) -> i64 = if a == b then 1 else 0 - 1
+
+fn main (mode : i64, lo : i64, hi : i64{hi >= lo}, x : i64{x > 0}) -> i64
+  = if mode == 0 then
+      let each = arr(i in lo..hi) escape(-2.0 + 3.0 * f64(i) / f64(x), 0.25, 200) in
+      same(sum(i in lo..hi) escape(-2.0 + 3.0 * f64(i) / f64(x), 0.25, 200), sum(i in 0..len(each)) each[i])
+    else if mode == 1 then
+      let each = arr(i in lo..hi) steps(i + x) in
+      same(sum(i in lo..hi) steps(i + x), sum(i in 0..len(each)) each[i])
+    else if mode == 2 then sum(i in lo..hi) grow(x + i, 59)
+    else if mode == 3 then
+      let total = sum(i in lo..hi) halves(f64(i), 3) in
+      let each = arr(i in lo..hi) halves(f64(i), 3) in
+      if total == (sum(i in 0..len(each)) each[i]) then i64(total * 8.0) else 0 - 1
+    else if mode == 4 then
+      let count = (hi - lo) * x in check count >= 0 in
+      let each = arr(p in 0..count) escape(-2.0 + 3.0 * f64(p % x) / f64(x), -1.5 + 3.0 * f64(lo + p / x) / f64(x), 100) in
+      same(sum(y in lo..hi) row(y, x), sum(p in 0..len(each)) each[p])
+    else 0

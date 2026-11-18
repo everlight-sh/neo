@@ -1,0 +1,28 @@
+; Where integer arithmetic traps. A sum traps when its total does not fit, not
+; when a partial total overflows (cg_sum_wide). A multiplication by a literal
+; is tested by range (cg_literal_arithmetic). An `if` between two short
+; expressions computes both and traps only for the one it chooses
+; (cg_if_select). Arithmetic at the top of a comprehension or sum body is
+; tested once after the loop (cg_lazy_tree). An index step such as i - 1 has
+; no test at all (cg_index_step).
+fn three (x : i64, i : i64) -> i64 = if i == 0 then x else if i == 1 then 1 else -1
+fn step (x : i64) -> i64 = if x % 2 == 0 then x / 2 else 3 * x + 1
+fn ends (xs : Arr i64 n) -> Arr i64 n
+  = arr(i in 0..n) if i == 0 || i + 1 == n then xs[i] else xs[i - 1] + xs[i + 1]
+
+fn main (mode : i64, x : i64) -> i64
+  = if mode == 0 then let xs = arr(i in 0..3) three(x, i) in sum(i in 0..3) xs[i]
+    else if mode == 1 then let xs = arr(i in 0..3) if i == 0 then x else 1 in sum(i in 0..3) xs[i]
+    else if mode == 2 then let xs = arr(i in 0..2) if i == 0 then x else -1 in sum(i in 0..2) xs[i]
+    else if mode == 3 then x * 3
+    else if mode == 4 then x * 8
+    else if mode == 5 then step(x)
+    else if mode == 6 then let ys = arr(i in 0..4) x + i * 2 in ys[3]
+    else if mode == 7 then let a = arr(i in 0..1000) x in let b = arr(i in 0..1000) i in
+      let c = arr(i in 0..1000) a[i] + b[i] in c[999]
+    else if mode == 8 then sum(i in 0..4) (x + i) - x
+    else if mode == 9 then let xs = arr(i in 0..5) x + i in let ys = ends(xs) in ys[0] + ys[1] + ys[2] + ys[3] + ys[4]
+    else if mode == 10 then check x >= 0 in sum(i in 0..x) i
+    else if mode == 11 then check x >= 0 in sum(i in 0..x) if i % 3 == 0 then 1 else 0
+    else if mode == 12 then check x >= 0 in let xs = arr(i in 0..x) 4611686018427387904 - i in sum(i in 0..x) xs[i]
+    else 0

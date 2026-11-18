@@ -222,6 +222,47 @@ stdin-file = "vectors/handed_parameters/runs.in"
 stdout = "handed_parameters.neo: 4 runs OK\n"
 timeout = 300
 
+# A loop state that set updates on every turn is tested for a second
+# reference once, as the loop is entered: a shared array is still copied
+# exactly once, an unshared one never.
+[[test]]
+name = "stable-states"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/stable_states.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/stable_states/runs.in"
+stdout = "stable_states.neo: 3 runs OK\n"
+timeout = 300
+
+# Where integer arithmetic traps: totals, literal factors, selects, range
+# bodies tested once after their loop, index steps.
+[[test]]
+name = "overflow-checks"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/overflow_checks.neo"]
+stdin-file = "vectors/overflow_checks/runs.in"
+stdout = "overflow_checks.neo: 35 runs OK\n"
+timeout = 300
+
+# A sum whose term is a loop runs four terms at a time under a mask: the same
+# totals as one by one, in a region and in a plain loop, and the same traps.
+[[test]]
+name = "lanes"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/lanes.neo"]
+stdin-file = "vectors/lanes/runs.in"
+stdout = "lanes.neo: 19 runs OK\n"
+timeout = 300
+
+# A function that ends with `e + f(args)` loops instead of calling itself:
+# the same results, and a trap only when the result does not fit.
+[[test]]
+name = "tail-sums"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/tail_sums.neo"]
+stdin-file = "vectors/tail_sums/runs.in"
+stdout = "tail_sums.neo: 10 runs OK\n"
+timeout = 300
+
 # borrow_parameters.py: effect borrows without copies at 1/1000/10000.
 [[test]]
 name = "borrow-parameters"

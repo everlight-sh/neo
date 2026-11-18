@@ -1,0 +1,25 @@
+# threads, args (mode lo hi x), stdin, expected. See tests/fixtures/lanes.neo.
+# Escape counts: 1 when four at a time equals one by one. Ranges of every length modulo 4.
+1	0 0 64 64		=1\n
+4	0 0 64 64		=1\n
+1	0 0 7 64		=1\n
+1	0 5 6 64		=1\n
+1	0 3 3 64		=1\n
+1	0 -9 10 64		=1\n
+4	0 0 1001 1000		=1\n
+# Collatz steps from x on: an integer loop with a select, a division and a checked 3 * x + 1.
+1	1 0 1000 1		=1\n
+4	1 0 1002 7		=1\n
+1	1 0 3 27		=1\n
+# (x + i) * 2^59. The total fits up to a sum of factors of 15; a lane overflows from a factor of 16.
+1	2 0 4 1		=5764607523034234880\n
+1	2 0 5 1		=8646911284551352320\n
+1	2 0 6 1		!integer overflow
+1	2 0 4 16		!integer overflow
+4	2 0 8 12		!integer overflow
+# i / 8 summed, times 8.
+1	3 0 10 1		=45\n
+4	3 0 1000 1		=499500\n
+# Rows of escape counts through a function.
+1	4 0 16 23		=1\n
+4	4 0 16 23		=1\n
