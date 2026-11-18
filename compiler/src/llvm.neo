@@ -2023,8 +2023,16 @@ fn cg_par_region(borrow m:Mods, borrow fns:Arr i64 _, borrow captured:Arr CgBind
     let loads=loop (i=0, out=CgLoads { state=r, env=arr(j in 0..0) cg_bind(-1,cg_unit()) }) while i<len(captured)
       next (i+1,let b=cg_binding(captured,i) in let loaded=cg_par_load(out.state,context,4+i,b.value) in
         CgLoads { state=loaded, env=push(out.env,cg_bind(b.name,loaded.value)) }) yield out in
-    let r=cg_ins(loads.state,n_t_i64(),concat("udiv i64 ",count,", ",chunks)) in let q=r.value.operand in
-    let r=cg_ins(r,n_t_i64(),concat("urem i64 ",count,", ",chunks)) in let rest=r.value.operand in
+    ; A region run as one chunk (one worker, or few turns) is the whole range:
+    ; its bounds need neither of the two divisions.
+    let one=cg_ins(loads.state,n_t_bool(),concat("icmp eq i64 ",chunks,", 1")) in
+    let origin=one.block in let split=one.serial in let whole=split+1 in
+    let r=cg_block(cg_branch(one with { serial=whole+1 },one.value.operand,whole,split),split) in
+    let r=cg_ins(r,n_t_i64(),concat("udiv i64 ",count,", ",chunks)) in let quotient=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("urem i64 ",count,", ",chunks)) in let remainder=r.value.operand in
+    let r=cg_block(cg_jump(r,whole),whole) in
+    let r=cg_ins(r,n_t_i64(),concat("phi i64 [ ",count,", %",cg_label(origin)," ], [ ",quotient,", %",cg_label(split)," ]")) in let q=r.value.operand in
+    let r=cg_ins(r,n_t_i64(),concat("phi i64 [ 0, %",cg_label(origin)," ], [ ",remainder,", %",cg_label(split)," ]")) in let rest=r.value.operand in
     let r=cg_ins(r,n_t_i64(),concat("mul i64 %chunk, ",q)) in let base=r.value.operand in
     let r=cg_ins(r,n_t_bool(),concat("icmp ult i64 %chunk, ",rest)) in let longer=r.value.operand in
     let r=cg_ins(r,n_t_i64(),concat("select i1 ",longer,", i64 %chunk, i64 ",rest)) in
@@ -2040,8 +2048,8 @@ fn cg_par_region(borrow m:Mods, borrow fns:Arr i64 _, borrow captured:Arr CgBind
       let known=cg_ins(r,n_t_bool(),concat("icmp sge i64 ",first,", ",int_text(bound.a))) in
       cg_write(known,concat("  call void @llvm.assume(i1 ",known.value.operand,")\n")) in
     let r=if totals then r else cg_ins(r,n_t_ptr(),concat("extractvalue %ax_arr ",output,", 0")) in
-    let blocks=if totals then cg_lane_try(m,fns,loads.env,r with { block= -1 },n,first,last)
-      else cg_lane_fill(m,fns,loads.env,r with { block= -1 },n,first,last,r.value.operand,low) in
+    let blocks=if totals then cg_lane_try(m,fns,loads.env,r,n,first,last)
+      else cg_lane_fill(m,fns,loads.env,r,n,first,last,r.value.operand,low) in
     let lanes=blocks.state.error<0 in
     let r=if lanes then cg_lane_after(r,blocks) else r in let first=if lanes then blocks.rest else first in
     let rest=if lanes || r.runtime then n.d else cg_ends(m,n.d,n.a) in
@@ -2106,8 +2114,19 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let s=cg_integer_arithmetic(s,"sub",hi,lo) in let difference=s.value.operand in
     let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",hi,", ",lo)) in
     let s=cg_ins(s,n_t_i64(),concat("select i1 ",s.value.operand,", i64 ",difference,", i64 0")) in let count=s.value.operand in
+    ; Fewer than 32 turns are one chunk without asking, and are run by a plain
+    ; call below: the dispatcher's entry and questions cost as much as a
+    ; dozen turns of a short body.
+    let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",count,", 32")) in let small=s.value.operand in
+    let s=cg_ins(s,n_t_bool(),concat("icmp sgt i64 ",count,", 0")) in
+    let s=cg_ins(s,n_t_i64(),concat("zext i1 ",s.value.operand," to i64")) in let few=s.value.operand in
+    let before=s.block in let sized=s.serial in let known=sized+1 in
+    let s=cg_block(cg_branch(s with { serial=known+1 },small,known,sized),sized) in
     let s=cg_ins(s,n_t_i64(),if cost>=0 then concat("call i64 @ax_chunks_work(i64 ",count,", i64 ",int_text(cost),")")
-      else concat("call i64 @ax_chunks(i64 ",count,")")) in let chunks=s.value.operand in
+      else concat("call i64 @ax_chunks(i64 ",count,")")) in let asked_chunks=s.value.operand in
+    let s=cg_block(cg_jump(s,known),known) in
+    let s=cg_ins(s,n_t_i64(),concat("phi i64 [ ",few,", %",cg_label(before)," ], [ ",asked_chunks,", %",cg_label(sized)," ]")) in
+    let chunks=s.value.operand in
     let s=cg_ins(s,n_t_i64(),concat("mul i64 ",chunks,", ptrtoint (ptr getelementptr (",cg_type_of(element),", ptr null, i64 1) to i64)")) in
     let bytes=s.value.operand in
     let s=if totals then cg_ins(s,n_t_ptr(),concat("call ptr @ax_alloc(i64 ",bytes,")")) else cg_array_allocate(s,element,difference) in
@@ -2128,8 +2147,13 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
          "  ",cg_reg(r+1)," = load i64, ptr @neo_threads, align 8\n",
          "  ",cg_reg(r+2)," = select i1 ",cg_reg(r),", i64 1, i64 ",cg_reg(r+1),"\n",
          "  store i64 ",cg_reg(r+2),", ptr @neo_threads, align 8\n"))) in
-    ; Under 32 turns the wide copy's setup costs more than its vectors save
-    ; (formatting a number fills at most 8 bytes this way, a million times).
+    let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",chunks,", 1")) in
+    let s=cg_ins(s,n_t_bool(),concat("and i1 ",small,", ",s.value.operand)) in
+    let direct=s.serial in let dispatched=direct+1 in let after=dispatched+1 in
+    let s=cg_block(cg_branch(s with { serial=after+1 },s.value.operand,direct,dispatched),direct) in
+    let s=cg_write(s,concat("  call void ",symbol,"(ptr ",pointer,", i64 0)\n")) in
+    let s=cg_block(cg_jump(s,after),dispatched) in
+    ; Under 32 turns the wide copy's setup costs more than its vectors save.
     let s=if len(clone)==0 then s with { value=cg_value(n_t_ptr(),symbol) } else
       let asked=cg_ins(s,n_t_bool(),"call i1 @neo_cpu_wide()") in
       let long=cg_ins(asked,n_t_bool(),concat("icmp sge i64 ",count,", 32")) in
@@ -2143,6 +2167,7 @@ fn cg_par_range(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
       "; neo-region {\"fn\":\"",rg_display(s.name),"\",\"pos\":[",int_text(n.line),",",int_text(n.col),
       "],\"kind\":\"",if totals then "sum" else "arr","\",\"dispatcher\":\"",dispatcher,"\",\"work_cost\":",
       if cost>=0 then int_text(cost) else "null","}\n")) in
+    let s=cg_block(cg_jump(s,after),after) in
     if !totals then s with { value=output } else
     let header=s.serial in let work=header+1 in let latch=work+1 in let done=latch+1 in
     let range=CgRange { header=header, work=work, latch=latch, done=done, iterator=cg_reg(done+1),
