@@ -30,7 +30,7 @@ jobs:
             export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
             echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
           fi
-          NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.0
+          NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.10
       - name: Build and package without Python
         shell: bash
         env:

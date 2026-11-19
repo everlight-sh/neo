@@ -24,7 +24,7 @@ jobs:
           if [[ $(uname -s) == Darwin ]]; then
             echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           fi
-          NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.0
+          NEO_HOME="$RUNNER_TEMP/neo-seed" sh install.sh --version 0.2.10
       - name: Bootstrap and test with native tools
         shell: bash
         run: |
