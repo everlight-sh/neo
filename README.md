@@ -556,7 +556,11 @@ Optional application protocols live in a separate package workspace.
 The Python reference compiler's
 [prepared-library inlining budgets](docs/prepared-library-inlining.md) kept
 small-helper optimization across large callers and cache boundaries; the
-native library cache links a prepared object without inlining hints. Escaped
+native library cache keeps no hints: a program built against a prepared
+object lowers the short pure functions of that object that it calls a second
+time, as bodies LLVM expands in place and then drops, so `int_text` or a
+string helper costs what it does when the library is built with the program.
+Escaped
 JSON strings decode into an exact-sized output buffer with plain-run copies.
 
 [Cooperative byte-result tasks and HTTP rendering](docs/async-rendering.md) preserve native

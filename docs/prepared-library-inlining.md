@@ -2,8 +2,11 @@
 
 This describes the Python reference compiler, which is in the `v0.2.4` tag
 and no longer in the repository. The native compiler's `--library-cache`
-links a prepared object of the dependency closure; it keeps no inlining hints
-and applies none of these budgets.
+links a prepared object of the dependency closure. It keeps no hints file
+and applies none of these budgets: a program built against the object lowers
+the object's short pure functions that it calls once more, as bodies LLVM may
+expand in place (`available_externally`), and the object keeps the functions
+themselves. The runtime's functions are only called.
 
 The reference compiler prepares dependency objects and retains
 pre-optimization LLVM bodies as application optimization hints. Checked return-alias facts are retained across

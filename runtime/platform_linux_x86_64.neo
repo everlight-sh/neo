@@ -88,10 +88,16 @@ effect fn rt_connect (fd: i64, address: ptr) -> i64 = rt_result(syscall6(42, fd,
 fn rt_open_write () -> i64 = 577
 fn rt_open_append () -> i64 = 1089
 fn rt_open_update () -> i64 = 66
+; The wall clock in milliseconds, read through the vDSO as rt_clock_ns reads
+; the monotonic one (they share the looked-up address): a server that stamps
+; every request made one clock_gettime system call per request without it.
 effect fn rt_now_ms () -> i64
-  = let buffer = stack_alloc(32) in let cleared = memset(buffer, i32(0), 32) in
-    let result = rt_result(syscall6(228, 0, ptr_to_i64(buffer), 0, 0, 0, 0)) in
-    if result < 0 then -1 else load_i64(buffer, 0) * 1000 + load_i64(buffer, 8) / 1000000
+  = let p = stack_alloc(16) in let cache = ptr_add(runtime_state(), 2000) in
+    let known = atomic_load_i64(cache, 0) in
+    let address = if known != 0 then known else let found = rt_vdso_clock_address() in let saved = atomic_store_i64(cache, 0, found) in found in
+    let fast = address > 0 && invoke_clock_gettime(ptr_from_i64(address), i32(0), p) == i32(0) in
+    if !fast && rt_result(syscall6(228, 0, ptr_to_i64(p), 0, 0, 0, 0)) < 0 then -1
+    else load_i64(p, 0) * 1000 + load_i64(p, 8) / 1000000
 effect fn rt_wait_ready_kernel (fd: i64, events: i64, milliseconds: i64) -> i64
   = let fds = stack_alloc(16) in let descriptor = store_i32(fds, 0, i32(fd)) in let mask = store_i32(fds, 4, i32(events)) in
     let timeout = stack_alloc(16) in let seconds = store_i64(timeout, 0, milliseconds / 1000) in let nanos = store_i64(timeout, 8, milliseconds % 1000 * 1000000) in

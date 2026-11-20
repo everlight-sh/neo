@@ -1,0 +1,294 @@
+; Text built in place: the analyses behind the concat that llvm.neo writes
+; straight into its result (cg_fused).
+;
+; concat(acc, row(i)) built row(i) in a buffer of its own, copied that into
+; acc and freed it, and each int_text(i) among a concat's parts allocated its
+; digits first. Two more copies of a function remove those buffers:
+;
+; - A word copy (@name.word) hands back up to eight bytes in a register
+;   instead of in an array: an %ax_arr with a null data pointer, the length in
+;   field 1 and the bytes in field 2. A function has one when a path through
+;   it ends in the word pattern (fu_word), or in a call of a function that has
+;   one. A concat stores such a part with one store.
+; - An appending copy (@name.app) takes the text built so far as an owned
+;   first argument and returns it with the function's result after it. A
+;   function has one when a path through it ends in a concat, in a call of a
+;   function that has one, or in a loop that builds its text (fu_builder). A
+;   concat hands the text it has so far to such a part.
+;
+; A program lowers only the copies its concats ask for (fu_table). A prepared
+; library object (library_cache.neo) cannot know what the programs linked
+; with it will ask for, so it holds every copy its functions can have, and a
+; program built against it calls those.
+;
+; Two more things keep text out of buffers of its own, both in llvm.neo:
+; html_escape among a concat's parts is counted and written by the runtime
+; (cg_fused_escape), and a let that names a concat for one reader is read
+; where that reader is (cg_deferred_let, with fu_let_tail and fu_part_uses
+; below).
+import "std:strings"
+import "text.neo"
+import "ast.neo"
+import "modules.neo"
+import "paths.neo"
+
+fn fu_named(borrow m:Mods, a:i64, b:i64) -> bool = a==b || tx_equal(md_str(m,a),md_str(m,b))
+fn fu_call(borrow m:Mods, id:i64, borrow name:Arr u8 _) -> bool
+  = let n=md_node(m,id) in id>=0 && n.kind==n_call() && tx_equal(md_str(m,n.a),name)
+fn fu_literal(borrow m:Mods, id:i64, value:i64) -> bool
+  = let n=md_node(m,id) in id>=0 && n.kind==n_num() && n.a==value && n.b!=1
+; The word pattern: byte_slice(byte_write_le(TEXT, 0, packed, 8), 0, length)
+; with a literal TEXT of eight bytes, all of which the write replaces. Its
+; value is the first `length` bytes of the word `packed`, lowest byte first.
+fn fu_word(borrow m:Mods, id:i64) -> bool
+  = let n=md_node(m,id) in
+    if !fu_call(m,id,"byte_slice") || ast_list_len(m.ast,n.b)!=3 || !fu_literal(m,ast_list_at(m.ast,n.b,1),0) then false else
+    let inner=ast_list_at(m.ast,n.b,0) in let w=md_node(m,inner) in
+    if !fu_call(m,inner,"byte_write_le") || ast_list_len(m.ast,w.b)!=4 then false else
+    let text=md_node(m,ast_list_at(m.ast,w.b,0)) in
+    text.kind==n_str() && len(md_str(m,text.a))==8 && fu_literal(m,ast_list_at(m.ast,w.b,1),0) &&
+      fu_literal(m,ast_list_at(m.ast,w.b,3),8)
+
+; A function with a body and a byte array for a result, called by its own
+; symbol with the internal convention, outside the runtime.
+fn fu_bytes(borrow m:Mods, id:i64) -> bool
+  = let f=md_node(m,id) in let t=md_node(m,f.c) in
+    id>=0 && f.kind==n_fn() && f.d>=0 && bit_and(f.f,fl_external()+fl_exported()+fl_variadic())==0 &&
+    t.kind==n_t_arr() && md_node(m,t.a).kind==n_t_u8() && !pt_within(md_path(m,tx_at(m.owners,id)),m.runtime)
+; The function a call node calls directly, or -1.
+fn fu_user(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> i64
+  = let n=md_node(m,id) in
+    if id<0 || n.kind!=n_call() || md_is_builtin(m,md_str(m,n.a)) then -1 else md_find_decl(m,fns,n.a)
+
+; Whether expression id reads the variable `name` anywhere. A name bound
+; again inside still counts: that only makes fu_builder turn a loop down.
+fn fu_mentions(borrow m:Mods, id:i64, name:i64) -> bool
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 || kind==n_num() || kind==n_flt() || kind==n_bool() || kind==n_byte() || kind==n_str() then false
+    else if kind==n_var() then fu_named(m,n.a,name)
+    else if kind==n_field() || kind==n_len() then fu_mentions(m,n.a,name)
+    else if kind==n_let() || kind==n_using() || kind==n_bin() then fu_mentions(m,n.b,name) || fu_mentions(m,n.c,name)
+    else if kind==n_if() then fu_mentions(m,n.a,name) || fu_mentions(m,n.b,name) || fu_mentions(m,n.c,name)
+    else if kind==n_check() || kind==n_index() then fu_mentions(m,n.a,name) || fu_mentions(m,n.b,name)
+    else if kind==n_un() || kind==n_cast() then fu_mentions(m,n.b,name)
+    else if kind==n_sum() || kind==n_arrc() then fu_mentions(m,n.b,name) || fu_mentions(m,n.c,name) || fu_mentions(m,n.d,name)
+    else if kind==n_call() then fu_named(m,n.a,name) || fu_mentions_list(m,n.b,name,0)
+    else if kind==n_reclit() then fu_mentions_list(m,n.b,name,2)
+    else if kind==n_with() then fu_mentions(m,n.a,name) || fu_mentions_list(m,n.b,name,2)
+    else if kind==n_loop() then
+      fu_mentions_list(m,n.a,name,3) || fu_mentions(m,n.b,name) || fu_mentions_list(m,n.c,name,0) || fu_mentions(m,n.d,name)
+    else true
+; The same over a list: of expressions (field 0), of field values (2) or of
+; loop states' first values (3).
+fn fu_mentions_list(borrow m:Mods, list:i64, name:i64, field:i64) -> bool
+  = loop (i=0, found=false) while !found && i<ast_list_len(m.ast,list)
+      next (i+1,let id=ast_list_at(m.ast,list,i) in let n=md_node(m,id) in
+        fu_mentions(m,if field==0 then id else if field==2 then n.b else n.c,name)) yield found
+
+; Whether expression id is the text `name` with nothing before it: the
+; variable itself, a concat that starts with such an expression and does not
+; read the name again, or an if, let or check that ends in such expressions.
+fn fu_prefix(borrow m:Mods, id:i64, name:i64) -> bool
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 then false
+    else if kind==n_var() then fu_named(m,n.a,name)
+    else if kind==n_if() then !fu_mentions(m,n.a,name) && fu_prefix(m,n.b,name) && fu_prefix(m,n.c,name)
+    else if kind==n_let() then !fu_named(m,n.a,name) && !fu_mentions(m,n.b,name) && fu_prefix(m,n.c,name)
+    else if kind==n_check() then !fu_mentions(m,n.a,name) && fu_prefix(m,n.b,name)
+    else if !fu_call(m,id,"concat") || ast_list_len(m.ast,n.b)<1 then false
+    else fu_prefix(m,ast_list_at(m.ast,n.b,0),name) &&
+      loop (i=1, clear=true) while clear && i<ast_list_len(m.ast,n.b)
+        next (i+1,!fu_mentions(m,ast_list_at(m.ast,n.b,i),name)) yield clear
+; The variable such an expression starts with, or -1.
+fn fu_root(borrow m:Mods, id:i64) -> i64
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 then -1 else if kind==n_var() then n.a
+    else if kind==n_if() || kind==n_check() then fu_root(m,n.b)
+    else if kind==n_let() then fu_root(m,n.c)
+    else if fu_call(m,id,"concat") && ast_list_len(m.ast,n.b)>=1 then fu_root(m,ast_list_at(m.ast,n.b,0)) else -1
+; A loop that builds its text:
+;   loop (out = "", i = 0) while i < n next (concat(out, row(i)), i + 1) yield out
+; One state is the text so far. Every turn keeps it or puts text after it,
+; the loop yields it (with or without more text after it), and nothing else
+; reads it: not the condition, not another state's next value. Text put
+; before the state's first value is then text before the loop's result. The
+; index of that state, or -1.
+fn fu_builder(borrow m:Mods, n:Node) -> i64
+  = let root=fu_root(m,n.d) in let count=ast_list_len(m.ast,n.a) in
+    if root<0 || ast_list_len(m.ast,n.c)!=count then -1 else
+    let k=loop (i=0, found= -1) while found<0 && i<count
+      next (i+1,if fu_named(m,md_node(m,ast_list_at(m.ast,n.a,i)).a,root) then i else -1) yield found in
+    if k<0 then -1 else
+    let name=md_node(m,ast_list_at(m.ast,n.a,k)).a in
+    let apart=loop (i=0, clear=true) while clear && i<count
+      next (i+1,i==k || (!fu_mentions(m,ast_list_at(m.ast,n.c,i),name) &&
+        !fu_named(m,md_node(m,ast_list_at(m.ast,n.a,i)).a,name))) yield clear in
+    if apart && !fu_mentions(m,n.b,name) && fu_prefix(m,n.d,name) && fu_prefix(m,ast_list_at(m.ast,n.c,k),name) then k else -1
+
+; The expressions a function's result comes from: through if, let and
+; check, and, when loops is set, through a loop that builds its text into
+; that state's first value.
+fn fu_tails(borrow m:Mods, id:i64, loops:bool, move out:Arr i64 _) -> Arr i64 _
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 then out
+    else if kind==n_if() then fu_tails(m,n.c,loops,fu_tails(m,n.b,loops,out))
+    else if kind==n_let() then fu_tails(m,n.c,loops,out)
+    else if kind==n_check() then fu_tails(m,n.b,loops,out)
+    else if loops && kind==n_loop() && fu_builder(m,n)>=0 then
+      fu_tails(m,md_node(m,ast_list_at(m.ast,n.a,fu_builder(m,n))).c,loops,out)
+    else push(out,id)
+; Whether a result comes through such a loop.
+fn fu_built(borrow m:Mods, id:i64) -> bool
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 then false
+    else if kind==n_if() then fu_built(m,n.b) || fu_built(m,n.c)
+    else if kind==n_let() then fu_built(m,n.c)
+    else if kind==n_check() then fu_built(m,n.b)
+    else kind==n_loop() && fu_builder(m,n)>=0
+
+; What is known of the program's byte functions. word, app: a byte per
+; node, 1 for a function that can have that copy. wfrom/wto, afrom/ato: for
+; each call that ends a function, the function and the one it calls (as the
+; word copy and as the appending copy see their ends). All of it follows
+; from a function's own source and that of the functions it ends in, so a
+; library's functions get the same answers in every program.
+type FuFacts = { word:Arr u8 _, app:Arr u8 _, wfrom:Arr i64 _, wto:Arr i64 _, afrom:Arr i64 _, ato:Arr i64 _ }
+fn fu_mark(move table:Arr u8 _, id:i64, bit:i64) -> Arr u8 _
+  = if id>=0 && id<len(table) then
+      let old=i64(table[id]) in if bit_and(old,bit)!=0 then table else set(table,id,u8(bit_or(old,bit)))
+    else table
+fn fu_has(borrow table:Arr u8 _, id:i64, bit:i64) -> bool = id>=0 && id<len(table) && bit_and(i64(table[id]),bit)!=0
+; One function's own ends: what they are, and the calls among them.
+fn fu_facts_of(borrow m:Mods, borrow fns:Arr i64 _, move facts:FuFacts, id:i64) -> FuFacts
+  = let body=md_node(m,id).d in
+    let plain=fu_tails(m,body,false,tx_ints()) in let through=fu_tails(m,body,true,tx_ints()) in
+    let facts=loop (i=0, out=facts) while i<len(plain)
+      next (i+1,let leaf=tx_at(plain,i) in
+        if fu_word(m,leaf) then out with { word=fu_mark(out.word,id,1) } else
+        let g=fu_user(m,fns,leaf) in
+        if g<0 || !fu_bytes(m,g) then out else out with { wfrom=push(out.wfrom,id), wto=push(out.wto,g) }) yield out in
+    let facts=if fu_built(m,body) then facts with { app=fu_mark(facts.app,id,1) } else facts in
+    loop (i=0, out=facts) while i<len(through)
+      next (i+1,let leaf=tx_at(through,i) in
+        if fu_call(m,leaf,"concat") then out with { app=fu_mark(out.app,id,1) } else
+        let g=fu_user(m,fns,leaf) in
+        if g<0 || !fu_bytes(m,g) then out else out with { afrom=push(out.afrom,id), ato=push(out.ato,g) }) yield out
+; A function whose end calls one that can have a copy can have it too.
+type FuSpread = { table:Arr u8 _, changed:bool }
+fn fu_spread_round(borrow from:Arr i64 _, borrow to:Arr i64 _, move s:FuSpread) -> FuSpread
+  = loop (i=0, out=s with { changed=false }) while i<len(from)
+      next (i+1,let f=tx_at(from,i) in
+        if fu_has(out.table,tx_at(to,i),1) && !fu_has(out.table,f,1) then out with { table=fu_mark(out.table,f,1), changed=true } else out) yield out
+fn fu_spread(borrow from:Arr i64 _, borrow to:Arr i64 _, move table:Arr u8 _) -> Arr u8 _
+  = loop (s=FuSpread { table=table, changed=true }) while s.changed next (fu_spread_round(from,to,s)) yield s.table
+fn fu_facts(borrow m:Mods, borrow fns:Arr i64 _) -> FuFacts
+  = let none=arr(i in 0..len(m.ast.nodes)/11) u8(0) in
+    let own=loop (k=0, facts=FuFacts { word=none, app=none, wfrom=tx_ints(), wto=tx_ints(), afrom=tx_ints(), ato=tx_ints() })
+      while k<len(fns)
+      next (k+1,let id=tx_at(fns,k) in
+        if !fu_bytes(m,id) then facts else fu_facts_of(m,fns,facts,id)) yield facts in
+    own with { word=fu_spread(own.wfrom,own.wto,own.word), app=fu_spread(own.afrom,own.ato,own.app) }
+
+; The copy a concat asks of the function a part calls: 2 the appending copy,
+; 1 the word copy, 0 none.
+fn fu_asked(borrow facts:FuFacts, g:i64) -> i64 = if fu_has(facts.app,g,1) then 2 else if fu_has(facts.word,g,1) then 1 else 0
+; Every concat in expression id marks the copies its parts ask for.
+fn fu_scan_list(borrow m:Mods, borrow fns:Arr i64 _, borrow facts:FuFacts, borrow modes:Arr u8 _, list:i64, field:i64,
+                move want:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=want) while i<ast_list_len(m.ast,list)
+      next (i+1,let id=ast_list_at(m.ast,list,i) in let n=md_node(m,id) in
+        fu_scan(m,fns,facts,modes,if field==0 then id else if field==2 then n.b else n.c,out)) yield out
+fn fu_scan(borrow m:Mods, borrow fns:Arr i64 _, borrow facts:FuFacts, borrow modes:Arr u8 _, id:i64, move want:Arr u8 _) -> Arr u8 _
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 || kind==n_num() || kind==n_flt() || kind==n_bool() || kind==n_byte() || kind==n_str() || kind==n_var() then want
+    else if kind==n_call() then
+      let want=if !tx_equal(md_str(m,n.a),"concat") then want else
+        loop (i=0, out=want) while i<ast_list_len(m.ast,n.b)
+          next (i+1,let g=fu_user(m,fns,ast_list_at(m.ast,n.b,i)) in let bit=fu_asked(facts,g) in
+            if g<0 || bit==0 || !fu_has(modes,g,3) then out else fu_mark(out,g,bit)) yield out in
+      fu_scan_list(m,fns,facts,modes,n.b,0,want)
+    else if kind==n_field() || kind==n_len() then fu_scan(m,fns,facts,modes,n.a,want)
+    else if kind==n_let() || kind==n_using() || kind==n_bin() then fu_scan(m,fns,facts,modes,n.c,fu_scan(m,fns,facts,modes,n.b,want))
+    else if kind==n_if() then fu_scan(m,fns,facts,modes,n.c,fu_scan(m,fns,facts,modes,n.b,fu_scan(m,fns,facts,modes,n.a,want)))
+    else if kind==n_check() || kind==n_index() then fu_scan(m,fns,facts,modes,n.b,fu_scan(m,fns,facts,modes,n.a,want))
+    else if kind==n_un() || kind==n_cast() then fu_scan(m,fns,facts,modes,n.b,want)
+    else if kind==n_sum() || kind==n_arrc() then fu_scan(m,fns,facts,modes,n.d,fu_scan(m,fns,facts,modes,n.c,fu_scan(m,fns,facts,modes,n.b,want)))
+    else if kind==n_reclit() then fu_scan_list(m,fns,facts,modes,n.b,2,want)
+    else if kind==n_with() then fu_scan_list(m,fns,facts,modes,n.b,2,fu_scan(m,fns,facts,modes,n.a,want))
+    else if kind==n_loop() then
+      fu_scan(m,fns,facts,modes,n.d,fu_scan_list(m,fns,facts,modes,n.c,0,fu_scan(m,fns,facts,modes,n.b,fu_scan_list(m,fns,facts,modes,n.a,3,want))))
+    else want
+; A copy that is asked for asks for the copies its own ends use: an
+; appending copy for the appending or word copy of a function it ends in, a
+; word copy for that function's word copy.
+type FuWant = { table:Arr u8 _, changed:bool }
+fn fu_want_round(borrow facts:FuFacts, borrow modes:Arr u8 _, move w:FuWant) -> FuWant
+  = let apps=loop (i=0, out=w with { changed=false }) while i<len(facts.afrom)
+      next (i+1,let g=tx_at(facts.ato,i) in let bit=fu_asked(facts,g) in
+        if !fu_has(out.table,tx_at(facts.afrom,i),2) || bit==0 || fu_has(out.table,g,bit) || !fu_has(modes,g,3) then out
+        else out with { table=fu_mark(out.table,g,bit), changed=true }) yield out in
+    loop (i=0, out=apps) while i<len(facts.wfrom)
+      next (i+1,let g=tx_at(facts.wto,i) in
+        if !fu_has(out.table,tx_at(facts.wfrom,i),1) || !fu_has(facts.word,g,1) || fu_has(out.table,g,1) || !fu_has(modes,g,3) then out
+        else out with { table=fu_mark(out.table,g,1), changed=true }) yield out
+; The copies there are: a byte per node, bit 1 for a function's word copy and
+; bit 2 for its appending copy. modes: a byte per node, 1 for a function this
+; module lowers for one program, which gets the copies that program asks
+; for, and 2 for a function of a prepared library object, lowered here or
+; called from here, which has every copy it can have.
+fn fu_table(borrow m:Mods, borrow fns:Arr i64 _, borrow modes:Arr u8 _) -> Arr u8 _
+  = let facts=fu_facts(m,fns) in
+    let none=arr(i in 0..len(m.ast.nodes)/11) u8(0) in
+    let kept=loop (k=0, want=none) while k<len(fns)
+      next (k+1,let id=tx_at(fns,k) in
+        if !fu_has(modes,id,2) then want else
+        let want=if fu_has(facts.word,id,1) then fu_mark(want,id,1) else want in
+        if fu_has(facts.app,id,1) then fu_mark(want,id,2) else want) yield want in
+    let direct=loop (k=0, want=kept) while k<len(fns)
+      next (k+1,let id=tx_at(fns,k) in let f=md_node(m,id) in
+        if !fu_has(modes,id,1) || f.kind!=n_fn() || f.d<0 then want else fu_scan(m,fns,facts,modes,f.d,want)) yield want in
+    loop (w=FuWant { table=direct, changed=true }) while w.changed next (fu_want_round(facts,modes,w)) yield w.table
+
+; A let read where it is needed. In a pure function,
+;   let name = concat(word, " ", adjective) in concat("<td>", html_escape(name), "</td>")
+; need not build `name`: its parts can be read where the body's concat reads
+; it (llvm.neo, cg_deferred_let), so they are written straight into that
+; concat's result.
+; The concat a let's body ends in, through lets and checks that do not read
+; `name`, or -1.
+fn fu_let_tail(borrow m:Mods, id:i64, name:i64) -> i64
+  = let n=md_node(m,id) in
+    if id<0 then -1
+    else if n.kind==n_let() then (if fu_named(m,n.a,name) || fu_mentions(m,n.b,name) then -1 else fu_let_tail(m,n.c,name))
+    else if n.kind==n_check() then (if fu_mentions(m,n.a,name) then -1 else fu_let_tail(m,n.b,name))
+    else if fu_call(m,id,"concat") then id else -1
+; How many parts of concat id are `name`, or a call with `name` as its only
+; argument, through parts that are concats: each such part reads the name
+; once, every time the concat runs. -1 when a part reads it any other way.
+fn fu_part_uses(borrow m:Mods, id:i64, name:i64) -> i64
+  = let n=md_node(m,id) in
+    loop (i=0, count=0) while count>=0 && i<ast_list_len(m.ast,n.b)
+      next (i+1,let a=ast_list_at(m.ast,n.b,i) in let p=md_node(m,a) in
+        let only=if p.kind==n_call() && ast_list_len(m.ast,p.b)==1 then md_node(m,ast_list_at(m.ast,p.b,0)) else p in
+        let found=if p.kind==n_var() then (if fu_named(m,p.a,name) then 1 else 0)
+          else if fu_call(m,a,"concat") then fu_part_uses(m,a,name)
+          else if p.kind==n_call() && ast_list_len(m.ast,p.b)==1 && only.kind==n_var() && fu_named(m,only.a,name) &&
+            !fu_named(m,p.a,name) then 1
+          else if fu_mentions(m,a,name) then -1 else 0 in
+        if found<0 then -1 else count+found) yield count
+; The names expression id reads (variables and call targets). ok: it holds
+; only literals, variables, fields, operators, lets, ifs, checks and calls.
+type FuVars = { names:Arr i64 _, ok:bool }
+fn fu_vars_list(borrow m:Mods, list:i64, move v:FuVars) -> FuVars
+  = loop (i=0, out=v) while i<ast_list_len(m.ast,list) next (i+1,fu_vars(m,ast_list_at(m.ast,list,i),out)) yield out
+fn fu_vars(borrow m:Mods, id:i64, move v:FuVars) -> FuVars
+  = let n=md_node(m,id) in let kind=n.kind in
+    if id<0 || kind==n_num() || kind==n_flt() || kind==n_bool() || kind==n_byte() || kind==n_str() then v
+    else if kind==n_var() then v with { names=push(v.names,n.a) }
+    else if kind==n_field() || kind==n_len() then fu_vars(m,n.a,v)
+    else if kind==n_let() || kind==n_bin() then fu_vars(m,n.c,fu_vars(m,n.b,v))
+    else if kind==n_if() then fu_vars(m,n.c,fu_vars(m,n.b,fu_vars(m,n.a,v)))
+    else if kind==n_check() || kind==n_index() then fu_vars(m,n.b,fu_vars(m,n.a,v))
+    else if kind==n_un() || kind==n_cast() then fu_vars(m,n.b,v)
+    else if kind==n_call() then fu_vars_list(m,n.b,v with { names=push(v.names,n.a) })
+    else v with { ok=false }

@@ -1,0 +1,231 @@
+; Text built in place (compiler/src/fuse.neo). A concat writes its parts
+; straight into its result: int_text as one store (a word copy), a function
+; that ends in a concat after the text so far (an appending copy), a loop
+; that builds text into the buffer it is handed, html_escape counted and
+; written without a buffer of its own, and a let that only names a concat
+; where it is read. Every mode builds its text that way and again a byte at
+; a time (slow_*, which nothing fuses), and the two must be equal.
+; Modes: 0 numbers, 1 a page of rows, 2 escapes of every length up to `a`,
+; 3 texts that share or hand on their parts, 4 the word pattern's bounds,
+; 5 a page's allocation requests (build with NEO_ALLOC_STATS=1), 6 `a` rounds
+; of small texts whose parts are last uses, which must not grow the resident
+; set (read from /proc/self/statm where it exists), 7 a list of `a` fragments
+; joined by halves, and its allocation requests.
+; Prints "<length> <checksum> OK", or the problem.
+import "std:io"
+import "std:strings"
+import "std:http"
+
+fn slow_join (a : Arr u8 n, b : Arr u8 m) -> Arr u8 _
+  = let first = loop (k : i64{k >= 0} = 0, o = arr(j in 0..0) u8(0)) while k < n next (k + 1, push(o, a[k])) yield o in
+    loop (i : i64{i >= 0} = 0, out = first) while i < m next (i + 1, push(out, b[i])) yield out
+fn slow_number (text : Arr u8 n, v : i64) -> Arr u8 _ = let digits = int_text(v) in slow_join(text, digits)
+fn slow_escape (text : Arr u8 n) -> Arr u8 _
+  = loop (i : i64{i >= 0} = 0, out = arr(j in 0..0) u8(0)) while i < n
+      next (i + 1, let b = text[i] in
+        if b == '&' then slow_join(out, "&amp;") else if b == '<' then slow_join(out, "&lt;")
+        else if b == '>' then slow_join(out, "&gt;") else if b == '"' then slow_join(out, "&quot;")
+        else if b == '\'' then slow_join(out, "&#x27;") else push(out, b)) yield out
+fn checksum (text : Arr u8 n) -> i64
+  = loop (i : i64{i >= 0} = 0, h = 7) while i < n next (i + 1, (h * 31 + i64(text[i])) % 1000000007) yield h
+fn report (built : Arr u8 n, slow : Arr u8 m) -> Arr u8 _
+  = if byte_equal(built, slow) then concat(int_text(n), " ", int_text(checksum(built)), " OK\n")
+    else concat("built ", int_text(n), " bytes, a byte at a time ", int_text(m), ":\n", built, "\n", slow, "\n")
+
+; Numbers. The last part of a text is a word, so the store of eight bytes
+; ends past the text.
+fn numbers (v : i64) -> Arr u8 _
+  = concat("[", int_text(v), "|", int_text(0 - v), "|", int_text(v * 1000 + 7), "]", int_text(v / 3))
+fn slow_numbers (v : i64) -> Arr u8 _
+  = slow_number(slow_join(slow_number(slow_join(slow_number(slow_join(slow_number("[", v), "|"), 0 - v), "|"), v * 1000 + 7), "]"), v / 3)
+fn edges (k : i64) -> i64
+  = if k == 0 then 0 else if k == 1 then 9 else if k == 2 then 10 else if k == 3 then 99 else if k == 4 then 100
+    else if k == 5 then 999 else if k == 6 then 1000 else if k == 7 then 9999 else if k == 8 then 10000
+    else if k == 9 then 99999999 else if k == 10 then 100000000 else if k == 11 then 9007199254740993 else 1234567
+; Hexadecimal digits: each part is one byte from the middle of a literal.
+fn hex (v : i64) -> Arr u8 _
+  = let digits = "0123456789abcdef" in
+    if v < 16 then str_slice(digits, v, v + 1) else concat(hex(v / 16), str_slice(digits, v % 16, v % 16 + 1))
+fn slow_hex (v : i64) -> Arr u8 _
+  = let digits = "0123456789abcdef" in let digit = str_slice(digits, v % 16, v % 16 + 1) in
+    if v < 16 then digit else slow_join(slow_hex(v / 16), digit)
+fn all_numbers (x : i64) -> Arr u8 _
+  = loop (k = 0, out = "") while k < 14
+      next (k + 1, let v = if k == 13 then x else edges(k) in concat(out, numbers(v), " ", hex(if v < 0 then 0 - v else v), "\n")) yield out
+fn slow_all_numbers (x : i64) -> Arr u8 _
+  = loop (k = 0, out = "") while k < 14
+      next (k + 1, let v = if k == 13 then x else edges(k) in
+        slow_join(slow_join(slow_join(slow_join(out, slow_numbers(v)), " "), slow_hex(if v < 0 then 0 - v else v)), "\n")) yield out
+
+; A page of rows: functions that end in a concat, in a call of one, in a
+; literal, and a loop that builds its text.
+fn word (k : i64) -> Arr u8 _
+  = let m = k % 4 in if m == 0 then "Widget" else if m == 1 then "Nut & Bolt" else if m == 2 then "<Gizmo>" else "Pro"
+fn cell (v : i64) -> Arr u8 _ = concat("<td>", int_text(v), "</td>")
+fn label (k : i64) -> Arr u8 _
+  = if k % 3 == 0 then "none" else if k % 3 == 1 then concat("k", int_text(k)) else cell(k)
+fn row (i : i64, seed : i64) -> Arr u8 _
+  = let name = concat(word(i + seed), " ", word(i * 7 + seed)) in
+    concat("<tr id=\"", int_text(i), "\">", cell(i * 37 % 1000), "<td>", html_escape(name), "</td>", label(i),
+      html_escape(if i % 5 == 0 then "a<b> \"q\" 'x' & more text after it" else "-"), "</tr>\n")
+fn rows (n : i64, seed : i64) -> Arr u8 _
+  = loop (out = "", i : i64{i >= 0} = 0) while i < n next (concat(out, row(i, seed)), i + 1) yield out
+fn page (n : i64, seed : i64) -> Arr u8 _ = concat("<table>", rows(n, seed), "</table>", int_text(n))
+fn slow_cell (v : i64) -> Arr u8 _ = slow_join(slow_number("<td>", v), "</td>")
+fn slow_label (k : i64) -> Arr u8 _
+  = if k % 3 == 0 then "none" else if k % 3 == 1 then slow_number("k", k) else slow_cell(k)
+fn slow_row (i : i64, seed : i64) -> Arr u8 _
+  = let name = slow_join(slow_join(word(i + seed), " "), word(i * 7 + seed)) in
+    let head = slow_join(slow_join(slow_number("<tr id=\"", i), "\">"), slow_cell(i * 37 % 1000)) in
+    let named = slow_join(slow_join(slow_join(head, "<td>"), slow_escape(name)), "</td>") in
+    let last = slow_escape(if i % 5 == 0 then "a<b> \"q\" 'x' & more text after it" else "-") in
+    slow_join(slow_join(slow_join(named, slow_label(i)), last), "</tr>\n")
+fn slow_rows (n : i64, seed : i64) -> Arr u8 _
+  = loop (out = "", i : i64{i >= 0} = 0) while i < n next (slow_join(out, slow_row(i, seed)), i + 1) yield out
+fn slow_page (n : i64, seed : i64) -> Arr u8 _
+  = slow_number(slow_join(slow_join("<table>", slow_rows(n, seed)), "</table>"), n)
+
+; A list of fragments joined by halves, as a template writes its loops: a
+; function whose text is that of two calls of itself, down to one fragment
+; as it is, or to a concat of its parts.
+type Fragment = { bytes : Arr u8 _ }
+fn fragments (n : i64{n >= 0}, seed : i64) -> Arr Fragment _ = arr(i in 0..n) Fragment { bytes = row(i, seed) }
+fn plain_items (items : Arr Fragment n, at : i64, count : i64) -> Arr u8 _
+  = if count <= 0 then "" else if count == 1 then check at >= 0 && at < n in let item = items[at] in item.bytes
+    else let half = count / 2 in concat(plain_items(items, at, half), plain_items(items, at + half, count - half))
+fn marked_items (items : Arr Fragment n, at : i64, count : i64) -> Arr u8 _
+  = if count <= 0 then "" else if count == 1 then
+      check at >= 0 && at < n in let item = items[at] in
+      concat("<li data-at=\"", int_text(at), "\">", html_escape(item.bytes), "</li>")
+    else let half = count / 2 in concat(marked_items(items, at, half), marked_items(items, at + half, count - half))
+fn listed (items : Arr Fragment n) -> Arr u8 _
+  = concat("<ul>", plain_items(items, 0, n), "</ul><ol>", marked_items(items, 0, n), "</ol>", int_text(n))
+fn slow_listed (n : i64, seed : i64) -> Arr u8 _
+  = let marked = loop (i : i64{i >= 0} = 0, out = "") while i < n
+      next (i + 1, slow_join(slow_join(slow_join(slow_number(slow_join(out, "<li data-at=\""), i), "\">"),
+        slow_escape(slow_row(i, seed))), "</li>")) yield out in
+    slow_number(slow_join(slow_join(slow_join(slow_join("<ul>", slow_rows(n, seed)), "</ul><ol>"), marked), "</ol>"), n)
+
+; Escapes: a text of every length up to `most` with the five bytes at
+; places that move with the seed, escaped as a part, inside a concat that is
+; escaped, as a literal, and after a number.
+fn sample (size : i64, seed : i64) -> Arr u8 _
+  = loop (i = 0, state = seed * 2654435761 % 4294967296, out = arr(j in 0..0) u8(0)) while i < size
+      next (i + 1, (state * 1103515245 + 12345) % 2147483648,
+        let pick = state / 65536 % 11 in
+        push(out, if pick == 0 then '&' else if pick == 1 then '<' else if pick == 2 then '>' else if pick == 3 then '"'
+          else if pick == 4 then '\'' else if pick == 5 then ' ' else if pick == 6 then '-' else u8(97 + pick))) yield out
+fn escapes (most : i64, seed : i64) -> Arr u8 _
+  = loop (size = 0, out = "") while size <= most
+      next (size + 1, let text = sample(size, seed + size) in
+        concat(out, "<", html_escape(text), ">", html_escape(concat(text, "&\"", text)), html_escape("a&b"), int_text(size),
+          html_escape(text))) yield out
+fn slow_escapes (most : i64, seed : i64) -> Arr u8 _
+  = loop (size = 0, out = "") while size <= most
+      next (size + 1, let text = sample(size, seed + size) in
+        let one = slow_join(slow_join(slow_join(out, "<"), slow_escape(text)), ">") in
+        let two = slow_join(one, slow_escape(slow_join(slow_join(text, "&\""), text))) in
+        slow_join(slow_number(slow_join(two, "a&amp;b"), size), slow_escape(text))) yield out
+fn every_byte () -> Arr u8 _ = let all = arr(i in 0..256) u8(i) in concat("{", html_escape(all), "}", html_escape(all))
+fn slow_every_byte () -> Arr u8 _
+  = let all = arr(i in 0..256) u8(i) in slow_join(slow_join(slow_join("{", slow_escape(all)), "}"), slow_escape(all))
+
+; Texts that share or hand on their parts.
+fn stamp (move t : Arr u8 n) -> Arr u8 n = if n > 0 then set(t, 0, '#') else t
+fn itself (t : Arr u8 n) -> Arr u8 n = t
+fn same (a : Arr u8 n, b : Arr u8 m) -> bool = byte_equal(a, b)
+; Two texts grown from one base leave it, and each other, alone.
+fn shared (v : i64) -> bool
+  = let base = concat("ab", int_text(v)) in let one = concat(base, cell(1)) in let two = concat(base, cell(2)) in
+    let three = concat(itself(base), int_text(3)) in let four = concat(itself(base), int_text(4)) in
+    same(one, slow_join(slow_number("ab", v), "<td>1</td>")) && same(two, slow_join(slow_number("ab", v), "<td>2</td>")) &&
+      same(three, slow_number(slow_number("ab", v), 3)) && same(four, slow_number(slow_number("ab", v), 4)) &&
+      same(base, slow_number("ab", v))
+; A part of an inner concat is written before a later part takes its buffer.
+fn handed (v : i64) -> bool
+  = let x = concat("xy", int_text(v)) in let got = concat(concat("a", x, cell(v)), stamp(x)) in
+    same(got, slow_number(slow_join(slow_join(slow_number("axy", v), slow_cell(v)), "#y"), v))
+; So is an escaped part.
+fn escaped_then_taken (v : i64) -> bool
+  = let x = concat("<y", int_text(v)) in let got = concat(html_escape(x), int_text(v), stamp(x)) in
+    same(got, slow_number(slow_join(slow_number(slow_number("&lt;y", v), v), "#y"), v))
+; A concat's result is its own: changing it leaves its parts as they were.
+fn own (v : i64) -> bool
+  = let x = concat("q", int_text(v)) in
+    let one = stamp(concat("", x, int_text(v))) in let two = stamp(concat(itself(x), int_text(1))) in
+    same(x, slow_number("q", v)) && same(one, slow_number(slow_number("#", v), v)) && same(two, slow_number(slow_number("#", v), 1))
+; A first part that is a call, a loop's text between literals, and a text
+; with nothing in it.
+fn joined (v : i64) -> bool
+  = same(concat(cell(v), cell(2), ""), slow_join(slow_cell(v), "<td>2</td>")) &&
+      same(concat("<", rows(3, v), ">"), slow_join(slow_join("<", slow_rows(3, v)), ">")) &&
+      same(concat(rows(2, v), int_text(v)), slow_number(slow_rows(2, v), v)) && len(concat("", rows(0, v), "")) == 0
+; A let that names a concat: read once (through html_escape, as a part,
+; through another call), read twice, and one whose parts the body also reads.
+fn named (v : i64) -> bool
+  = let escaped = (let name = concat("<m", int_text(v), ">") in concat("[", html_escape(name), "]")) in
+    let part = (let name = concat("m", int_text(v)) in concat("[", name, "]", int_text(v))) in
+    let trimmed = (let name = concat("  p", int_text(v), "  ") in concat("[", str_trim(name), "]", int_text(v))) in
+    let twice = (let name = concat("<m", int_text(v)) in concat(html_escape(name), name, int_text(v))) in
+    let read = (let a = concat("<m", int_text(v)) in let name = concat(a, "-", a) in concat(html_escape(name), a, int_text(v))) in
+    same(escaped, slow_join(slow_number("[&lt;m", v), "&gt;]")) && same(part, slow_number(slow_join(slow_number("[m", v), "]"), v)) &&
+      same(trimmed, slow_number(slow_join(slow_number("[p", v), "]"), v)) &&
+      same(twice, slow_number(slow_number(slow_join(slow_number("&lt;m", v), "<m"), v), v)) &&
+      same(read, slow_number(slow_number(slow_join(slow_number(slow_join(slow_number("&lt;m", v), "-&lt;m"), v), "<m"), v), v))
+fn parts (v : i64) -> Arr u8 _
+  = concat(if shared(v) then "" else "shared ", if handed(v) then "" else "handed ",
+      if escaped_then_taken(v) then "" else "escaped_then_taken ", if own(v) then "" else "own ",
+      if joined(v) then "" else "joined ", if named(v) then "" else "named ")
+
+; Texts whose parts are the last uses of their buffers: each buffer is given
+; back once. The total length of one round.
+fn churn (v : i64) -> i64
+  = let one = (let x = concat("<y", int_text(v)) in concat(html_escape(x), int_text(v))) in
+    let two = (let x = concat("<y", int_text(v)) in concat(html_escape(concat(x, "!", x)), int_text(v))) in
+    let three = (let x = concat("<y", int_text(v)) in concat(html_escape(concat(x, "!")), cell(v))) in
+    let four = (let w = concat("w<", int_text(v)) in let name = concat(w, "!") in concat("[", html_escape(name), "]")) in
+    let five = (let w = concat("w", int_text(v)) in let name = concat(w, "!", cell(v)) in concat("[", name, "]", int_text(v))) in
+    let six = (let x = concat("&", int_text(v)) in concat(html_escape(itself(x)), concat(x, cell(v)), rows(1, v))) in
+    let seven = (let x = concat("q", int_text(v)) in concat(x, cell(v), label(v), html_escape(word(v)))) in
+    len(one) + len(two) + len(three) + len(four) + len(five) + len(six) + len(seven) + len(parts(v))
+fn statm_field (text : Arr u8 n, field : i64) -> i64
+  = let start = loop (i : i64{i >= 0} = 0, seen = 0) while i < n && seen < field
+      next (i + 1, if text[i] == ' ' then seen + 1 else seen) yield i in
+    loop (i : i64{i >= 0} = start, value = 0) while i < n && text[i] >= '0' && text[i] <= '9' && value < 1000000000
+      next (i + 1, value * 10 + i64(text[i]) - 48) yield value
+effect(fs) fn resident_pages () -> i64
+  = let opened = file_open("/proc/self/statm", 0) in if !opened.ok then -1 else
+    let text = file_read(opened.value, 4096) in let closed = file_close(opened.value) in
+    if !text.ok then -1 else statm_field(text.value, 1)
+
+; The word pattern: the first `size` bytes of a word, as a part and as a value.
+fn word_of (packed : i64, size : i64) -> Arr u8 _ = byte_slice(byte_write_le("00000000", 0, packed, 8), 0, size)
+
+effect(fs,unsafe) fn main (mode : i64, a : i64, b : i64) -> unit
+  = let text = if mode == 0 then report(all_numbers(a), slow_all_numbers(a))
+      else if mode == 1 then report(page(a, b), slow_page(a, b))
+      else if mode == 2 then report(concat(escapes(a, b), every_byte()), slow_join(slow_escapes(a, b), slow_every_byte()))
+      else if mode == 3 then (let failed = parts(a) in if len(failed) == 0 then "OK\n" else concat("wrong: ", failed, "\n"))
+      else if mode == 4 then concat("<", word_of(a, b), ">", int_text(len(word_of(a, b))), "\n")
+      else if mode == 7 then
+        if a < 0 then "a list has no fewer than no fragments\n" else
+        let items = fragments(a, b) in let before = load_i64(runtime_state(), 64) in let built = listed(items) in
+        let requests = load_i64(runtime_state(), 64) - before in
+        if allocation_stats_enabled() && requests > 32 then
+          concat(int_text(requests), " allocation requests to join ", int_text(a), " fragments: halves were built on their own\n")
+        else report(built, slow_listed(a, b))
+      else if mode == 6 then
+        let warm = loop (k = 0, total = 0) while k < 200 next (k + 1, total + churn(k)) yield total in
+        let before = resident_pages() in
+        let total = loop (k = 0, total = 0) while k < a next (k + 1, total + churn(k % 1000)) yield total in
+        let after = resident_pages() in let grown = if before < 0 || after < 0 then 0 else after - before in
+        if grown > 256 then concat("resident set grew by ", int_text(grown), " pages over ", int_text(a), " rounds\n")
+        else concat(int_text(total), " OK\n")
+      else
+        let before = load_i64(runtime_state(), 64) in let built = page(a, b) in
+        let requests = load_i64(runtime_state(), 64) - before in
+        if !allocation_stats_enabled() then "built without NEO_ALLOC_STATS=1\n"
+        else if requests > 24 then
+          concat(int_text(requests), " allocation requests for ", int_text(a), " rows: text was built outside the page\n")
+        else report(built, slow_page(a, b)) in
+    let shown = print_out(text) in noop()

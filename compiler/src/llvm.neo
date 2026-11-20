@@ -12,6 +12,7 @@ import "native_asm.neo"
 import "native_crypto.neo"
 import "regions.neo"
 import "sort_kernel.neo"
+import "fuse.neo"
 
 type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 ; moves: uses of the binding that take its own reference (see cg_plan).
@@ -21,10 +22,19 @@ type CgValue = { ty:i64, elem:i64, depth:i64, record:i64, operand:Arr u8 _ }
 ; ranged, floor: the index of a comprehension or sum, and its literal lower
 ; bound when that is not negative (else -1). i + 1 and, above such a bound,
 ; i - c cannot overflow (cg_index_step), so they need no check.
-type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, parts:Arr i64 _, unique:Arr u8 _, ranged:bool, floor:i64 }
+; lazy, depth: a let that is read where it is needed (cg_deferred_let): the
+; expression it names (else -1) and how many bindings were in scope there.
+type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, parts:Arr i64 _, unique:Arr u8 _, ranged:bool, floor:i64,
+                   lazy:i64, depth:i64 }
 type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
                  function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool,
-                 par:Arr i64 _, lazy:bool, pending:Arr u8 _, tails:Arr i64 _, again:i64, sure:bool, picks:Arr i64 _, flat:bool }
+                 par:Arr i64 _, lazy:bool, pending:Arr u8 _, tails:Arr i64 _, again:i64, sure:bool, picks:Arr i64 _, flat:bool,
+                 words:Arr i64 _, apps:Arr i64 _, pure:bool }
+; pure: the function has no effects, so when its expressions run cannot be told.
+; words: in a function's word copy, the expressions its result comes from
+; that are lowered as words (cg_word) or as calls of word copies.
+; apps: in its appending copy, the expressions its result comes from: each is
+; written after the text handed in as %acc (cg_app_leaf). See fuse.neo.
 ; flat: no lanes here (the copy of a region for processors without AVX-512, cg_par_range).
 ; sure: integer arithmetic cannot overflow here and is not checked (cg_ends).
 ; picks: the `if`s lowered as a select of both sides (cg_loop_picks).
@@ -179,7 +189,7 @@ fn cg_copy_array(move s:CgState, borrow array:CgValue, borrow target:CgValue, bo
     if !cg_managed(element) then s else cg_write(s,concat("  call void @neo.visit.elements(ptr ",destination,", ptr ",
       cg_slot_symbol(element,true),", i64 ",cg_stride(element),", i64 ",length,")\n"))
 
-fn cg_bind(name:i64, borrow value:CgValue) -> CgBinding = CgBinding { name=name, value=value, live=tx_empty(), moves=tx_ints(), parts=tx_ints(), unique=tx_empty(), ranged=false, floor= -1 }
+fn cg_bind(name:i64, borrow value:CgValue) -> CgBinding = CgBinding { name=name, value=value, live=tx_empty(), moves=tx_ints(), parts=tx_ints(), unique=tx_empty(), ranged=false, floor= -1, lazy= -1, depth=0 }
 fn cg_bind_index(borrow m:Mods, n:Node, borrow iterator:Arr u8 _) -> CgBinding
   = let low=md_node(m,n.b) in
     cg_bind(n.a,cg_value(n_t_i64(),iterator)) with { ranged=true, floor=if low.kind==n_num() && low.b==0 && low.a>=0 then low.a else -1 }
@@ -1172,6 +1182,10 @@ fn cg_byte_read(move s:CgState, borrow bytes:CgValue, borrow offset:Arr u8 _, bo
     else if tx_equal(width,"4") then
       let word=cg_ins(s,n_t_i32(),concat("load i32, ptr ",s.value.operand,", align 1")) in
       cg_ins(word,n_t_i64(),concat("zext i32 ",word.value.operand," to i64"))
+    else if tx_equal(width,"2") || tx_equal(width,"1") then
+      let narrow=if tx_equal(width,"2") then "i16" else "i8" in
+      let word=cg_ins(s,n_t_i64(),concat("load ",narrow,", ptr ",s.value.operand,", align 1")) in
+      cg_ins(word,n_t_i64(),concat("zext ",narrow," ",word.value.operand," to i64"))
     else cg_ins(s,n_t_i64(),concat("call i64 @neo.bytes.read(ptr ",s.value.operand,", i64 ",width,")")) in
     if owned then cg_release(loaded,bytes) else loaded
 
@@ -1214,8 +1228,14 @@ fn cg_byte_write(move s:CgState, borrow original:CgValue, borrow offset:Arr u8 _
     let s=cg_ins(s,n_t_i64(),concat("sub i64 ",length,", ",width)) in
     let s=cg_byte_bounds(s,offset,s.value.operand,"byte write bounds") in
     let s=cg_byte_target(s,original,length,fresh,known) in let result=s.value in
-    let s=cg_extract(s,result,0,n_t_ptr()) in let s=cg_offset(s,"i8",s.value.operand,offset) in
-    cg_write(s,concat("  call void @neo.bytes.write(ptr ",s.value.operand,", i64 ",number,", i64 ",width,")\n")) with { value=result }
+    let s=cg_extract(s,result,0,n_t_ptr()) in let s=cg_offset(s,"i8",s.value.operand,offset) in let slot=s.value.operand in
+    ; A whole word, half or quarter of one is a single store; other widths are written byte by byte.
+    let narrow=if tx_equal(width,"4") then "i32" else if tx_equal(width,"2") then "i16" else if tx_equal(width,"1") then "i8" else "" in
+    if tx_equal(width,"8") then cg_write(s,concat("  store i64 ",number,", ptr ",slot,", align 1\n")) with { value=result }
+    else if len(narrow)>0 then
+      let cut=cg_ins(s,n_t_i64(),concat("trunc i64 ",number," to ",narrow)) in
+      cg_write(cut,concat("  store ",narrow," ",cut.value.operand,", ptr ",slot,", align 1\n")) with { value=result }
+    else cg_write(s,concat("  call void @neo.bytes.write(ptr ",slot,", i64 ",number,", i64 ",width,")\n")) with { value=result }
 
 fn cg_byte_slice(move s:CgState, borrow bytes:CgValue, borrow lo:Arr u8 _, borrow hi:Arr u8 _) -> CgState
   = let s=cg_extract(s,bytes,1,n_t_i64()) in let length=s.value.operand in
@@ -1371,9 +1391,306 @@ fn cg_reference(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let result=cg_declaration(m,n.e) in
     let s=cg_ins_value(s,result,concat("load ",cg_type_of(result),", ptr ",box,", align 8")) in cg_retain(s,s.value)
 
+; A direct call of a function by its symbol. variant: 0 the function, 1 its
+; word copy, 2 its appending copy, which takes the text so far, acc, first.
+fn cg_direct(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
+             variant:i64, borrow acc:CgValue) -> CgState
+  = let callee=md_find_decl(m,fns,n.a) in let result=cg_declaration(m,md_node(m,callee).c) in
+    if callee<0 || !cg_supported(result) then s with { error=id } else
+    let f=md_node(m,callee) in let lends=cg_lends(m,f) in
+    let args=if lends then cg_lent_arguments(m,fns,env,s,f,n.b) else
+      let owned=cg_arguments(m,fns,env,s,n.b,false) in CgReads { state=owned.state, values=owned.values, owned=tx_ints() } in
+    if args.state.error>=0 then args.state else
+    let signature=if ast_flag(f,fl_variadic()) then concat(" (",cg_abi_types(m,f),")") else "" in
+    let s=loop (i=0, out=args.state) while i<ast_list_len(m.ast,f.b)
+      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
+        if md_resource_consumed(m,f,p) then cg_move_owner(m,env,out,ast_list_at(m.ast,n.b,i)) else out) yield out in
+    let target=if variant==0 && tx_at(s.par,callee)==1 then concat(cg_par_symbol(callee),if lends then ".lent" else "")
+      else cg_variant_symbol(if lends then cg_lent_symbol(m,callee) else cg_symbol(m,callee),variant) in
+    let first=if variant!=2 then tx_empty() else concat(cg_typed(acc),if len(args.values)>0 then ", " else "") in
+    let call=concat("call ",cg_return(result),signature," ",target,"(",first,cg_arg_text(args.values),")") in
+    let called=if result.ty==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  ",call,"\n")) else
+      cg_ins_value(s,result,call) in
+    cg_release_owned(called,args.values,args.owned)
+
+; Text built in place (fuse.neo). A concat with a part that is the word
+; pattern, or a call of a function with a word or an appending copy, is
+; lowered here. Its parts are read in order into pieces, a part that is
+; itself a concat giving its own parts, and the pieces are written into one
+; buffer whose size is their total: the first part's when this concat owns
+; that and it has room, else a new one. A word is written with one store of
+; eight bytes, so the buffer then has eight bytes more than the text
+; (cg_fused_room). At a call with an appending copy the pieces read so far
+; are written, and that copy puts the function's text after them.
+; wordy: the value may be a word (no data pointer, the bytes in field 2).
+; length: how many bytes the piece adds to the text. escaped: it is written
+; as html_escape of the value, and length is that text's (cg_fused_escape).
+type CgPiece = { value:CgValue, owned:bool, wordy:bool, literal:bool, escaped:bool, length:Arr u8 _ }
+; buf: when has is set, the text so far, owned here. sure: it is the only
+; reference to a whole buffer. pieces: read, not written yet.
+type CgFused = { state:CgState, buf:CgValue, has:bool, sure:bool, pieces:Arr CgPiece _ }
+type CgSpan = { state:CgState, total:Arr u8 _, slack:bool }
+fn cg_bytes_value(borrow operand:Arr u8 _) -> CgValue = cg_array_value(cg_value(n_t_u8(),""),operand)
+fn cg_no_piece() -> CgPiece = CgPiece { value=cg_unit(), owned=false, wordy=false, literal=false, escaped=false, length=tx_empty() }
+; A piece that is the value just lowered, with its length read.
+fn cg_fused_push(move f:CgFused, move s:CgState, move pieces:Arr CgPiece _, owned:bool, wordy:bool, literal:bool) -> CgFused
+  = let value=s.value in let s=cg_extract(s,value,1,n_t_i64()) in
+    f with { state=s, pieces=push(pieces,CgPiece { value=value, owned=owned, wordy=wordy, literal=literal, escaped=false,
+      length=s.value.operand }) }
+fn cg_no_pieces() -> Arr CgPiece _ = arr(i in 0..0) cg_no_piece()
+fn cg_piece(borrow pieces:Arr CgPiece _, i:i64) -> CgPiece = if i>=0 && i<len(pieces) then pieces[i] else cg_no_piece()
+fn cg_variant_symbol(borrow symbol:Arr u8 _, variant:i64) -> Arr u8 _
+  = let suffix=if variant==1 then ".word" else if variant==2 then ".app" else "" in let size=len(symbol) in
+    if size>1 && tx_byte(symbol,size-1)==34 then concat(pt_slice(symbol,0,size-1),suffix,"\"") else concat(symbol,suffix)
+; How a part of a concat is read: 0 as a value, 1 the word pattern, 2 a call
+; of a word copy, 3 a call of an appending copy, 4 a concat. A function
+; with a par clone is called as that clone, which has no copies.
+; 5: html_escape, which is written straight into the result, part by part
+; when its argument is a concat (cg_fused_escape). 6: a let that is read
+; where it is needed (cg_deferred_let).
+fn cg_part_kind(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, borrow s:CgState, id:i64) -> i64
+  = let n=md_node(m,id) in
+    if n.kind==n_var() then (if cg_binding(env,cg_binding_index(m,env,n.a)).lazy>=0 then 6 else 0)
+    else if n.kind!=n_call() then 0
+    else if tx_equal(md_str(m,n.a),"concat") then 4
+    else if fu_word(m,id) then 1
+    else if len(m.fused)==0 then 0
+    else let g=fu_user(m,fns,id) in let bits=tx_byte(m.fused,g) in
+      if g<0 || cg_lookup(m,env,n.a).ty==n_t_fn() then 0
+      else if cg_escape(m,g) && ast_list_len(m.ast,n.b)==1 then 5
+      else if bits<=0 || tx_at(s.par,g)==1 then 0
+      else if bit_and(bits,2)!=0 then 3 else if bit_and(bits,1)!=0 then 2 else 0
+; The standard library's html_escape, which maps each byte on its own:
+; html_escape(concat(a, b)) is concat(html_escape(a), html_escape(b)).
+fn cg_escape(borrow m:Mods, g:i64) -> bool
+  = g>=0 && tx_equal(md_str(m,md_node(m,g).a),"html_escape") && tx_equal(md_path(m,tx_at(m.owners,g)),pt_join(m.stdlib,"http.neo"))
+; What html_escape gives for a literal.
+fn cg_html_escaped(borrow text:Arr u8 _) -> Arr u8 _
+  = loop (i=0, out=tx_empty()) while i<len(text)
+      next (i+1,let b=tx_byte(text,i) in
+        if b==38 then concat(out,"&amp;") else if b==60 then concat(out,"&lt;") else if b==62 then concat(out,"&gt;")
+        else if b==34 then concat(out,"&quot;") else if b==39 then concat(out,"&#x27;") else push(out,u8(b))) yield out
+; The bindings that were in scope where a lazy binding was made.
+fn cg_scope(borrow env:Arr CgBinding _, depth:i64) -> Arr CgBinding _
+  = loop (i=0, out=arr(j in 0..0) cg_bind(-1,cg_unit())) while i<depth && i<len(env) next (i+1,push(out,cg_binding(env,i))) yield out
+; A let that is read where it is needed. Its value is a concat, its function
+; is pure, and the concat its body ends in reads it exactly once, as a part
+; or as the only argument of a call that is a part (fu_part_uses). The value
+; then runs once per run of the let, as before, only later: after the parts
+; before it. So nothing it reads may change hands in between: every array,
+; record or other counted value it names is left alone by the rest of the body.
+fn cg_deferred_let(borrow m:Mods, borrow env:Arr CgBinding _, borrow s:CgState, n:Node) -> bool
+  = if !s.pure || s.runtime || len(m.fused)==0 || !fu_call(m,n.b,"concat") then false else
+    let tail=fu_let_tail(m,n.c,n.a) in
+    if tail<0 || fu_part_uses(m,tail,n.a)!=1 then false else
+    let vars=fu_vars(m,n.b,FuVars { names=tx_ints(), ok=true }) in
+    vars.ok && loop (i=0, clear=true) while clear && i<len(vars.names)
+      next (i+1,let v=tx_at(vars.names,i) in let k=cg_binding_index(m,env,v) in let b=cg_binding(env,k) in
+        k<0 || (b.lazy<0 && (cg_tail_scalar(b.value.ty) || b.value.ty==n_t_u16() || !fu_mentions(m,n.c,v)))) yield clear
+fn cg_fusable(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, borrow s:CgState, list:i64) -> bool
+  = loop (i=0, found=false) while !found && i<ast_list_len(m.ast,list)
+      next (i+1,let id=ast_list_at(m.ast,list,i) in let kind=cg_part_kind(m,fns,env,s,id) in
+        if kind==4 then cg_fusable(m,fns,env,s,md_node(m,id).b) else kind>0) yield found
+; The word pattern byte_slice(byte_write_le(TEXT, 0, packed, 8), 0, length)
+; as a word: nothing is allocated. It traps as the slice would.
+fn cg_word(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let w=md_node(m,ast_list_at(m.ast,n.b,0)) in
+    let packed=cg_expr(m,fns,env,s,ast_list_at(m.ast,w.b,2)) in if packed.error>=0 then packed else
+    let word=packed.value.operand in
+    let size=cg_expr(m,fns,env,packed,ast_list_at(m.ast,n.b,2)) in if size.error>=0 then size else
+    let length=size.value.operand in
+    let s=cg_ins(size with { line=n.line },n_t_bool(),concat("icmp ugt i64 ",length,", 8")) in
+    let s=cg_arithmetic_guard(s,"byte slice bounds") in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr zeroinitializer, i64 ",length,", 1")) in
+    cg_ins_value(s,cg_bytes_value(""),concat("insertvalue %ax_arr ",s.value.operand,", i64 ",word,", 2"))
+; The total of start and the pieces' lengths. Lengths are sizes of arrays
+; in memory, so their sum cannot overflow.
+fn cg_fused_total(move s:CgState, borrow pieces:Arr CgPiece _, borrow start:Arr u8 _) -> CgSpan
+  = loop (i=0, out=CgSpan { state=s, total=start, slack=false }) while i<len(pieces)
+      next (i+1,let p=cg_piece(pieces,i) in
+        let added=cg_ins(out.state,n_t_i64(),concat("add i64 ",out.total,", ",p.length)) in
+        CgSpan { state=added, total=added.value.operand, slack=out.slack || p.wordy || p.escaped }) yield out
+; One piece's bytes. A literal's length is known, so its copy is a few
+; stores; any other goes to memcpy. (Copying a short piece as sixteen bytes
+; whatever its length read past the piece, which LLVM may assume never
+; happens: a slice of a literal was then taken to start at its first byte.)
+fn cg_fused_copy(move s:CgState, borrow target:Arr u8 _, borrow source:Arr u8 _, borrow length:Arr u8 _) -> CgState
+  = cg_write(s,concat("  call void @llvm.memcpy.p0.p0.i64(ptr ",target,", ptr ",source,", i64 ",length,", i1 false)\n"))
+; Writes the pieces at data + start and releases those this concat owns.
+fn cg_fused_write(move s:CgState, borrow pieces:Arr CgPiece _, borrow data:Arr u8 _, borrow start:Arr u8 _) -> CgState
+  = loop (i=0, copy=CgCopy { state=s, offset=start }) while i<len(pieces)
+      next (i+1,let p=cg_piece(pieces,i) in
+        let s=cg_extract(copy.state,p.value,0,n_t_ptr()) in let source=s.value.operand in
+        let s=cg_offset(s,"i8",data,copy.offset) in let target=s.value.operand in
+        let s=if p.escaped then
+          ; Text that escaping leaves as it is has its own length, and is copied.
+          let s=cg_extract(s,p.value,1,n_t_i64()) in let raw=s.value.operand in
+          let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",p.length,", ",raw)) in
+          let same=s.serial in let changed=same+1 in let done=changed+1 in
+          let s=cg_block(cg_branch(s with { serial=done+1 },s.value.operand,same,changed),same) in
+          let s=cg_fused_copy(s,target,source,raw) in
+          let s=cg_block(cg_jump(s,done),changed) in
+          let s=cg_write(s,concat("  call void @ax_esc_write(ptr ",target,", ptr ",source,", i64 ",raw,")\n")) in
+          cg_block(cg_jump(s,done),done)
+        else if !p.wordy then cg_fused_copy(s,target,source,p.length) else
+          let s=cg_ins(s,n_t_bool(),concat("icmp eq ptr ",source,", null")) in
+          let word=s.serial in let bytes=word+1 in let done=bytes+1 in
+          let s=cg_block(cg_branch(s with { serial=done+1 },s.value.operand,word,bytes),word) in
+          let s=cg_extract(s,p.value,2,n_t_i64()) in
+          let s=cg_write(s,concat("  store i64 ",s.value.operand,", ptr ",target,", align 1\n")) in
+          let s=cg_fused_copy(cg_block(cg_jump(s,done),bytes),target,source,p.length) in
+          cg_block(cg_jump(s,done),done) in
+        let s=if p.owned then cg_release(s,p.value) else s in
+        let s=cg_ins(s,n_t_i64(),concat("add i64 ",copy.offset,", ",p.length)) in
+        CgCopy { state=s, offset=s.value.operand }) yield copy.state
+fn cg_fused_value(move s:CgState, borrow data:Arr u8 _, borrow length:Arr u8 _, borrow control:Arr u8 _) -> CgState
+  = let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr poison, ptr ",data,", 0")) in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr ",s.value.operand,", i64 ",length,", 1")) in
+    let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr ",s.value.operand,", i64 1, 2")) in
+    cg_ins_value(s,cg_bytes_value(""),concat("insertvalue %ax_arr ",s.value.operand,", ptr ",control,", 3"))
+; The bytes a buffer for `total` bytes of text is asked for: eight more when
+; a word, or the last word of an escaped text, may be stored at its end.
+fn cg_fused_room(move s:CgState, borrow span:CgSpan) -> CgState
+  = if span.slack then cg_ins(s,n_t_i64(),concat("add i64 ",span.total,", 8")) else s with { value=cg_value(n_t_i64(),span.total) }
+; Writes the pieces read so far after the text so far. lone: a call of an
+; appending copy follows, which takes any one array as the text so far.
+; Otherwise this ends the concat, and its result is made the only reference
+; to a whole buffer, as every concat's is (cg_fresh).
+fn cg_fused_flush(move f:CgFused, lone:bool) -> CgFused
+  = let count=len(f.pieces) in let first=cg_piece(f.pieces,0) in
+    if f.state.error>=0 || (lone && !f.has && count==0) then f
+    else if !f.has && lone && count==1 && !first.wordy && !first.escaped then
+      let s=if first.owned then f.state else cg_retain(f.state,first.value) in
+      f with { state=s, buf=first.value, has=true, sure=false, pieces=cg_no_pieces() }
+    else if !f.has && count>0 && first.owned && !first.wordy && !first.literal && !first.escaped then
+      ; The first part is this concat's own and may have room for the rest.
+      let rest=arr(i in 0..count-1) cg_piece(f.pieces,i+1) in
+      cg_fused_flush(f with { buf=first.value, has=true, sure=false, pieces=rest },lone)
+    else if !f.has then
+      let span=cg_fused_total(f.state,f.pieces,"0") in
+      let sized=cg_fused_room(span.state,span) in
+      let s=cg_ins(sized,n_t_ptr(),concat("call ptr @ax_heap_alloc(i64 ",sized.value.operand,")")) in let data=s.value.operand in
+      let s=cg_offset(s,"i8",data,"-16") in let control=s.value.operand in
+      let s=cg_fused_value(cg_fused_write(s,f.pieces,data,"0"),data,span.total,control) in
+      f with { state=s, buf=s.value, has=true, sure=true, pieces=cg_no_pieces() }
+    else if count==0 && (lone || f.sure) then f
+    else
+      let s=cg_extract(f.state,f.buf,1,n_t_i64()) in let length=s.value.operand in
+      let span=cg_fused_total(s,f.pieces,length) in
+      let sized=cg_fused_room(span.state,span) in let bytes=sized.value.operand in
+      let s=cg_extract(sized,f.buf,0,n_t_ptr()) in let old_data=s.value.operand in
+      let s=cg_extract(s,f.buf,3,n_t_ptr()) in let old_control=s.value.operand in
+      let tested=cg_ins(s,n_t_bool(),concat("call i1 @neo_spare(",cg_typed(f.buf),", i64 ",bytes,", i64 0)")) in
+      let direct=tested.block in let grow=tested.serial in let done=grow+1 in
+      let s=cg_block(cg_branch(tested with { serial=done+1 },tested.value.operand,done,grow),grow) in
+      let s=cg_ins(s,n_t_ptr(),concat("call ptr @ax_heap_alloc(i64 ",bytes,")")) in let new_data=s.value.operand in
+      let s=cg_offset(s,"i8",new_data,"-16") in let new_control=s.value.operand in
+      let s=cg_write(s,concat("  call void @llvm.memcpy.p0.p0.i64(ptr ",new_data,", ptr ",old_data,", i64 ",length,", i1 false)\n")) in
+      let s=cg_release(s,f.buf) in let grown=s.block in
+      let s=cg_block(cg_jump(s,done),done) in
+      let s=cg_phi(s,cg_value(n_t_ptr(),old_data),direct,cg_value(n_t_ptr(),new_data),grown) in let data=s.value.operand in
+      let s=cg_phi(s,cg_value(n_t_ptr(),old_control),direct,cg_value(n_t_ptr(),new_control),grown) in let control=s.value.operand in
+      let s=cg_fused_value(cg_fused_write(s,f.pieces,data,length),data,span.total,control) in
+      f with { state=s, buf=s.value, has=true, sure=true, pieces=cg_no_pieces() }
+; A part that calls a function with an appending copy: what was read so far
+; is written, and the copy puts the function's text after it. With no text
+; so far the function itself is called and its result is the text so far.
+fn cg_fused_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, id:i64, n:Node) -> CgFused
+  = let flushed=cg_fused_flush(f,true) in if flushed.state.error>=0 then flushed else
+    let appending=flushed.has in let buf=flushed.buf in
+    let s=cg_direct(m,fns,env,flushed.state,id,n,if appending then 2 else 0,buf) in
+    flushed with { state=s, buf=s.value, has=true, sure=appending }
+; One part. first: it is its concat's first part, which that concat owns
+; when it is a variable's last use (cg_plan_call). leaf: it is not a part
+; but a whole value this function owns (cg_app_leaf). nested: it is a part
+; of a concat that is itself a part. That concat would have copied a variable
+; it reads before a later part of the outer one could take the variable's
+; buffer, so such a read keeps a reference until it is written.
+fn cg_fused_part(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, id:i64,
+                 first:bool, leaf:bool, nested:bool) -> CgFused
+  = let n=md_node(m,id) in let kind=cg_part_kind(m,fns,env,f.state,id) in
+    if kind==4 then cg_fused(m,fns,env,f,n.b,!leaf)
+    else if kind==3 then cg_fused_call(m,fns,env,f,id,n)
+    else if kind==6 then
+      let binding=cg_binding(env,cg_binding_index(m,env,n.a)) in
+      cg_fused(m,fns,cg_scope(env,binding.depth),f,md_node(m,binding.lazy).b,true)
+    else if kind==5 then cg_fused_escape(m,fns,env,f,ast_list_at(m.ast,n.b,0),true,false)
+    else if n.kind==n_str() && len(md_str(m,n.a))==0 then f
+    else
+    let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in
+    let taken=first && n.kind==n_var() && cg_listed(cg_binding(env,cg_binding_index(m,env,n.a)).moves,id) in
+    let read=if kind==1 then CgRead { state=cg_word(m,fns,env,f.state,n), borrowed=false }
+      else if kind==2 then CgRead { state=cg_direct(m,fns,env,f.state,id,n,1,cg_unit()), borrowed=false }
+      else if leaf || taken then CgRead { state=cg_expr(m,fns,env,f.state,id), borrowed=false }
+      else cg_read(m,fns,env,f.state,id) in
+    if read.state.error>=0 then f with { state=read.state, pieces=pieces } else
+    let value=read.state.value in
+    let kept=if nested && read.borrowed then cg_retain(read.state,value) else read.state in
+    cg_fused_push(f,kept with { value=value },pieces,!read.borrowed || nested,kind==1 || kind==2,n.kind==n_str())
+; html_escape of expression id as pieces: of each part when it is a concat
+; or a let read where it is needed, and at build time when it is a literal.
+; Any other value is one piece: the runtime counts its escaped length
+; (ax_esc_len) and, if that is not its own, writes it escaped into the result
+; (ax_esc_write); nothing is allocated. The value keeps a reference until it
+; is written: the call this stands for would have finished before a later
+; part could take the value's buffer.
+; whole: id is html_escape's own argument, which that call owns. Otherwise it
+; is a part of the concat being escaped, and first says it is the first,
+; which that concat owns when it is a variable's last use (cg_plan_call).
+fn cg_fused_escape(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, id:i64,
+                   whole:bool, first:bool) -> CgFused
+  = let n=md_node(m,id) in
+    let binding=if n.kind==n_var() then cg_binding(env,cg_binding_index(m,env,n.a)) else cg_bind(-1,cg_unit()) in
+    if f.state.error>=0 then f
+    else if fu_call(m,id,"concat") then cg_fused_escape_list(m,fns,env,f,n.b)
+    else if binding.lazy>=0 then cg_fused_escape_list(m,fns,cg_scope(env,binding.depth),f,md_node(m,binding.lazy).b)
+    else if n.kind==n_str() then
+      let text=cg_html_escaped(md_str(m,n.a)) in if len(text)==0 then f else
+      let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in let s=cg_string(f.state,text) in
+      cg_fused_push(f,s,pieces,false,false,true)
+    else
+      let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in
+      let taken=first && n.kind==n_var() && cg_listed(binding.moves,id) in
+      let read=if whole || taken then CgRead { state=cg_expr(m,fns,env,f.state,id), borrowed=false }
+        else cg_read(m,fns,env,f.state,id) in
+      if read.state.error>=0 then f with { state=read.state, pieces=pieces } else
+      let value=read.state.value in
+      let s=if read.borrowed then cg_retain(read.state,value) else read.state in
+      let s=cg_extract(s,value,0,n_t_ptr()) in let source=s.value.operand in
+      let s=cg_extract(s,value,1,n_t_i64()) in
+      let s=cg_ins(s,n_t_i64(),concat("call i64 @ax_esc_len(ptr ",source,", i64 ",s.value.operand,")")) in
+      f with { state=s, pieces=push(pieces,CgPiece { value=value, owned=true, wordy=false, literal=false, escaped=true,
+        length=s.value.operand }) }
+fn cg_fused_escape_list(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, list:i64) -> CgFused
+  = loop (i=0, out=f) while out.state.error<0 && i<ast_list_len(m.ast,list)
+      next (i+1,cg_fused_escape(m,fns,env,out,ast_list_at(m.ast,list,i),false,i==0)) yield out
+; The parts of a concat, in order.
+fn cg_fused(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, list:i64, nested:bool) -> CgFused
+  = loop (i=0, out=f) while out.state.error<0 && i<ast_list_len(m.ast,list)
+      next (i+1,cg_fused_part(m,fns,env,out,ast_list_at(m.ast,list,i),i==0,false,nested)) yield out
+fn cg_fused_concat(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, n:Node) -> CgState
+  = let start=CgFused { state=s with { line=n.line }, buf=cg_unit(), has=false, sure=false, pieces=cg_no_pieces() } in
+    let done=cg_fused_flush(cg_fused(m,fns,env,start,n.b,false),false) in
+    if done.state.error>=0 then done.state else done.state with { value=done.buf }
+; In a function's appending copy, an expression its result comes from: its
+; text is written after the text handed in, which this path now gives up.
+fn cg_app_leaf(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
+  = let apps=s.apps in
+    let start=CgFused { state=s with { apps=tx_ints() }, buf=cg_bytes_value("%acc"), has=true, sure=false, pieces=cg_no_pieces() } in
+    let done=cg_fused_flush(cg_fused_part(m,fns,env,start,id,false,true,false),false) in
+    if done.state.error>=0 then done.state else done.state with { value=done.buf, apps=apps }
+; The expressions a word copy's result comes from that it lowers as words:
+; the word pattern, and calls of functions that have a word copy themselves.
+fn cg_word_tails(borrow m:Mods, borrow fns:Arr i64 _, body:i64) -> Arr i64 _
+  = let tails=fu_tails(m,body,false,tx_ints()) in
+    loop (i=0, out=tx_ints()) while i<len(tails)
+      next (i+1,let id=tx_at(tails,i) in
+        if fu_word(m,id) || bit_and(tx_byte(m.fused,fu_user(m,fns,id)),1)==1 then push(out,id) else out) yield out
+
 fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node) -> CgState
   = let name=md_str(m,n.a) in
-    if tx_equal(name,"noop") then s with { value=cg_unit() }
+    if len(s.words)>0 && cg_listed(s.words,id) && fu_word(m,id) then cg_word(m,fns,env,s,n)
+    else if tx_equal(name,"noop") then s with { value=cg_unit() }
     else if tx_equal(name,"null") then s with { value=cg_value(n_t_ptr(),"null") }
     else if tx_equal(name,"addr") || tx_equal(name,"function") then
       let arg=md_node(m,ast_list_at(m.ast,n.b,0)) in let decl=md_find_decl(m,fns,arg.a) in
@@ -1398,6 +1715,7 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     else if tx_equal(name,"view") then
       let args=cg_arguments(m,fns,env,s,n.b,false) in if args.state.error>=0 then args.state else
       cg_byte_view(args.state,cg_arg(args.values,0),cg_arg(args.values,1))
+    else if tx_equal(name,"concat") && !s.runtime && cg_fusable(m,fns,env,s,n.b) then cg_fused_concat(m,fns,env,s,n)
     else if tx_equal(name,"concat") then
       let parts=cg_read_arguments(m,fns,env,s,n.b) in if parts.state.error>=0 then parts.state else
       cg_concat(parts.state with { line=n.line },parts.values,parts.owned,
@@ -1425,22 +1743,7 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       cg_intrinsic(args.state,name,args.values,signature.result,id)
     else let callback=cg_lookup(m,env,n.a) in
     if callback.ty==n_t_fn() then cg_indirect(m,fns,env,s,n,callback) else
-    let callee=md_find_decl(m,fns,n.a) in let result=cg_declaration(m,md_node(m,callee).c) in
-    if callee<0 || !cg_supported(result) then s with { error=id } else
-    let f=md_node(m,callee) in let lends=cg_lends(m,f) in
-    let args=if lends then cg_lent_arguments(m,fns,env,s,f,n.b) else
-      let owned=cg_arguments(m,fns,env,s,n.b,false) in CgReads { state=owned.state, values=owned.values, owned=tx_ints() } in
-    if args.state.error>=0 then args.state else
-    let signature=if ast_flag(f,fl_variadic()) then concat(" (",cg_abi_types(m,f),")") else "" in
-    let s=loop (i=0, out=args.state) while i<ast_list_len(m.ast,f.b)
-      next (i+1,let p=md_node(m,ast_list_at(m.ast,f.b,i)) in
-        if md_resource_consumed(m,f,p) then cg_move_owner(m,env,out,ast_list_at(m.ast,n.b,i)) else out) yield out in
-    let target=if tx_at(s.par,callee)==1 then concat(cg_par_symbol(callee),if lends then ".lent" else "")
-      else if lends then cg_lent_symbol(m,callee) else cg_symbol(m,callee) in
-    let call=concat("call ",cg_return(result),signature," ",target,"(",cg_arg_text(args.values),")") in
-    let called=if result.ty==n_t_unit() then cg_write(s with { value=cg_unit() },concat("  ",call,"\n")) else
-      cg_ins_value(s,result,call) in
-    cg_release_owned(called,args.values,args.owned)
+    cg_direct(m,fns,env,s,id,n,if len(s.words)>0 && cg_listed(s.words,id) then 1 else 0,cg_unit())
 
 type CgRange = { header:i64, work:i64, latch:i64, done:i64, iterator:Arr u8 _, successor:Arr u8 _, lo:Arr u8 _, hi:Arr u8 _ }
 fn cg_counted_head(move s:CgState, borrow r:CgRange, borrow other_phi:Arr u8 _) -> CgState
@@ -2059,7 +2362,7 @@ fn cg_par_ref(borrow m:Mods, borrow fns:Arr i64 _, borrow s:CgState, borrow name
     else if !str_starts(name,"neo_fn_") then false else
     let callee=rg_number(name,7) in let f=md_node(m,callee) in
     if callee<0 || f.kind!=n_fn() || ast_flag(f,fl_effect()) || cg_listed(path,callee) then false else
-    let lowered=cg_function(m,fns,callee,false,s.target,s.views,false,false) in
+    let lowered=cg_function_mode(m,fns,callee,false,s.target,s.views,false,false,tx_ints(),0) in
     let lent=len(name)>5 && bytes_match_at(name,len(name)-5,".lent") in
     lowered.error<0 && cg_par_safe(m,fns,s,if lent then rg_first(lowered.text) else lowered.text,push(path,callee))
 
@@ -2516,8 +2819,9 @@ fn cg_root_taken(borrow m:Mods, borrow env:Arr CgBinding _, id:i64) -> bool
 ; A lexical binding owns its storage through an observation. A temporary
 ; instead transfers its reference to the observer, which must release it.
 fn cg_read(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgRead
-  = let n=md_node(m,id) in
-    if n.kind==n_var() then CgRead { state=s with { value=cg_lookup(m,env,n.a) },borrowed=true }
+  = let n=md_node(m,id) in let binding=if n.kind==n_var() then cg_binding(env,cg_binding_index(m,env,n.a)) else cg_bind(-1,cg_unit()) in
+    if binding.lazy>=0 then CgRead { state=cg_expr(m,fns,cg_scope(env,binding.depth),s,binding.lazy),borrowed=false }
+    else if n.kind==n_var() then CgRead { state=s with { value=binding.value },borrowed=true }
     else if n.kind==n_field() then cg_read_field(m,fns,env,s,n,id)
     else CgRead { state=cg_expr(m,fns,env,s,id),borrowed=false }
 
@@ -2694,14 +2998,16 @@ fn cg_record_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding 
 
 fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
   = let n=md_node(m,id) in let kind=n.kind in let s=s with { line=n.line } in
-    if kind==n_num() then s with { value=cg_value(n_t_i64(),int_text(n.a)) }
+    if len(s.apps)>0 && cg_listed(s.apps,id) then cg_app_leaf(m,fns,env,s,id)
+    else if kind==n_num() then s with { value=cg_value(n_t_i64(),int_text(n.a)) }
     else if kind==n_flt() then s with { value=cg_value(n_t_f64(),tx_hex("0x",n.a,16)) }
     else if kind==n_bool() then s with { value=cg_value(n_t_bool(),if n.a==0 then "false" else "true") }
     else if kind==n_byte() then s with { value=cg_value(n_t_u8(),int_text(n.a)) }
     else if kind==n_str() then cg_string(s,md_str(m,n.a))
     else if kind==n_var() then
       let binding=cg_binding(env,cg_binding_index(m,env,n.a)) in let value=binding.value in
-      if cg_listed(binding.moves,id) then s with { value=value } else cg_retain(s with { value=value },value)
+      if binding.lazy>=0 then cg_expr(m,fns,cg_scope(env,binding.depth),s,binding.lazy)
+      else if cg_listed(binding.moves,id) then s with { value=value } else cg_retain(s with { value=value },value)
     else if kind==n_if() then
       let chain=cg_switch_chain(m,env,id) in if len(chain.values)>=4 then cg_switch(m,fns,env,s,n,chain)
       else if !cg_listed(s.picks,id) then cg_if(m,fns,env,s,n) else
@@ -2725,6 +3031,8 @@ fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
         let s=cg_expr(m,fns,env,base.state,n.b) in if s.error>=0 then s else
         let loaded=cg_load_element(s,array,s.value) in cg_retain(loaded,loaded.value) in
       if base.borrowed || read.error>=0 then read else cg_release(read,array)
+    else if kind==n_let() && cg_deferred_let(m,env,s,n) then
+      cg_expr(m,fns,push(env,cg_bind(n.a,cg_unit()) with { lazy=n.b, depth=len(env) }),s,n.c)
     else if kind==n_let() then
       ; Another name for a lexical value shares that binding's reference; only
       ; a computed value is owned by the let and released after its body.
@@ -2878,18 +3186,33 @@ fn cg_retarget(borrow text:Arr u8 _, borrow from:Arr u8 _, borrow to:Arr u8 _) -
         str_find(rest,from).present)
       yield out
 
+; A function, followed by the word and appending copies concats ask for (fuse.neo).
+fn cg_function_add(move base:CgState, borrow more:CgState) -> CgState
+  = if more.error>=0 then base with { error=more.error }
+    else base with { text=concat(base.text,more.text), globals=concat(base.globals,more.globals) }
 fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool, shared:bool) -> CgState
-  = cg_function_mode(m,fns,id,entry,target,views,source_runtime,shared,tx_ints())
+  = let base=cg_function_mode(m,fns,id,entry,target,views,source_runtime,shared,tx_ints(),0) in
+    let bits=tx_byte(m.fused,id) in
+    if entry || base.error>=0 || bits<=0 then base else
+    let word=if bit_and(bits,1)==0 then base
+      else cg_function_add(base,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),1)) in
+    if bit_and(bits,2)==0 || word.error>=0 then word
+    else cg_function_add(word,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),2))
 ; par (rg_par_set): an entry calls main's par clone when main has one; any
 ; other function given a non-empty par is lowered as its par clone.
+; variant: 0 the function, 1 its word copy, 2 its appending copy (fuse.neo),
+; which take their parameters as the function's body does.
 fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool,
-                    shared:bool, borrow par:Arr i64 _) -> CgState
+                    shared:bool, borrow par:Arr i64 _, variant:i64) -> CgState
   = let f=md_node(m,id) in let result=cg_declaration(m,f.c) in let clone=!entry && len(par)>0 in
     let name=md_str(m,f.a) in let symbol=if entry then "@neo_entry" else if clone then cg_par_symbol(id) else cg_symbol(m,id) in
-    let diagnostic_id=if entry then len(m.ast.nodes)/11+id else if clone then 2*(len(m.ast.nodes)/11)+id else id in
+    let diagnostic_id=if entry then len(m.ast.nodes)/11+id else if clone then 2*(len(m.ast.nodes)/11)+id
+      else if variant>0 then (4+variant)*(len(m.ast.nodes)/11)+id else id in
     let start=CgState { text=tx_empty(), globals=tx_empty(), allocas=tx_empty(), serial=0, block=-1, value=cg_unit(), error=-1,
       function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id),
-      par=if clone then par else tx_ints(), lazy=false, pending=tx_empty(), tails=tx_ints(), again= -1, sure=false, picks=tx_ints(), flat=false } in
+      par=if clone then par else tx_ints(), lazy=false, pending=tx_empty(), tails=tx_ints(), again= -1, sure=false, picks=tx_ints(), flat=false,
+      words=if variant==1 then cg_word_tails(m,fns,f.d) else tx_ints(), apps=if variant==2 then fu_tails(m,f.d,true,tx_ints()) else tx_ints(),
+      pure=!ast_flag(f,fl_effect()) } in
     let runtime_export=source_runtime && ast_flag(f,fl_exported()) && start.runtime in
     if tc_abi_boundary(f) && cg_abi_reserved(name,len(target)>0,runtime_export) then start with { error=id } else
     if ast_flag(f,fl_external()) then cg_write(start,concat("declare ",cg_return(result)," ",symbol,"(",cg_abi_types(m,f),")\n")) else
@@ -2963,16 +3286,17 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
       else if ast_flag(f,fl_inline()) then " alwaysinline"
       else if !ast_flag(f,fl_effect()) && cg_short(finish.text,400) then " inlinehint" else "" in
     let lent=if clone then concat(symbol,".lent") else cg_lent_symbol(m,id) in
-    let header=concat("; fn ",name,"\ndefine ",linkage,cg_return(result)," ",if lends then lent else symbol,"(",p.text,")",
+    let taken=if variant!=2 then p.text else concat("%ax_arr %acc",if len(p.text)>0 then ", " else "",p.text) in
+    let header=concat("; fn ",name,"\ndefine ",linkage,cg_return(result)," ",cg_variant_symbol(if lends then lent else symbol,variant),"(",taken,")",
       if libc then " \"no-builtins\"" else "",policy," {\nentry:\n") in
-    let wrapper=if lends then cg_owning_wrapper(m,f,linkage,result,symbol,lent,p) else tx_empty() in
+    let wrapper=if lends && variant==0 then cg_owning_wrapper(m,f,linkage,result,symbol,lent,p) else tx_empty() in
     ; A short function that recurses inside its sum (cg_tails) is written out
     ; several levels deep: its recursive call goes to a copy that LLVM expands
     ; in place, whose call goes to the next such copy, and the last copy's call
     ; comes back here. One call then does the work of that many levels,
     ; without their entries and returns.
     let code=concat(finish.allocas,finish.text,"}\n\n") in let call=concat(" ",symbol,"(") in
-    let levels=if entry || lends || !str_find(finish.allocas,"%tail.total = alloca").present || !cg_short(finish.text,150) then 1
+    let levels=if entry || lends || variant>0 || !str_find(finish.allocas,"%tail.total = alloca").present || !cg_short(finish.text,150) then 1
       else cg_deep_levels(cg_occurrences(finish.text,call)) in
     if levels<2 then finish with { text=concat(header,code,wrapper) } else
     let stem=concat(" @neo_deep_",if clone then "p" else "",int_text(id),"_") in
@@ -3068,9 +3392,12 @@ fn cg_array_runtime(source_runtime:bool, counting:i64) -> Arr u8 _
 
 fn cg_view_runtime() -> Arr u8 _
   = concat("define internal %ax_arr @neo_own_view(%ax_arr %value) {\nentry:\n",
-      "  %control = extractvalue %ax_arr %value, 3\n  %borrowed = icmp eq ptr %control, null\n",
+      "  %control = extractvalue %ax_arr %value, 3\n  %unowned = icmp eq ptr %control, null\n",
+      ; Nothing to copy without data: an empty view, or a word (fuse.neo).
+      "  %data = extractvalue %ax_arr %value, 0\n  %present = icmp ne ptr %data, null\n",
+      "  %borrowed = and i1 %unowned, %present\n",
       "  br i1 %borrowed, label %copy, label %keep\nkeep:\n  ret %ax_arr %value\ncopy:\n",
-      "  %data = extractvalue %ax_arr %value, 0\n  %length = extractvalue %ax_arr %value, 1\n",
+      "  %length = extractvalue %ax_arr %value, 1\n",
       "  %owned = call ptr @ax_heap_alloc(i64 %length)\n",
       "  call void @llvm.memcpy.p0.p0.i64(ptr %owned, ptr %data, i64 %length, i1 false)\n",
       "  %header = getelementptr i8, ptr %owned, i64 -16\n",
@@ -3218,8 +3545,14 @@ fn cg_import_function(borrow m:Mods, id:i64) -> Arr u8 _
         concat(text,if i==0 then "" else ", ",cg_type_of(cg_declaration(m,p.b)))) yield text in
     let rest=if !ast_flag(f,fl_variadic()) then "" else if len(parameters)==0 then "..." else ", ..." in
     let result=cg_return(cg_declaration(m,f.c)) in
+    ; The word and appending copies a prepared library object holds for it (fuse.neo).
+    let bits=tx_byte(m.fused,id) in let body=if cg_lends(m,f) then cg_lent_symbol(m,id) else cg_symbol(m,id) in
     concat("declare ",if tc_abi_boundary(f) then "" else "hidden ",result," ",cg_symbol(m,id),"(",parameters,rest,")\n",
-      if cg_lends(m,f) then concat("declare hidden ",result," ",cg_lent_symbol(m,id),"(",parameters,")\n") else "")
+      if cg_lends(m,f) then concat("declare hidden ",result," ",cg_lent_symbol(m,id),"(",parameters,")\n") else "",
+      if bits>0 && bit_and(bits,1)!=0 then concat("declare hidden ",result," ",cg_variant_symbol(body,1),"(",parameters,")\n") else "",
+      if bits>0 && bit_and(bits,2)!=0 then
+        concat("declare hidden ",result," ",cg_variant_symbol(body,2),"(%ax_arr",if len(parameters)>0 then ", " else "",parameters,")\n")
+      else "")
 
 ; Reachability. An executable's module keeps only the functions that its
 ; entry point, its exported interface or the startup code can reach, so Clang
@@ -3228,7 +3561,10 @@ fn cg_import_function(borrow m:Mods, id:i64) -> Arr u8 _
 ; symbol after an '@'.
 ; units: the piece that defines each function node, or -1. names and owners:
 ; the ABI symbols and their pieces. roots: the pieces that are always kept.
-type CgPieces = { pieces:Arr Arr u8 _ _, report:TcReport, units:Arr i64 _, names:Arr Arr u8 _ _, owners:Arr i64 _, roots:Arr i64 _ }
+; imports: for each declaration of a function in another object, the
+; function and its piece.
+type CgPieces = { pieces:Arr Arr u8 _ _, report:TcReport, units:Arr i64 _, names:Arr Arr u8 _ _, owners:Arr i64 _, roots:Arr i64 _,
+                  imports:Arr i64 _ }
 type CgReach = { kept:Arr i64 _, queue:Arr i64 _ }
 
 ; A function that stays without a reference: a declaration, part of the
@@ -3256,9 +3592,49 @@ fn cg_piece_par(move p:CgPieces, id:i64, borrow function:CgState) -> CgPieces
 ; module refers to its symbol.
 fn cg_piece_import(borrow m:Mods, move p:CgPieces, id:i64) -> CgPieces
   = let index=len(p.pieces) in let symbol=cg_symbol(m,id) in
-    let p=p with { pieces=push(p.pieces,cg_import_function(m,id)) } in
+    let p=p with { pieces=push(p.pieces,cg_import_function(m,id)), imports=push(push(p.imports,id),index) } in
     if len(symbol)<3 || tx_byte(symbol,1)!=34 then p with { roots=push(p.roots,index) }
     else p with { names=push(p.names,pt_slice(symbol,2,len(symbol)-1)), owners=push(p.owners,index) }
+
+; Bodies for a prepared library's short functions. A program built against
+; a prepared library object (library_cache.neo) calls its functions across
+; the object boundary, so LLVM could not expand int_text or a string helper
+; in place as it does when the library is lowered with the program. The
+; short pure functions of that object which the program refers to are
+; therefore lowered here as well, as bodies LLVM may expand and then drops
+; (available_externally); the object still holds the functions themselves.
+; A body may refer to more such functions, which get bodies in the next
+; round. The runtime's own functions keep their declarations.
+; state: per piece, 0 the program's own text or a body, 2 a declaration not
+; looked at yet, 3 one that stays a declaration.
+type CgBodies = { p:CgPieces, state:Arr i64 _, changed:bool }
+fn cg_import_body(borrow m:Mods, borrow fns:Arr i64 _, borrow target:Arr u8 _, views:bool, source_runtime:bool,
+                  move b:CgBodies, id:i64, index:i64) -> CgBodies
+  = let f=md_node(m,id) in
+    if index<0 || index>=len(b.state) || index>=len(b.p.pieces) then b
+    else if tc_abi_boundary(f) || ast_flag(f,fl_variadic()) || f.d<0 || cg_runtime_owner(m,id) then b with { state=set(b.state,index,3) } else
+    let body=cg_function(m,fns,id,false,target,views,source_runtime,true) in
+    if body.error>=0 || !(str_find(body.text,") inlinehint {").present || str_find(body.text,") alwaysinline {").present) then
+      b with { state=set(b.state,index,3) }
+    else let text=cg_retarget(concat(body.globals,body.text),"define hidden ","define available_externally hidden ") in
+      let state=set(b.state,index,0) in let p=b.p in let pieces=p.pieces in
+      CgBodies { p=p with { pieces=set(pieces,index,text) }, state=state, changed=true }
+fn cg_import_round(borrow m:Mods, borrow fns:Arr i64 _, borrow target:Arr u8 _, views:bool, source_runtime:bool, move b:CgBodies) -> CgBodies
+  = let none=CgReach { kept=arr(i in 0..len(b.p.pieces)) 0, queue=tx_ints() } in
+    let reach=loop (i=0, r=none) while i<len(b.p.pieces)
+      next (i+1,if tx_at(b.state,i)!=0 then r else cg_reach_scan(md_word(b.p.pieces,i),b.p,r)) yield r in
+    let imports=b.p.imports in
+    loop (k=0, out=b with { changed=false }) while k+1<len(imports)
+      next (k+2,let index=tx_at(imports,k+1) in
+        if tx_at(out.state,index)!=2 || tx_at(reach.kept,index)!=1 then out
+        else cg_import_body(m,fns,target,views,source_runtime,out,tx_at(imports,k),index)) yield out
+fn cg_import_bodies(borrow m:Mods, borrow fns:Arr i64 _, borrow target:Arr u8 _, views:bool, source_runtime:bool, move p:CgPieces) -> CgPieces
+  = let imports=p.imports in
+    let state=loop (k=0, s=arr(i in 0..len(p.pieces)) 0) while k+1<len(imports)
+      next (k+2,let index=tx_at(imports,k+1) in if index>=0 && index<len(s) then set(s,index,2) else s) yield s in
+    let done=loop (round=0, b=CgBodies { p=p, state=state, changed=true }) while b.changed && round<4
+      next (round+1,cg_import_round(m,fns,target,views,source_runtime,b)) yield b in
+    done.p
 
 fn cg_reach_mark(move r:CgReach, piece:i64) -> CgReach
   = if piece<0 || piece>=len(r.kept) || tx_at(r.kept,piece)==1 then r
@@ -3276,6 +3652,8 @@ fn cg_reach_symbol(borrow text:Arr u8 _, at:i64, borrow p:CgPieces) -> i64
     ; An ABI symbol is written with or without quotes.
     let end=loop (j=start) while j<len(text) && (if quoted then tx_byte(text,j)!=34 else cg_reach_word(tx_byte(text,j)))
       next (j+1) yield j in
+    let end=if end-start>4 && bytes_match_at(text,end-4,".app") then end-4
+      else if end-start>5 && bytes_match_at(text,end-5,".word") then end-5 else end in
     let stop=if end-start>5 && bytes_match_at(text,end-5,".lent") then end-5 else end in
     loop (k=0, found=-1) while found<0 && k<len(p.names)
       next (k+1,let name=md_word(p.names,k) in
@@ -3375,8 +3753,20 @@ fn cg_wide_runtime(borrow text:Arr u8 _, wide:bool) -> Arr u8 _
       "  store atomic i8 %state, ptr @ax_cpu_wide_state monotonic, align 1\n  br label %done\n",
       "done:\n  %final = phi i8 [ %known, %entry ], [ %state, %store ]\n  %wide = icmp uge i8 %final, 2\n  ret i1 %wide\n}\n")
 fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool,
-                   borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _, wide:bool) -> CgProgram
+                   borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _, wide:bool, fused:bool) -> CgProgram
   = let fns=tc_functions(m) in let m=m with { handed=cg_handed(m,fns) } in
+    ; The functions with word and appending copies (fuse.neo): 1 for those
+    ; this module lowers for the program, which get the copies its concats ask
+    ; for, and 2 for those of a prepared library object, whether this module
+    ; is that object or calls into it, which have every copy they can have.
+    let here=loop (k=0, t=arr(i in 0..len(m.ast.nodes)/11) u8(0)) while k<len(m.paths)
+      next (k+1,let chosen=tx_at(selected,k)==1 in
+        let mode=if partition==2 then (if chosen then 2 else 0) else if partition==1 && chosen then 2 else 1 in
+        if mode==0 then t else let ids=md_list(m.fns,k) in
+        loop (i=0, out=t) while i<len(ids)
+          next (i+1,let id=tx_at(ids,i) in if id>=0 && id<len(out) then set(out,id,u8(mode)) else out) yield out) yield t in
+    ; Escaped parts are written by the runtime's ax_esc_write.
+    let m=m with { fused=if fused && md_find_decl(m,fns,bk_get(m.base,0,"ax_esc_write"))>=0 then fu_table(m,fns,here) else tx_empty() } in
     let runtime=if source_runtime then cg_runtime_check(m,fns) else TcReport { result=tc_type(n_t_unit()), module=-1 } in
     if runtime.result.value.ty<=0 then CgProgram { text=tx_empty(), report=runtime } else
     let views=loop (i=0, found=partition!=0) while !found && i<len(m.ast.nodes)/11
@@ -3406,7 +3796,7 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     let start=cg_records(m,CgProgram { text=header, report=TcReport { result=tc_type(n_t_unit()), module=-1 } },
       partition==2 && len(m.shared)>0) in
     let first=CgPieces { pieces=push(md_words(),start.text),report=start.report,units=arr(i in 0..len(m.ast.nodes)/11) -1,
-      names=md_words(),owners=tx_ints(),roots=push(tx_ints(),0) } in
+      names=md_words(),owners=tx_ints(),roots=push(tx_ints(),0),imports=tx_ints() } in
     let p=loop (k=0, p=first)
       while p.report.result.value.ty>0 && k<len(m.paths)
       next (k+1,if !cg_partition_module(selected,k,partition) then p else let ids=md_list(m.fns,k) in
@@ -3417,17 +3807,18 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
             if function.error>=0 then out with { report=TcReport { result=tc_unsupported(function.error,"LLVM lowering outside the supported subset"), module=k } }
             else cg_piece_function(m,out,id,function)) yield out) yield p in
     if p.report.result.value.ty<=0 then CgProgram { text="",report=p.report } else
+    let p=if partition==1 && m.stable_symbols && len(m.fused)>0 then cg_import_bodies(m,fns,target,views,source_runtime,p) else p in
     let module=md_entry_module(m) in let id=md_find_decl(m,fns,bk_get(m.local,module,"main")) in
     ; Par clones (regions.neo) for a whole program or its part, built with
     ; the runtime's source, for Linux: the shared dispatcher needs its threads.
     let par=if partition==2 || !source_runtime || !str_find(target,"-linux").present then tx_ints() else rg_par_set(m,fns,id) in
     let p=loop (k=0, out=p) while out.report.result.value.ty>0 && k<len(par)
       next (k+1,if tx_at(par,k)!=1 then out else
-        let clone=cg_function_mode(m,fns,k,false,target,views,source_runtime,false,par) in
+        let clone=cg_function_mode(m,fns,k,false,target,views,source_runtime,false,par,0) in
         if clone.error>=0 then out with { report=TcReport { result=tc_unsupported(clone.error,"LLVM lowering outside the supported subset"), module=module } }
         else cg_piece_par(out,k,clone)) yield out in
     if p.report.result.value.ty<=0 then CgProgram { text="",report=p.report } else
-    let entry=if partition==2 then p else let code=cg_function_mode(m,fns,id,true,target,views,source_runtime,false,par) in
+    let entry=if partition==2 then p else let code=cg_function_mode(m,fns,id,true,target,views,source_runtime,false,par,0) in
       if code.error>=0 then p with { report=TcReport { result=tc_unsupported(code.error,"LLVM lowering outside the supported subset"), module=module } }
       else cg_piece_function(m,p,-1,code) in
     if entry.report.result.value.ty<=0 then CgProgram { text="",report=entry.report } else
@@ -3436,7 +3827,8 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     let text=if str_find(text,"@neo_sort_small(").present then concat(text,sk_module(str_starts(target,"x86_64-"))) else text in
     let text=concat(text,na_runtime(target,text,partition),na_crypto(target,text),cg_wide_runtime(text,wide),
       if !source_runtime && str_find(text,"call ptr @ax_alloc(").present then "declare ptr @ax_alloc(i64)\n" else "",
-      if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "") in
+      if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "",
+      if !source_runtime && str_find(text,"@ax_esc_len(").present then "declare i64 @ax_esc_len(ptr, i64)\ndeclare void @ax_esc_write(ptr, ptr, i64)\n" else "") in
     ; Threads start only through spawn_thread, so a whole program that never
     ; calls it has one thread and needs no atomic reference counts. An object
     ; linked with others tests the flag spawn_thread sets, unless it is the
@@ -3459,4 +3851,4 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     CgProgram { text=concat(text,cg_array_helpers(text,source_runtime,counting),noted,heap,hints),report=entry.report }
 
 fn cg_program(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool, source_runtime:bool) -> CgProgram
-  = cg_program_part(m,target,allocation_stats,source_runtime,tx_ints(),0,"",true)
+  = cg_program_part(m,target,allocation_stats,source_runtime,tx_ints(),0,"",true,true)

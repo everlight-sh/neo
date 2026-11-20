@@ -286,6 +286,33 @@ a partial result on the way does. When the function is short, the calls to
 itself that remain (`fib(n - 1)`) are written out in place several levels
 deep (eight levels for one such call, three for two, two for three), so one
 real call does the work of that many.
+Text is built in place. A `concat` computes the size of its whole result,
+makes room once, and writes each part straight into it:
+- `int_text(n)` among the parts is stored as its digits and has no array of
+  its own. So has any function that ends in the first bytes of a word,
+  `byte_slice(byte_write_le("00000000", 0, packed, 8), 0, length)`: as a part
+  of a concat it hands those bytes back in a register.
+- A function that ends in a `concat`, or in a call of such a function, is
+  handed the text so far and puts its own text after it. So is a loop that
+  only ever puts text after one of its states and yields that state, as
+  `loop (out = "", i = 0) while i < n next (concat(out, row(i)), i + 1) yield
+  out` does: `concat(head, rows(n), tail)` builds no row and no list of rows
+  of its own.
+- `html_escape(text)` among the parts is counted first and then written,
+  escaped, into the result. `html_escape(concat(a, b))` is written as the
+  escaped `a` and the escaped `b`.
+- In a function without effects, a `let` that names a `concat` and is read
+  once by the concat its body ends in (as a part, or as the only argument of
+  a part) is not built: its parts are read where the name is.
+
+The text is the one the parts give one by one. Only a `let` of the last kind
+runs at another moment, where it is read, so which of two traps comes first
+can differ. A concat that stores a number or escaped text this way asks for
+eight bytes more than its text, as it writes them a whole word at a time.
+`NEO_FUSE=0` at build time builds every part on its own, as before. A
+prepared library object (`--library-cache`) holds these forms of its
+functions too, so a program built against one builds its text the same way.
+
 Bitwise operations, logical shifts and arithmetic right shift operate on exact
 64-bit patterns; shift counts are masked modulo 64. Casts to u8/i32 keep low bits.
 Array bounds/division/refinement obligations must be proven or guarded by `check`.

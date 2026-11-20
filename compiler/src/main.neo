@@ -60,9 +60,9 @@ effect fn cli_ir(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, bor
 
 effect fn cli_ir_part(borrow m:Mods, borrow target:Arr u8 _, source_runtime:bool, borrow format:Arr u8 _,
                       borrow selected:Arr i64 _, partition:i64, borrow startup:Arr u8 _) -> Arr u8 _
-  = let stats=env_get("NEO_ALLOC_STATS") in let narrow=env_get("NEO_WIDE") in
+  = let stats=env_get("NEO_ALLOC_STATS") in let narrow=env_get("NEO_WIDE") in let apart=env_get("NEO_FUSE") in
     let compiled=cg_program_part(m,target,stats.present && tx_equal(stats.value,"1"),source_runtime,selected,partition,startup,
-      !(narrow.present && tx_equal(narrow.value,"0"))) in
+      !(narrow.present && tx_equal(narrow.value,"0")),!(apart.present && tx_equal(apart.value,"0"))) in
     let checked=if compiled.report.result.value.ty<=0 then check_output(m,compiled.report,format) else noop() in compiled.text
 
 fn cli_usage() -> Arr u8 _

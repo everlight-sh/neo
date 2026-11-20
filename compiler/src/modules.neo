@@ -56,7 +56,10 @@ type Mods = { stdlib:Arr u8 _, runtime:Arr u8 _, entry:Arr u8 _,
               threaded:Arr u8 _,
               ; handed: a byte per node, 1 for a parameter that the code generator owns
               ; because its function hands it on (cg_handed); empty before lowering.
-              handed:Arr u8 _ }
+              handed:Arr u8 _,
+              ; fused: a byte per node, bit 1 for a function with a word copy and bit 2
+              ; for one with an appending copy (fuse.neo); empty before lowering.
+              fused:Arr u8 _ }
 
 fn md_words() -> Arr Arr u8 _ _ = tx_words()
 fn md_lists() -> Arr Arr i64 _ _ = arr(i in 0..0) tx_ints()
@@ -437,7 +440,7 @@ effect(fs,unsafe) fn md_load_overlay(borrow root:Arr u8 _, borrow entry:Arr u8 _
                  active=md_words(), done=hashmap_empty::<Arr u8 _,i64>(29,31),
                  paths=md_words(), toks=md_lists(), texts=md_words(), sources=md_words(), imports=md_lists(), aliases=md_words(),
                  ast=ast_empty(), types=md_lists(), fns=md_lists(), prefixes=md_words(), canon=tx_ints(), display=tx_ints(), owners=tx_ints(),
-                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1,stable_symbols=false,shared=tx_ints(),threaded=tx_empty(),handed=tx_empty() } in
+                 local=bk_empty(), imported=bk_empty(), surface=bk_empty(), base=bk_empty(), builtins=md_builtins(), result=-1,stable_symbols=false,shared=tx_ints(),threaded=tx_empty(),handed=tx_empty(),fused=tx_empty() } in
     let count=md_runtime_count(target) in
     let m=loop (s=m, k=0) while s.ok && k<count
       next (md_visit(s,pt_realpath(pt_join(s.runtime,md_runtime_file(k,target))),tx_empty(),1,1), k+1) yield s in

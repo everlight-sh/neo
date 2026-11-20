@@ -286,6 +286,9 @@ The object cache keys include dependency sources, generated IR and ABI, the
 target, Clang, and optimization level. The compiler verifies artifact hashes
 before linking and checks the source program on every build. `--no-cache`
 rebuilds the prepared object. Prepared libraries require fully checked code.
+The short pure functions of the object that a program calls are also lowered
+into the program, where LLVM expands them in place, so a helper such as
+`int_text` is as fast as when the library is built with the program.
 The Python reference compiler also kept library inlining hints (`hints.ll`)
 and answered unchanged rebuilds from a record (`NEO_QUICK`); it is in the
 `v0.2.4` tag.

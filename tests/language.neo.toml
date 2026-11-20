@@ -348,6 +348,18 @@ stdin-file = "vectors/vector_sort_shapes/runs.in"
 stdout = "vector_sort_shapes.neo: 445 runs OK\n"
 timeout = 600
 
+# Text built in place: a concat writes numbers, escaped text and the text of
+# the functions and loops among its parts straight into its result, and the
+# result is the text those parts give one by one. A page of rows allocates
+# only as its buffer grows, and no part's buffer is kept.
+[[test]]
+name = "text-in-place"
+file = "drivers/language_sweep.neo"
+args = ["fixtures/text_in_place.neo", "NEO_ALLOC_STATS=1"]
+stdin-file = "vectors/text_in_place/runs.in"
+stdout = "text_in_place.neo: 28 runs OK\n"
+timeout = 300
+
 # word_bytes.py: owned little-endian word bytes for short, large and signed words.
 [[test]]
 name = "word-bytes"

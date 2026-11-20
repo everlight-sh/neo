@@ -33,14 +33,36 @@ fn html_scan (text: Arr u8 n, from: i64{from >= 0, from <= n}) -> i64 {result >=
       next (i + 8) yield i in
     loop (i: i64{i >= from, i <= n} = word, found = false) while !found && i < n
       next (if html_special(text[i]) then i else i + 1, html_special(text[i])) yield i
-; Escapes & < > " ' for HTML text and attribute values. Text without them is
-; returned as is; otherwise unchanged runs between special bytes are appended whole.
+; For each byte, what escaping does to it: in the low three bits which of
+; & < > " ' it is (1 to 5, 0 for any other byte), and above them how many
+; bytes longer it is once escaped. Then the five escaped forms, eight bytes
+; each, at eight times that number.
+private fn html_kinds () -> Arr u8 _
+  = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x54\0\0\0\x41\x55\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x32\0\x33\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+private fn html_forms () -> Arr u8 _
+  = "\0\0\0\0\0\0\0\0\x26\x61\x6d\x70\x3b\0\0\0\x26\x6c\x74\x3b\0\0\0\0\x26\x67\x74\x3b\0\0\0\0\x26\x71\x75\x6f\x74\x3b\0\0\x26\x23\x78\x32\x37\x3b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+; Escapes & < > " ' for HTML text and attribute values. Among the parts of a
+; concat the compiler writes the escaped text straight into the result
+; (compiler/src/fuse.neo; the runtime's ax_esc_len and ax_esc_write hold
+; these same tables, so the two must change together). Text without the five
+; bytes is returned as is. Otherwise the escaped length is counted first and the text
+; is written once into a buffer of that size: what comes before the first
+; special byte as it is, then each byte as one eight-byte store of its
+; escaped form, the next byte's store covering what it does not need. The
+; buffer has eight bytes more than the text for the last of those stores.
 fn html_escape (text: Arr u8 n) -> Arr u8 _
   = let first = html_scan(text, 0) in
     if first == n then text else
-    loop (run: i64{run >= 0, run <= n} = 0, at: i64{at >= run, at <= n} = first, out = "") while at < n
-      next (at + 1, html_scan(text, at + 1), concat(out, byte_slice(text, run, at), html_entity(text[at])))
-      yield concat(out, byte_slice(text, run, n))
+    let extra = loop (i: i64{i >= first, i <= n} = first, total = 0) while i < n
+      next (i + 1, total + shift_right(byte_read_le(html_kinds(), i64(text[i]), 1), 4)) yield total in
+    check extra >= 0 in
+    let filled = loop (i: i64{i >= first, i <= n} = first, at = first,
+        out = byte_copy(arr(k in 0..n + extra + 8) u8(0), 0, byte_slice(text, 0, first))) while i < n
+      next (i + 1, at + 1 + shift_right(byte_read_le(html_kinds(), i64(text[i]), 1), 4),
+        let kind = bit_and(byte_read_le(html_kinds(), i64(text[i]), 1), 7) in
+        byte_write_le(out, at, bit_or(byte_read_le(html_forms(), kind * 8, 8), if kind == 0 then i64(text[i]) else 0), 8))
+      yield out in
+    byte_slice(filled, 0, n + extra)
 
 type HttpHeaderState = { valid: bool, length: i64, has_length: bool, chunked: bool, has_encoding: bool }
 type HttpChunk = { valid: bool, done: bool, offset: i64, body: Arr u8 _ }
