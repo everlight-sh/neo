@@ -29,7 +29,10 @@ type CgBinding = { name:i64, value:CgValue, live:Arr u8 _, moves:Arr i64 _, part
 type CgState = { text:Arr u8 _, globals:Arr u8 _, allocas:Arr u8 _, serial:i64, block:i64, value:CgValue, error:i64,
                  function:i64, name:Arr u8 _, line:i64, target:Arr u8 _, views:bool, runtime:bool,
                  par:Arr i64 _, lazy:bool, pending:Arr u8 _, tails:Arr i64 _, again:i64, sure:bool, picks:Arr i64 _, flat:bool,
-                 words:Arr i64 _, apps:Arr i64 _, pure:bool }
+                 words:Arr i64 _, apps:Arr i64 _, pure:bool, escs:Arr i64 _ }
+; escs: the expressions lowered escaped for HTML: a literal as its escaped
+; text, a call as a call of the function's escaped copy (fuse.neo). In an
+; escaped copy they are the expressions its result comes from.
 ; pure: the function has no effects, so when its expressions run cannot be told.
 ; words: in a function's word copy, the expressions its result comes from
 ; that are lowered as words (cg_word) or as calls of word copies.
@@ -1392,7 +1395,8 @@ fn cg_reference(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _,
     let s=cg_ins_value(s,result,concat("load ",cg_type_of(result),", ptr ",box,", align 8")) in cg_retain(s,s.value)
 
 ; A direct call of a function by its symbol. variant: 0 the function, 1 its
-; word copy, 2 its appending copy, which takes the text so far, acc, first.
+; word copy, 2 its appending copy, which takes the text so far, acc, first,
+; 3 its escaped copy.
 fn cg_direct(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64, n:Node,
              variant:i64, borrow acc:CgValue) -> CgState
   = let callee=md_find_decl(m,fns,n.a) in let result=cg_declaration(m,md_node(m,callee).c) in
@@ -1440,7 +1444,7 @@ fn cg_fused_push(move f:CgFused, move s:CgState, move pieces:Arr CgPiece _, owne
 fn cg_no_pieces() -> Arr CgPiece _ = arr(i in 0..0) cg_no_piece()
 fn cg_piece(borrow pieces:Arr CgPiece _, i:i64) -> CgPiece = if i>=0 && i<len(pieces) then pieces[i] else cg_no_piece()
 fn cg_variant_symbol(borrow symbol:Arr u8 _, variant:i64) -> Arr u8 _
-  = let suffix=if variant==1 then ".word" else if variant==2 then ".app" else "" in let size=len(symbol) in
+  = let suffix=if variant==1 then ".word" else if variant==2 then ".app" else if variant==3 then ".esc" else "" in let size=len(symbol) in
     if size>1 && tx_byte(symbol,size-1)==34 then concat(pt_slice(symbol,0,size-1),suffix,"\"") else concat(symbol,suffix)
 ; How a part of a concat is read: 0 as a value, 1 the word pattern, 2 a call
 ; of a word copy, 3 a call of an appending copy, 4 a concat. A function
@@ -1470,6 +1474,22 @@ fn cg_html_escaped(borrow text:Arr u8 _) -> Arr u8 _
       next (i+1,let b=tx_byte(text,i) in
         if b==38 then concat(out,"&amp;") else if b==60 then concat(out,"&lt;") else if b==62 then concat(out,"&gt;")
         else if b==34 then concat(out,"&quot;") else if b==39 then concat(out,"&#x27;") else push(out,u8(b))) yield out
+; Text whose escaping is known at build time: a literal, or an if, let,
+; check or call all of whose results are literals or come from functions
+; with an escaped copy (fu_static), none of them called through a binding.
+fn cg_static(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, id:i64) -> bool
+  = let kind=md_node(m,id).kind in
+    if kind!=n_str() && kind!=n_if() && kind!=n_let() && kind!=n_check() && kind!=n_call() then false
+    else if !fu_static(m,fns,id) then false else
+    let tails=fu_tails(m,id,false,tx_ints()) in
+    loop (i=0, ok=true) while ok && i<len(tails)
+      next (i+1,let n=md_node(m,tx_at(tails,i)) in n.kind==n_str() || cg_lookup(m,env,n.a).ty!=n_t_fn()) yield ok
+; Such text, escaped: its literals are lowered as their escaped texts and
+; its calls go to escaped copies. Nothing is escaped when the program runs.
+fn cg_escaped_static(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move s:CgState, id:i64) -> CgState
+  = let outer=s.escs in
+    let lowered=cg_expr(m,fns,env,s with { escs=fu_tails(m,id,false,tx_ints()) },id) in
+    lowered with { escs=outer }
 ; The bindings that were in scope where a lazy binding was made.
 fn cg_scope(borrow env:Arr CgBinding _, depth:i64) -> Arr CgBinding _
   = loop (i=0, out=arr(j in 0..0) cg_bind(-1,cg_unit())) while i<depth && i<len(env) next (i+1,push(out,cg_binding(env,i))) yield out
@@ -1648,6 +1668,11 @@ fn cg_fused_escape(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding
       let text=cg_html_escaped(md_str(m,n.a)) in if len(text)==0 then f else
       let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in let s=cg_string(f.state,text) in
       cg_fused_push(f,s,pieces,false,false,true)
+    else if cg_static(m,fns,env,id) then
+      ; Known at build time: the escaped text itself is the part.
+      let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in
+      let s=cg_escaped_static(m,fns,env,f.state,id) in if s.error>=0 then f with { state=s, pieces=pieces } else
+      cg_fused_push(f,s,pieces,true,false,false)
     else
       let pieces=f.pieces in let f=f with { pieces=cg_no_pieces() } in
       let taken=first && n.kind==n_var() && cg_listed(binding.moves,id) in
@@ -1743,7 +1768,11 @@ fn cg_call(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
       cg_intrinsic(args.state,name,args.values,signature.result,id)
     else let callback=cg_lookup(m,env,n.a) in
     if callback.ty==n_t_fn() then cg_indirect(m,fns,env,s,n,callback) else
-    cg_direct(m,fns,env,s,id,n,if len(s.words)>0 && cg_listed(s.words,id) then 1 else 0,cg_unit())
+    ; html_escape of text that is known at build time is that text, escaped then.
+    if len(m.fused)>0 && tx_equal(name,"html_escape") && ast_list_len(m.ast,n.b)==1 && cg_escape(m,fu_user(m,fns,id)) &&
+      cg_static(m,fns,env,ast_list_at(m.ast,n.b,0)) then cg_escaped_static(m,fns,env,s,ast_list_at(m.ast,n.b,0)) else
+    cg_direct(m,fns,env,s,id,n,if len(s.words)>0 && cg_listed(s.words,id) then 1
+      else if len(s.escs)>0 && cg_listed(s.escs,id) then 3 else 0,cg_unit())
 
 type CgRange = { header:i64, work:i64, latch:i64, done:i64, iterator:Arr u8 _, successor:Arr u8 _, lo:Arr u8 _, hi:Arr u8 _ }
 fn cg_counted_head(move s:CgState, borrow r:CgRange, borrow other_phi:Arr u8 _) -> CgState
@@ -3003,7 +3032,8 @@ fn cg_expr(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     else if kind==n_flt() then s with { value=cg_value(n_t_f64(),tx_hex("0x",n.a,16)) }
     else if kind==n_bool() then s with { value=cg_value(n_t_bool(),if n.a==0 then "false" else "true") }
     else if kind==n_byte() then s with { value=cg_value(n_t_u8(),int_text(n.a)) }
-    else if kind==n_str() then cg_string(s,md_str(m,n.a))
+    else if kind==n_str() then
+      cg_string(s,if len(s.escs)>0 && cg_listed(s.escs,id) then cg_html_escaped(md_str(m,n.a)) else md_str(m,n.a))
     else if kind==n_var() then
       let binding=cg_binding(env,cg_binding_index(m,env,n.a)) in let value=binding.value in
       if binding.lazy>=0 then cg_expr(m,fns,cg_scope(env,binding.depth),s,binding.lazy)
@@ -3196,12 +3226,15 @@ fn cg_function(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow t
     if entry || base.error>=0 || bits<=0 then base else
     let word=if bit_and(bits,1)==0 then base
       else cg_function_add(base,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),1)) in
-    if bit_and(bits,2)==0 || word.error>=0 then word
-    else cg_function_add(word,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),2))
+    let app=if bit_and(bits,2)==0 || word.error>=0 then word
+      else cg_function_add(word,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),2)) in
+    if bit_and(bits,4)==0 || app.error>=0 then app
+    else cg_function_add(app,cg_function_mode(m,fns,id,false,target,views,source_runtime,shared,tx_ints(),3))
 ; par (rg_par_set): an entry calls main's par clone when main has one; any
 ; other function given a non-empty par is lowered as its par clone.
-; variant: 0 the function, 1 its word copy, 2 its appending copy (fuse.neo),
-; which take their parameters as the function's body does.
+; variant: 0 the function, 1 its word copy, 2 its appending copy, 3 its
+; escaped copy (fuse.neo), which take their parameters as the function's
+; body does.
 fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, borrow target:Arr u8 _, views:bool, source_runtime:bool,
                     shared:bool, borrow par:Arr i64 _, variant:i64) -> CgState
   = let f=md_node(m,id) in let result=cg_declaration(m,f.c) in let clone=!entry && len(par)>0 in
@@ -3212,7 +3245,7 @@ fn cg_function_mode(borrow m:Mods, borrow fns:Arr i64 _, id:i64, entry:bool, bor
       function=diagnostic_id, name=name, line=f.line, target=target, views=views, runtime=cg_runtime_owner(m,id),
       par=if clone then par else tx_ints(), lazy=false, pending=tx_empty(), tails=tx_ints(), again= -1, sure=false, picks=tx_ints(), flat=false,
       words=if variant==1 then cg_word_tails(m,fns,f.d) else tx_ints(), apps=if variant==2 then fu_tails(m,f.d,true,tx_ints()) else tx_ints(),
-      pure=!ast_flag(f,fl_effect()) } in
+      pure=!ast_flag(f,fl_effect()), escs=if variant==3 then fu_tails(m,f.d,false,tx_ints()) else tx_ints() } in
     let runtime_export=source_runtime && ast_flag(f,fl_exported()) && start.runtime in
     if tc_abi_boundary(f) && cg_abi_reserved(name,len(target)>0,runtime_export) then start with { error=id } else
     if ast_flag(f,fl_external()) then cg_write(start,concat("declare ",cg_return(result)," ",symbol,"(",cg_abi_types(m,f),")\n")) else
@@ -3552,7 +3585,8 @@ fn cg_import_function(borrow m:Mods, id:i64) -> Arr u8 _
       if bits>0 && bit_and(bits,1)!=0 then concat("declare hidden ",result," ",cg_variant_symbol(body,1),"(",parameters,")\n") else "",
       if bits>0 && bit_and(bits,2)!=0 then
         concat("declare hidden ",result," ",cg_variant_symbol(body,2),"(%ax_arr",if len(parameters)>0 then ", " else "",parameters,")\n")
-      else "")
+      else "",
+      if bits>0 && bit_and(bits,4)!=0 then concat("declare hidden ",result," ",cg_variant_symbol(body,3),"(",parameters,")\n") else "")
 
 ; Reachability. An executable's module keeps only the functions that its
 ; entry point, its exported interface or the startup code can reach, so Clang
@@ -3652,7 +3686,7 @@ fn cg_reach_symbol(borrow text:Arr u8 _, at:i64, borrow p:CgPieces) -> i64
     ; An ABI symbol is written with or without quotes.
     let end=loop (j=start) while j<len(text) && (if quoted then tx_byte(text,j)!=34 else cg_reach_word(tx_byte(text,j)))
       next (j+1) yield j in
-    let end=if end-start>4 && bytes_match_at(text,end-4,".app") then end-4
+    let end=if end-start>4 && (bytes_match_at(text,end-4,".app") || bytes_match_at(text,end-4,".esc")) then end-4
       else if end-start>5 && bytes_match_at(text,end-5,".word") then end-5 else end in
     let stop=if end-start>5 && bytes_match_at(text,end-5,".lent") then end-5 else end in
     loop (k=0, found=-1) while found<0 && k<len(p.names)

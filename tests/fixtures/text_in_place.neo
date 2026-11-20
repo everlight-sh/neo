@@ -10,7 +10,8 @@
 ; 5 a page's allocation requests (build with NEO_ALLOC_STATS=1), 6 `a` rounds
 ; of small texts whose parts are last uses, which must not grow the resident
 ; set (read from /proc/self/statm where it exists), 7 a list of `a` fragments
-; joined by halves, and its allocation requests.
+; joined by halves, and its allocation requests, 8 html_escape of texts
+; that are known at build time.
 ; Prints "<length> <checksum> OK", or the problem.
 import "std:io"
 import "std:strings"
@@ -130,6 +131,30 @@ fn every_byte () -> Arr u8 _ = let all = arr(i in 0..256) u8(i) in concat("{", h
 fn slow_every_byte () -> Arr u8 _
   = let all = arr(i in 0..256) u8(i) in slow_join(slow_join(slow_join("{", slow_escape(all)), "}"), slow_escape(all))
 
+; html_escape of text known at build time: a function or an `if` that can
+; only give literals is escaped then. kind_or_word can also give a text that
+; is not a literal, so it is escaped when the program runs.
+fn kind_text (k : i64) -> Arr u8 _
+  = let m = k % 6 in
+    if m == 0 then "R&D" else if m == 1 then "<none>" else if m == 2 then "it's" else if m == 3 then "\"quoted\""
+    else if m == 4 then "plain" else ""
+fn kind_twice (k : i64) -> Arr u8 _ = if k % 3 == 0 then "a<b" else check k >= 0 in let after = k + 1 in kind_text(after)
+fn kind_or_word (k : i64) -> Arr u8 _ = if k % 2 == 0 then kind_text(k / 2) else let text = concat(word(k), "&") in text
+fn known (k : i64) -> Arr u8 _
+  = let alone = html_escape(kind_twice(k)) in
+    concat("[", html_escape(kind_text(k)), "|", html_escape(if k % 2 == 0 then "x & y" else "<z>"), "|",
+      html_escape(kind_or_word(k)), "|", alone, "|", html_escape(kind_twice(k + 1)), "|", html_escape("a\"b"), "]")
+fn slow_known (k : i64) -> Arr u8 _
+  = let one = slow_join(slow_join("[", slow_escape(kind_text(k))), "|") in
+    let two = slow_join(slow_join(one, slow_escape(if k % 2 == 0 then "x & y" else "<z>")), "|") in
+    let three = slow_join(slow_join(two, slow_escape(kind_or_word(k))), "|") in
+    let four = slow_join(slow_join(three, slow_escape(kind_twice(k))), "|") in
+    slow_join(slow_join(slow_join(four, slow_escape(kind_twice(k + 1))), "|a&quot;b"), "]")
+fn all_known (count : i64) -> Arr u8 _
+  = loop (k = 0, out = "") while k < count next (k + 1, concat(out, known(k), "\n")) yield out
+fn slow_all_known (count : i64) -> Arr u8 _
+  = loop (k = 0, out = "") while k < count next (k + 1, slow_join(slow_join(out, slow_known(k)), "\n")) yield out
+
 ; Texts that share or hand on their parts.
 fn stamp (move t : Arr u8 n) -> Arr u8 n = if n > 0 then set(t, 0, '#') else t
 fn itself (t : Arr u8 n) -> Arr u8 n = t
@@ -207,6 +232,7 @@ effect(fs,unsafe) fn main (mode : i64, a : i64, b : i64) -> unit
       else if mode == 2 then report(concat(escapes(a, b), every_byte()), slow_join(slow_escapes(a, b), slow_every_byte()))
       else if mode == 3 then (let failed = parts(a) in if len(failed) == 0 then "OK\n" else concat("wrong: ", failed, "\n"))
       else if mode == 4 then concat("<", word_of(a, b), ">", int_text(len(word_of(a, b))), "\n")
+      else if mode == 8 then report(all_known(a), slow_all_known(a))
       else if mode == 7 then
         if a < 0 then "a list has no fewer than no fragments\n" else
         let items = fragments(a, b) in let before = load_i64(runtime_state(), 64) in let built = listed(items) in

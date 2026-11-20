@@ -301,6 +301,11 @@ makes room once, and writes each part straight into it:
 - `html_escape(text)` among the parts is counted first and then written,
   escaped, into the result. `html_escape(concat(a, b))` is written as the
   escaped `a` and the escaped `b`.
+- `html_escape` of text that is known at build time is that text, escaped
+  at build time: a literal, an `if` between literals, or a call of a function
+  that can only return literals (a label for each kind of thing, say), which
+  gets a copy that returns them escaped. Nothing is escaped for such text
+  when the program runs, as a part of a concat or anywhere else.
 - In a function without effects, a `let` that names a `concat` and is read
   once by the concat its body ends in (as a part, or as the only argument of
   a part) is not built: its parts are read where the name is.

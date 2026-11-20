@@ -21,6 +21,11 @@
 ; with it will ask for, so it holds every copy its functions can have, and a
 ; program built against it calls those.
 ;
+; - An escaped copy (@name.esc) is the function with every text it can
+;   return escaped for HTML at build time. A function has one when every
+;   path through it ends in a literal, or in a call of a function that has
+;   one: html_escape of its result then costs nothing when the program runs.
+;
 ; Two more things keep text out of buffers of its own, both in llvm.neo:
 ; html_escape among a concat's parts is counted and written by the runtime
 ; (cg_fused_escape), and a let that names a concat for one reader is read
@@ -231,8 +236,39 @@ fn fu_want_round(borrow facts:FuFacts, borrow modes:Arr u8 _, move w:FuWant) -> 
       next (i+1,let g=tx_at(facts.wto,i) in
         if !fu_has(out.table,tx_at(facts.wfrom,i),1) || !fu_has(facts.word,g,1) || fu_has(out.table,g,1) || !fu_has(modes,g,3) then out
         else out with { table=fu_mark(out.table,g,1), changed=true }) yield out
-; The copies there are: a byte per node, bit 1 for a function's word copy and
-; bit 2 for its appending copy. modes: a byte per node, 1 for a function this
+; Text known at build time. A function all of whose results are literals,
+; themselves or through calls of such functions, can have an escaped copy.
+; The answer grows from the functions that end in literals only.
+type FuEsc = { table:Arr u8 _, changed:bool }
+fn fu_esc_shape(borrow m:Mods, body:i64) -> bool
+  = let tails=fu_tails(m,body,false,tx_ints()) in
+    len(tails)>0 && loop (i=0, ok=true) while ok && i<len(tails)
+      next (i+1,let n=md_node(m,tx_at(tails,i)) in n.kind==n_str() || (n.kind==n_call() && !md_is_builtin(m,md_str(m,n.a)))) yield ok
+fn fu_esc_ready(borrow m:Mods, borrow fns:Arr i64 _, borrow table:Arr u8 _, id:i64) -> bool
+  = let tails=fu_tails(m,id,false,tx_ints()) in
+    len(tails)>0 && loop (i=0, ok=true) while ok && i<len(tails)
+      next (i+1,let t=tx_at(tails,i) in md_node(m,t).kind==n_str() || fu_has(table,fu_user(m,fns,t),1)) yield ok
+fn fu_esc_round(borrow m:Mods, borrow fns:Arr i64 _, borrow shaped:Arr i64 _, move e:FuEsc) -> FuEsc
+  = loop (k=0, out=e with { changed=false }) while k<len(shaped)
+      next (k+1,let id=tx_at(shaped,k) in
+        if fu_has(out.table,id,1) || !fu_esc_ready(m,fns,out.table,md_node(m,id).d) then out
+        else out with { table=fu_mark(out.table,id,1), changed=true }) yield out
+fn fu_esc(borrow m:Mods, borrow fns:Arr i64 _) -> Arr u8 _
+  = let shaped=loop (k=0, out=tx_ints()) while k<len(fns)
+      next (k+1,let id=tx_at(fns,k) in if fu_bytes(m,id) && fu_esc_shape(m,md_node(m,id).d) then push(out,id) else out) yield out in
+    loop (e=FuEsc { table=arr(i in 0..len(m.ast.nodes)/11) u8(0), changed=true }) while e.changed
+      next (fu_esc_round(m,fns,shaped,e)) yield e.table
+; Whether html_escape of expression id is known at build time: every
+; expression its value comes from is a literal or a call of a function with
+; an escaped copy (bit 4 of m.fused).
+fn fu_static(borrow m:Mods, borrow fns:Arr i64 _, id:i64) -> bool
+  = let tails=fu_tails(m,id,false,tx_ints()) in
+    len(tails)>0 && loop (i=0, ok=true) while ok && i<len(tails)
+      next (i+1,let t=tx_at(tails,i) in md_node(m,t).kind==n_str() || fu_has(m.fused,fu_user(m,fns,t),4)) yield ok
+
+; The copies there are: a byte per node, bit 1 for a function's word copy,
+; bit 2 for its appending copy and bit 4 for its escaped copy, which every
+; function that can have one has. modes: a byte per node, 1 for a function this
 ; module lowers for one program, which gets the copies that program asks
 ; for, and 2 for a function of a prepared library object, lowered here or
 ; called from here, which has every copy it can have.
@@ -247,7 +283,10 @@ fn fu_table(borrow m:Mods, borrow fns:Arr i64 _, borrow modes:Arr u8 _) -> Arr u
     let direct=loop (k=0, want=kept) while k<len(fns)
       next (k+1,let id=tx_at(fns,k) in let f=md_node(m,id) in
         if !fu_has(modes,id,1) || f.kind!=n_fn() || f.d<0 then want else fu_scan(m,fns,facts,modes,f.d,want)) yield want in
-    loop (w=FuWant { table=direct, changed=true }) while w.changed next (fu_want_round(facts,modes,w)) yield w.table
+    let asked=loop (w=FuWant { table=direct, changed=true }) while w.changed next (fu_want_round(facts,modes,w)) yield w.table in
+    let escaped=fu_esc(m,fns) in
+    loop (k=0, want=asked) while k<len(fns)
+      next (k+1,let id=tx_at(fns,k) in if fu_has(modes,id,3) && fu_has(escaped,id,1) then fu_mark(want,id,4) else want) yield want
 
 ; A let read where it is needed. In a pure function,
 ;   let name = concat(word, " ", adjective) in concat("<td>", html_escape(name), "</td>")
