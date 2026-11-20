@@ -169,6 +169,63 @@ file = "drivers/worker_timer.neo"
 stdout = "PASS an interval registered before serving runs in worker zero only with 1, 2 and 4 workers, stops by its token there, and stops at shutdown\n"
 timeout = 120
 
+# The same four servers with http_server_options on epoll, which is not the
+# default backend on x86-64 Linux.
+[[test]]
+name = "worker-timer-epoll"
+file = "drivers/worker_timer.neo"
+env.NEO_HTTP_URING = "0"
+stdout = "PASS an interval registered before serving runs in worker zero only with 1, 2 and 4 workers, stops by its token there, and stops at shutdown\n"
+timeout = 120
+
+[[test]]
+name = "http-async-epoll"
+file = "drivers/http_async.neo"
+env.NEO_HTTP_URING = "0"
+stdout = "PASS 1 workers grace 150\nPASS 1 workers grace 2000\nPASS 2 workers grace 150\nPASS 2 workers grace 2000\nPASS 4 workers grace 150\nPASS 4 workers grace 2000\n"
+timeout = 300
+
+[[test]]
+name = "prepared-frames-epoll"
+file = "drivers/prepared_frames.neo"
+env.NEO_HTTP_URING = "0"
+stdout = "PASS 1 workers: persistent state/reset, prepared fast writes, 4 backpressured 4 MiB bodies across cache eviction, responsive fast requests and disconnect/shutdown cleanup\nPASS 2 workers: persistent state/reset, prepared fast writes, 4 backpressured 4 MiB bodies across cache eviction, responsive fast requests and disconnect/shutdown cleanup\n"
+timeout = 300
+
+[[test]]
+name = "async-pressure-epoll"
+file = "drivers/async_pressure.neo"
+env.NEO_HTTP_URING = "0"
+stdout = "PASS root I/O-to-stream handoff, partial admission rollback, and root failure before headers\nPASS 8 backpressured 8 MiB streams do not stall fast requests\nPASS exact 256-task admission bound and cancellation of every admitted task\nPASS slow-reader deadlines release task and result memory\nPASS graceful shutdown cancels held socket/timer continuations by deadline\n"
+timeout = 300
+
+# A server with http_server_options on io_uring (multishot receives and a
+# receive per request) and on epoll: the backend in use, an interval, a render
+# task's socket wait and a continuation beside ordinary requests, SIGTERM with
+# a long and a short grace period, and the interval without the options call
+# (tests/fixtures/server_options.neo).
+[[test]]
+name = "server-options"
+file = "drivers/server_options.neo"
+stdout = """
+PASS io_uring, 1 worker(s), grace 2000 ms
+PASS io_uring, 1 worker(s), grace 150 ms
+PASS io_uring, 2 worker(s), grace 2000 ms
+PASS io_uring, 2 worker(s), grace 150 ms
+PASS io_uring, 1 worker(s), no options
+PASS io_uring, a receive per request, 1 worker(s), grace 2000 ms
+PASS io_uring, a receive per request, 1 worker(s), grace 150 ms
+PASS io_uring, a receive per request, 2 worker(s), grace 2000 ms
+PASS io_uring, a receive per request, 2 worker(s), grace 150 ms
+PASS io_uring, a receive per request, 1 worker(s), no options
+PASS epoll, 1 worker(s), grace 2000 ms
+PASS epoll, 1 worker(s), grace 150 ms
+PASS epoll, 2 worker(s), grace 2000 ms
+PASS epoll, 2 worker(s), grace 150 ms
+PASS epoll, 1 worker(s), no options
+"""
+timeout = 300
+
 # prepared_frames.py: the async_frames.neo server under backpressure,
 # eviction, disconnects and shutdown; prepared_frames.neo checks the frame
 # cache itself (keys, bounded storage, eviction, fork ownership).

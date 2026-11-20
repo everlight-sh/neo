@@ -1,7 +1,8 @@
 import "std:http_server"
 import "std:cancel"
-; Opt in before serve_effect. Timers and shutdown use kqueue/epoll; all
-; continuations must return promptly and use nonblocking I/O/task steps.
+; Opt in before serve_effect. Timers and shutdown run in every backend's loop
+; (kqueue, epoll, io_uring); all continuations must return promptly and use
+; nonblocking I/O/task steps.
 effect(process) fn http_server_options(grace_ms:i64,asynchronous:bool)->IntResult
   = let result=rt_http_config(grace_ms,asynchronous) in if result<0 then int_error(0-result,"Invalid HTTP runtime options",0) else int_ok(0)
 private fn http_async_hex(value:i64)->Arr u8 _

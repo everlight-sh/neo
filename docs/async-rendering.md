@@ -42,7 +42,10 @@ CPU-bound loop. Socket operations also check cancellation and checkpoint.
 
 Enable `http_server_options(grace_ms,true)` before `serve_effect` and import
 `std:http_async`. The existing kqueue/epoll worker multiplexes client sockets,
-outbound readiness and deadlines.
+outbound readiness and deadlines. An io_uring worker (the default on x86-64
+Linux) keeps ordinary requests in its ring and serves streamed and deferred
+responses, outbound readiness and deadlines through an epoll instance it polls
+from the ring.
 
 - `http_response_async(capture,callback,deadline)` schedules a complete buffered
   HTTP response. Return its successful value (an empty internal placeholder)

@@ -426,6 +426,12 @@ ordinary requests; closing connections compacts their slots only after the
 entire ready batch has been handled. `NEO_HTTP_URING=0` selects epoll,
 `NEO_HTTP_URING=1` requests io_uring on ARM64 too and reports a fallback, and
 `NEO_HTTP_POLL=1` selects the previous Linux ppoll backend for diagnostics.
+A server that calls `http_server_options` uses the same backends: the io_uring
+loop runs interval timers, tasks, continuations and the shutdown grace period
+as the epoll loop does. A connection that a continuation or a render stream
+owns leaves the ring and is served by readiness, through one epoll instance
+polled from the ring; ordinary requests on other connections stay in the ring.
+For such a server `NEO_HTTP_POLL=1` selects epoll.
 All backends use direct kernel syscalls and the same HTTP framing, batching and
 worker assignment.
 It supports Content-Length and chunked bodies. Requests it refuses are answered

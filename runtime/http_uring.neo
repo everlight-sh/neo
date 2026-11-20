@@ -12,15 +12,35 @@
 ; one-entry epoll instance) and the notification socket are polled through the
 ; ring, then accepted directly.
 ; user_data: listener poll=0, notification poll=1, receive=2+2i, send=3+2i
-; (with the generation above bit 32 for multishot receives), and 2^32-1 for
-; cancels, whose completions are ignored.
+; (with the generation above bit 32 for multishot receives), 2^32-2 for the
+; readiness poll (below) and 2^32-1 for cancels, whose completions are ignored.
 ;
-; Ring descriptor (128 bytes): fd@0, mapping@8, sqes@16, sq mask@24,
+; Ring descriptor (192 bytes): fd@0, mapping@8, sqes@16, sq mask@24,
 ; sq entries@32, sq tail@40, queued@48, cq mask@56, the kernel's offsets of
 ; sq tail@64, cq head@72, cq tail@80 and cqes@88, then cq head@96, and for
 ; multishot receives the buffer ring@104 (null without them), its buffers@112
-; and the buffer ring tail this worker has filled up to@120.
+; and the buffer ring tail this worker has filled up to@120. Then the
+; readiness epoll@128 (-1 without one), its connections' interests@136, the
+; connection metadata@144, its event buffer@152 and the sizes of the ring
+; mapping@160 and of the submission entries@168.
 ; Ring indices are unsigned 32-bit counters kept as i64 in [0, 2^32).
+;
+; Timers, tasks, continuations and shutdown (http_server_options, intervals
+; registered before serving) run as in the epoll backend. Each loop starts
+; with rt_async_tick, and the wait's timeout is the time to the next timer,
+; task or continuation (rt_async_timeout). What they wait for is readiness,
+; so the worker keeps one epoll instance for it, polled through the ring like
+; the listener's: task waits register there (it is the task backend,
+; state@1768), the signal monitor is in it, and so is every connection a
+; continuation or a render group owns (close 2). Such a connection is written
+; from the tick with plain non-blocking sends, which a send in flight in the
+; ring could not share its buffer with, so it leaves the ring for good when
+; the request code hands it over (rt_uring_handoff) and is served from then on
+; by the epoll backend's own rt_step. Ordinary requests never touch that
+; epoll. After SIGINT or SIGTERM (rt_uring_draining) the listener closes, idle
+; connections close, a response being sent finishes and closes, owned
+; connections get the grace period, and the worker returns once none is left
+; and no task is live.
 ;
 ; Multishot receives. Where the kernel takes a ring of provided buffers
 ; (IORING_REGISTER_PBUF_RING) each connection keeps one receive armed
@@ -32,9 +52,10 @@
 ; the armed receive keeps one poll for the connection's lifetime. A connection
 ; then has its receive and at most one send in flight. Its slot's metadata
 ; (16 bytes at local@16: generation@0, flags@8 with 1 receive armed, 2 send
-; in flight, 4 receive being cancelled) tags each operation's user_data with
-; the generation, so a completion that arrives after its connection closed is
-; recognised and only its buffer is returned. A connection is closed only
+; in flight, 4 receive being cancelled, 8 handed to the readiness epoll) tags
+; each operation's user_data with the generation, so a completion that
+; arrives after its connection closed is recognised and only its buffer is
+; returned. A connection is closed only
 ; with no send in flight (an end of input during a send closes it when the
 ; send completes); its armed receive is then cancelled, which also releases
 ; the kernel's reference to the socket. While a send is in flight, input that
@@ -89,7 +110,9 @@ effect fn rt_uring_setup (d : ptr) -> bool
         let a9 = store_i64(d, 72, i64(load_i32(params, 80))) in
         let a10 = store_i64(d, 80, i64(load_i32(params, 84))) in
         let a11 = store_i64(d, 88, i64(load_i32(params, 100))) in
-        let a12 = store_i64(d, 96, bit_and(i64(atomic_load_i32(mapping, i64(load_i32(params, 80)))), 4294967295)) in true
+        let a12 = store_i64(d, 96, bit_and(i64(atomic_load_i32(mapping, i64(load_i32(params, 80)))), 4294967295)) in
+        let a13 = store_i64(d, 160, if sq_bytes > cq_bytes then sq_bytes else cq_bytes) in
+        let a14 = store_i64(d, 168, sq_entries * 64) in true
 
 ; The buffer ring (one page of 128 16-byte entries: address, length, buffer id,
 ; with the tail in the last two bytes of entry 0) and its buffers, registered
@@ -184,6 +207,7 @@ effect fn rt_uring_send (d : ptr, state : ptr, index : i64) -> unit
 effect fn rt_uring_continue (d : ptr, state : ptr, handler : ptr, index : i64) -> unit
   = let prepared = if load_i64(state, 16) > 0 then rt_prepare(state, handler) else noop() in
     if load_i64(state, 0) < 0 then noop()
+    else if load_i64(state, 48) == 2 then rt_uring_handoff(d, ptr_add(load_ptr(d, 144), index * 16), state, index)
     else if load_i64(state, 32) > 0 then rt_uring_send(d, state, index)
     else rt_uring_recv(d, state, index)
 
@@ -243,11 +267,30 @@ effect fn rt_uring_close (d : ptr, meta : ptr, state : ptr, index : i64) -> unit
   = if bit_and(load_i64(meta, 8), 2) != 0 then store_i64(state, 48, 1) else
       let dropped = rt_drop(state) in rt_uring_retire(d, meta, index)
 
+; The request code made a continuation or a render group the connection's
+; owner (close 2). Nothing of it is in flight in the ring but its armed
+; receive: that is cancelled and the generation retired, so whatever the
+; receive still completes with only returns its buffer (what a client sends
+; to an owned connection is discarded anyway). Flag 8 marks the slot until a
+; new connection is accepted into it. The socket becomes non-blocking, what is
+; queued is sent as far as it goes, and the readiness epoll takes the
+; connection with the epoll backend's interests.
+effect fn rt_uring_handoff (d : ptr, meta : ptr, state : ptr, index : i64) -> unit
+  = let retired = rt_uring_retire(d, meta, index) in let marked = store_i64(meta, 8, 8) in
+    let epoll = load_i64(d, 128) in
+    if epoll < 0 || rt_nonblock(load_i64(state, 0)) < 0 then rt_drop(state) else
+      let flushed = if load_i64(state, 32) > 0 then rt_flush(state) else noop() in
+      if load_i64(state, 0) < 0 then noop() else
+        let wanted = rt_epoll_wanted(state) in
+        let added = rt_epoll_apply(epoll, 1, load_i64(state, 0), wanted, rt_http_token(index)) in
+        store_i64(load_ptr(d, 136), index * 8, wanted)
+
 ; With nothing being sent: render what is buffered, then send it, or keep
 ; receiving.
 effect fn rt_uring_next (d : ptr, meta : ptr, state : ptr, handler : ptr, index : i64) -> unit
   = let prepared = if load_i64(state, 16) > 0 && load_i64(state, 48) < 4 then rt_prepare(state, handler) else noop() in
     if load_i64(state, 0) < 0 then rt_uring_retire(d, meta, index)
+    else if load_i64(state, 48) == 2 then rt_uring_handoff(d, meta, state, index)
     else if load_i64(state, 32) > 0 then rt_uring_send_armed(d, meta, state, index)
     else if bit_and(load_i64(meta, 8), 5) == 0 then rt_uring_arm(d, meta, state, index) else noop()
 
@@ -310,6 +353,66 @@ effect fn rt_uring_armed_event (d : ptr, states : ptr, local : ptr, handler : pt
     else if low % 2 == 1 then rt_uring_sent(d, meta, state, handler, index, result)
     else rt_uring_received(d, meta, state, handler, index, result, flags)
 
+; The readiness epoll has events: task waits, the signal monitor, and the
+; connections handed to it, stepped as the epoll backend steps them. It is
+; level-triggered, so events beyond this batch raise its poll again.
+effect fn rt_uring_ready (d : ptr, states : ptr, n : i64, handler : ptr, control : ptr) -> unit
+  = let epoll = load_i64(d, 128) in let events = load_ptr(d, 152) in
+    let ready = rt_epoll_wait_timeout(epoll, events, 32, 0) in
+    let served = loop (i = 0) while i < ready
+      next (let token = load_i64(events, i * rt_epoll_event_bytes() + rt_epoll_data_offset()) in
+            let mask = i64(load_i32(events, i * rt_epoll_event_bytes())) in
+            let stepped = if bit_and(token, 4095) >= 2048 then rt_fiber_notify(token)
+              else if token == 1026 then rt_http_shutdown_signal(control, load_i64(runtime_state(), 1696) - 1)
+              else let index = rt_http_token_index(token) in
+                if index < 0 || index >= n then ax_trap(data("invalid epoll token\0")) else
+                  let state = ptr_add(states, index * 128) in
+                  ; Only a connection that was handed over: a closed one's socket can
+                  ; outlive it in a forked child, and its slot may be in the ring again.
+                  if load_i64(state, 0) < 0 || bit_and(load_i64(load_ptr(d, 144), index * 16 + 8), 8) == 0 then noop() else
+                    let done = rt_step(state, mask, handler) in
+                    if load_i64(state, 0) < 0 then noop() else rt_epoll_sync(epoll, state, load_ptr(d, 136), index) in i + 1)
+      yield i in noop()
+
+; After a tick with continuations or tasks live: what they queued or finished
+; changes what their connections wait for.
+effect fn rt_uring_sync (d : ptr, states : ptr, n : i64) -> unit
+  = let epoll = load_i64(d, 128) in let meta = load_ptr(d, 144) in
+    let synced = loop (i = 0) while i < n
+      next (let state = ptr_add(states, i * 128) in
+            let sync = if load_i64(state, 0) >= 0 && bit_and(load_i64(meta, i * 16 + 8), 8) != 0
+              then rt_epoll_sync(epoll, state, load_ptr(d, 136), i) else noop() in i + 1)
+      yield i in noop()
+
+; Shutdown, as rt_http_draining for the epoll backend: timers stop, the
+; listener closes, and the worker is done once no connection and no task is
+; left. A connection the readiness epoll serves is treated as there: closed
+; when it has nothing to send and no owner, or when the grace period is over.
+; In the ring an idle connection closes at once and one whose response is
+; being sent closes when the send completes; a receive queued per request
+; (without multishot receives) is ended by shutting the socket down, as the
+; sweep does. Past the grace period a send in flight is ended the same way.
+effect fn rt_uring_draining (d : ptr, control : ptr, states : ptr, n : i64, listener : i64) -> bool
+  = let deadline = atomic_load_i64(control, 8) in if deadline <= 0 then false else
+    let timers = rt_timer_stop_all() in
+    let closed = if load_i64(runtime_state(), 1704) == 0 then let closed = rt_close(listener) in store_i64(runtime_state(), 1704, 1) else noop() in
+    let expired = rt_clock_ns() / 1000000 >= deadline in
+    let multishot = load_ptr(d, 104) != null() in
+    let active = loop (i = 0, active = 0) while i < n next (i + 1,
+      let state = ptr_add(states, i * 128) in let meta = ptr_add(load_ptr(d, 144), i * 16) in
+      if load_i64(state, 0) < 0 then active else
+      if bit_and(load_i64(meta, 8), 8) != 0 then
+        (if expired || load_i64(state, 32) == 0 && load_i64(state, 48) != 2 then let dropped = rt_drop(state) in active else
+         let close = if load_i64(state, 48) == 2 then noop() else store_i64(state, 48, 1) in active + 1)
+      else if multishot && bit_and(load_i64(meta, 8), 2) == 0 then let gone = rt_uring_close(d, meta, state, i) in active
+      else
+        let sending = multishot || load_i64(state, 32) > 0 in
+        let close = if sending then store_i64(state, 48, 1) else noop() in
+        let ended = if (sending && !expired) || bit_and(load_i64(state, 112), 4) != 0 then noop() else
+          let marked = store_i64(state, 112, bit_or(load_i64(state, 112), 4)) in
+          let shut = rt_shutdown_both(load_i64(state, 0)) in noop() in active + 1) yield active in
+    active == 0 && load_i64(runtime_state(), 1784) == 0
+
 ; Timeouts: a connection always has an operation in flight, so an expired one
 ; is shut down, and that operation's completion closes it.
 effect fn rt_uring_sweep (states : ptr, n : i64, control : ptr, parent : i64) -> unit
@@ -338,17 +441,22 @@ effect fn rt_uring_event (d : ptr, states : ptr, local : ptr, handler : ptr, lis
       ; readiness event made the k-th of a burst of new connections wait out k
       ; loop iterations, each serving the requests of those already accepted.
       let rearm = store_i64(local, 8, 0) in
-      let drained = loop (more = true) while more
+      let drained = loop (more = atomic_load_i64(control, 8) == 0) while more
         next (let slot = rt_accept_at(listener, states, rt_uring_slot(states, load_i64(local, 0)), true,
                 local, control, worker, workers) in
               if slot < 0 then false else
+              let fresh = store_i64(ptr_add(load_ptr(local, 16), slot * 16), 8, 0) in
               let queued = if load_ptr(d, 104) == null() then rt_uring_recv(d, ptr_add(states, slot * 128), slot)
                 else rt_uring_arm(d, ptr_add(load_ptr(local, 16), slot * 16), ptr_add(states, slot * 128), slot) in true)
         yield more in noop()
     else if user == 1 then
       let notify = load_i64(control, 256 + worker * 16) in
       let drained = rt_read(notify, scratch, 64) in
+      let noted = rt_async_notified() in
       rt_uring_push(d, 6, notify, 0, 0, 1, 1)
+    else if user == 4294967294 then
+      let served = rt_uring_ready(d, states, load_i64(local, 0), handler, control) in
+      rt_uring_push(d, 6, load_i64(d, 128), 0, 0, 1, 4294967294)
     else if load_ptr(d, 104) != null() then rt_uring_armed_event(d, states, local, handler, user, result, flags)
     else let index = (user - 2) / 2 in
       if index < 0 || index >= load_i64(local, 0) then ax_trap(data("invalid io_uring completion\0")) else
@@ -377,7 +485,7 @@ effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control 
     ; local: connection count@0, listener polled@8, connection metadata@16.
     let local = stack_alloc(24) in let cleared = memset(local, i32(0), 24) in
     let meta = ax_alloc(rt_http_limit(control) * 16) in let unused = memset(meta, i32(0), rt_http_limit(control) * 16) in
-    let kept = store_ptr(local, 16, meta) in
+    let kept = store_ptr(local, 16, meta) in let shared = store_ptr(d, 144, meta) in
     let scratch = stack_alloc(64) in
     let notify = load_i64(control, 256 + worker * 16) in
     let watched = rt_uring_push(d, 6, notify, 0, 0, 1, 1) in
@@ -389,14 +497,33 @@ effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control 
     let gate = rt_epoll_create() in
     let target = if gate < 0 then listener else if rt_epoll_ctl(gate, 1, listener, 1, 0) >= 0 then gate
       else let closed = rt_close(gate) in listener in
-    ; Waits time out after a second so orphaned workers still notice and exit.
+    ; The readiness epoll (see the top). A server with options cannot do without it.
+    let signal = load_i64(runtime_state(), 1696) - 1 in
+    let epoll = rt_epoll_create() in let readiness = store_i64(d, 128, epoll) in
+    let required = if epoll < 0 && signal >= 0 then ax_trap(data("epoll_create1 syscall failed\0")) else noop() in
+    let interests = ax_alloc(rt_http_limit(control) * 8) in let i0 = store_ptr(d, 136, interests) in
+    let events = ax_alloc(32 * rt_epoll_event_bytes()) in let e0 = store_ptr(d, 152, events) in
+    let polled = if epoll < 0 then noop() else
+      let backend = store_i64(runtime_state(), 1768, epoll + 1) in
+      let monitored = if signal < 0 then noop() else rt_epoll_apply(epoll, 1, signal, 1, 1026) in
+      rt_uring_push(d, 6, epoll, 0, 0, 1, 4294967294) in
+    ; Waits end at the next timer, task or continuation, and after a second at
+    ; the latest (a tenth with a signal monitor), so orphaned workers still
+    ; notice and exit.
     let timeout = stack_alloc(16) in let seconds = store_i64(timeout, 0, 1) in let nanos = store_i64(timeout, 8, 0) in
     let waiting = stack_alloc(24) in let zeroed = memset(waiting, i32(0), 24) in
     let limit = store_i64(waiting, 16, ptr_to_i64(timeout)) in
-    loop (running = true) while running
-      next (let swept = if rt_http_sweep_due() then rt_uring_sweep(states, load_i64(local, 0), control, parent) else noop() in
-            let listening = if load_i64(control, 0) == worker && load_i64(local, 8) == 0 then
+    let served = loop (running = true) while running
+      next (let pending = load_i64(runtime_state(), 1640) > 0 || load_i64(runtime_state(), 1784) > 0 in
+            let ticks = rt_async_tick(states, load_i64(local, 0)) in
+            let draining = if signal < 0 then false else rt_uring_draining(d, control, states, load_i64(local, 0), listener) in
+            if draining then false else
+            let synced = if !pending then noop() else rt_uring_sync(d, states, load_i64(local, 0)) in
+            let swept = if rt_http_sweep_due() then rt_uring_sweep(states, load_i64(local, 0), control, parent) else noop() in
+            let listening = if load_i64(control, 0) == worker && load_i64(local, 8) == 0 && atomic_load_i64(control, 8) == 0 then
               let polled = rt_uring_push(d, 6, target, 0, 0, 1, 0) in store_i64(local, 8, 1) else noop() in
+            let delay = rt_async_timeout(if signal < 0 then 1000 else 100) in
+            let whole = store_i64(timeout, 0, delay / 1000) in let part = store_i64(timeout, 8, delay % 1000 * 1000000) in
             let entered = rt_uring_submit(d, waiting) in
             let error = if entered < 0 then i64(load_i32(rt_errno(), 0)) else 0 in
             let tick = rt_http_tick() in
@@ -404,11 +531,20 @@ effect fn rt_http_uring_worker (d : ptr, listener : i64, handler : ptr, control 
             if error != 0 && error != 62 && error != 4 && error != 11 && error != 16 then
               let failed = ax_trap(data("io_uring_enter syscall failed\0")) in false
             else let reaped = rt_uring_reap(d, states, local, handler, listener, control, worker, workers, scratch) in true)
-      yield 0
+      yield 0 in
+    ; Shut down: the queued cancels go out, and closing the ring ends whatever
+    ; is still in it and lets go of its sockets.
+    let flushed = rt_uring_submit(d, null()) in
+    let backend = store_i64(runtime_state(), 1768, 0) in
+    let c0 = rt_close(load_i64(d, 0)) in
+    let c1 = if epoll < 0 then 0 else rt_close(epoll) in let c2 = if gate < 0 || target != gate then 0 else rt_close(gate) in
+    let u0 = rt_munmap(load_ptr(d, 16), load_i64(d, 168)) in let u1 = rt_munmap(load_ptr(d, 8), load_i64(d, 160)) in
+    let u2 = if load_ptr(d, 104) == null() then 0 else rt_munmap(load_ptr(d, 104), 4096 + 131072) in
+    let r0 = ax_release(states) in let r1 = ax_release(meta) in let r2 = ax_release(interests) in let r3 = ax_release(events) in served
 
 effect fn rt_serve_uring (listener : i64, handler : ptr, control : ptr, worker : i64,
                         workers : i64{workers >= 1}, parent : i64, requested : bool) -> i64
-  = let d = stack_alloc(128) in let blank = memset(d, i32(0), 128) in
+  = let d = stack_alloc(192) in let blank = memset(d, i32(0), 192) in
     if rt_uring_setup(d) then let buffered = rt_uring_buffers(d) in rt_http_uring_worker(d, listener, handler, control, worker, workers, parent)
     else let noted = if requested && worker == 0 then rt_write_all(2, data("neo: io_uring unavailable, serving with epoll\n"), 46) else noop() in
       rt_http_epoll_worker(listener, handler, control, worker, workers, parent)

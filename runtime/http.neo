@@ -212,10 +212,12 @@ effect fn rt_prepare (state : ptr, handler : ptr) -> unit
       let started = if batch.offset > 0 && batch.offset < n then store_i64(state, 64, rt_http_now()) else noop() in
       store_i64(state, 56, if batch.more && batch.offset < n then 1 else 0)
 
+; Never waits: an io_uring worker's sockets are blocking, and a render task
+; can flush one between its handler's commit and the hand-over to readiness.
 effect fn rt_flush (state : ptr) -> unit
   = let length = load_i64(state, 32) in
     let offset = load_i64(state, 40) in
-    let count = rt_send(load_i64(state, 0), ptr_add(load_ptr(state, 24), offset), length - offset) in
+    let count = rt_send_now(load_i64(state, 0), ptr_add(load_ptr(state, 24), offset), length - offset) in
     if count < 0 then if rt_retry() then noop() else rt_drop(state)
     else if count == 0 then rt_drop(state)
     else let progress = store_i64(state, 72, rt_http_now()) in let sent = offset + count in

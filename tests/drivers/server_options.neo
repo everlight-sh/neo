@@ -1,0 +1,131 @@
+; tests/fixtures/server_options.neo, a server that calls http_server_options,
+; on io_uring (multishot receives, and a receive queued per request) and on
+; epoll, with one and two workers. On Linux the driver checks that a ring is
+; open exactly when io_uring was asked for and the kernel gave one. Then:
+; an interval registered before serve_effect fires; a render task's socket
+; wait and a continuation's timer run beside ordinary requests, also on a
+; connection that takes the place of a finished continuation's; on SIGTERM an
+; idle keep-alive connection closes at once, while a continuation, a render
+; task and a 4 MiB response that were open finish within a 2 s grace period
+; and the server exits 0; with a 150 ms grace period they are cut off and the
+; server still exits in time. Without the options call the interval fires on
+; every backend too (grace 0: SIGTERM then simply ends the process).
+import "std:io"
+import "std:process"
+import "std:socket"
+import "std:time"
+import "../support/driver.neo"
+import "../support/network.neo"
+import "../../compiler/src/modules.neo"
+import "../../compiler/src/paths.neo"
+import "../../compiler/src/text.neo"
+
+effect fn so_children(pid:i64) -> Arr Arr u8 _ _
+  = let listed=fs_read(concat("/proc/",int_text(pid),"/task/",int_text(pid),"/children")) in
+    if !listed.ok || len(str_trim(listed.value))==0 then md_words() else nw_split(str_trim(listed.value),32)
+effect fn so_ring(pid:i64) -> bool
+  = loop (fd=0, found=false) while !found && fd<256
+      next (fd+1,let link=fs_readlink(concat("/proc/",int_text(pid),"/fd/",int_text(fd))) in link.ok && nw_contains(link.value,"io_uring")) yield found
+; Whether the server process or one of its workers has an io_uring ring open.
+effect fn so_rings(server:Process) -> bool
+  = let pid=nw_process_pid(server) in let children=so_children(pid) in
+    so_ring(pid) || loop (i=0, hit=false) while i<len(children) next (i+1,hit || so_ring(nw_int(md_word(children,i)))) yield hit
+
+effect fn so_ticks(borrow log:Arr u8 _) -> i64
+  = let read=fs_read(log) in if !read.ok || len(str_trim(read.value))==0 then 0 else len(nw_split(str_trim(read.value),10))
+
+fn so_get(borrow path:Arr u8 _) -> Arr u8 _ = concat("GET ",path," HTTP/1.1\r\nHost: localhost\r\n\r\n")
+fn so_body_bytes(borrow wire:Arr u8 _) -> i64
+  = let end=str_find(wire,"\r\n\r\n") in if end.present then len(wire)-end.value-4 else -1
+
+type SoStop = { problems:Arr u8 _, begin:i64 }
+
+; A 2 s grace period: everything that was open when SIGTERM arrived finishes.
+; One whole /wait goes first: its connection was handed to readiness and
+; closed, so the connections after it reuse its place while continuations run.
+effect fn so_finish(server:Process, port:i64) -> SoStop
+  = let whole=nw_get(port,"/wait","") in let deadline=deadline_after(8000) in
+    using idle=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    using waiting=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    using task=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    using big=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let a=socket_write(idle,so_get("/"),deadline.value) in let first=nw_read_until(idle,"FAST",deadline.value) in
+    let b=socket_write(waiting,so_get("/wait"),deadline.value) in let shell=nw_read_until(waiting,"Shell ready",deadline.value) in
+    let c=socket_write(task,so_get(concat("/task?port=",int_text(port))),deadline.value) in
+    let fetched=nw_read_until(task,"Fetched FAST",deadline.value) in
+    let d=socket_write(big,so_get("/big"),deadline.value) in let paused=nw_sleep(100) in
+    let fast=loop (i=0, ok=true) while i<20 next (i+1, ok && nw_get_is(port,"/",200,"FAST")) yield ok in
+    let p=nw_note("",whole.complete && whole.status==200 && nw_contains(whole.body,"Last fragment"),
+      concat("a whole /wait before the others: status ",int_text(whole.status),", body ",tx_repr(whole.body,true))) in
+    let p=nw_note(p,nw_contains(first,"FAST"),"the keep-alive request was not answered") in
+    let p=nw_note(p,nw_contains(shell,"Shell ready") && !nw_contains(shell,"fragment"),"/wait: no shell before its fragments") in
+    let p=nw_note(p,nw_contains(fetched,"Fetched FAST"),concat("/task: the render task did not fetch /: ",tx_repr(nw_after(fetched,if len(fetched)>120 then len(fetched)-120 else 0),true))) in
+    let p=nw_note(p,fast,"a request beside the open ones failed") in
+    let signalled=nw_signal_tree(server,15) in let begin=nw_now_ms() in
+    let closed=nw_drain(idle,deadline.value) in let idle_ms=nw_now_ms()-begin in
+    let body=nw_drain(big,deadline.value) in
+    let rest=concat(shell,nw_drain(waiting,deadline.value)) in
+    let done=concat(fetched,nw_drain(task,deadline.value)) in
+    let p=nw_note(p,len(closed)==0 && idle_ms<500,concat("the idle connection closed ",int_text(idle_ms)," ms after SIGTERM with ",int_text(len(closed))," bytes")) in
+    let p=nw_note(p,so_body_bytes(body)==4194304,concat("/big: ",int_text(so_body_bytes(body))," body bytes of 4194304 after SIGTERM")) in
+    let p=nw_note(p,nw_contains(rest,"Last fragment") && nw_ends(rest,"0\r\n\r\n"),concat("/wait: unfinished after SIGTERM: ",tx_repr(nw_after(rest,if len(rest)>100 then len(rest)-100 else 0),true))) in
+    SoStop { problems=nw_note(p,nw_contains(done,"Task done") && nw_ends(done,"0\r\n\r\n"),concat("/task: unfinished after SIGTERM: ",tx_repr(nw_after(done,if len(done)>100 then len(done)-100 else 0),true))),
+      begin=begin }
+
+; A 150 ms grace period: a continuation and an unread response do not hold the
+; server past it. The sockets are read only after the server is gone.
+effect fn so_cut(server:Process, port:i64, move up:NwChild) -> SoStop
+  = let deadline=deadline_after(8000) in
+    using waiting=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    using big=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let b=socket_write(waiting,so_get("/wait"),deadline.value) in let shell=nw_read_until(waiting,"Shell ready",deadline.value) in
+    let d=socket_write(big,so_get("/big"),deadline.value) in let paused=nw_sleep(50) in
+    let signalled=nw_signal_tree(server,15) in let begin=nw_now_ms() in
+    let gone=nw_finish(server,up,4000) in let elapsed=nw_now_ms()-begin in
+    let rest=concat(shell,nw_drain(waiting,deadline.value)) in
+    let p=nw_note("",!gone.running && gone.code==0,concat("server exit ",int_text(gone.code),": ",gone.errors)) in
+    let p=nw_note(p,elapsed<750,concat("shutdown took ",int_text(elapsed)," ms with a 150 ms grace period")) in
+    SoStop { problems=nw_note(p,!nw_contains(rest,"Last fragment"),"/wait finished despite the short grace period"), begin=begin }
+
+; ring: whether the environment asks for io_uring.
+effect fn so_run(borrow tools:DvTools, borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _,
+                 borrow backend:Arr Arr u8 _ _, ring:bool, workers:i64, grace:i64) -> unit
+  = let port=nw_port() in let log=pt_join(dir,concat("ticks-",int_text(port))) in
+    let environment=dv_environment(push(backend,concat("NEO_THREADS=",int_text(workers)))) in
+    let problems=(using server=process_start(binary,push(push(push(md_words(),int_text(port)),int_text(grace)),log),environment) in
+      let up=nw_await(server,nw_child(),"neo: serving",5000) in
+      if !nw_contains(up.errors,"neo: serving") then concat("the server did not start: ",up.errors,up.output) else
+      let ready=nw_wait_port(port,2000) in let waited=nw_sleep(400) in let up=nw_poll(server,up) in
+      let given=ring && !nw_contains(up.errors,"io_uring unavailable") in
+      let p=nw_note("",!dv_linux(tools) || so_rings(server)==given,
+        concat("io_uring ring open: ",if given then "no, expected one" else "yes, expected none")) in
+      let ticks=so_ticks(log) in let p=nw_note(p,ticks>=3,concat(int_text(ticks)," ticks of the 50 ms interval in 400 ms")) in
+      if grace==0 then
+        let p=nw_note(p,nw_get_is(port,"/",200,"FAST"),"a request was not answered") in
+        let signalled=nw_signal_tree(server,15) in let done=nw_finish(server,up,4000) in
+        nw_note(p,!done.running,"the server did not end on SIGTERM") else
+      if grace<1000 then let cut=so_cut(server,port,up) in concat(p,cut.problems) else
+      let stopped=so_finish(server,port) in
+      let done=nw_finish(server,up,4000) in let elapsed=nw_now_ms()-stopped.begin in
+      let p=nw_note(concat(p,stopped.problems),!done.running && done.code==0,concat("server exit ",int_text(done.code),": ",done.errors)) in
+      let p=nw_note(p,!nw_contains(done.errors,"starting another"),concat("a worker exited: ",done.errors)) in
+      nw_note(p,elapsed<1900,concat("shutdown took ",int_text(elapsed)," ms"))) in
+    let before=so_ticks(log) in let paused=nw_sleep(200) in let after=so_ticks(log) in
+    let problems=nw_note(problems,after==before,concat(int_text(after-before)," ticks after the server exited")) in
+    let label=concat(name,", ",int_text(workers)," worker(s), ",if grace==0 then "no options" else concat("grace ",int_text(grace)," ms")) in
+    let checked=dv_expect(len(problems)==0,concat(label,": ",problems)) in
+    let shown=print_out(concat("PASS ",label,"\n")) in noop()
+
+effect fn so_backend(borrow tools:DvTools, borrow binary:Arr u8 _, borrow dir:Arr u8 _, borrow name:Arr u8 _,
+                     borrow backend:Arr Arr u8 _ _, ring:bool) -> unit
+  = let a=so_run(tools,binary,dir,name,backend,ring,1,2000) in let b=so_run(tools,binary,dir,name,backend,ring,1,150) in
+    let c=so_run(tools,binary,dir,name,backend,ring,2,2000) in let d=so_run(tools,binary,dir,name,backend,ring,2,150) in
+    so_run(tools,binary,dir,name,backend,ring,1,0)
+
+effect fn main() -> unit
+  = let tools=dv_tools() in let dir=dv_temp("server-options") in let binary=pt_join(dir,"server-options") in
+    let built=dv_build(tools,pt_join(tools.here,"../fixtures/server_options.neo"),binary,md_words()) in
+    let a=so_backend(tools,binary,dir,"io_uring",push(md_words(),"NEO_HTTP_URING=1"),true) in
+    let b=so_backend(tools,binary,dir,"io_uring, a receive per request",push(push(md_words(),"NEO_HTTP_URING=1"),"NEO_HTTP_URING_MULTISHOT=0"),true) in
+    let c=so_backend(tools,binary,dir,"epoll",push(md_words(),"NEO_HTTP_URING=0"),false) in
+    dv_clean(dir)

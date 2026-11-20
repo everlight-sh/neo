@@ -1,0 +1,44 @@
+import "std:http_async"
+import "std:http_client"
+import "std:io"
+import "std:strings"
+import "std:time"
+import "std:timer"
+; A server with http_server_options, driven by tests/drivers/server_options.neo.
+; Arguments: the port, the shutdown grace in ms (0: no http_server_options
+; call, so no continuations, render tasks or graceful shutdown) and a log
+; path. An interval registered before serve_effect appends a line to the log
+; every 50 ms.
+;   /             "FAST"
+;   /wait         a shell at once, a fragment 300 ms later and the last one
+;                 300 ms after that (a continuation)
+;   /task?port=N  a shell, then a render task that fetches / from port N,
+;                 writes what it got, sleeps 400 ms and ends
+;   /big          4 MiB of 'x'
+private effect(fs,net,env,time,process) fn tick(capture:Arr u8 n)->Arr u8 _
+  = let appended=fs_append(capture,"tick\n") in ""
+private effect(fs,net,env,time,process) fn fragment(state:Arr u8 n)->Arr u8 _
+  = let now=monotonic_ms() in
+    if str_equal(state,"first") then http_async_yield("second",web_html("<p>First fragment</p>"),now.value+300) else
+    http_async_finish(web_html("<p>Last fragment</p></body></html>"))
+private effect(fs,net,env,time,process) fn task(capture:Arr u8 n)->Arr u8 _
+  = let request=web_request(capture,0) in let port=int_parse(web_query_get(request.query,"port").value) in
+    let response=http_request("127.0.0.1",if port.ok then port.value else 0,"GET","/","",3000,65536) in
+    let wrote=http_render_write(web_html(concat("<p>Fetched ",if response.ok then response.body else "nothing","</p>"))) in
+    let paused=sleep_ms(400) in "<p>Task done</p></body></html>"
+private effect fn handler(raw:Arr u8 n)->Arr u8 _
+  = let request=web_request(raw,0) in
+    if str_equal(request.path,"/wait") then let now=monotonic_ms() in
+      let started=http_async_start(web_html("<!doctype html><html><body><p>Shell ready</p>"),"first",function(fragment),now.value+300,now.value+10000) in
+      if started.ok then started.value else web_encode(web_reply(503,"Busy","text/plain"),false) else
+    if str_equal(request.path,"/task") then let deadline=deadline_after(5000) in
+      let started=http_render_start(web_html("<!doctype html><html><body><p>Shell ready</p>"),arr(i in 0..1) http_deferred(raw,function(task)),deadline.value) in
+      if started.ok then started.value else web_encode(web_reply(503,"Busy","text/plain"),false) else
+    if str_equal(request.path,"/big") then web_encode(web_reply(200,arr(i in 0..4194304) 'x',"text/plain"),false) else
+    web_encode(web_reply(200,"FAST","text/plain"),false)
+effect fn main()->i64
+  = let port=int_parse(cli_arg(1).value) in let grace=int_parse(cli_arg(2).value) in let log=cli_arg(3) in
+    check port.ok && grace.ok && log.present in
+    let timer=timer_interval_start(50,function(tick),log.value) in check timer.ok in
+    let options=if grace.value>0 then http_server_options(grace.value,true) else int_ok(0) in check options.ok in
+    serve_effect(port.value,handler)

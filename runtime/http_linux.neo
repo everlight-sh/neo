@@ -4,15 +4,22 @@
 ; EPOLLIN registered without epoll_ctl per request. EPOLLOUT is armed only for
 ; backpressure or complete buffered requests that exceed the 64-response batch.
 ; It serves where io_uring (http_uring.neo) is off or unavailable;
-; NEO_HTTP_URING=0 selects it, NEO_HTTP_POLL=1 the older ppoll loop.
+; NEO_HTTP_URING=0 selects it, NEO_HTTP_POLL=1 the older ppoll loop (epoll for
+; a server with http_server_options, which that loop cannot serve).
 
 effect fn rt_epoll_apply (epfd : i64, op : i64, fd : i64, mask : i64, token : i64) -> unit
   = let result = rt_epoll_ctl(epfd, op, fd, mask, token) in
     if result < 0 then ax_trap(data("epoll_ctl syscall failed\0")) else noop()
 
+; What a connection waits for: input, or output space for queued output or
+; buffered requests; a connection a continuation or render group owns (close
+; 2) also its peer's hang-up.
+effect fn rt_epoll_wanted (state : ptr) -> i64
+  = if load_i64(state,48)==2 then (if load_i64(state,32)>0 then 8197 else 8193) else if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1
+
 effect fn rt_epoll_sync (epfd : i64, state : ptr, interests : ptr, index : i64) -> unit
   = if load_i64(state, 0) < 0 then noop() else
-    let wanted = if load_i64(state,48)==2 then (if load_i64(state,32)>0 then 8197 else 8193) else if load_i64(state, 32) > 0 || load_i64(state, 56) == 1 then 4 else 1 in
+    let wanted = rt_epoll_wanted(state) in
     if wanted == load_i64(interests, index * 8) then noop() else
       let updated = rt_epoll_apply(epfd, 3, load_i64(state, 0), wanted, rt_http_token(index)) in
       store_i64(interests, index * 8, wanted)
@@ -111,8 +118,11 @@ effect fn rt_serve_worker (listener : i64, handler : ptr, control : ptr, worker 
   = let fallback = rt_getenv_legacy(data("NEO_HTTP_POLL\0"), data("AXON_HTTP_POLL\0")) in
     let uring = rt_getenv_legacy(data("NEO_HTTP_URING\0"), data("AXON_HTTP_URING\0")) in
     let requested = uring != null() && load_u8(uring, 0) == '1' in
-    if load_i64(control,16)>0 then rt_http_epoll_worker(listener,handler,control,worker,workers,parent) else
-    if fallback != null() && load_u8(fallback, 0) == '1' then
+    let polling = fallback != null() && load_u8(fallback, 0) == '1' in
+    ; The ppoll loop has no timers, tasks or shutdown: with http_server_options
+    ; NEO_HTTP_POLL=1 selects epoll.
+    if polling && load_i64(control,16)>0 then rt_http_epoll_worker(listener,handler,control,worker,workers,parent) else
+    if polling then
       rt_http_worker(listener, handler, control, worker, workers, parent)
     else if uring != null() && load_u8(uring, 0) == '0' then
       rt_http_epoll_worker(listener, handler, control, worker, workers, parent)
