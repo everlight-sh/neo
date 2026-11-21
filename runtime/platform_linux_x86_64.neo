@@ -69,6 +69,8 @@ effect fn rt_ncpu () -> i64
     let n = if result < 0 || count < 1 then 1 else count in
     let saved = store_i64(runtime_state(), 16, n) in n
 fn rt_again () -> i64 = 11
+; 1 Linux, 2 macOS (os_name in std:process).
+fn rt_platform () -> i64 = 1
 fn rt_nonblock_flag () -> i64 {result > 0} = 2048
 fn rt_socket_level () -> i64 = 1
 fn rt_reuseaddr () -> i64 = 2

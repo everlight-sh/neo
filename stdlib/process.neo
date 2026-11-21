@@ -59,6 +59,10 @@ effect(process) fn process_status(process:Process) -> ProcessStatus
     let saved=if waited==pid && pid>0 then let a=store_i64(p,8,0) in store_i64(p,32,code) else noop() in
     ProcessStatus { ok=waited>=0,running=pid>0 && waited==0,exit_code=if code%128==0 then code/256%256 else 0,signal=code%128,
       error=if waited<0 then Error { code=i64(load_i32(rt_errno(),0)),message="wait failed",position=0 } else no_error() }
+; "linux" or "macos": the system this program runs on. The code of an error
+; that comes from the system is that system's own number, and the two differ
+; above 34 (a directory that is not empty is 39 on Linux and 66 on macOS).
+fn os_name() -> Arr u8 _ = if rt_platform()==2 then "macos" else "linux"
 effect(process,fs) fn process_try_read(process:Process,stream:i64,limit:i64) -> BytesResult
   = let address=rt_handle_fd(process.token,10) in
     if address<0 || stream<1 || stream>2 || load_i64(ptr_from_i64(address),16)<0 then bytes_error(9,"invalid process stream",0) else file_read_chunk(load_i64(ptr_from_i64(address),if stream==1 then 16 else 24),limit)
@@ -67,7 +71,10 @@ effect(process,fs) fn process_try_write(process:Process,bytes:Arr u8 n,offset:i6
     if load_i64(ptr_from_i64(address),16)<0 then int_error(9,"process input is inherited",0) else
     if offset<0 || offset>n then int_error(22,"invalid write offset",0) else
       let count=rt_send(load_i64(ptr_from_i64(address),16),ptr_add(data(bytes),offset),n-offset) in
-      if count<0 then int_error(i64(load_i32(rt_errno(),0)),"child write failed",offset) else int_ok(count)
+      ; A full pipe is code 11 on every system (the system's own number for it
+      ; is 11 on Linux and 35 on macOS), so a caller can tell it from a failure.
+      if count<0 then let code=i64(load_i32(rt_errno(),0)) in int_error(if code==rt_again() then 11 else code,"child write failed",offset)
+      else int_ok(count)
 ; SIGINT (2), SIGTERM (15) or SIGKILL (9); a child that already exited is not signalled.
 effect(process) fn process_signal(process:Process,signal:i64) -> IntResult
   = if signal!=2 && signal!=15 && signal!=9 then int_error(22,"unsupported child signal",0) else

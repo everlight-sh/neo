@@ -70,6 +70,15 @@ effect fn main() -> unit
     let ended=wait_exit(child) in check ended.ok && !ended.running && ended.exit_code==3 in
     let read=process_try_read(child,1,64) in let wrote_child=process_try_write(child,"x",0) in
     check !read.ok && read.error.code==9 && !wrote_child.ok && wrote_child.error.code==9 in
+    ; A child that never reads: its input pipe fills, and that is code 11 on
+    ; every system, not the system's own number for it.
+    using sleeper=process_start("/bin/sh",arr(i in 0..2) if i==0 then "-c" else "sleep 5",environment) in
+    let block=arr(i in 0..65536) u8(120) in
+    let full=loop(result=process_try_write(sleeper,block,0),tries=0) while result.ok && tries<64
+      next(process_try_write(sleeper,block,0),tries+1) yield result in
+    check !full.ok && full.error.code==11 in
+    let stopped=process_signal(sleeper,9) in let reaped=wait_exit(sleeper) in
+    check str_equal(os_name(),"linux") || str_equal(os_name(),"macos") in
     let r1=fs_remove(concat(root,"/l")) in let r2=fs_remove(concat(root,"/a")) in let r3=fs_remove(concat(root,"/b")) in
     let r4=fs_remove(file) in let r5=fs_rmdir(concat(root,"/d")) in let r6=fs_rmdir(root) in
     check r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok in

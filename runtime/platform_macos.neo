@@ -57,6 +57,8 @@ effect fn rt_ncpu () -> i64
       let n = if result < 0 then 1 else i64(load_i32(p, 8)) in
       let saved = store_i64(runtime_state(), 16, n) in n
 fn rt_again () -> i64 = 35
+; 1 Linux, 2 macOS (os_name in std:process).
+fn rt_platform () -> i64 = 2
 fn rt_nonblock_flag () -> i64 {result > 0} = 4
 fn rt_socket_level () -> i64 = 65535
 fn rt_reuseaddr () -> i64 = 4
