@@ -594,7 +594,7 @@ fn cg_runtime_check(borrow m:Mods, borrow fns:Arr i64 _) -> TcReport
 fn cg_abi_reserved(borrow name:Arr u8 _, executable:bool, runtime_export:bool) -> bool
   = str_starts(name,"neo_fn_") || str_starts(name,"neo_bytes_") || str_starts(name,"neo_failure_") ||
     str_starts(name,"neo_par_") || str_starts(name,"neo_region_") || tx_equal(name,"neo_heap_mode") ||
-    str_find(" neo_entry neo_retain neo_release neo_own_view neo_runtime_trap neo_precondition_trap ax_runtime_state ax_native_alloc_stats ",concat(" ",name," ")).present ||
+    str_find(" neo_entry neo_retain neo_release neo_own_view neo_own_view_copy neo_runtime_trap neo_precondition_trap ax_runtime_state ax_native_alloc_stats ",concat(" ",name," ")).present ||
     str_find(" neo_spawn_thread neo_fiber_swap neo_fiber_init ",concat(" ",name," ")).present ||
     (executable && (str_starts(name,"neo_arg_") || tx_equal(name,"_start") || tx_equal(name,"neo_process_start"))) ||
     (!runtime_export && (if executable then len(cg_runtime_signature(name))>0 else tx_equal(name,"ax_heap_alloc") || tx_equal(name,"ax_free")))
@@ -3469,14 +3469,18 @@ fn cg_array_runtime(source_runtime:bool, counting:i64) -> Arr u8 _
       "done:\n  %spare = phi i1 [ false, %entry ], [ %room, %check ]\n  ret i1 %spare\n}\n",
       cg_slot_refs(cg_value(n_t_arr(),""),true),cg_slot_refs(cg_value(n_t_arr(),""),false))
 
+; The test is inline at every store, since almost every array stored has an
+; owner; only the copy of a raw view is a call.
 fn cg_view_runtime() -> Arr u8 _
-  = concat("define internal %ax_arr @neo_own_view(%ax_arr %value) {\nentry:\n",
+  = concat("define internal %ax_arr @neo_own_view(%ax_arr %value) alwaysinline {\nentry:\n",
       "  %control = extractvalue %ax_arr %value, 3\n  %unowned = icmp eq ptr %control, null\n",
       ; Nothing to copy without data: an empty view, or a word (fuse.neo).
       "  %data = extractvalue %ax_arr %value, 0\n  %present = icmp ne ptr %data, null\n",
       "  %borrowed = and i1 %unowned, %present\n",
       "  br i1 %borrowed, label %copy, label %keep\nkeep:\n  ret %ax_arr %value\ncopy:\n",
-      "  %length = extractvalue %ax_arr %value, 1\n",
+      "  %copied = call %ax_arr @neo_own_view_copy(%ax_arr %value)\n  ret %ax_arr %copied\n}\n",
+      "define internal %ax_arr @neo_own_view_copy(%ax_arr %value) noinline {\nentry:\n",
+      "  %data = extractvalue %ax_arr %value, 0\n  %length = extractvalue %ax_arr %value, 1\n",
       "  %owned = call ptr @ax_heap_alloc(i64 %length)\n",
       "  call void @llvm.memcpy.p0.p0.i64(ptr %owned, ptr %data, i64 %length, i1 false)\n",
       "  %header = getelementptr i8, ptr %owned, i64 -16\n",
