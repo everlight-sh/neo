@@ -43,7 +43,7 @@ private fn html_forms () -> Arr u8 _
   = "\0\0\0\0\0\0\0\0\x26\x61\x6d\x70\x3b\0\0\0\x26\x6c\x74\x3b\0\0\0\0\x26\x67\x74\x3b\0\0\0\0\x26\x71\x75\x6f\x74\x3b\0\0\x26\x23\x78\x32\x37\x3b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
 ; Escapes & < > " ' for HTML text and attribute values. Among the parts of a
 ; concat the compiler writes the escaped text straight into the result
-; (compiler/src/fuse.neo; the runtime's ax_esc_len and ax_esc_write hold
+; (compiler/src/fuse.neo; the runtime's ax_esc_len and ax_esc_put hold
 ; these same tables, so the two must change together). Text without the five
 ; bytes is returned as is. Otherwise the escaped length is counted first and the text
 ; is written once into a buffer of that size: what comes before the first

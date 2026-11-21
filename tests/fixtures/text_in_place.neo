@@ -1,8 +1,8 @@
 ; Text built in place (compiler/src/fuse.neo). A concat writes its parts
 ; straight into its result: int_text as one store (a word copy), a function
 ; that ends in a concat after the text so far (an appending copy), a loop
-; that builds text into the buffer it is handed, html_escape counted and
-; written without a buffer of its own, and a let that only names a concat
+; that builds text into the buffer it is handed, html_escape written
+; without a buffer of its own, and a let that only names a concat
 ; where it is read. Every mode builds its text that way and again a byte at
 ; a time (slow_*, which nothing fuses), and the two must be equal.
 ; Modes: 0 numbers, 1 a page of rows, 2 escapes of every length up to `a`,
@@ -11,7 +11,10 @@
 ; of small texts whose parts are last uses, which must not grow the resident
 ; set (read from /proc/self/statm where it exists), 7 a list of `a` fragments
 ; joined by halves, and its allocation requests, 8 html_escape of texts
-; that are known at build time.
+; that are known at build time, 9 short texts escaped as they are written:
+; every length up to `a`, as a text of its own and after a growing one,
+; 10 and 11 the room an escaped part needs: `b` quotes (10) or letters (11)
+; after `a` bytes of text, with the allocation requests that took first.
 ; Prints "<length> <checksum> OK", or the problem.
 import "std:io"
 import "std:strings"
@@ -131,6 +134,59 @@ fn every_byte () -> Arr u8 _ = let all = arr(i in 0..256) u8(i) in concat("{", h
 fn slow_every_byte () -> Arr u8 _
   = let all = arr(i in 0..256) u8(i) in slow_join(slow_join(slow_join("{", slow_escape(all)), "}"), slow_escape(all))
 
+; Short texts, which are escaped as they are written. Text k has a length up
+; to `most`. Kinds 0 to 11: letters with one byte, at each place in turn (or
+; at none), one of & < > " ' or a byte the test for those must tell from
+; them. Kind 12: only " and ', which get six times as long. Kind 13: a slice
+; from each place of a literal up to its end, so it is read up to its own
+; last byte and no further. Each is escaped after the growing text, whose
+; buffer it finds with and without room, and twice as a text of its own.
+fn odd_byte (k : i64) -> u8
+  = if k == 0 then '&' else if k == 1 then '<' else if k == 2 then '>' else if k == 3 then '"' else if k == 4 then '\''
+    else if k == 5 then '#' else if k == 6 then ' ' else if k == 7 then '?' else if k == 8 then '!' else if k == 9 then u8(255)
+    else if k == 10 then u8(0) else '%'
+fn short_piece (k : i64, most : i64{most >= 0, most <= 48}) -> Arr u8 _
+  = let span = most + 1 in let size = k % span in let at = k / span % span in let kind = k / span / span in
+    let table = "Plain words, 0123 and-some; marks. Caf\xc3\xa9 ~@[]{}|^_`=+*/:(x)" in
+    if kind == 13 then
+      let from = if at + size <= len(table) then at else len(table) - size in
+      check from >= 0 && size >= 0 && from + size <= len(table) in byte_slice(table, from, from + size)
+    else loop (i = 0, out = arr(j in 0..0) u8(0)) while i < size
+      next (i + 1, push(out, if kind == 12 then (if i % 2 == 0 then '"' else '\'')
+        else if i == at then odd_byte(kind) else u8(97 + (i * 7 + size) % 26))) yield out
+fn fold (h : i64, text : Arr u8 n) -> i64
+  = loop (i : i64{i >= 0} = 0, hash = h) while i < n next (i + 1, (hash * 31 + i64(text[i])) % 1000000007) yield hash
+fn slow_short (k : i64, most : i64{most >= 0, most <= 48}) -> Arr u8 _
+  = let escaped = slow_escape(short_piece(k, most)) in let own = slow_join(slow_join("[", escaped), "]") in
+    slow_number(slow_join(slow_join(slow_join(escaped, "|"), own), own), k)
+fn shorts (most : i64{most >= 0, most <= 48}) -> Arr u8 _
+  = let span = most + 1 in let count = span * span * 14 in
+    let built = loop (k = 0, text = "") while k < count
+      next (k + 1, let piece = short_piece(k, most) in let own = concat("[", html_escape(piece), "]") in
+        concat(text, html_escape(piece), "|", own, own, int_text(k))) yield text in
+    let hash = loop (k = 0, h = 7) while k < count next (k + 1, fold(h, slow_short(k, most))) yield h in
+    let total = loop (k = 0, size = 0) while k < count next (k + 1, size + len(slow_short(k, most))) yield size in
+    if len(built) == total && checksum(built) == hash then concat(int_text(total), " ", int_text(hash), " OK\n")
+    else concat("built ", int_text(len(built)), " bytes with checksum ", int_text(checksum(built)), ", a byte at a time ",
+      int_text(total), " with ", int_text(hash), "\n")
+
+; The room an escaped part needs. A text of `size` bytes has a buffer of the
+; next power of two. `count` quotes get six times as long and letters stay
+; as they are, and either is written into that buffer when it fits there
+; with the eight bytes a last word may take, and into a new one when not.
+; The allocation requests of that one concat come first in what is printed.
+fn filled (size : i64{size >= 0, size <= 4096}) -> Arr u8 _ = arr(i in 0..size) u8(97 + i % 26)
+effect(unsafe) fn room (size : i64{size >= 0, size <= 4096}, count : i64, quotes : bool) -> Arr u8 _
+  = let base = filled(size) in
+    let piece = loop (i = 0, out = arr(j in 0..0) u8(0)) while i < count next (i + 1, push(out, if quotes then '"' else 'x')) yield out in
+    let expected = slow_join(filled(size), slow_escape(piece)) in
+    let before = load_i64(runtime_state(), 64) in
+    let grown = concat(base, html_escape(piece)) in
+    let requests = load_i64(runtime_state(), 64) - before in
+    if !allocation_stats_enabled() then "built without NEO_ALLOC_STATS=1\n"
+    else if !byte_equal(grown, expected) then concat("built ", int_text(len(grown)), " bytes, a byte at a time ", int_text(len(expected)), "\n")
+    else concat(int_text(requests), " ", int_text(len(grown)), " ", int_text(checksum(grown)), " OK\n")
+
 ; html_escape of text known at build time: a function or an `if` that can
 ; only give literals is escaped then. kind_or_word can also give a text that
 ; is not a literal, so it is escaped when the program runs.
@@ -233,6 +289,8 @@ effect(fs,unsafe) fn main (mode : i64, a : i64, b : i64) -> unit
       else if mode == 3 then (let failed = parts(a) in if len(failed) == 0 then "OK\n" else concat("wrong: ", failed, "\n"))
       else if mode == 4 then concat("<", word_of(a, b), ">", int_text(len(word_of(a, b))), "\n")
       else if mode == 8 then report(all_known(a), slow_all_known(a))
+      else if mode == 9 then (if a < 0 || a > 48 then "lengths are from 0 to 48\n" else shorts(a))
+      else if mode == 10 || mode == 11 then (if a < 0 || a > 4096 then "a text has from 0 to 4096 bytes\n" else room(a, b, mode == 10))
       else if mode == 7 then
         if a < 0 then "a list has no fewer than no fragments\n" else
         let items = fragments(a, b) in let before = load_i64(runtime_state(), 64) in let built = listed(items) in

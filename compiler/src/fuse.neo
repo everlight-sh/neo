@@ -27,8 +27,8 @@
 ;   one: html_escape of its result then costs nothing when the program runs.
 ;
 ; Two more things keep text out of buffers of its own, both in llvm.neo:
-; html_escape among a concat's parts is counted and written by the runtime
-; (cg_fused_escape), and a let that names a concat for one reader is read
+; html_escape among a concat's parts is escaped as it is written into the
+; result (cg_fused_escape), and a let that names a concat for one reader is read
 ; where that reader is (cg_deferred_let, with fu_let_tail and fu_part_uses
 ; below).
 import "std:strings"

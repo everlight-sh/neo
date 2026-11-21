@@ -114,32 +114,27 @@ export effect fn memset_pattern16 (dst : ptr, pattern : ptr, n : i64) -> unit
 export effect fn bzero (dst : ptr, n : i64) -> unit
   = let cleared = memset(dst, i32(0), n) in noop()
 
-; html_escape for the parts of a concat (llvm.neo, cg_fused_escape): the
-; length of n bytes at p once & < > " ' are escaped, and that escaped text
-; written at dst. The text is read a word at a time. A word without any of
-; the five bytes is counted and stored as it is. In any other, the five are
-; found as marks, one bit per byte: their number gives the length, and the
-; text is written as the bytes up to each mark followed by that byte's
-; escaped form, each as one eight-byte store that the next one covers where
-; it wrote too much. So dst needs room for the escaped text and eight bytes
-; more. The tables are std:http's (html_kinds, html_forms): for each byte,
-; which of the five it is in the low three bits and how much longer it gets
-; above them, then the five escaped forms at eight times that number.
-; A quick test first: & and ' differ in their lowest bit and < and > in the
-; next, so each pair is one test; the three are joined before one comparison.
-; It can only be wrong above a byte that is one of the five.
-fn rt_esc_marks (v : i64) -> i64 = bit_and(wrapping_sub(v, 72340172838076673), bit_xor(v, -1))
-fn rt_esc_special (w : i64) -> bool
-  = bit_and(bit_or(bit_or(rt_esc_marks(bit_xor(bit_or(w, 72340172838076673), 2821266740684990247)), rt_esc_marks(bit_xor(bit_or(w, 144680345676153346), 4485090715960753726))),
-      rt_esc_marks(bit_xor(w, 2459565876494606882))), -9187201950435737472) != 0
-; 128 in each byte of v that is zero, and nothing else; and how many bytes
-; of such marks are set.
-fn rt_esc_zeros (v : i64) -> i64
-  = bit_xor(bit_or(bit_or(wrapping_add(bit_and(v, 9187201950435737471), 9187201950435737471), v), 9187201950435737471), -1)
-fn rt_esc_count (marks : i64) -> i64 = shift_right(wrapping_mul(shift_right(marks, 7), 72340172838076673), 56)
-fn rt_esc_amp (w : i64) -> i64 = rt_esc_zeros(bit_xor(w, 2748926567846913574))
-fn rt_esc_angle (w : i64) -> i64 = rt_esc_zeros(bit_xor(bit_or(w, 144680345676153346), 4485090715960753726))
-fn rt_esc_quote (w : i64) -> i64 = bit_or(rt_esc_zeros(bit_xor(w, 2459565876494606882)), rt_esc_zeros(bit_xor(w, 2821266740684990247)))
+; html_escape for the parts of a concat (llvm.neo, cg_fused_escape): n bytes
+; at p written at dst with & < > " ' escaped (ax_esc_put, which says how many
+; bytes that was), and how long that text is (ax_esc_len). The text is read
+; a word at a time. In each word the bytes that may be one of the five are
+; found as marks, 128 in each such byte. A word without marks is stored as
+; it is. In any other the text is written as the bytes up to each mark
+; followed by that byte's escaped form, each as one eight-byte store that the
+; next one covers where it wrote too much. So dst needs room for the escaped
+; text and eight bytes more. The tables are std:http's (html_kinds,
+; html_forms): for each byte, which of the five it is in the low three bits
+; and how much longer it gets above them, then the five escaped forms at
+; eight times that number.
+; The marks: " # & ' are the bytes that are 0x27 once bits 0 and 2 are set,
+; and < > those that are 0x3e once bit 1 is, so two tests find the five and
+; '#', which the table then leaves as it is. A byte of v is zero exactly
+; when bit 7 of ((v & 0x7f) + 0x7f) | v is clear.
+fn rt_esc_marks (w : i64) -> i64
+  = let a = bit_xor(bit_or(w, 361700864190383365), 2821266740684990247) in
+    let b = bit_xor(bit_or(w, 144680345676153346), 4485090715960753726) in
+    bit_xor(bit_or(bit_and(bit_or(wrapping_add(bit_and(a, 9187201950435737471), 9187201950435737471), a),
+      bit_or(wrapping_add(bit_and(b, 9187201950435737471), 9187201950435737471), b)), 9187201950435737471), -1)
 ; The next bytes at p as a word, those past `left` (at least 1) zero. Fewer
 ; than eight are read as two halves that overlap, and fewer than four as the
 ; first, the middle and the last byte: never past the last one.
@@ -152,30 +147,45 @@ effect fn rt_esc_word (p : ptr, left : i64) -> i64
         shift_left(i64(load_u8(p, left - 1)), (left - 1) * 8))
 effect fn rt_esc_kind (byte : i64) -> i64 = i64(load_u8(data("\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x54\0\0\0\x41\x55\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x32\0\x33\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"), byte))
 effect fn rt_esc_form (kind : i64) -> i64 = load_i64(data("\0\0\0\0\0\0\0\0\x26\x61\x6d\x70\x3b\0\0\0\x26\x6c\x74\x3b\0\0\0\0\x26\x67\x74\x3b\0\0\0\0\x26\x71\x75\x6f\x74\x3b\0\0\x26\x23\x78\x32\x37\x3b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"), bit_and(kind, 7) * 8)
+; How many bytes longer the marked bytes of w get.
+effect fn rt_esc_more (w : i64, marks : i64) -> i64
+  = loop (m = marks, extra = 0) while m != 0
+      next (bit_and(m, wrapping_sub(m, 1)),
+        extra + shift_right(rt_esc_kind(bit_and(shift_right(w, count_trailing_zeros(m) - 7), 255)), 4))
+      yield extra
 export effect fn ax_esc_len (p : ptr, n : i64) -> i64
-  = loop (i = 0, total = n) while i < n
-      next (i + 8, let w = rt_esc_word(ptr_add(p, i), n - i) in
-        if !rt_esc_special(w) then total else
-        total + 4 * rt_esc_count(rt_esc_amp(w)) + 3 * rt_esc_count(rt_esc_angle(w)) + 5 * rt_esc_count(rt_esc_quote(w)))
-      yield total
+  = let whole = bit_and(n, -8) in
+    let full = loop (i = 0, total = n) while i < whole
+      next (i + 8, let w = load_i64(p, i) in let marks = rt_esc_marks(w) in
+        if marks == 0 then total else total + rt_esc_more(w, marks)) yield total in
+    if whole == n then full else
+    let w = rt_esc_word(ptr_add(p, whole), n - whole) in let marks = rt_esc_marks(w) in
+    if marks == 0 then full else full + rt_esc_more(w, marks)
 ; The first `count` bytes of w, escaped, at dst: how many bytes that is.
 ; more: the marks of the bytes still to write, the next one lowest.
-effect fn rt_esc_put (dst : ptr, w : i64, count : i64) -> i64
-  = loop (rest = w, more = bit_or(bit_or(rt_esc_amp(w), rt_esc_angle(w)), rt_esc_quote(w)), left = count, at = 0) while more != 0
+effect fn rt_esc_put (dst : ptr, w : i64, marks : i64, count : i64) -> i64
+  = loop (rest = w, more = marks, left = count, at = 0) while more != 0
       next (shift_right(shift_right(rest, count_trailing_zeros(more) / 8 * 8), 8),
         shift_right(shift_right(more, count_trailing_zeros(more) / 8 * 8), 8),
         left - count_trailing_zeros(more) / 8 - 1,
         let before = count_trailing_zeros(more) / 8 in let plain = store_i64(dst, at, rest) in
-        let kind = rt_esc_kind(bit_and(shift_right(rest, before * 8), 255)) in
-        let stored = store_i64(dst, at + before, rt_esc_form(kind)) in at + before + 1 + shift_right(kind, 4))
+        let byte = bit_and(shift_right(rest, before * 8), 255) in let kind = rt_esc_kind(byte) in
+        let stored = store_i64(dst, at + before, if kind == 0 then byte else rt_esc_form(kind)) in
+        at + before + 1 + shift_right(kind, 4))
       yield let plain = store_i64(dst, at, rest) in at + left
+export effect fn ax_esc_put (dst : ptr, p : ptr, n : i64) -> i64
+  = let whole = bit_and(n, -8) in
+    let full = loop (i = 0, o = 0) while i < whole
+      next (i + 8, let w = load_i64(p, i) in let marks = rt_esc_marks(w) in
+        if marks == 0 then let stored = store_i64(dst, o, w) in o + 8
+        else o + rt_esc_put(ptr_add(dst, o), w, marks, 8)) yield o in
+    if whole == n then full else
+    let left = n - whole in let w = rt_esc_word(ptr_add(p, whole), left) in let marks = rt_esc_marks(w) in
+    if marks == 0 then let stored = store_i64(dst, full, w) in full + left
+    else full + rt_esc_put(ptr_add(dst, full), w, marks, left)
+; What a compiler before 0.2.14 calls to write a part it has counted.
 export effect fn ax_esc_write (dst : ptr, p : ptr, n : i64) -> unit
-  = let end = loop (i = 0, o = 0) while i < n
-      next (i + 8, let left = n - i in let count = if left < 8 then left else 8 in
-        let w = rt_esc_word(ptr_add(p, i), left) in
-        if !rt_esc_special(w) then let stored = store_i64(dst, o, w) in o + count
-        else o + rt_esc_put(ptr_add(dst, o), w, count))
-      yield o in noop()
+  = let written = ax_esc_put(dst, p, n) in noop()
 
 export fn ax_cap (bytes : i64) -> i64
   = loop (capacity = 16) while capacity < bytes && capacity <= 4611686018427387903

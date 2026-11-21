@@ -40,3 +40,14 @@
 1	8 0 0		=0 7 OK\n
 1	8 1 0		=54 671598529 OK\n
 1	8 37 0		=2208 145102444 OK\n
+# Short texts escaped as they are written: every length up to a, with one of the five bytes or one the test must tell from them at each place, only quotes, and slices of a literal up to its end; after a growing text and as texts of their own.
+1	9 0 0		=88 711020310 OK\n
+1	9 8 0		=29724 794589532 OK\n
+1	9 17 0		=205872 507590029 OK\n
+1	9 33 0		=1271608 711871153 OK\n
+# The room an escaped part needs, with the allocation requests of that concat first: 40 quotes get six times as long and fit a buffer of 1024 bytes after 776 bytes of text (with the eight bytes a last word may take) but not after 777; 40 letters fit after 777 and after 976, and not after 977.
+1	10 776 40		=0 1016 531840928 OK\n
+1	10 777 40		=1 1017 352083806 OK\n
+1	11 777 40		=0 817 990718424 OK\n
+1	11 976 40		=0 1016 329086568 OK\n
+1	11 977 40		=1 1017 694986539 OK\n

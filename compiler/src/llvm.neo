@@ -1428,7 +1428,8 @@ fn cg_direct(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, mo
 ; are written, and that copy puts the function's text after them.
 ; wordy: the value may be a word (no data pointer, the bytes in field 2).
 ; length: how many bytes the piece adds to the text. escaped: it is written
-; as html_escape of the value, and length is that text's (cg_fused_escape).
+; as html_escape of the value, and how long that is is known once it is
+; written (cg_fused_escape); length is then not used.
 type CgPiece = { value:CgValue, owned:bool, wordy:bool, literal:bool, escaped:bool, length:Arr u8 _ }
 ; buf: when has is set, the text so far, owned here. sure: it is the only
 ; reference to a whole buffer. pieces: read, not written yet.
@@ -1524,45 +1525,58 @@ fn cg_word(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move
     let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr zeroinitializer, i64 ",length,", 1")) in
     cg_ins_value(s,cg_bytes_value(""),concat("insertvalue %ax_arr ",s.value.operand,", i64 ",word,", 2"))
 ; The total of start and the pieces' lengths. Lengths are sizes of arrays
-; in memory, so their sum cannot overflow.
-fn cg_fused_total(move s:CgState, borrow pieces:Arr CgPiece _, borrow start:Arr u8 _) -> CgSpan
+; in memory, so their sum cannot overflow. An escaped piece counts as its
+; escaped length when exact is set (the runtime's ax_esc_len reads it for
+; that), and otherwise as six times its own, which no escaped text exceeds
+; (" and ' become six bytes): enough to tell that a buffer has room.
+fn cg_fused_total(move s:CgState, borrow pieces:Arr CgPiece _, borrow start:Arr u8 _, exact:bool) -> CgSpan
   = loop (i=0, out=CgSpan { state=s, total=start, slack=false }) while i<len(pieces)
       next (i+1,let p=cg_piece(pieces,i) in
-        let added=cg_ins(out.state,n_t_i64(),concat("add i64 ",out.total,", ",p.length)) in
+        let sized=if !p.escaped then out.state with { value=cg_value(n_t_i64(),p.length) } else
+          let s=cg_extract(out.state,p.value,1,n_t_i64()) in let raw=s.value.operand in
+          if !exact then cg_ins(s,n_t_i64(),concat("mul i64 ",raw,", 6")) else
+          let s=cg_extract(s,p.value,0,n_t_ptr()) in
+          cg_ins(s,n_t_i64(),concat("call i64 @ax_esc_len(ptr ",s.value.operand,", i64 ",raw,")")) in
+        let added=cg_ins(sized,n_t_i64(),concat("add i64 ",out.total,", ",sized.value.operand)) in
         CgSpan { state=added, total=added.value.operand, slack=out.slack || p.wordy || p.escaped }) yield out
+fn cg_fused_escapes(borrow pieces:Arr CgPiece _) -> bool
+  = loop (i=0, found=false) while !found && i<len(pieces) next (i+1,cg_piece(pieces,i).escaped) yield found
 ; One piece's bytes. A literal's length is known, so its copy is a few
 ; stores; any other goes to memcpy. (Copying a short piece as sixteen bytes
 ; whatever its length read past the piece, which LLVM may assume never
 ; happens: a slice of a literal was then taken to start at its first byte.)
 fn cg_fused_copy(move s:CgState, borrow target:Arr u8 _, borrow source:Arr u8 _, borrow length:Arr u8 _) -> CgState
   = cg_write(s,concat("  call void @llvm.memcpy.p0.p0.i64(ptr ",target,", ptr ",source,", i64 ",length,", i1 false)\n"))
-; Writes the pieces at data + start and releases those this concat owns.
-fn cg_fused_write(move s:CgState, borrow pieces:Arr CgPiece _, borrow data:Arr u8 _, borrow start:Arr u8 _) -> CgState
+; Writes the pieces at data + start and releases those this concat owns;
+; offset: where the text then ends. An escaped piece is escaped as it is
+; written, and says how long that was: a short one without any of the five
+; bytes here (cg_escape_runtime), any other by the runtime's ax_esc_put.
+fn cg_fused_write(move s:CgState, borrow pieces:Arr CgPiece _, borrow data:Arr u8 _, borrow start:Arr u8 _) -> CgCopy
   = loop (i=0, copy=CgCopy { state=s, offset=start }) while i<len(pieces)
       next (i+1,let p=cg_piece(pieces,i) in
         let s=cg_extract(copy.state,p.value,0,n_t_ptr()) in let source=s.value.operand in
         let s=cg_offset(s,"i8",data,copy.offset) in let target=s.value.operand in
         let s=if p.escaped then
-          ; Text that escaping leaves as it is has its own length, and is copied.
           let s=cg_extract(s,p.value,1,n_t_i64()) in let raw=s.value.operand in
-          let s=cg_ins(s,n_t_bool(),concat("icmp eq i64 ",p.length,", ",raw)) in
-          let same=s.serial in let changed=same+1 in let done=changed+1 in
-          let s=cg_block(cg_branch(s with { serial=done+1 },s.value.operand,same,changed),same) in
-          let s=cg_fused_copy(s,target,source,raw) in
-          let s=cg_block(cg_jump(s,done),changed) in
-          let s=cg_write(s,concat("  call void @ax_esc_write(ptr ",target,", ptr ",source,", i64 ",raw,")\n")) in
-          cg_block(cg_jump(s,done),done)
-        else if !p.wordy then cg_fused_copy(s,target,source,p.length) else
+          let s=cg_ins(s,n_t_i64(),concat("call i64 @neo_esc_put(ptr ",target,", ptr ",source,", i64 ",raw,")")) in let quick=s.value.operand in
+          let s=cg_ins(s,n_t_bool(),concat("icmp slt i64 ",quick,", 0")) in
+          let here=s.block in let slow=s.serial in let done=slow+1 in
+          let s=cg_block(cg_branch(s with { serial=done+1 },s.value.operand,slow,done),slow) in
+          let s=cg_ins(s,n_t_i64(),concat("call i64 @ax_esc_put(ptr ",target,", ptr ",source,", i64 ",raw,")")) in let full=s.value.operand in
+          let s=cg_block(cg_jump(s,done),done) in
+          cg_phi(s,cg_value(n_t_i64(),quick),here,cg_value(n_t_i64(),full),slow)
+        else if !p.wordy then cg_fused_copy(s,target,source,p.length) with { value=cg_value(n_t_i64(),p.length) } else
           let s=cg_ins(s,n_t_bool(),concat("icmp eq ptr ",source,", null")) in
           let word=s.serial in let bytes=word+1 in let done=bytes+1 in
           let s=cg_block(cg_branch(s with { serial=done+1 },s.value.operand,word,bytes),word) in
           let s=cg_extract(s,p.value,2,n_t_i64()) in
           let s=cg_write(s,concat("  store i64 ",s.value.operand,", ptr ",target,", align 1\n")) in
           let s=cg_fused_copy(cg_block(cg_jump(s,done),bytes),target,source,p.length) in
-          cg_block(cg_jump(s,done),done) in
+          cg_block(cg_jump(s,done),done) with { value=cg_value(n_t_i64(),p.length) } in
+        let written=s.value.operand in
         let s=if p.owned then cg_release(s,p.value) else s in
-        let s=cg_ins(s,n_t_i64(),concat("add i64 ",copy.offset,", ",p.length)) in
-        CgCopy { state=s, offset=s.value.operand }) yield copy.state
+        let s=cg_ins(s,n_t_i64(),concat("add i64 ",copy.offset,", ",written)) in
+        CgCopy { state=s, offset=s.value.operand }) yield copy
 fn cg_fused_value(move s:CgState, borrow data:Arr u8 _, borrow length:Arr u8 _, borrow control:Arr u8 _) -> CgState
   = let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr poison, ptr ",data,", 0")) in
     let s=cg_ins(s,n_t_arr(),concat("insertvalue %ax_arr ",s.value.operand,", i64 ",length,", 1")) in
@@ -1572,6 +1586,39 @@ fn cg_fused_value(move s:CgState, borrow data:Arr u8 _, borrow length:Arr u8 _, 
 ; a word, or the last word of an escaped text, may be stored at its end.
 fn cg_fused_room(move s:CgState, borrow span:CgSpan) -> CgState
   = if span.slack then cg_ins(s,n_t_i64(),concat("add i64 ",span.total,", 8")) else s with { value=cg_value(n_t_i64(),span.total) }
+; The pieces after the text so far when some of them are escaped. Their
+; escaped lengths are not known before they are written, so the text so far
+; is first asked for room for the most they can take (cg_fused_total), which
+; a buffer that is being filled usually has: the pieces are then written in
+; one pass. Only when it has not are the escaped lengths counted, and the
+; text gets what it then needs: the same buffer if that has room after all,
+; else a new one of exactly that size, as when lengths are known.
+fn cg_fused_append(move f:CgFused) -> CgFused
+  = let s=cg_extract(f.state,f.buf,1,n_t_i64()) in let length=s.value.operand in
+    let most=cg_fused_total(s,f.pieces,length,false) in
+    let sized=cg_fused_room(most.state,most) in let room=sized.value.operand in
+    let s=cg_extract(sized,f.buf,0,n_t_ptr()) in let old_data=s.value.operand in
+    let s=cg_extract(s,f.buf,3,n_t_ptr()) in let old_control=s.value.operand in
+    let tested=cg_ins(s,n_t_bool(),concat("call i1 @neo_spare(",cg_typed(f.buf),", i64 ",room,", i64 0)")) in
+    let direct=tested.block in let count=tested.serial in let grow=count+1 in let done=grow+1 in
+    let s=cg_block(cg_branch(tested with { serial=done+1 },tested.value.operand,done,count),count) in
+    let span=cg_fused_total(s,f.pieces,length,true) in
+    let sized=cg_fused_room(span.state,span) in let bytes=sized.value.operand in
+    let fits=cg_ins(sized,n_t_bool(),concat("call i1 @neo_spare(",cg_typed(f.buf),", i64 ",bytes,", i64 0)")) in
+    let counted=fits.block in
+    let s=cg_block(cg_branch(fits,fits.value.operand,done,grow),grow) in
+    let s=cg_ins(s,n_t_ptr(),concat("call ptr @ax_heap_alloc(i64 ",bytes,")")) in let new_data=s.value.operand in
+    let s=cg_offset(s,"i8",new_data,"-16") in let new_control=s.value.operand in
+    let s=cg_write(s,concat("  call void @llvm.memcpy.p0.p0.i64(ptr ",new_data,", ptr ",old_data,", i64 ",length,", i1 false)\n")) in
+    let s=cg_release(s,f.buf) in let grown=s.block in
+    let s=cg_block(cg_jump(s,done),done) in
+    let s=cg_ins(s,n_t_ptr(),concat("phi ptr [ ",old_data,", %",cg_label(direct)," ], [ ",old_data,", %",cg_label(counted),
+      " ], [ ",new_data,", %",cg_label(grown)," ]")) in let data=s.value.operand in
+    let s=cg_ins(s,n_t_ptr(),concat("phi ptr [ ",old_control,", %",cg_label(direct)," ], [ ",old_control,", %",cg_label(counted),
+      " ], [ ",new_control,", %",cg_label(grown)," ]")) in let control=s.value.operand in
+    let copy=cg_fused_write(s,f.pieces,data,length) in
+    let s=cg_fused_value(copy.state,data,copy.offset,control) in
+    f with { state=s, buf=s.value, has=true, sure=true, pieces=cg_no_pieces() }
 ; Writes the pieces read so far after the text so far. lone: a call of an
 ; appending copy follows, which takes any one array as the text so far.
 ; Otherwise this ends the concat, and its result is made the only reference
@@ -1587,16 +1634,19 @@ fn cg_fused_flush(move f:CgFused, lone:bool) -> CgFused
       let rest=arr(i in 0..count-1) cg_piece(f.pieces,i+1) in
       cg_fused_flush(f with { buf=first.value, has=true, sure=false, pieces=rest },lone)
     else if !f.has then
-      let span=cg_fused_total(f.state,f.pieces,"0") in
+      ; A new buffer has the text's own size: escaped pieces are counted.
+      let span=cg_fused_total(f.state,f.pieces,"0",true) in
       let sized=cg_fused_room(span.state,span) in
       let s=cg_ins(sized,n_t_ptr(),concat("call ptr @ax_heap_alloc(i64 ",sized.value.operand,")")) in let data=s.value.operand in
       let s=cg_offset(s,"i8",data,"-16") in let control=s.value.operand in
-      let s=cg_fused_value(cg_fused_write(s,f.pieces,data,"0"),data,span.total,control) in
+      let copy=cg_fused_write(s,f.pieces,data,"0") in
+      let s=cg_fused_value(copy.state,data,if cg_fused_escapes(f.pieces) then copy.offset else span.total,control) in
       f with { state=s, buf=s.value, has=true, sure=true, pieces=cg_no_pieces() }
     else if count==0 && (lone || f.sure) then f
+    else if cg_fused_escapes(f.pieces) then cg_fused_append(f)
     else
       let s=cg_extract(f.state,f.buf,1,n_t_i64()) in let length=s.value.operand in
-      let span=cg_fused_total(s,f.pieces,length) in
+      let span=cg_fused_total(s,f.pieces,length,false) in
       let sized=cg_fused_room(span.state,span) in let bytes=sized.value.operand in
       let s=cg_extract(sized,f.buf,0,n_t_ptr()) in let old_data=s.value.operand in
       let s=cg_extract(s,f.buf,3,n_t_ptr()) in let old_control=s.value.operand in
@@ -1610,7 +1660,7 @@ fn cg_fused_flush(move f:CgFused, lone:bool) -> CgFused
       let s=cg_block(cg_jump(s,done),done) in
       let s=cg_phi(s,cg_value(n_t_ptr(),old_data),direct,cg_value(n_t_ptr(),new_data),grown) in let data=s.value.operand in
       let s=cg_phi(s,cg_value(n_t_ptr(),old_control),direct,cg_value(n_t_ptr(),new_control),grown) in let control=s.value.operand in
-      let s=cg_fused_value(cg_fused_write(s,f.pieces,data,length),data,span.total,control) in
+      let s=cg_fused_value(cg_fused_write(s,f.pieces,data,length).state,data,span.total,control) in
       f with { state=s, buf=s.value, has=true, sure=true, pieces=cg_no_pieces() }
 ; A part that calls a function with an appending copy: what was read so far
 ; is written, and the copy puts the function's text after it. With no text
@@ -1649,11 +1699,10 @@ fn cg_fused_part(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _
     cg_fused_push(f,kept with { value=value },pieces,!read.borrowed || nested,kind==1 || kind==2,n.kind==n_str())
 ; html_escape of expression id as pieces: of each part when it is a concat
 ; or a let read where it is needed, and at build time when it is a literal.
-; Any other value is one piece: the runtime counts its escaped length
-; (ax_esc_len) and, if that is not its own, writes it escaped into the result
-; (ax_esc_write); nothing is allocated. The value keeps a reference until it
-; is written: the call this stands for would have finished before a later
-; part could take the value's buffer.
+; Any other value is one piece, which is escaped as it is written into the
+; result (cg_fused_write); nothing is allocated. The value keeps a reference
+; until it is written: the call this stands for would have finished before a
+; later part could take the value's buffer.
 ; whole: id is html_escape's own argument, which that call owns. Otherwise it
 ; is a part of the concat being escaped, and first says it is the first,
 ; which that concat owns when it is a variable's last use (cg_plan_call).
@@ -1681,11 +1730,8 @@ fn cg_fused_escape(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding
       if read.state.error>=0 then f with { state=read.state, pieces=pieces } else
       let value=read.state.value in
       let s=if read.borrowed then cg_retain(read.state,value) else read.state in
-      let s=cg_extract(s,value,0,n_t_ptr()) in let source=s.value.operand in
-      let s=cg_extract(s,value,1,n_t_i64()) in
-      let s=cg_ins(s,n_t_i64(),concat("call i64 @ax_esc_len(ptr ",source,", i64 ",s.value.operand,")")) in
       f with { state=s, pieces=push(pieces,CgPiece { value=value, owned=true, wordy=false, literal=false, escaped=true,
-        length=s.value.operand }) }
+        length=tx_empty() }) }
 fn cg_fused_escape_list(borrow m:Mods, borrow fns:Arr i64 _, borrow env:Arr CgBinding _, move f:CgFused, list:i64) -> CgFused
   = loop (i=0, out=f) while out.state.error<0 && i<ast_list_len(m.ast,list)
       next (i+1,cg_fused_escape(m,fns,env,out,ast_list_at(m.ast,list,i),false,i==0)) yield out
@@ -3437,6 +3483,51 @@ fn cg_view_runtime() -> Arr u8 _
       "  %buffer = insertvalue %ax_arr %value, ptr %owned, 0\n  %flag = insertvalue %ax_arr %buffer, i64 1, 2\n",
       "  %result = insertvalue %ax_arr %flag, ptr %header, 3\n  ret %ax_arr %result\n}\n")
 
+; neo_esc_put(d, p, n): html_escape of the n bytes at p, written at d, when
+; that is the text itself and it has at most sixteen bytes; n then, and -1
+; when nothing was written and the runtime's ax_esc_put is to do it. Nothing
+; past the text is read: eight to sixteen bytes are two loads that overlap,
+; four to seven two halves that overlap, fewer the first, the middle and the
+; last byte, put together as one word with the bytes past the text zero. (A
+; load past a piece is one LLVM may assume never happens, see cg_fused_copy.)
+; A text of at most eight bytes is written as one store of eight, so d has
+; eight bytes more than the text (cg_fused_room). The test is the runtime's
+; rt_esc_marks as one comparison: " # & ' are 0x27 once bits 0 and 2 are
+; set and < > are 0x3e once bit 1 is, so a text with '#' also goes to the
+; runtime, which leaves that byte as it is.
+fn cg_escape_marks(borrow k:Arr u8 _) -> Arr u8 _
+  = concat("  %x",k,"o = or i64 %w",k,", 361700864190383365\n  %x",k," = xor i64 %x",k,"o, 2821266740684990247\n",
+      "  %x",k,"s = add i64 %x",k,", -72340172838076673\n  %x",k,"n = xor i64 %x",k,", -1\n  %x",k,"m = and i64 %x",k,"s, %x",k,"n\n",
+      "  %y",k,"o = or i64 %w",k,", 144680345676153346\n  %y",k," = xor i64 %y",k,"o, 4485090715960753726\n",
+      "  %y",k,"s = add i64 %y",k,", -72340172838076673\n  %y",k,"n = xor i64 %y",k,", -1\n  %y",k,"m = and i64 %y",k,"s, %y",k,"n\n",
+      "  %m",k," = or i64 %x",k,"m, %y",k,"m\n")
+fn cg_escape_runtime() -> Arr u8 _
+  = concat("define internal i64 @neo_esc_put(ptr %d, ptr %p, i64 %n) alwaysinline {\nentry:\n",
+      "  %long = icmp ugt i64 %n, 16\n  br i1 %long, label %other, label %short\nshort:\n",
+      "  %wide = icmp uge i64 %n, 8\n  br i1 %wide, label %two, label %narrow\ntwo:\n",
+      "  %a0 = load i64, ptr %p, align 1\n  %a_at = add i64 %n, -8\n  %a_ptr = getelementptr i8, ptr %p, i64 %a_at\n",
+      "  %w1 = load i64, ptr %a_ptr, align 1\n",cg_escape_marks("1"),"  br label %test\nnarrow:\n",
+      "  %half = icmp uge i64 %n, 4\n  br i1 %half, label %four, label %tiny\nfour:\n",
+      "  %b0 = load i32, ptr %p, align 1\n  %b_at = add i64 %n, -4\n  %b_ptr = getelementptr i8, ptr %p, i64 %b_at\n",
+      "  %b1 = load i32, ptr %b_ptr, align 1\n  %b0x = zext i32 %b0 to i64\n  %b1x = zext i32 %b1 to i64\n",
+      "  %b_shift = shl i64 %b_at, 3\n  %b_high = shl i64 %b1x, %b_shift\n  %b = or i64 %b0x, %b_high\n  br label %test\ntiny:\n",
+      "  %none = icmp eq i64 %n, 0\n  br i1 %none, label %empty, label %bytes\nempty:\n  ret i64 0\nbytes:\n",
+      "  %c0 = load i8, ptr %p, align 1\n  %c_mid = lshr i64 %n, 1\n  %c_mid_ptr = getelementptr i8, ptr %p, i64 %c_mid\n",
+      "  %c1 = load i8, ptr %c_mid_ptr, align 1\n  %c_last = add i64 %n, -1\n  %c_last_ptr = getelementptr i8, ptr %p, i64 %c_last\n",
+      "  %c2 = load i8, ptr %c_last_ptr, align 1\n  %c0x = zext i8 %c0 to i64\n  %c1x = zext i8 %c1 to i64\n  %c2x = zext i8 %c2 to i64\n",
+      "  %c_mid_shift = shl i64 %c_mid, 3\n  %c_last_shift = shl i64 %c_last, 3\n",
+      "  %c1s = shl i64 %c1x, %c_mid_shift\n  %c2s = shl i64 %c2x, %c_last_shift\n",
+      "  %c01 = or i64 %c0x, %c1s\n  %c = or i64 %c01, %c2s\n  br label %test\ntest:\n",
+      "  %w0 = phi i64 [ %a0, %two ], [ %b, %four ], [ %c, %bytes ]\n",
+      "  %last = phi i64 [ %w1, %two ], [ %b, %four ], [ %c, %bytes ]\n",
+      "  %at = phi i64 [ %a_at, %two ], [ 0, %four ], [ 0, %bytes ]\n",
+      "  %more = phi i64 [ %m1, %two ], [ 0, %four ], [ 0, %bytes ]\n",
+      cg_escape_marks("0"),
+      "  %marks = or i64 %m0, %more\n  %hit = and i64 %marks, -9187201950435737472\n  %special = icmp ne i64 %hit, 0\n",
+      "  br i1 %special, label %other, label %clean\nclean:\n",
+      "  store i64 %w0, ptr %d, align 1\n  %out = getelementptr i8, ptr %d, i64 %at\n  store i64 %last, ptr %out, align 1\n",
+      "  ret i64 %n\nother:\n  ret i64 -1\n}\n")
+
 fn cg_failure_runtime(executable:bool, source_runtime:bool) -> Arr u8 _
   = if executable then concat(if source_runtime then "" else "declare void @ax_trap(ptr)\ndeclare void @ax_precondition_failed(ptr)\ndeclare void @ax_exit(i64)\n",
       "define internal void @neo_runtime_trap(ptr %message) noreturn {\n  call void @ax_trap(ptr %message)\n  unreachable\n}\n",
@@ -3799,8 +3890,8 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
         if mode==0 then t else let ids=md_list(m.fns,k) in
         loop (i=0, out=t) while i<len(ids)
           next (i+1,let id=tx_at(ids,i) in if id>=0 && id<len(out) then set(out,id,u8(mode)) else out) yield out) yield t in
-    ; Escaped parts are written by the runtime's ax_esc_write.
-    let m=m with { fused=if fused && md_find_decl(m,fns,bk_get(m.base,0,"ax_esc_write"))>=0 then fu_table(m,fns,here) else tx_empty() } in
+    ; Escaped parts are written by the runtime's ax_esc_put.
+    let m=m with { fused=if fused && md_find_decl(m,fns,bk_get(m.base,0,"ax_esc_put"))>=0 then fu_table(m,fns,here) else tx_empty() } in
     let runtime=if source_runtime then cg_runtime_check(m,fns) else TcReport { result=tc_type(n_t_unit()), module=-1 } in
     if runtime.result.value.ty<=0 then CgProgram { text=tx_empty(), report=runtime } else
     let views=loop (i=0, found=partition!=0) while !found && i<len(m.ast.nodes)/11
@@ -3859,10 +3950,11 @@ fn cg_program_part(borrow m:Mods, borrow target:Arr u8 _, allocation_stats:bool,
     let prune=(partition==0 || (partition==1 && len(m.shared)>0)) && source_runtime && len(target)>0 && !m.stable_symbols in
     let text=str_concat_parts(if prune then cg_kept(entry,startup,source_runtime) else entry.pieces) in
     let text=if str_find(text,"@neo_sort_small(").present then concat(text,sk_module(str_starts(target,"x86_64-"))) else text in
+    let text=if str_find(text,"@neo_esc_put(").present then concat(text,cg_escape_runtime()) else text in
     let text=concat(text,na_runtime(target,text,partition),na_crypto(target,text),cg_wide_runtime(text,wide),
       if !source_runtime && str_find(text,"call ptr @ax_alloc(").present then "declare ptr @ax_alloc(i64)\n" else "",
       if !source_runtime && str_find(text,"call i64 @ax_serve(").present then "declare i64 @ax_serve(i64, ptr)\n" else "",
-      if !source_runtime && str_find(text,"@ax_esc_len(").present then "declare i64 @ax_esc_len(ptr, i64)\ndeclare void @ax_esc_write(ptr, ptr, i64)\n" else "") in
+      if !source_runtime && str_find(text,"@ax_esc_put(").present then "declare i64 @ax_esc_len(ptr, i64)\ndeclare i64 @ax_esc_put(ptr, ptr, i64)\n" else "") in
     ; Threads start only through spawn_thread, so a whole program that never
     ; calls it has one thread and needs no atomic reference counts. An object
     ; linked with others tests the flag spawn_thread sets, unless it is the

@@ -298,9 +298,13 @@ makes room once, and writes each part straight into it:
   `loop (out = "", i = 0) while i < n next (concat(out, row(i)), i + 1) yield
   out` does: `concat(head, rows(n), tail)` builds no row and no list of rows
   of its own.
-- `html_escape(text)` among the parts is counted first and then written,
-  escaped, into the result. `html_escape(concat(a, b))` is written as the
-  escaped `a` and the escaped `b`.
+- `html_escape(text)` among the parts is escaped as it is written into the
+  result, in one pass over the text. A buffer that is being filled takes it
+  as soon as it has room for six times the text, the most escaping can make
+  of it; the escaped length is counted first only when it has not, and for a
+  result that gets a buffer of its own, which then has exactly its size.
+  `html_escape(concat(a, b))` is written as the escaped `a` and the escaped
+  `b`.
 - `html_escape` of text that is known at build time is that text, escaped
   at build time: a literal, an `if` between literals, or a call of a function
   that can only return literals (a label for each kind of thing, say), which
