@@ -399,7 +399,8 @@ effect fn rt_uring_sync (d : ptr, states : ptr, n : i64) -> unit
 effect fn rt_uring_draining (d : ptr, control : ptr, states : ptr, n : i64, listener : i64) -> bool
   = let deadline = atomic_load_i64(control, 8) in if deadline <= 0 then false else
     let timers = rt_timer_stop_all() in
-    let closed = if load_i64(runtime_state(), 1704) == 0 then let closed = rt_close(listener) in store_i64(runtime_state(), 1704, 1) else noop() in
+    let closed = if load_i64(runtime_state(), 1704) == 0 then
+      let closed = rt_close(listener) in let woken = rt_async_wake_all() in store_i64(runtime_state(), 1704, 1) else noop() in
     let expired = rt_clock_ns() / 1000000 >= deadline in
     let multishot = load_ptr(d, 104) != null() in
     let active = loop (i = 0, active = 0) while i < n next (i + 1,

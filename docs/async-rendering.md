@@ -84,6 +84,15 @@ accepting, drains until the configured grace deadline, then cancels outstanding
 work. This HTTP/1.1 streaming profile closes the connection after completion;
 client EOF/half-close cancels an async response.
 
+A response that is still open when the grace deadline passes is cut off
+without its last chunk, which a proxy reports to its client as an error. That
+is right for a page that could not finish, and wrong for a response that never
+finishes by itself, such as an event stream. So when shutdown begins every
+continuation is called once, whatever its wake time, and
+`http_async_stopping()` is true from then on: a continuation that streams
+events should answer with `http_async_close(...)`, which ends the response
+properly and lets the server exit without waiting for the deadline.
+
 ## Bounds and limits
 
 There are at most 256 live tasks per worker and 32 deferred tasks per response.

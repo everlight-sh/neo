@@ -5,9 +5,10 @@
 ; an interval registered before serve_effect fires; a render task's socket
 ; wait and a continuation's timer run beside ordinary requests, also on a
 ; connection that takes the place of a finished continuation's; on SIGTERM an
-; idle keep-alive connection closes at once, while a continuation, a render
-; task and a 4 MiB response that were open finish within a 2 s grace period
-; and the server exits 0; with a 150 ms grace period they are cut off and the
+; idle keep-alive connection closes at once, an event stream that would run
+; for ever is told and ends with its last chunk at once, while a continuation,
+; a render task and a 4 MiB response that were open finish within a 2 s grace
+; period and the server exits 0; with a 150 ms grace period they are cut off and the
 ; server still exits in time. Without the options call the interval fires on
 ; every backend too (grace 0: SIGTERM then simply ends the process).
 import "std:io"
@@ -49,6 +50,8 @@ effect fn so_finish(server:Process, port:i64) -> SoStop
     using waiting=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
     using task=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
     using big=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    using events=tcp_connect_ipv4("127.0.0.1",port,deadline.value) in
+    let e=socket_write(events,so_get("/events"),deadline.value) in let opened=nw_read_until(events,": tick",deadline.value) in
     let a=socket_write(idle,so_get("/"),deadline.value) in let first=nw_read_until(idle,"FAST",deadline.value) in
     let b=socket_write(waiting,so_get("/wait"),deadline.value) in let shell=nw_read_until(waiting,"Shell ready",deadline.value) in
     let c=socket_write(task,so_get(concat("/task?port=",int_text(port))),deadline.value) in
@@ -63,10 +66,13 @@ effect fn so_finish(server:Process, port:i64) -> SoStop
     let p=nw_note(p,fast,"a request beside the open ones failed") in
     let signalled=nw_signal_tree(server,15) in let begin=nw_now_ms() in
     let closed=nw_drain(idle,deadline.value) in let idle_ms=nw_now_ms()-begin in
+    let stream=concat(opened,nw_drain(events,deadline.value)) in let events_ms=nw_now_ms()-begin in
     let body=nw_drain(big,deadline.value) in
     let rest=concat(shell,nw_drain(waiting,deadline.value)) in
     let done=concat(fetched,nw_drain(task,deadline.value)) in
     let p=nw_note(p,len(closed)==0 && idle_ms<500,concat("the idle connection closed ",int_text(idle_ms)," ms after SIGTERM with ",int_text(len(closed))," bytes")) in
+    let p=nw_note(p,nw_contains(opened,": open") && nw_contains(stream,": bye") && nw_ends(stream,"0\r\n\r\n") && events_ms<600,
+      concat("/events: ",int_text(events_ms)," ms after SIGTERM the stream ended with ",tx_repr(nw_after(stream,if len(stream)>60 then len(stream)-60 else 0),true))) in
     let p=nw_note(p,so_body_bytes(body)==4194304,concat("/big: ",int_text(so_body_bytes(body))," body bytes of 4194304 after SIGTERM")) in
     let p=nw_note(p,nw_contains(rest,"Last fragment") && nw_ends(rest,"0\r\n\r\n"),concat("/wait: unfinished after SIGTERM: ",tx_repr(nw_after(rest,if len(rest)>100 then len(rest)-100 else 0),true))) in
     SoStop { problems=nw_note(p,nw_contains(done,"Task done") && nw_ends(done,"0\r\n\r\n"),concat("/task: unfinished after SIGTERM: ",tx_repr(nw_after(done,if len(done)>100 then len(done)-100 else 0),true))),

@@ -149,10 +149,17 @@ effect fn rt_http_shutdown_signal(control:ptr,fd:i64)->unit
     let woken=if previous!=0 then noop() else
       let byte=stack_alloc(8) in let set=store_u8(byte,0,u8(1)) in
       let sent=loop(i=0) while i<load_i64(control,40) next(let wrote=rt_write(load_i64(control,264+i*16),byte,1) in i+1) yield i in noop() in noop()
+; Shutdown has begun in this worker: every continuation is made due once, so
+; one that would never end by itself (an event stream) is called now, sees
+; http_async_stopping in std:http_async, and can end its response.
+effect fn rt_async_wake_all()->unit
+  = let active=load_ptr(runtime_state(),1960) in
+    let woken=loop(i=0) while i<load_i64(runtime_state(),1640)
+      next(let job=load_ptr(active,i*8) in let due=store_i64(job,72,bit_or(load_i64(job,72),1)) in i+1) yield i in noop()
 effect fn rt_http_draining(control:ptr,states:ptr,n:i64,listener:i64)->bool
   = let deadline=atomic_load_i64(control,8) in if deadline<=0 then false else
     let timers=rt_timer_stop_all() in
-    let closed=if load_i64(runtime_state(),1704)==0 then let closed=rt_close(listener) in store_i64(runtime_state(),1704,1) else noop() in
+    let closed=if load_i64(runtime_state(),1704)==0 then let closed=rt_close(listener) in let woken=rt_async_wake_all() in store_i64(runtime_state(),1704,1) else noop() in
     let expired=rt_clock_ns()/1000000>=deadline in
     let active=loop(i=0,active=0) while i<n next(i+1,
       let state=ptr_add(states,i*128) in if load_i64(state,0)<0 then active else

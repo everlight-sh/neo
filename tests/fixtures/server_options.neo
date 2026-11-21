@@ -15,6 +15,9 @@ import "std:timer"
 ;   /task?port=N  a shell, then a render task that fetches / from port N,
 ;                 writes what it got, sleeps 400 ms and ends
 ;   /big          4 MiB of 'x'
+;   /events       an event stream: a comment after 100 ms and then every 3 s
+;                 for as long as the server runs, and a last one as soon as
+;                 it is asked to stop
 private effect(fs,net,env,time,process) fn tick(capture:Arr u8 n)->Arr u8 _
   = let appended=fs_append(capture,"tick\n") in ""
 private effect(fs,net,env,time,process) fn fragment(state:Arr u8 n)->Arr u8 _
@@ -26,8 +29,14 @@ private effect(fs,net,env,time,process) fn task(capture:Arr u8 n)->Arr u8 _
     let response=http_request("127.0.0.1",if port.ok then port.value else 0,"GET","/","",3000,65536) in
     let wrote=http_render_write(web_html(concat("<p>Fetched ",if response.ok then response.body else "nothing","</p>"))) in
     let paused=sleep_ms(400) in "<p>Task done</p></body></html>"
+private effect(fs,net,env,time,process) fn events(state:Arr u8 n)->Arr u8 _
+  = if http_async_stopping() then http_async_close(": bye\n\n") else
+    let now=monotonic_ms() in http_async_resume(state,": tick\n\n",now.value+3000)
 private effect fn handler(raw:Arr u8 n)->Arr u8 _
   = let request=web_request(raw,0) in
+    if str_equal(request.path,"/events") then let now=monotonic_ms() in
+      let started=http_async_response(web_reply(200,": open\n\n","text/event-stream; charset=utf-8"),"e",function(events),now.value+100,now.value+10000) in
+      if started.ok then started.value else web_encode(web_reply(503,"Busy","text/plain"),false) else
     if str_equal(request.path,"/wait") then let now=monotonic_ms() in
       let started=http_async_start(web_html("<!doctype html><html><body><p>Shell ready</p>"),"first",function(fragment),now.value+300,now.value+10000) in
       if started.ok then started.value else web_encode(web_reply(503,"Busy","text/plain"),false) else

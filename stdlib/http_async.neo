@@ -105,6 +105,12 @@ effect(net,time,process) fn http_async_response(response:WebResponse,capture:Arr
     let admitted=rt_async_register(callback_address(callback),capture,wake,deadline) in
     if admitted<0 then bytes_error(0-admitted,"Async stream capacity unavailable",0) else
     bytes_ok(concat("HTTP/1.1 200 OK\r\nContent-Type: ",response.content_type,"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",response.headers,"\r\n",http_async_chunk(response.body)))
+; True once this worker has been asked to stop (SIGINT or SIGTERM under
+; http_server_options). Every continuation is called once when that happens,
+; whatever its wake time. One that would go on for ever, such as an event
+; stream, should end its response then (http_async_close): a response still
+; open when the grace period ends is cut off without its last chunk.
+effect(process) fn http_async_stopping()->bool = load_i64(runtime_state(),1704)!=0
 effect(process) fn http_async_subscribers()->i64 = load_i64(runtime_state(),1640)
 effect(process) fn http_async_callback_count()->i64 = load_i64(runtime_state(),1896)
 effect(process) fn http_async_event_ready()->bool = bit_and(load_i64(runtime_state(),1912),2)!=0
