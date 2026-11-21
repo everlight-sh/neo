@@ -78,11 +78,15 @@
 
 effect fn rt_uring_setup (d : ptr) -> bool
   = let params = stack_alloc(120) in let cleared = memset(params, i32(0), 120) in
-    ; CQSIZE | SUBMIT_ALL | SINGLE_ISSUER | DEFER_TASKRUN with 4096 completions:
-    ; at most 1026 operations are ever in flight, so neither queue overflows.
-    let sized = store_i32(params, 4, i32(4096)) in
+    ; CQSIZE | SUBMIT_ALL | SINGLE_ISSUER | DEFER_TASKRUN with 2048 completions:
+    ; at most 1026 operations are ever in flight, so that queue never overflows.
+    ; 256 submissions: rt_uring_push enters the ring when they are all queued,
+    ; which posts no completion (DEFER_TASKRUN). Both queues are used round
+    ; and round, so every page of them becomes resident: 2048 submissions and
+    ; 4096 completions were 200 KiB of each worker's memory, these are 50.
+    let sized = store_i32(params, 4, i32(2048)) in
     let flags = store_i32(params, 8, i32(12424)) in
-    let fd = rt_result(syscall6(425, 2048, ptr_to_i64(params), 0, 0, 0, 0)) in
+    let fd = rt_result(syscall6(425, 256, ptr_to_i64(params), 0, 0, 0, 0)) in
     if fd < 0 then false else
       let features = i64(load_i32(params, 20)) in
       let sq_entries = i64(load_i32(params, 0)) in
